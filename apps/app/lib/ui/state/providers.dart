@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/author.dart';
@@ -25,7 +26,7 @@ final storageServiceProvider = Provider<StorageService>((ref) {
 
 final apiServiceProvider = Provider<ApiService>((ref) {
   final storage = ref.watch(storageServiceProvider);
-  final serverUrl = storage.getServerUrl() ?? 'http://localhost:8080';
+  final serverUrl = kIsWeb ? Uri.base.origin : (storage.getServerUrl() ?? 'http://localhost:8080');
   final token = storage.getAuthToken();
   return ApiService(baseUrl: serverUrl, token: token);
 });
@@ -87,7 +88,8 @@ class AuthNotifier extends Notifier<AuthState> {
   @override
   AuthState build() {
     final storage = ref.watch(storageServiceProvider);
-    return AuthState(serverUrl: storage.getServerUrl());
+    final url = kIsWeb ? Uri.base.origin : storage.getServerUrl();
+    return AuthState(serverUrl: url);
   }
 
   Future<void> checkAuth() async {
@@ -109,11 +111,12 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   Future<bool> login(String serverUrl, String username, String password) async {
-    state = state.copyWith(isLoading: true, error: null, serverUrl: serverUrl);
+    final effectiveUrl = kIsWeb ? Uri.base.origin : serverUrl;
+    state = state.copyWith(isLoading: true, error: null, serverUrl: effectiveUrl);
     final authRepo = ref.read(authRepositoryProvider);
     try {
-      final user = await authRepo.login(serverUrl, username, password);
-      state = state.copyWith(user: user, isLoading: false);
+      final user = await authRepo.login(effectiveUrl, username, password);
+      state = state.copyWith(user: user, isLoading: false, serverUrl: effectiveUrl);
       return true;
     } catch (e) {
       state = state.copyWith(clearUser: true, isLoading: false, error: e.toString());

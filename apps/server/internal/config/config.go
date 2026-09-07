@@ -24,6 +24,7 @@ type ServerConfig struct {
 	Host      string `yaml:"host"`
 	Port      int    `yaml:"port"`
 	JWTSecret string `yaml:"jwt_secret"`
+	WebDir    string `yaml:"web_dir"`
 }
 
 type DatabaseConfig struct {
@@ -66,6 +67,7 @@ func DefaultConfig() *Config {
 			Host:      "0.0.0.0",
 			Port:      8080,
 			JWTSecret: "",
+			WebDir:    "/usr/share/shelfd/web",
 		},
 		Database: DatabaseConfig{
 			Type: "sqlite",
@@ -214,6 +216,11 @@ func ApplyEnvOverrides(cfg *Config) {
 		cfg.Server.JWTSecret = v
 	} else if v := os.Getenv("JWT_SECRET"); v != "" {
 		cfg.Server.JWTSecret = v
+	}
+	if v := os.Getenv("SHELFD_SERVER_WEB_DIR"); v != "" {
+		cfg.Server.WebDir = v
+	} else if v := os.Getenv("SHELFD_WEB_DIR"); v != "" {
+		cfg.Server.WebDir = v
 	}
 
 	if v := os.Getenv("SHELFD_DATABASE_TYPE"); v != "" {

@@ -1,13 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../data/services/storage_service.dart';
 import 'features/connect/connect_view.dart';
 import 'features/library/library_view.dart';
 import 'features/reader/reader_view.dart';
 import 'features/search/search_view.dart';
 
-GoRouter createRouter({required String initialLocation}) {
+GoRouter createRouter({required String initialLocation, StorageService? storageService}) {
   return GoRouter(
     initialLocation: initialLocation,
+    redirect: (context, state) {
+      if (storageService == null) return null;
+      final token = storageService.getAuthToken();
+      final hasToken = token != null && token.isNotEmpty;
+      final isConnect = state.matchedLocation == '/connect';
+
+      if (!hasToken && !isConnect) {
+        return '/connect';
+      }
+      return null;
+    },
     routes: [
       GoRoute(
         path: '/connect',

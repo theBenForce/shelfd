@@ -34,11 +34,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create standard volume mount points
-RUN mkdir -p /data /library /config
+# Create standard volume mount points and web static asset directory
+RUN mkdir -p /data /library /config /usr/share/shelfd/web
 
 # Copy binary from builder stage
 COPY --from=builder /out/shelfd /usr/local/bin/shelfd
+
+# Copy bundled Flutter web static assets
+COPY apps/app/build/web /usr/share/shelfd/web
 
 # Copy entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh
@@ -49,7 +52,8 @@ ENV PUID=1000 \
     PGID=1000 \
     UMASK=002 \
     SHELFD_STORAGE_DATA_DIR=/data \
-    SHELFD_STORAGE_LIBRARY_DIR=/library
+    SHELFD_STORAGE_LIBRARY_DIR=/library \
+    SHELFD_SERVER_WEB_DIR=/usr/share/shelfd/web
 
 EXPOSE 8080
 

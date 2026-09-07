@@ -21,6 +21,7 @@ services:
       - SHELFD_AI_EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5@q8_0
       - SHELFD_AI_EMBEDDING_DIMENSIONS=768
       - SHELFD_AI_SUMMARY_MODEL=google/gemma-4-e4b
+      - SHELFD_JWT_SECRET=shelfd-homelab-jwt-secret-key-32bytes
       - SHELFD_ADMIN_PASSWORD=adminpassword
     volumes:
       # Shelfd state: sqlite database, vector index, and cached covers

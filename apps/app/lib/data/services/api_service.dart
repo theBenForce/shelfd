@@ -114,9 +114,17 @@ class ApiService {
     if (response.statusCode >= 400) {
       throw ApiException(response.statusCode, response.body);
     }
-    final body = jsonDecode(response.body) as Map<String, dynamic>;
-    final data = body['data'] as List<dynamic>? ?? [];
-    return data.map((b) => Book.fromJson(b as Map<String, dynamic>)).toList();
+    final body = jsonDecode(response.body);
+    List<dynamic> data = [];
+    if (body is Map<String, dynamic>) {
+      data = (body['books'] ?? body['data']) as List<dynamic>? ?? [];
+    } else if (body is List<dynamic>) {
+      data = body;
+    }
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map((b) => Book.fromJson(b, baseUrl: baseUrl))
+        .toList();
   }
 
   Future<Book> getBook(String id) async {
@@ -125,7 +133,7 @@ class ApiService {
       throw ApiException(response.statusCode, response.body);
     }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return Book.fromJson(data);
+    return Book.fromJson(data, baseUrl: baseUrl);
   }
 
   Future<Chapter> getChapter(String bookId, int chapterIndex) async {
@@ -145,8 +153,17 @@ class ApiService {
     if (response.statusCode >= 400) {
       throw ApiException(response.statusCode, response.body);
     }
-    final data = jsonDecode(response.body) as List<dynamic>? ?? [];
-    return data.map((a) => Author.fromJson(a as Map<String, dynamic>)).toList();
+    final body = jsonDecode(response.body);
+    List<dynamic> data = [];
+    if (body is Map<String, dynamic>) {
+      data = (body['authors'] ?? body['data']) as List<dynamic>? ?? [];
+    } else if (body is List<dynamic>) {
+      data = body;
+    }
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map((a) => Author.fromJson(a))
+        .toList();
   }
 
   Future<List<Genre>> getGenres() async {
@@ -154,8 +171,17 @@ class ApiService {
     if (response.statusCode >= 400) {
       throw ApiException(response.statusCode, response.body);
     }
-    final data = jsonDecode(response.body) as List<dynamic>? ?? [];
-    return data.map((g) => Genre.fromJson(g as Map<String, dynamic>)).toList();
+    final body = jsonDecode(response.body);
+    List<dynamic> data = [];
+    if (body is Map<String, dynamic>) {
+      data = (body['genres'] ?? body['data']) as List<dynamic>? ?? [];
+    } else if (body is List<dynamic>) {
+      data = body;
+    }
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map((g) => Genre.fromJson(g))
+        .toList();
   }
 
   Future<List<Series>> getSeries() async {
@@ -163,8 +189,17 @@ class ApiService {
     if (response.statusCode >= 400) {
       throw ApiException(response.statusCode, response.body);
     }
-    final data = jsonDecode(response.body) as List<dynamic>? ?? [];
-    return data.map((s) => Series.fromJson(s as Map<String, dynamic>)).toList();
+    final body = jsonDecode(response.body);
+    List<dynamic> data = [];
+    if (body is Map<String, dynamic>) {
+      data = (body['series'] ?? body['data']) as List<dynamic>? ?? [];
+    } else if (body is List<dynamic>) {
+      data = body;
+    }
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map((s) => Series.fromJson(s))
+        .toList();
   }
 
   Future<List<SemanticSearchHit>> semanticSearch(

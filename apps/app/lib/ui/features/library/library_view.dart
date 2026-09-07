@@ -94,7 +94,53 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
             Expanded(
               child: libraryState.isLoading
                   ? const Center(child: CircularProgressIndicator())
-                  : libraryState.filteredBooks.isEmpty
+                  : libraryState.error != null
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(AppTokens.space32),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(
+                                  Icons.error_outline_rounded,
+                                  size: 48,
+                                  color: Color(0xFFC92A2A),
+                                ),
+                                const SizedBox(height: AppTokens.space16),
+                                Text(
+                                  'Unable to load library',
+                                  style: AppTypography.titleSerif(fontSize: 20),
+                                ),
+                                const SizedBox(height: AppTokens.space8),
+                                Text(
+                                  libraryState.error!,
+                                  textAlign: TextAlign.center,
+                                  style: AppTypography.bodySans(fontSize: 14),
+                                ),
+                                const SizedBox(height: AppTokens.space16),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    OutlinedButton(
+                                      onPressed: () => ref.read(libraryProvider.notifier).loadLibrary(),
+                                      child: const Text('Retry'),
+                                    ),
+                                    const SizedBox(width: AppTokens.space12),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppTokens.charcoalInk,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                      onPressed: () => context.go('/connect'),
+                                      child: const Text('Reconnect / Sign In'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : libraryState.filteredBooks.isEmpty
                       ? Center(
                           child: Padding(
                             padding: const EdgeInsets.all(AppTokens.space32),

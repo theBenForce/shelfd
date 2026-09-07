@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -165,6 +167,13 @@ func main() {
 	mux.Handle("/api/v1/", apiRouter)
 	log.Printf("REST API enabled at /api/v1/")
 
+	// Static Flutter web application
+	webDir := resolveWebDir(cfg.Server.WebDir)
+	if webDir != "" {
+		mux.HandleFunc("/", api.SPAHandler(webDir))
+		log.Printf("Serving Flutter web application from %s at /", webDir)
+	}
+
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	server := &http.Server{
 		Addr:    addr,
@@ -272,4 +281,25 @@ func ensureSeedToken(ctx context.Context, repo repository.StorageEngine) {
 			log.Printf("================================================================================")
 		}
 	}
+}
+
+func resolveWebDir(configured string) string {
+	var candidates []string
+	if strings.TrimSpace(configured) != "" {
+		candidates = append(candidates, configured)
+	}
+	candidates = append(candidates,
+		"/usr/share/shelfd/web",
+		"apps/app/build/web",
+		"../app/build/web",
+		"./web",
+	)
+
+	for _, c := range candidates {
+		indexPath := filepath.Join(c, "index.html")
+		if fi, err := os.Stat(indexPath); err == nil && !fi.IsDir() {
+			return c
+		}
+	}
+	return ""
 }

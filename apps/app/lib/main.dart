@@ -32,7 +32,8 @@ class ShelfApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final readerSettings = ref.watch(readerSettingsProvider);
     final theme = AppTheme.buildTheme(readerSettings.themeMode);
-    final router = createRouter(initialLocation: initialRoute);
+    final storage = ref.watch(storageServiceProvider);
+    final router = createRouter(initialLocation: initialRoute, storageService: storage);
 
     return MaterialApp.router(
       title: 'Shelf',

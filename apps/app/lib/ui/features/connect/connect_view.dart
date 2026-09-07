@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -16,10 +17,18 @@ class ConnectView extends ConsumerStatefulWidget {
 
 class _ConnectViewState extends ConsumerState<ConnectView> {
   final _formKey = GlobalKey<FormState>();
-  final _urlController = TextEditingController(text: 'http://localhost:8080');
+  late final TextEditingController _urlController;
   final _userController = TextEditingController(text: 'admin');
-  final _passwordController = TextEditingController();
+  late final TextEditingController _passwordController;
   bool _obscurePassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+    final initialUrl = kIsWeb ? Uri.base.origin : 'http://localhost:8080';
+    _urlController = TextEditingController(text: initialUrl);
+    _passwordController = TextEditingController(text: kIsWeb ? 'adminpassword' : '');
+  }
 
   @override
   void dispose() {
@@ -63,7 +72,7 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
   Future<void> _handleConnect() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final url = _urlController.text.trim();
+    final url = kIsWeb ? Uri.base.origin : _urlController.text.trim();
     final user = _userController.text.trim();
     final pass = _passwordController.text;
 
@@ -191,9 +200,11 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
                     // Manual Inputs
                     TextFormField(
                       controller: _urlController,
+                      readOnly: kIsWeb,
                       decoration: InputDecoration(
                         labelText: 'Server URL',
                         hintText: 'http://192.168.1.100:8080',
+                        helperText: kIsWeb ? 'Connected to self-hosted API origin' : null,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                           borderSide: const BorderSide(color: AppTokens.crispBorder),
@@ -225,6 +236,7 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
                       decoration: InputDecoration(
                         labelText: 'Password',
                         hintText: '••••••••',
+                        helperText: kIsWeb ? 'Default homelab password: adminpassword' : null,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                           borderSide: const BorderSide(color: AppTokens.crispBorder),
