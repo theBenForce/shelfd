@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
+import 'package:shelf/ui/core/shared_layout.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/library/library_view.dart';
 import 'package:shelf/ui/state/providers.dart';
@@ -68,5 +69,49 @@ void main() {
 
     // Verify reading progress badge
     expect(find.text('64% read'), findsOneWidget);
+  });
+
+  testWidgets('LibraryView adapts grid columns responsively with MaxCrossAxisExtent',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          libraryProvider.overrideWith(() => FakeLibraryNotifier([
+            const Book(id: 'b1', title: 'Book 1', readingProgress: 0.0),
+          ])),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const LibraryView(),
+        ),
+      ),
+    );
+
+    final gridFinder = find.byType(GridView);
+    expect(gridFinder, findsOneWidget);
+
+    final grid = tester.widget<GridView>(gridFinder);
+    expect(grid.gridDelegate, isA<SliverGridDelegateWithMaxCrossAxisExtent>());
+
+    final delegate = grid.gridDelegate as SliverGridDelegateWithMaxCrossAxisExtent;
+    expect(delegate.maxCrossAxisExtent, 200.0);
+    expect(delegate.childAspectRatio, 0.55);
+
+    // Verify desktop layout has side navigation and hides bottom navigation
+    expect(find.byType(ShelfdSideNav), findsOneWidget);
+    expect(find.byType(ShelfdBottomNav), findsNothing);
+    expect(find.text('Library'), findsWidgets);
+    expect(find.text('1 Books'), findsOneWidget);
   });
 }

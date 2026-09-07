@@ -27,7 +27,11 @@ func OpenSQLite(path string) (*sql.DB, error) {
 
 	dsn := path
 	if !strings.Contains(dsn, "?") {
-		dsn += "?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL"
+		journalMode := os.Getenv("SHELFD_SQLITE_JOURNAL_MODE")
+		if journalMode == "" {
+			journalMode = "DELETE"
+		}
+		dsn += fmt.Sprintf("?_foreign_keys=on&_busy_timeout=10000&_journal_mode=%s", journalMode)
 	}
 
 	db, err := sql.Open("sqlite3", dsn)

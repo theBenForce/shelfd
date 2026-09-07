@@ -16,7 +16,7 @@ class Responsive {
       MediaQuery.sizeOf(context).width > AppTokens.tabletBreakpoint;
 
   static double horizontalPadding(BuildContext context) {
-    if (isDesktop(context)) return AppTokens.space64;
+    if (isDesktop(context)) return AppTokens.space48;
     if (isTablet(context)) return AppTokens.space32;
     return AppTokens.space20;
   }

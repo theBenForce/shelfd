@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 256">
+  <path d="M64 48v160c0 8.8 7.2 16 16 16h112V48H64z" fill="#111111"/>
+  <path d="M80 48v80l24-16 24 16V48H80z" fill="#FBFBFA"/>
+  <text x="256" y="160" font-family="Source Serif 4, serif" font-size="120" font-weight="600" fill="#111111">Shelfd</text>
+</svg>

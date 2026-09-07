@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'responsive.dart';
 import 'tokens.dart';
 import 'typography.dart';
 
@@ -296,3 +297,380 @@ class ShelfdBottomNav extends StatelessWidget {
     );
   }
 }
+
+class ShelfdSideNav extends StatelessWidget {
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+  final VoidCallback? onRescan;
+  final bool isRescanning;
+
+  const ShelfdSideNav({
+    super.key,
+    required this.currentIndex,
+    required this.onTap,
+    this.onRescan,
+    this.isRescanning = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      width: AppTokens.sidebarWidth,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        color: theme.scaffoldBackgroundColor,
+        border: const Border(
+          right: BorderSide(color: AppTokens.crispBorder, width: 1),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTokens.space20,
+        vertical: AppTokens.space24,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Brand Logo & Title
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppTokens.charcoalInk,
+                  borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                ),
+                child: const Icon(
+                  Icons.auto_stories_rounded,
+                  color: AppTokens.boneSurface,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: AppTokens.space12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Shelfd',
+                      style: AppTypography.titleSerif(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      'Your Digital Vellum',
+                      style: AppTypography.bodySans(
+                        fontSize: 11,
+                        color: AppTokens.mutedCopy,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppTokens.space32),
+
+          // Navigation Links
+          _SideNavItem(
+            icon: Icons.menu_book_outlined,
+            selectedIcon: Icons.menu_book_rounded,
+            label: 'Library',
+            isSelected: currentIndex == 0,
+            onTap: () => onTap(0),
+          ),
+          const SizedBox(height: AppTokens.space8),
+          _SideNavItem(
+            icon: Icons.saved_search_outlined,
+            selectedIcon: Icons.saved_search_rounded,
+            label: 'Semantic Search',
+            isSelected: currentIndex == 1,
+            onTap: () => onTap(1),
+          ),
+          const SizedBox(height: AppTokens.space8),
+          _SideNavItem(
+            icon: Icons.settings_outlined,
+            selectedIcon: Icons.settings_rounded,
+            label: 'Settings',
+            isSelected: currentIndex == 2,
+            onTap: () => onTap(2),
+          ),
+
+          const Spacer(),
+
+          // Rescan Library Button (if callback provided)
+          if (onRescan != null) ...[
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: AppTokens.charcoalInk,
+                  foregroundColor: Colors.white,
+                  side: BorderSide.none,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
+                ),
+                onPressed: isRescanning ? null : onRescan,
+                icon: isRescanning
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.sync_rounded, size: 18),
+                label: Text(
+                  isRescanning ? 'Scanning...' : 'Rescan Library',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            const SizedBox(height: AppTokens.space16),
+          ],
+
+          // Homelab NAS connection status badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppTokens.boneContainer,
+              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+              border: Border.all(color: AppTokens.crispBorder),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF2B8A3E),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: AppTokens.space8),
+                Expanded(
+                  child: Text(
+                    'Homelab NAS - Connected',
+                    style: AppTypography.bodySans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: AppTokens.mutedCopy,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SideNavItem extends StatelessWidget {
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _SideNavItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: isSelected ? AppTokens.boneContainer : Colors.transparent,
+      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+        child: Container(
+          height: AppTokens.minTouchTarget,
+          padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+            border: isSelected ? Border.all(color: AppTokens.crispBorder) : null,
+          ),
+          child: Row(
+            children: [
+              Icon(
+                isSelected ? selectedIcon : icon,
+                color: isSelected ? AppTokens.charcoalInk : AppTokens.mutedCopy,
+                size: 22,
+              ),
+              const SizedBox(width: AppTokens.space12),
+              Expanded(
+                child: Text(
+                  label,
+                  style: AppTypography.bodySans(
+                    fontSize: 14,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                    color: isSelected ? AppTokens.charcoalInk : AppTokens.mutedCopy,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (isSelected)
+                Container(
+                  width: 4,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: AppTokens.charcoalInk,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ShelfdAdaptiveScaffold extends StatelessWidget {
+  final int currentIndex;
+  final ValueChanged<int> onNavTap;
+  final PreferredSizeWidget? appBar;
+  final Widget body;
+  final VoidCallback? onRescan;
+  final bool isRescanning;
+
+  const ShelfdAdaptiveScaffold({
+    super.key,
+    required this.currentIndex,
+    required this.onNavTap,
+    this.appBar,
+    required this.body,
+    this.onRescan,
+    this.isRescanning = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDesktop = Responsive.isDesktop(context);
+
+    if (isDesktop) {
+      return Scaffold(
+        body: Row(
+          children: [
+            ShelfdSideNav(
+              currentIndex: currentIndex,
+              onTap: onNavTap,
+              onRescan: onRescan,
+              isRescanning: isRescanning,
+            ),
+            Expanded(
+              child: body,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: appBar,
+      body: body,
+      bottomNavigationBar: ShelfdBottomNav(
+        currentIndex: currentIndex,
+        onTap: onNavTap,
+      ),
+    );
+  }
+}
+
+void showShelfdSettingsModal(
+  BuildContext context, {
+  required Future<void> Function() onLogout,
+}) {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: AppTokens.boneBackground,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
+    ),
+    builder: (ctx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(AppTokens.space24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.settings_outlined, size: 24, color: AppTokens.charcoalInk),
+                const SizedBox(width: AppTokens.space12),
+                Text('Settings', style: AppTypography.titleSerif(fontSize: 20)),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppTokens.space16),
+            const Divider(color: AppTokens.crispBorder, height: 1),
+            const SizedBox(height: AppTokens.space16),
+            Row(
+              children: [
+                const Icon(Icons.dns_outlined, size: 20, color: AppTokens.mutedCopy),
+                const SizedBox(width: AppTokens.space12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Homelab Server',
+                        style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        'Connected to Shelfd Homelab Daemon',
+                        style: AppTypography.bodySans(fontSize: 12, color: AppTokens.mutedCopy),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF2B8A3E),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppTokens.space24),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFC92A2A),
+                side: const BorderSide(color: Color(0xFFFFC9C9)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              icon: const Icon(Icons.logout_rounded, size: 18),
+              label: const Text('Disconnect / Sign Out'),
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                await onLogout();
+              },
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+

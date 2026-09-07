@@ -24,12 +24,21 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
     Future.microtask(() => ref.read(libraryProvider.notifier).loadLibrary());
   }
 
-  void _onBottomNavTapped(int index) {
-    setState(() => _navIndex = index);
-    if (index == 1) {
+  void _onNavTapped(int index) {
+    if (index == 0) {
+      setState(() => _navIndex = 0);
+    } else if (index == 1) {
       context.go('/search');
     } else if (index == 2) {
-      context.go('/connect');
+      showShelfdSettingsModal(
+        context,
+        onLogout: () async {
+          await ref.read(authProvider.notifier).logout();
+          if (mounted) {
+            context.go('/connect');
+          }
+        },
+      );
     }
   }
 
@@ -37,6 +46,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
   Widget build(BuildContext context) {
     final libraryState = ref.watch(libraryProvider);
     final horizontalPad = Responsive.horizontalPadding(context);
+    final isDesktop = Responsive.isDesktop(context);
 
     final filterItems = const [
       FilterPillItem(id: 'all', label: 'All Books'),
@@ -45,7 +55,20 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
       FilterPillItem(id: 'authors', label: 'Authors'),
     ];
 
-    return Scaffold(
+    Future<void> handleScan() async {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Scanning library...')),
+      );
+      await ref.read(bookRepositoryProvider).triggerScan();
+      if (context.mounted) {
+        ref.read(libraryProvider.notifier).loadLibrary();
+      }
+    }
+
+    return ShelfdAdaptiveScaffold(
+      currentIndex: _navIndex,
+      onNavTap: _onNavTapped,
+      onRescan: handleScan,
       appBar: ShelfdTopBar(
         title: 'Shelfd',
         subtitle: 'Connected to Homelab NAS',
@@ -53,15 +76,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Rescan Library',
-            onPressed: () async {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Scanning library...')),
-              );
-              await ref.read(bookRepositoryProvider).triggerScan();
-              if (context.mounted) {
-                ref.read(libraryProvider.notifier).loadLibrary();
-              }
-            },
+            onPressed: handleScan,
           ),
           IconButton(
             icon: const Icon(Icons.search_rounded),
@@ -70,22 +85,58 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
           ),
         ],
       ),
-      bottomNavigationBar: ShelfdBottomNav(
-        currentIndex: _navIndex,
-        onTap: _onBottomNavTapped,
-      ),
       body: SafeArea(
         child: Column(
           children: [
+            // Desktop Header: "Library" title and book count badge (Stitch spec)
+            if (isDesktop)
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      horizontalPad,
+                      AppTokens.space24,
+                      horizontalPad,
+                      AppTokens.space8,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          'Library',
+                          style: AppTypography.titleSerif(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: AppTokens.space12),
+                        StatusBadge(
+                          label: '${libraryState.books.length} Books',
+                          backgroundColor: AppTokens.boneContainer,
+                          textColor: AppTokens.mutedCopy,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
             // Filter Pills Row (DRY shared component)
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: horizontalPad, vertical: AppTokens.space12),
-              child: FilterPillsRow(
-                items: filterItems,
-                selectedId: libraryState.activeFilter,
-                onSelected: (filterId) {
-                  ref.read(libraryProvider.notifier).setFilter(filterId);
-                },
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPad, vertical: AppTokens.space12),
+                  child: FilterPillsRow(
+                    items: filterItems,
+                    selectedId: libraryState.activeFilter,
+                    onSelected: (filterId) {
+                      ref.read(libraryProvider.notifier).setFilter(filterId);
+                    },
+                  ),
+                ),
               ),
             ),
             const Divider(color: AppTokens.crispBorder, height: 1),
@@ -167,31 +218,32 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                             ),
                           ),
                         )
-                      : GridView.builder(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: horizontalPad,
-                            vertical: AppTokens.space16,
-                          ),
-                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: Responsive.isDesktop(context)
-                                ? 4
-                                : Responsive.isTablet(context)
-                                    ? 3
-                                    : 2,
-                            childAspectRatio: 0.58,
-                            crossAxisSpacing: AppTokens.space16,
-                            mainAxisSpacing: AppTokens.space24,
-                          ),
-                          itemCount: libraryState.filteredBooks.length,
-                          itemBuilder: (context, index) {
-                            final book = libraryState.filteredBooks[index];
-                            return _BookCard(
-                              book: book,
-                              onTap: () {
-                                context.go('/reader/${book.id}/0');
+                      : Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
+                            child: GridView.builder(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: horizontalPad,
+                                vertical: AppTokens.space16,
+                              ),
+                              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                                maxCrossAxisExtent: 200.0,
+                                childAspectRatio: 0.55,
+                                crossAxisSpacing: AppTokens.space16,
+                                mainAxisSpacing: AppTokens.space24,
+                              ),
+                              itemCount: libraryState.filteredBooks.length,
+                              itemBuilder: (context, index) {
+                                final book = libraryState.filteredBooks[index];
+                                return _BookCard(
+                                  book: book,
+                                  onTap: () {
+                                    context.go('/reader/${book.id}/0');
+                                  },
+                                );
                               },
-                            );
-                          },
+                            ),
+                          ),
                         ),
             ),
           ],
@@ -256,7 +308,7 @@ class _BookCard extends StatelessWidget {
                   book.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: AppTypography.titleSerif(fontSize: 15, fontWeight: FontWeight.w600),
+                  style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: AppTokens.space4),
                 Text(

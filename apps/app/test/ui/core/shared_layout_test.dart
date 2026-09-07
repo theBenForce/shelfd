@@ -103,5 +103,69 @@ void main() {
 
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
     });
+
+    testWidgets('ShelfdSideNav renders branding, items, and connection status', (tester) async {
+      int selectedNav = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: Scaffold(
+            body: ShelfdSideNav(
+              currentIndex: selectedNav,
+              onTap: (i) => selectedNav = i,
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Shelfd'), findsOneWidget);
+      expect(find.text('Your Digital Vellum'), findsOneWidget);
+      expect(find.text('Library'), findsOneWidget);
+      expect(find.text('Semantic Search'), findsOneWidget);
+      expect(find.text('Settings'), findsOneWidget);
+      expect(find.text('Homelab NAS - Connected'), findsOneWidget);
+
+      await tester.tap(find.text('Semantic Search'));
+      await tester.pump();
+      expect(selectedNav, 1);
+    });
+
+    testWidgets('ShelfdAdaptiveScaffold switches between ShelfdBottomNav and ShelfdSideNav', (tester) async {
+      tester.view.physicalSize = const Size(600, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: ShelfdAdaptiveScaffold(
+            currentIndex: 0,
+            onNavTap: (_) {},
+            body: const Center(child: Text('Content')),
+          ),
+        ),
+      );
+
+      expect(find.byType(ShelfdBottomNav), findsOneWidget);
+      expect(find.byType(ShelfdSideNav), findsNothing);
+
+      tester.view.physicalSize = const Size(1440, 900);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: ShelfdAdaptiveScaffold(
+            currentIndex: 0,
+            onNavTap: (_) {},
+            body: const Center(child: Text('Content')),
+          ),
+        ),
+      );
+
+      expect(find.byType(ShelfdSideNav), findsOneWidget);
+      expect(find.byType(ShelfdBottomNav), findsNothing);
+    });
   });
 }

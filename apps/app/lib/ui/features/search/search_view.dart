@@ -25,12 +25,21 @@ class _SearchViewState extends ConsumerState<SearchView> {
     super.dispose();
   }
 
-  void _onBottomNavTapped(int index) {
-    setState(() => _navIndex = index);
+  void _onNavTapped(int index) {
     if (index == 0) {
       context.go('/library');
+    } else if (index == 1) {
+      setState(() => _navIndex = 1);
     } else if (index == 2) {
-      context.go('/connect');
+      showShelfdSettingsModal(
+        context,
+        onLogout: () async {
+          await ref.read(authProvider.notifier).logout();
+          if (mounted) {
+            context.go('/connect');
+          }
+        },
+      );
     }
   }
 
@@ -42,35 +51,59 @@ class _SearchViewState extends ConsumerState<SearchView> {
   Widget build(BuildContext context) {
     final searchState = ref.watch(searchProvider);
     final horizontalPad = Responsive.horizontalPadding(context);
+    final isDesktop = Responsive.isDesktop(context);
 
-    return Scaffold(
-      bottomNavigationBar: ShelfdBottomNav(
-        currentIndex: _navIndex,
-        onTap: _onBottomNavTapped,
-      ),
-      appBar: AppBar(
-        title: Text('Semantic Search', style: AppTypography.titleSerif(fontSize: 20)),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () {
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/library');
-            }
-          },
-        ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(color: AppTokens.crispBorder, height: 1),
-        ),
-      ),
+    return ShelfdAdaptiveScaffold(
+      currentIndex: _navIndex,
+      onNavTap: _onNavTapped,
+      appBar: isDesktop
+          ? null
+          : AppBar(
+              title: Text('Semantic Search', style: AppTypography.titleSerif(fontSize: 20)),
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                onPressed: () {
+                  if (context.canPop()) {
+                    context.pop();
+                  } else {
+                    context.go('/library');
+                  }
+                },
+              ),
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(1),
+                child: Container(color: AppTokens.crispBorder, height: 1),
+              ),
+            ),
       body: SafeArea(
-        child: Column(
-          children: [
-            // Search Input Header
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: horizontalPad, vertical: AppTokens.space16),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: AppTokens.maxSearchWidth),
+            child: Column(
+              children: [
+                if (isDesktop)
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      horizontalPad,
+                      AppTokens.space24,
+                      horizontalPad,
+                      AppTokens.space8,
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Semantic Search',
+                          style: AppTypography.titleSerif(
+                            fontSize: 32,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                // Search Input Header
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPad, vertical: AppTokens.space16),
               child: TextField(
                 controller: _searchController,
                 textInputAction: TextInputAction.search,
@@ -157,7 +190,9 @@ class _SearchViewState extends ConsumerState<SearchView> {
           ],
         ),
       ),
-    );
+    ),
+  ),
+);
   }
 }
 

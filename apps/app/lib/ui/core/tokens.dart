@@ -6,6 +6,9 @@ class AppTokens {
   // Touch & Sizing Invariants
   static const double minTouchTarget = 48.0;
   static const double maxReadingWidth = 720.0;
+  static const double maxSearchWidth = 860.0;
+  static const double maxLibraryWidth = 1800.0;
+  static const double sidebarWidth = 240.0;
   static const double mobileBreakpoint = 640.0;
   static const double tabletBreakpoint = 1024.0;
 

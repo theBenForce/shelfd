@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Squircle Base Canvas (Charcoal Ink #111111) -->
+  <rect width="512" height="512" rx="112" fill="#111111"/>
+  
+  <!-- Subtle inner border for tactile editorial polish -->
+  <rect x="2" y="2" width="508" height="508" rx="110" fill="none" stroke="#242424" stroke-width="2"/>
+
+  <!-- Book Hardcover (Warm Editorial Bone #FBFBFA) -->
+  <rect x="146" y="96" width="220" height="320" rx="16" fill="#FBFBFA"/>
+
+  <!-- Book Spine Crease -->
+  <line x1="176" y1="96" x2="176" y2="416" stroke="#E6E6E5" stroke-width="3"/>
+
+  <!-- Page Interior (Digital Vellum block #F4F4F3) -->
+  <rect x="184" y="108" width="170" height="296" rx="8" fill="#F4F4F3"/>
+  
+  <!-- Ribbon Bookmark (Charcoal #111111 with Swallowtail notch) -->
+  <path d="M224 96 v120 l24 -18 l24 18 v-120 z" fill="#111111"/>
+
+  <!-- Subtle Editorial Text Lines -->
+  <line x1="216" y1="264" x2="324" y2="264" stroke="#DCDCDA" stroke-width="5" stroke-linecap="round"/>
+  <line x1="216" y1="292" x2="324" y2="292" stroke="#DCDCDA" stroke-width="5" stroke-linecap="round"/>
+  <line x1="216" y1="320" x2="292" y2="320" stroke="#DCDCDA" stroke-width="5" stroke-linecap="round"/>
+  <line x1="216" y1="348" x2="260" y2="348" stroke="#DCDCDA" stroke-width="5" stroke-linecap="round"/>
+</svg>

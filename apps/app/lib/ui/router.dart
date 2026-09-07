@@ -18,6 +18,9 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
       if (!hasToken && !isConnect) {
         return '/connect';
       }
+      if (hasToken && isConnect) {
+        return '/library';
+      }
       return null;
     },
     routes: [
