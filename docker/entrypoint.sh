@@ -36,8 +36,15 @@ if [ "$(id -u)" = '0' ]; then
         echo "[shelfd] Warning: /library is not writable by UID $PUID"
     fi
 
-    exec su-exec "$PUID:$PGID" "$@"
+    if command -v gosu >/dev/null 2>&1; then
+        exec gosu "$PUID:$PGID" "$@"
+    elif command -v su-exec >/dev/null 2>&1; then
+        exec su-exec "$PUID:$PGID" "$@"
+    else
+        exec "$@"
+    fi
 fi
 
 # Already non-root
 exec "$@"
+

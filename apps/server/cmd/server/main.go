@@ -87,6 +87,10 @@ func main() {
 		log.Fatalf("Failed to execute migrations: %v", err)
 	}
 
+	if err := database.EnsureVectorDimensions(ctx, db, cfg.AI.EmbeddingDimensions); err != nil {
+		log.Fatalf("Failed to configure vector dimensions: %v", err)
+	}
+
 	repo := repository.NewSQLiteStorageEngine(db)
 	defer repo.Close()
 	log.Printf("Storage engine initialized successfully.")

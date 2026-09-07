@@ -24,6 +24,7 @@ type OpenAIClient struct {
 // NewOpenAIClient creates an OpenAI-compatible client instance.
 func NewOpenAIClient(cfg *config.AIConfig) *OpenAIClient {
 	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	baseURL = strings.TrimSuffix(baseURL, "/v1")
 	if baseURL == "" {
 		baseURL = "https://api.openai.com"
 	}

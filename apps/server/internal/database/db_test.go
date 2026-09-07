@@ -44,3 +44,32 @@ func TestOpenSQLiteOnDisk(t *testing.T) {
 		t.Fatalf("failed to run migrations on disk db: %v", err)
 	}
 }
+
+func TestEnsureVectorDimensions(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("opening in-memory db: %v", err)
+	}
+	defer db.Close()
+
+	if err := database.RunMigrations(ctx, db); err != nil {
+		t.Fatalf("running initial migrations: %v", err)
+	}
+
+	// Adapt to 768 dimensions (for models like nomic-embed-text)
+	if err := database.EnsureVectorDimensions(ctx, db, 768); err != nil {
+		t.Fatalf("EnsureVectorDimensions(768) failed: %v", err)
+	}
+
+	// Verify table exists and can accept 768-dim query/insert
+	var count int
+	err = db.QueryRowContext(ctx, "SELECT count(*) FROM vec_chapters").Scan(&count)
+	if err != nil {
+		t.Fatalf("querying vec_chapters count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0, got %d", count)
+	}
+}
+

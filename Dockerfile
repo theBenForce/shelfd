@@ -1,10 +1,11 @@
 # ==============================================================================
 # Stage 1: Build daemon binary with Cgo and sqlite-vec
 # ==============================================================================
-FROM golang:1.24-alpine AS builder
+FROM golang:1.24-bookworm AS builder
 
-# Install Cgo build dependencies for SQLite and sqlite-vec
-RUN apk add --no-cache gcc musl-dev git
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 
@@ -12,7 +13,7 @@ WORKDIR /src
 COPY apps/server/go.mod apps/server/go.sum ./
 RUN go mod download
 
-# Copy server source code and compile statically with external cgo linking stripped
+# Copy server source code and compile with Cgo
 COPY apps/server ./
 RUN CGO_ENABLED=1 GOOS=linux go build \
     -ldflags="-s -w -X main.Version=0.1.0" \
@@ -20,21 +21,18 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
     ./cmd/server
 
 # ==============================================================================
-# Stage 2: Minimal runtime image (< 50MB)
+# Stage 2: Minimal runtime image
 # ==============================================================================
-FROM alpine:3.21
+FROM debian:bookworm-slim
 
-# Install runtime utilities:
-# - ca-certificates: TLS verification for remote AI endpoints (OpenAI)
-# - tzdata: homelab timezone support
-# - su-exec & shadow: PUID/PGID dynamic user mapping and privilege dropping
-# - tini: zombie process reaping and graceful signal handling (SIGTERM/SIGINT)
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tzdata \
-    su-exec \
-    shadow \
-    tini
+    gosu \
+    tini \
+    curl \
+    libsqlite3-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create standard volume mount points
 RUN mkdir -p /data /library /config
@@ -58,7 +56,7 @@ EXPOSE 8080
 VOLUME ["/data", "/library"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD wget -qO- http://127.0.0.1:8080/health || exit 1
+    CMD curl -fsS http://127.0.0.1:8080/health || exit 1
 
-ENTRYPOINT ["/sbin/tini", "--", "/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
 CMD ["shelfd"]

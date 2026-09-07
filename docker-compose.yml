@@ -9,31 +9,23 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Match PUID/PGID to your host user so Audiobookshelf and Shelfd share file permissions
-      - PUID=1000
-      - PGID=1000
+      - PUID=501
+      - PGID=20
       - UMASK=002
-      - TZ=UTC
+      - TZ=America/Chicago
 
-      # Semantic AI Configuration (Optional: defaults to local Ollama on host)
-      - SHELFD_AI_PROVIDER=ollama
-      - SHELFD_AI_BASE_URL=http://host.docker.internal:11434
-      - SHELFD_AI_EMBEDDING_MODEL=nomic-embed-text
-      - SHELFD_AI_SUMMARY_MODEL=llama3.2:3b
-
-      # To use OpenAI instead, uncomment below:
-      # - SHELFD_AI_PROVIDER=openai
-      # - SHELFD_AI_BASE_URL=https://api.openai.com/v1
-      # - SHELFD_AI_API_KEY=sk-your-openai-api-key
-      # - SHELFD_AI_EMBEDDING_MODEL=text-embedding-3-small
-      # - SHELFD_AI_SUMMARY_MODEL=gpt-4o-mini
+      # LM Studio Local Instance Configuration
+      - SHELFD_AI_PROVIDER=openai
+      - SHELFD_AI_BASE_URL=http://host.docker.internal:1234
+      - SHELFD_AI_API_KEY=lm-studio
+      - SHELFD_AI_EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5@q8_0
+      - SHELFD_AI_EMBEDDING_DIMENSIONS=768
+      - SHELFD_AI_SUMMARY_MODEL=google/gemma-4-e4b
+      - SHELFD_ADMIN_PASSWORD=adminpassword
     volumes:
       # Shelfd state: sqlite database, vector index, and cached covers
       - ./data:/data
       # Shared Audiobookshelf library (read-write for EPUB upload)
-      - /path/to/my/ebooks:/library:rw
-      # Optional: Mount a custom config.yaml if you prefer file-based config over env vars
-      # - ./config.yaml:/config/config.yaml:ro
+      - /Users/bforce/books:/library:rw
     extra_hosts:
-      # Allows connecting to Ollama running directly on the Docker host machine
       - "host.docker.internal:host-gateway"
