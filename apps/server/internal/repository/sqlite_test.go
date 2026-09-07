@@ -273,6 +273,16 @@ func TestBookCRUDAndFiltering(t *testing.T) {
 	if err != nil || len(offsetBooks) != 1 || offsetBooks[0].ID == allBooks[0].ID {
 		t.Fatalf("expected different book with offset 1, got %v", offsetBooks)
 	}
+
+	// CountBooks verification
+	totalCount, err := repo.CountBooks(ctx, repository.BookFilter{})
+	if err != nil || totalCount != 2 {
+		t.Fatalf("expected 2 total books, got %d (err: %v)", totalCount, err)
+	}
+	authorCount, err := repo.CountBooks(ctx, repository.BookFilter{AuthorID: &author2.ID})
+	if err != nil || authorCount != 1 {
+		t.Fatalf("expected 1 book by author2 count, got %d", authorCount)
+	}
 }
 
 func TestAuthorGenreSeriesUpserts(t *testing.T) {
@@ -472,6 +482,11 @@ func TestUsersAndTokens(t *testing.T) {
 	fetchedToken, err := repo.GetAPITokenByHash(ctx, token.TokenHash)
 	if err != nil || fetchedToken.ID != token.ID {
 		t.Fatalf("failed to get api token: %v", err)
+	}
+
+	tokens, err := repo.ListAPITokensByUserID(ctx, user.ID)
+	if err != nil || len(tokens) != 1 || tokens[0].ID != token.ID {
+		t.Fatalf("expected 1 token for user, got %v", tokens)
 	}
 
 	if err := repo.DeleteAPIToken(ctx, token.ID); err != nil {

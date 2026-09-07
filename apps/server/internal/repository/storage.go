@@ -12,6 +12,7 @@ type StorageEngine interface {
 	UpdateBook(ctx context.Context, book *Book) error
 	DeleteBook(ctx context.Context, id string) error
 	ListBooks(ctx context.Context, filter BookFilter) ([]*Book, error)
+	CountBooks(ctx context.Context, filter BookFilter) (int, error)
 
 	// Authors
 	UpsertAuthor(ctx context.Context, name string) (*Author, error)
@@ -57,6 +58,7 @@ type StorageEngine interface {
 	GetUserByID(ctx context.Context, id string) (*User, error)
 	CreateAPIToken(ctx context.Context, token *APIToken) error
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (*APIToken, error)
+	ListAPITokensByUserID(ctx context.Context, userID string) ([]*APIToken, error)
 	DeleteAPIToken(ctx context.Context, id string) error
 
 	// Lifecycle

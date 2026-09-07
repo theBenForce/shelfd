@@ -725,6 +725,39 @@ func (r *SQLiteStorageEngine) SearchVectorChapters(ctx context.Context, queryEmb
 	return hits, rows.Err()
 }
 
+func (r *SQLiteStorageEngine) CountBooks(ctx context.Context, filter BookFilter) (int, error) {
+	var conditions []string
+	var args []interface{}
+
+	if filter.AuthorID != nil {
+		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?)")
+		args = append(args, *filter.AuthorID)
+	}
+	if filter.GenreID != nil {
+		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?)")
+		args = append(args, *filter.GenreID)
+	}
+	if filter.SeriesID != nil {
+		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_series WHERE series_id = ?)")
+		args = append(args, *filter.SeriesID)
+	}
+	if filter.Search != nil && strings.TrimSpace(*filter.Search) != "" {
+		conditions = append(conditions, "b.title LIKE ?")
+		args = append(args, "%"+strings.TrimSpace(*filter.Search)+"%")
+	}
+
+	query := "SELECT COUNT(*) FROM books b"
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	var count int
+	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("counting books: %w", err)
+	}
+	return count, nil
+}
+
 // --- Users & Tokens ---
 
 func (r *SQLiteStorageEngine) CreateUser(ctx context.Context, u *User) error {
@@ -811,6 +844,30 @@ func (r *SQLiteStorageEngine) GetAPITokenByHash(ctx context.Context, tokenHash s
 		return nil, fmt.Errorf("querying api token by hash: %w", err)
 	}
 	return t, nil
+}
+
+func (r *SQLiteStorageEngine) ListAPITokensByUserID(ctx context.Context, userID string) ([]*APIToken, error) {
+	query := `
+		SELECT id, user_id, token_hash, name, created_at
+		FROM api_tokens
+		WHERE user_id = ?
+		ORDER BY created_at DESC
+	`
+	rows, err := r.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("listing api tokens: %w", err)
+	}
+	defer rows.Close()
+
+	var tokens []*APIToken
+	for rows.Next() {
+		t := &APIToken{}
+		if err := rows.Scan(&t.ID, &t.UserID, &t.TokenHash, &t.Name, &t.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning api token: %w", err)
+		}
+		tokens = append(tokens, t)
+	}
+	return tokens, rows.Err()
 }
 
 func (r *SQLiteStorageEngine) DeleteAPIToken(ctx context.Context, id string) error {

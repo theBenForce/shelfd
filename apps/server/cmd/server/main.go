@@ -14,7 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/shelfd/shelfd/internal/ai"
+	"github.com/shelfd/shelfd/internal/api"
 	"github.com/shelfd/shelfd/internal/config"
 	"github.com/shelfd/shelfd/internal/database"
 	"github.com/shelfd/shelfd/internal/mcp"
@@ -60,6 +63,13 @@ func main() {
 	} else {
 		log.Printf("No config.yaml found, using defaults...")
 		cfg = config.DefaultConfig()
+	}
+
+	if cfg.Server.JWTSecret == "" {
+		secretBytes := make([]byte, 32)
+		_, _ = rand.Read(secretBytes)
+		cfg.Server.JWTSecret = hex.EncodeToString(secretBytes)
+		log.Printf("Notice: server.jwt_secret not configured; generated ephemeral JWT secret.")
 	}
 
 	log.Printf("shelfd %s starting on %s:%d", Version, cfg.Server.Host, cfg.Server.Port)
@@ -113,6 +123,10 @@ func main() {
 	defer chapterWorker.Stop()
 	log.Printf("Semantic indexing background worker started.")
 
+	// Scanner and ingester
+	scannerInst := scanner.NewScanner(cfg.Storage.LibraryDir)
+	ingester := scanner.NewIngester(repo, cfg.Storage.LibraryDir, cfg.Storage.DataDir)
+
 	// Register HTTP routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +142,22 @@ func main() {
 		mux.Handle(cfg.MCP.Path+"/", mcpServer.Routes())
 		log.Printf("MCP Server enabled at %s/sse and %s/messages", cfg.MCP.Path, cfg.MCP.Path)
 	}
+
+	// REST API Router
+	apiRouter := api.NewRouter(api.RouterConfig{
+		Repo:       repo,
+		Ingester:   ingester,
+		Scanner:    scannerInst,
+		Worker:     chapterWorker,
+		DataDir:    cfg.Storage.DataDir,
+		LibraryDir: cfg.Storage.LibraryDir,
+		JWTSecret:  cfg.Server.JWTSecret,
+		Host:       cfg.Server.Host,
+		Port:       cfg.Server.Port,
+		Version:    Version,
+	})
+	mux.Handle("/api/v1/", apiRouter)
+	log.Printf("REST API enabled at /api/v1/")
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	server := &http.Server{
@@ -181,20 +211,39 @@ func runScan(ctx context.Context, repo repository.StorageEngine, cfg *config.Con
 func ensureSeedToken(ctx context.Context, repo repository.StorageEngine) {
 	adminUser, err := repo.GetUserByUsername(ctx, "admin")
 	if errors.Is(err, repository.ErrNotFound) {
+		adminPass := os.Getenv("SHELFD_ADMIN_PASSWORD")
+		if adminPass == "" {
+			buf := make([]byte, 8)
+			_, _ = rand.Read(buf)
+			adminPass = hex.EncodeToString(buf)
+		}
+
+		hash, err := bcrypt.GenerateFromPassword([]byte(adminPass), bcrypt.DefaultCost)
+		if err != nil {
+			log.Printf("Warning: failed to hash admin password: %v", err)
+			return
+		}
+
 		adminUser = &repository.User{
 			Username:     "admin",
-			PasswordHash: "$2a$12$e8Yd8mockhashnotforlogin",
+			PasswordHash: string(hash),
 		}
 		if err := repo.CreateUser(ctx, adminUser); err != nil {
 			log.Printf("Warning: failed to create admin user: %v", err)
 			return
 		}
+
+		log.Printf("================================================================================")
+		log.Printf(" [INITIAL SETUP] Generated default administrator account:")
+		log.Printf(" Username: admin")
+		log.Printf(" Password: %s", adminPass)
+		log.Printf(" (Set SHELFD_ADMIN_PASSWORD environment variable to override)")
+		log.Printf("================================================================================")
 	} else if err != nil {
 		return
 	}
 
 	// Check if any API token exists for admin
-	// Generate random 32-byte secret token
 	buf := make([]byte, 24)
 	if _, err := rand.Read(buf); err != nil {
 		return
