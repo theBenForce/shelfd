@@ -1,0 +1,14 @@
+{
+  "name": "@shelfd/app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "if [ -f pubspec.yaml ]; then flutter build macos; else echo 'App scaffolded in Milestone 6'; fi",
+    "build:apk": "if [ -f pubspec.yaml ]; then flutter build apk; else echo 'App scaffolded in Milestone 6'; fi",
+    "build:web": "if [ -f pubspec.yaml ]; then flutter build web; else echo 'App scaffolded in Milestone 6'; fi",
+    "dev": "if [ -f pubspec.yaml ]; then flutter run; else echo 'App scaffolded in Milestone 6'; fi",
+    "test": "if [ -d test ]; then flutter test; else echo 'No tests found in @shelfd/app yet (Milestone 6)'; fi",
+    "lint": "if [ -f pubspec.yaml ]; then flutter analyze; else echo 'No pubspec.yaml in @shelfd/app yet (Milestone 6)'; fi",
+    "clean": "if [ -f pubspec.yaml ]; then flutter clean; fi"
+  }
+}
