@@ -228,7 +228,7 @@ func ensureSeedToken(ctx context.Context, repo repository.StorageEngine) {
 	if errors.Is(err, repository.ErrNotFound) {
 		adminPass := os.Getenv("SHELFD_ADMIN_PASSWORD")
 		if adminPass == "" {
-			buf := make([]byte, 8)
+			buf := make([]byte, 12)
 			_, _ = rand.Read(buf)
 			adminPass = hex.EncodeToString(buf)
 		}

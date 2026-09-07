@@ -624,8 +624,13 @@ func (r *SQLiteStorageEngine) InsertChapterVector(ctx context.Context, chapterID
 		return fmt.Errorf("serializing embedding: %w", err)
 	}
 
+	// sqlite-vec's vec0 virtual table does not support INSERT OR REPLACE semantics
+	// and will fail with a shadow table constraint error if chapter_id exists.
+	// We explicitly delete any existing vector entry for this chapter first.
+	_, _ = r.db.ExecContext(ctx, "DELETE FROM vec_chapters WHERE chapter_id = ?", chapterID)
+
 	query := `
-		INSERT OR REPLACE INTO vec_chapters (chapter_id, embedding)
+		INSERT INTO vec_chapters (chapter_id, embedding)
 		VALUES (?, ?)
 	`
 	_, err = r.db.ExecContext(ctx, query, chapterID, blob)

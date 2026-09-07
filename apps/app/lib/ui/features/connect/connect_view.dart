@@ -27,7 +27,7 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
     super.initState();
     final initialUrl = kIsWeb ? Uri.base.origin : 'http://localhost:8080';
     _urlController = TextEditingController(text: initialUrl);
-    _passwordController = TextEditingController(text: kIsWeb ? 'adminpassword' : '');
+    _passwordController = TextEditingController();
   }
 
   @override
@@ -236,7 +236,7 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
                       decoration: InputDecoration(
                         labelText: 'Password',
                         hintText: '••••••••',
-                        helperText: kIsWeb ? 'Default homelab password: adminpassword' : null,
+                        helperText: kIsWeb ? 'Check container logs on first startup for generated password' : null,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                           borderSide: const BorderSide(color: AppTokens.crispBorder),

@@ -602,6 +602,11 @@ func TestChapterSummaryAndVectorSearch(t *testing.T) {
 		t.Fatalf("insert vec2: %v", err)
 	}
 
+	// Test updating/re-inserting chapter vector for existing chapter
+	if err := repo.InsertChapterVector(ctx, ch1.ID, vec1); err != nil {
+		t.Fatalf("re-insert/update vec1: %v", err)
+	}
+
 	// Search query matching vec1
 	queryVec := make([]float32, 1536)
 	queryVec[0] = 0.95

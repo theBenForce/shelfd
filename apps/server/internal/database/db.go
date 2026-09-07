@@ -35,10 +35,8 @@ func OpenSQLite(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("opening sqlite database: %w", err)
 	}
 
-	// For in-memory databases, retain a single connection to preserve tables across queries
-	if path == ":memory:" || strings.Contains(path, "mode=memory") {
-		db.SetMaxOpenConns(1)
-	}
+	// Single connection prevents multi-connection WAL lock contention and sqlite-vec shadow table race conditions
+	db.SetMaxOpenConns(1)
 
 	// Ensure foreign key constraints are strictly active
 	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
