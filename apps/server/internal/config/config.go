@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -194,3 +195,101 @@ func (c *Config) Validate() error {
 
 	return nil
 }
+
+// ApplyEnvOverrides overrides configuration values from standard SHELFD_* environment variables.
+func ApplyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("SHELFD_SERVER_HOST"); v != "" {
+		cfg.Server.Host = v
+	}
+	if v := os.Getenv("SHELFD_SERVER_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.Server.Port = p
+		}
+	} else if v := os.Getenv("PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.Server.Port = p
+		}
+	}
+	if v := os.Getenv("SHELFD_JWT_SECRET"); v != "" {
+		cfg.Server.JWTSecret = v
+	} else if v := os.Getenv("JWT_SECRET"); v != "" {
+		cfg.Server.JWTSecret = v
+	}
+
+	if v := os.Getenv("SHELFD_DATABASE_TYPE"); v != "" {
+		cfg.Database.Type = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("SHELFD_SQLITE_PATH"); v != "" {
+		cfg.Database.SQLite.Path = v
+	}
+	if v := os.Getenv("SHELFD_POSTGRES_DSN"); v != "" {
+		cfg.Database.Postgres.DSN = v
+	}
+
+	if v := os.Getenv("SHELFD_STORAGE_LIBRARY_DIR"); v != "" {
+		cfg.Storage.LibraryDir = v
+	} else if v := os.Getenv("SHELFD_LIBRARY_DIR"); v != "" {
+		cfg.Storage.LibraryDir = v
+	}
+	if v := os.Getenv("SHELFD_STORAGE_DATA_DIR"); v != "" {
+		cfg.Storage.DataDir = v
+	} else if v := os.Getenv("SHELFD_DATA_DIR"); v != "" {
+		cfg.Storage.DataDir = v
+	}
+
+	if v := os.Getenv("SHELFD_AI_PROVIDER"); v != "" {
+		cfg.AI.Provider = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("SHELFD_AI_BASE_URL"); v != "" {
+		cfg.AI.BaseURL = v
+	}
+	if v := os.Getenv("SHELFD_AI_API_KEY"); v != "" {
+		cfg.AI.APIKey = v
+	}
+	if v := os.Getenv("SHELFD_AI_EMBEDDING_MODEL"); v != "" {
+		cfg.AI.EmbeddingModel = v
+	}
+	if v := os.Getenv("SHELFD_AI_EMBEDDING_DIMENSIONS"); v != "" {
+		if dims, err := strconv.Atoi(v); err == nil && dims > 0 {
+			cfg.AI.EmbeddingDimensions = dims
+		}
+	}
+	if v := os.Getenv("SHELFD_AI_SUMMARY_MODEL"); v != "" {
+		cfg.AI.SummaryModel = v
+	}
+
+	if v := os.Getenv("SHELFD_MCP_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.MCP.Enabled = b
+		}
+	}
+	if v := os.Getenv("SHELFD_MCP_PATH"); v != "" {
+		cfg.MCP.Path = v
+	}
+}
+
+// ResolveConfigPath locates the active configuration file in order of priority:
+// 1. Explicit CLI flag argument
+// 2. SHELFD_CONFIG environment variable
+// 3. Candidate files: config.yaml, /config/config.yaml, /data/config.yaml, /config.yaml
+func ResolveConfigPath(explicit string) string {
+	if strings.TrimSpace(explicit) != "" {
+		return explicit
+	}
+	if envPath := os.Getenv("SHELFD_CONFIG"); strings.TrimSpace(envPath) != "" {
+		return envPath
+	}
+	candidates := []string{
+		"config.yaml",
+		"/config/config.yaml",
+		"/data/config.yaml",
+		"/config.yaml",
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+

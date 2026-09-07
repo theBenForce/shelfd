@@ -1,0 +1,55 @@
+# ==============================================================================
+# Shelfd Production Configuration Example
+# ==============================================================================
+# All settings can also be overridden using SHELFD_* environment variables
+# (e.g. SHELFD_SERVER_PORT=8080, SHELFD_AI_PROVIDER=openai, etc.).
+# ==============================================================================
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  # Secret key used to sign JWT authentication tokens for the REST API.
+  # If left blank, an ephemeral random key is generated on each startup.
+  jwt_secret: ""
+
+database:
+  # Database type: "sqlite" (default Phase 1 MVP) or "postgres"
+  type: "sqlite"
+  sqlite:
+    path: "/data/sqlite.db"
+  postgres:
+    dsn: ""
+
+storage:
+  # Path to the shared ebook library (read-write for non-destructive uploads).
+  # Shelfd never mutates or deletes existing metadata, descriptions, or audio files.
+  # Newly uploaded books are saved to: <library_dir>/<Author>/<Title>/<Title>.epub
+  library_dir: "/library"
+
+  # Path to Shelfd internal state, vector embeddings, and extracted cover art.
+  data_dir: "/data"
+
+ai:
+  # AI Provider for chapter summaries and semantic embeddings: "ollama" or "openai"
+  provider: "ollama"
+
+  # Ollama Configuration:
+  # Use host.docker.internal:11434 if Ollama is running directly on your Docker host.
+  base_url: "http://host.docker.internal:11434"
+  api_key: ""
+  embedding_model: "nomic-embed-text"
+  embedding_dimensions: 1536
+  summary_model: "llama3.2:3b"
+
+  # OpenAI Configuration Example:
+  # provider: "openai"
+  # base_url: "https://api.openai.com/v1"
+  # api_key: "sk-your-openai-api-key"
+  # embedding_model: "text-embedding-3-small"
+  # embedding_dimensions: 1536
+  # summary_model: "gpt-4o-mini"
+
+mcp:
+  # Model Context Protocol (MCP) server integration for AI agents (Cursor, Claude Desktop)
+  enabled: true
+  path: "/mcp"

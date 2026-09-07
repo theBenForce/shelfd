@@ -40,17 +40,7 @@ func main() {
 	scanFlag := flag.Bool("scan", false, "Scan library directory for books and exit")
 	flag.Parse()
 
-	configPath := *configFlag
-	if configPath == "" {
-		configPath = os.Getenv("SHELFD_CONFIG")
-	}
-	if configPath == "" {
-		if _, err := os.Stat("config.yaml"); err == nil {
-			configPath = "config.yaml"
-		} else if _, err := os.Stat("/config.yaml"); err == nil {
-			configPath = "/config.yaml"
-		}
-	}
+	configPath := config.ResolveConfigPath(*configFlag)
 
 	var cfg *config.Config
 	var err error
@@ -61,9 +51,12 @@ func main() {
 			log.Fatalf("Failed to load configuration: %v", err)
 		}
 	} else {
-		log.Printf("No config.yaml found, using defaults...")
+		log.Printf("No config file found, using defaults...")
 		cfg = config.DefaultConfig()
 	}
+
+	// Apply any SHELFD_* environment variable overrides
+	config.ApplyEnvOverrides(cfg)
 
 	if cfg.Server.JWTSecret == "" {
 		secretBytes := make([]byte, 32)

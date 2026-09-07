@@ -15,3 +15,5 @@ This directory contains the architectural decision records (ADRs) for `shelfd`, 
 | [ADR-0007](0007-relational-normalization-author-genre-series.md) | Relational Normalization — Author, Genre, and Series Entities | Accepted | 2026-09-07 |
 | [ADR-0008](0008-client-application-shell-flutter.md) | Client Application Shell — Flutter for Mobile & Desktop | Accepted | 2026-09-07 |
 | [ADR-0009](0009-authentication-architecture-jwt-and-api-tokens.md) | Authentication Architecture — JWT & Scoped API Tokens | Accepted | 2026-09-07 |
+| [ADR-0010](0010-single-container-docker-and-homelab-deployment.md) | Single-Container Docker & Homelab Deployment | Accepted | 2026-09-07 |
+
