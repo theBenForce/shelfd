@@ -556,6 +556,24 @@ func (r *SQLiteStorageEngine) GetChapterByID(ctx context.Context, id string) (*C
 	return c, nil
 }
 
+func (r *SQLiteStorageEngine) GetChapterByBookAndIndex(ctx context.Context, bookID string, chapterIndex int) (*Chapter, error) {
+	query := `
+		SELECT id, book_id, chapter_index, title, summary, content_plain, created_at
+		FROM chapters WHERE book_id = ? AND chapter_index = ?
+	`
+	c := &Chapter{}
+	err := r.db.QueryRowContext(ctx, query, bookID, chapterIndex).Scan(
+		&c.ID, &c.BookID, &c.ChapterIndex, &c.Title, &c.Summary, &c.ContentPlain, &c.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying chapter by book and index: %w", err)
+	}
+	return c, nil
+}
+
 func (r *SQLiteStorageEngine) UpdateChapterSummary(ctx context.Context, chapterID string, summary string) error {
 	query := `UPDATE chapters SET summary = ? WHERE id = ?`
 	res, err := r.db.ExecContext(ctx, query, summary, chapterID)

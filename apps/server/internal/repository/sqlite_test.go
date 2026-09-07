@@ -416,6 +416,15 @@ func TestChapters(t *testing.T) {
 		t.Fatalf("get chapter by id: %v", err)
 	}
 
+	fetchedByIndex, err := repo.GetChapterByBookAndIndex(ctx, book.ID, 0)
+	if err != nil || fetchedByIndex.ID != ch.ID {
+		t.Fatalf("get chapter by book and index: %v", err)
+	}
+
+	if _, err := repo.GetChapterByBookAndIndex(ctx, book.ID, 999); err != repository.ErrNotFound {
+		t.Errorf("expected ErrNotFound for missing index, got %v", err)
+	}
+
 	if _, err := repo.GetChapterByID(ctx, "ghost-ch"); err != repository.ErrNotFound {
 		t.Errorf("expected ErrNotFound, got %v", err)
 	}
