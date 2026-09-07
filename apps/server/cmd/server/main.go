@@ -124,6 +124,14 @@ func main() {
 	scannerInst := scanner.NewScanner(cfg.Storage.LibraryDir)
 	ingester := scanner.NewIngester(repo, cfg.Storage.LibraryDir, cfg.Storage.DataDir)
 
+	// Start background upload worker
+	uploadWorker := worker.NewUploadWorker(repo, ingester, chapterWorker, worker.UploadWorkerConfig{
+		PollInterval: 3 * time.Second,
+	})
+	uploadWorker.Start(ctx)
+	defer uploadWorker.Stop()
+	log.Printf("Asynchronous book upload queue worker started.")
+
 	// Register HTTP routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -142,16 +150,17 @@ func main() {
 
 	// REST API Router
 	apiRouter := api.NewRouter(api.RouterConfig{
-		Repo:       repo,
-		Ingester:   ingester,
-		Scanner:    scannerInst,
-		Worker:     chapterWorker,
-		DataDir:    cfg.Storage.DataDir,
-		LibraryDir: cfg.Storage.LibraryDir,
-		JWTSecret:  cfg.Server.JWTSecret,
-		Host:       cfg.Server.Host,
-		Port:       cfg.Server.Port,
-		Version:    Version,
+		Repo:         repo,
+		Ingester:     ingester,
+		Scanner:      scannerInst,
+		Worker:       chapterWorker,
+		UploadWorker: uploadWorker,
+		DataDir:      cfg.Storage.DataDir,
+		LibraryDir:   cfg.Storage.LibraryDir,
+		JWTSecret:    cfg.Server.JWTSecret,
+		Host:         cfg.Server.Host,
+		Port:         cfg.Server.Port,
+		Version:      Version,
 	})
 	mux.Handle("/api/v1/", apiRouter)
 	log.Printf("REST API enabled at /api/v1/")

@@ -10,16 +10,17 @@ import (
 
 // RouterConfig contains dependencies for assembling the Shelfd REST API.
 type RouterConfig struct {
-	Repo       repository.StorageEngine
-	Ingester   *scanner.Ingester
-	Scanner    *scanner.Scanner
-	Worker     *worker.Worker
-	DataDir    string
-	LibraryDir string
-	JWTSecret  string
-	Host       string
-	Port       int
-	Version    string
+	Repo         repository.StorageEngine
+	Ingester     *scanner.Ingester
+	Scanner      *scanner.Scanner
+	Worker       *worker.Worker
+	UploadWorker *worker.UploadWorker
+	DataDir      string
+	LibraryDir   string
+	JWTSecret    string
+	Host         string
+	Port         int
+	Version      string
 }
 
 // NewRouter constructs and returns the fully configured /api/v1 HTTP handler.
@@ -27,7 +28,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux := http.NewServeMux()
 
 	authHandler := NewAuthHandler(cfg.Repo, cfg.JWTSecret)
-	bookHandler := NewBookHandler(cfg.Repo, cfg.Ingester, cfg.Worker, cfg.DataDir, cfg.LibraryDir)
+	bookHandler := NewBookHandler(cfg.Repo, cfg.Ingester, cfg.Worker, cfg.UploadWorker, cfg.DataDir, cfg.LibraryDir)
 	taxHandler := NewTaxonomyHandler(cfg.Repo)
 	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, nil)
 	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version)
@@ -47,6 +48,8 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	mux.Handle("GET /api/v1/books", auth(http.HandlerFunc(bookHandler.ListBooks)))
 	mux.Handle("POST /api/v1/books/upload", auth(http.HandlerFunc(bookHandler.UploadBook)))
+	mux.Handle("GET /api/v1/books/upload/jobs", auth(http.HandlerFunc(bookHandler.ListUploadJobs)))
+	mux.Handle("GET /api/v1/books/upload/jobs/{id}", auth(http.HandlerFunc(bookHandler.GetUploadJob)))
 	mux.Handle("GET /api/v1/books/{id}", auth(http.HandlerFunc(bookHandler.GetBook)))
 	mux.Handle("GET /api/v1/books/{id}/chapters/{index}", auth(http.HandlerFunc(bookHandler.GetChapter)))
 

@@ -884,3 +884,131 @@ func (r *SQLiteStorageEngine) DeleteAPIToken(ctx context.Context, id string) err
 	}
 	return nil
 }
+
+// --- Upload Jobs ---
+
+func (r *SQLiteStorageEngine) CreateUploadJob(ctx context.Context, job *UploadJob) error {
+	if job.ID == "" {
+		job.ID = uuid.NewString()
+	}
+	now := time.Now().UTC()
+	if job.CreatedAt.IsZero() {
+		job.CreatedAt = now
+	}
+	if job.UpdatedAt.IsZero() {
+		job.UpdatedAt = now
+	}
+	if job.Status == "" {
+		job.Status = "queued"
+	}
+
+	query := `
+		INSERT INTO upload_jobs (id, filename, staged_path, status, book_id, error_message, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		job.ID, job.Filename, job.StagedPath, job.Status,
+		job.BookID, job.ErrorMessage, job.CreatedAt, job.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("creating upload job: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) GetUploadJob(ctx context.Context, id string) (*UploadJob, error) {
+	query := `
+		SELECT id, filename, staged_path, status, book_id, error_message, created_at, updated_at
+		FROM upload_jobs
+		WHERE id = ?
+	`
+	j := &UploadJob{}
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&j.ID, &j.Filename, &j.StagedPath, &j.Status,
+		&j.BookID, &j.ErrorMessage, &j.CreatedAt, &j.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting upload job: %w", err)
+	}
+	return j, nil
+}
+
+func (r *SQLiteStorageEngine) UpdateUploadJobStatus(ctx context.Context, id string, status string, bookID *string, errMessage *string) error {
+	now := time.Now().UTC()
+	query := `
+		UPDATE upload_jobs
+		SET status = ?, book_id = ?, error_message = ?, updated_at = ?
+		WHERE id = ?
+	`
+	res, err := r.db.ExecContext(ctx, query, status, bookID, errMessage, now, id)
+	if err != nil {
+		return fmt.Errorf("updating upload job status: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking update upload job result: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) GetPendingUploadJobs(ctx context.Context, limit int) ([]*UploadJob, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	query := `
+		SELECT id, filename, staged_path, status, book_id, error_message, created_at, updated_at
+		FROM upload_jobs
+		WHERE status IN ('queued', 'processing')
+		ORDER BY created_at ASC
+		LIMIT ?
+	`
+	rows, err := r.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying pending upload jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*UploadJob
+	for rows.Next() {
+		j := &UploadJob{}
+		if err := rows.Scan(&j.ID, &j.Filename, &j.StagedPath, &j.Status, &j.BookID, &j.ErrorMessage, &j.CreatedAt, &j.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning upload job: %w", err)
+		}
+		jobs = append(jobs, j)
+	}
+	return jobs, rows.Err()
+}
+
+func (r *SQLiteStorageEngine) ListUploadJobs(ctx context.Context, limit int) ([]*UploadJob, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	query := `
+		SELECT id, filename, staged_path, status, book_id, error_message, created_at, updated_at
+		FROM upload_jobs
+		ORDER BY created_at DESC
+		LIMIT ?
+	`
+	rows, err := r.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying upload jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*UploadJob
+	for rows.Next() {
+		j := &UploadJob{}
+		if err := rows.Scan(&j.ID, &j.Filename, &j.StagedPath, &j.Status, &j.BookID, &j.ErrorMessage, &j.CreatedAt, &j.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning upload job: %w", err)
+		}
+		jobs = append(jobs, j)
+	}
+	return jobs, rows.Err()
+}
+

@@ -163,6 +163,60 @@ Add the following to your `claude_desktop_config.json`:
 
 ---
 
+## Asynchronous Book Upload Queue
+
+To protect homelab disk I/O and prevent HTTP timeouts on slow connections or large EPUB files, book uploads are processed through a persistent background queue.
+
+### 1. Upload EPUB (`POST /api/v1/books/upload`)
+Upload an EPUB file via multipart form. The server immediately stages the file, validates the archive header, enqueues the job, and returns HTTP **`202 Accepted`**:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/books/upload \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@dune.epub"
+```
+
+Response:
+```json
+{
+  "job_id": "c1f7b02d-4bf5-4b13-bbba-cba063833bcf",
+  "status": "queued",
+  "filename": "dune.epub",
+  "message": "Upload enqueued for processing",
+  "created_at": "2026-09-07T13:55:00Z"
+}
+```
+
+### 2. Poll Job Status (`GET /api/v1/books/upload/jobs/{id}`)
+Check background ingestion progress:
+
+```bash
+curl http://localhost:8080/api/v1/books/upload/jobs/c1f7b02d-4bf5-4b13-bbba-cba063833bcf \
+  -H "Authorization: Bearer <token>"
+```
+
+Response upon completion:
+```json
+{
+  "id": "c1f7b02d-4bf5-4b13-bbba-cba063833bcf",
+  "filename": "dune.epub",
+  "status": "completed",
+  "book_id": "8fa24056-b072-466d-886d-fb0df9f086b9",
+  "created_at": "2026-09-07T13:55:00Z",
+  "updated_at": "2026-09-07T13:55:03Z"
+}
+```
+
+### 3. List Recent Jobs (`GET /api/v1/books/upload/jobs`)
+List recent upload queue tasks:
+
+```bash
+curl "http://localhost:8080/api/v1/books/upload/jobs?limit=10" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
 ## Client Application (`Shelf`)
 
 The client application is located in `apps/app` and built with Flutter:
@@ -229,4 +283,5 @@ pnpm clean
 * [Macro Implementation Plan](docs/MACRO_PLAN.md)
 * [Architecture Decision Records (ADRs)](docs/decisions/index.md)
   * [ADR-0010: Single-Container Docker & Homelab Deployment](docs/decisions/0010-single-container-docker-and-homelab-deployment.md)
+  * [ADR-0011: Asynchronous Upload Processing Queue](docs/decisions/0011-asynchronous-upload-processing-queue.md)
 * [Antigravity Personas & Workflow](.agents/AGENTS.md)

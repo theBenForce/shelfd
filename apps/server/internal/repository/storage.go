@@ -61,6 +61,13 @@ type StorageEngine interface {
 	ListAPITokensByUserID(ctx context.Context, userID string) ([]*APIToken, error)
 	DeleteAPIToken(ctx context.Context, id string) error
 
+	// Upload Jobs
+	CreateUploadJob(ctx context.Context, job *UploadJob) error
+	GetUploadJob(ctx context.Context, id string) (*UploadJob, error)
+	UpdateUploadJobStatus(ctx context.Context, id string, status string, bookID *string, errMessage *string) error
+	GetPendingUploadJobs(ctx context.Context, limit int) ([]*UploadJob, error)
+	ListUploadJobs(ctx context.Context, limit int) ([]*UploadJob, error)
+
 	// Lifecycle
 	Close() error
 }

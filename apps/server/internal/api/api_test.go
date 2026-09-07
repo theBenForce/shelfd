@@ -30,17 +30,18 @@ func init() {
 }
 
 type testFixture struct {
-	db        *sql.DB
-	repo      repository.StorageEngine
-	ingester  *scanner.Ingester
-	scanner   *scanner.Scanner
-	worker    *worker.Worker
-	handler   http.Handler
-	jwtSecret string
-	dataDir   string
-	libDir    string
-	user      *repository.User
-	password  string
+	db           *sql.DB
+	repo         repository.StorageEngine
+	ingester     *scanner.Ingester
+	scanner      *scanner.Scanner
+	worker       *worker.Worker
+	uploadWorker *worker.UploadWorker
+	handler      http.Handler
+	jwtSecret    string
+	dataDir      string
+	libDir       string
+	user         *repository.User
+	password     string
 }
 
 func setupAPITest(t *testing.T) *testFixture {
@@ -76,31 +77,35 @@ func setupAPITest(t *testing.T) *testFixture {
 	s := scanner.NewScanner(libDir)
 	jwtSecret := "super-secure-jwt-test-secret-key-123"
 
+	uploadWorker := worker.NewUploadWorker(repo, ingester, nil, worker.UploadWorkerConfig{})
+
 	handler := api.NewRouter(api.RouterConfig{
-		Repo:       repo,
-		Ingester:   ingester,
-		Scanner:    s,
-		Worker:     nil,
-		DataDir:    dataDir,
-		LibraryDir: libDir,
-		JWTSecret:  jwtSecret,
-		Host:       "127.0.0.1",
-		Port:       8080,
-		Version:    "0.1.0-test",
+		Repo:         repo,
+		Ingester:     ingester,
+		Scanner:      s,
+		Worker:       nil,
+		UploadWorker: uploadWorker,
+		DataDir:      dataDir,
+		LibraryDir:   libDir,
+		JWTSecret:    jwtSecret,
+		Host:         "127.0.0.1",
+		Port:         8080,
+		Version:      "0.1.0-test",
 	})
 
 	return &testFixture{
-		db:        db,
-		repo:      repo,
-		ingester:  ingester,
-		scanner:   s,
-		worker:    nil,
-		handler:   handler,
-		jwtSecret: jwtSecret,
-		dataDir:   dataDir,
-		libDir:    libDir,
-		user:      user,
-		password:  password,
+		db:           db,
+		repo:         repo,
+		ingester:     ingester,
+		scanner:      s,
+		worker:       nil,
+		uploadWorker: uploadWorker,
+		handler:      handler,
+		jwtSecret:    jwtSecret,
+		dataDir:      dataDir,
+		libDir:       libDir,
+		user:         user,
+		password:     password,
 	}
 }
 
@@ -526,23 +531,91 @@ func TestAPI_UploadBook(t *testing.T) {
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 Created on upload, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted on upload, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var book repository.Book
-	json.Unmarshal(rec.Body.Bytes(), &book)
-	if book.Title != "Solaris" {
-		t.Errorf("expected book title Solaris, got %s", book.Title)
+	var uploadResp struct {
+		JobID     string `json:"job_id"`
+		Status    string `json:"status"`
+		Filename  string `json:"filename"`
+		Message   string `json:"message"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("failed to parse upload response: %v", err)
+	}
+	if uploadResp.JobID == "" || uploadResp.Status != "queued" || uploadResp.Filename != "solaris.epub" {
+		t.Fatalf("unexpected upload response: %+v", uploadResp)
 	}
 
-	// Verify book is cataloged in database
-	fetched, err := f.repo.GetBookByID(context.Background(), book.ID)
+	// 2. Query job status via GET /api/v1/books/upload/jobs/{id} before worker runs
+	jobReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/"+uploadResp.JobID, nil)
+	jobReq.Header.Set("Authorization", "Bearer "+token)
+	jobRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(jobRec, jobReq)
+	if jobRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on get job, got %d: %s", jobRec.Code, jobRec.Body.String())
+	}
+	var jobBefore repository.UploadJob
+	json.Unmarshal(jobRec.Body.Bytes(), &jobBefore)
+	if jobBefore.Status != "queued" {
+		t.Fatalf("expected job status queued, got %s", jobBefore.Status)
+	}
+
+	// 3. Process the queue with worker
+	processed, err := f.uploadWorker.ProcessNext(context.Background())
+	if err != nil || !processed {
+		t.Fatalf("failed to process upload job: %v", err)
+	}
+
+	// 4. Query job status after processing
+	jobReq2 := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/"+uploadResp.JobID, nil)
+	jobReq2.Header.Set("Authorization", "Bearer "+token)
+	jobRec2 := httptest.NewRecorder()
+	f.handler.ServeHTTP(jobRec2, jobReq2)
+	if jobRec2.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on get job after processing, got %d: %s", jobRec2.Code, jobRec2.Body.String())
+	}
+	var jobAfter repository.UploadJob
+	json.Unmarshal(jobRec2.Body.Bytes(), &jobAfter)
+	if jobAfter.Status != "completed" || jobAfter.BookID == nil {
+		t.Fatalf("expected completed status with book_id, got %+v", jobAfter)
+	}
+
+	// 5. Verify book is cataloged in database and visible in ListBooks
+	fetched, err := f.repo.GetBookByID(context.Background(), *jobAfter.BookID)
 	if err != nil || fetched.Title != "Solaris" {
 		t.Fatalf("book not found in database: %v", err)
 	}
 
-	// 2. Reject non-epub file
+	// 6. Test GET /api/v1/books/upload/jobs listing
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs", nil)
+	listReq.Header.Set("Authorization", "Bearer "+token)
+	listRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on list upload jobs, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+	var listResp struct {
+		Jobs  []*repository.UploadJob `json:"jobs"`
+		Total int                     `json:"total"`
+	}
+	json.Unmarshal(listRec.Body.Bytes(), &listResp)
+	if listResp.Total < 1 || len(listResp.Jobs) < 1 {
+		t.Fatalf("expected at least 1 job in list, got %d", listResp.Total)
+	}
+
+	// 7. Nonexistent job ID returns 404
+	notfoundReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/nonexistent-id", nil)
+	notfoundReq.Header.Set("Authorization", "Bearer "+token)
+	notfoundRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(notfoundRec, notfoundReq)
+	if notfoundRec.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for nonexistent job, got %d", notfoundRec.Code)
+	}
+
+	// 8. Reject non-epub file
 	badBody := &bytes.Buffer{}
 	badMpw := multipart.NewWriter(badBody)
 	badPart, _ := badMpw.CreateFormFile("file", "malicious.exe")
@@ -557,6 +630,23 @@ func TestAPI_UploadBook(t *testing.T) {
 
 	if badRec.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request for non-epub upload, got %d", badRec.Code)
+	}
+
+	// 9. Reject corrupted epub (fails zip reader)
+	corruptBody := &bytes.Buffer{}
+	corruptMpw := multipart.NewWriter(corruptBody)
+	corruptPart, _ := corruptMpw.CreateFormFile("file", "corrupt.epub")
+	corruptPart.Write([]byte("definitely not a valid zip file archive"))
+	corruptMpw.Close()
+
+	corruptReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload", corruptBody)
+	corruptReq.Header.Set("Authorization", "Bearer "+token)
+	corruptReq.Header.Set("Content-Type", corruptMpw.FormDataContentType())
+	corruptRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(corruptRec, corruptReq)
+
+	if corruptRec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for corrupt zip, got %d", corruptRec.Code)
 	}
 }
 

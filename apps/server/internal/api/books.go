@@ -1,6 +1,7 @@
 package api
 
 import (
+	"archive/zip"
 	"errors"
 	"fmt"
 	"io"
@@ -10,33 +11,36 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/shelfd/shelfd/internal/epub"
+	"github.com/google/uuid"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 	"github.com/shelfd/shelfd/internal/worker"
 )
 
 type BookHandler struct {
-	repo       repository.StorageEngine
-	ingester   *scanner.Ingester
-	worker     *worker.Worker
-	dataDir    string
-	libraryDir string
+	repo         repository.StorageEngine
+	ingester     *scanner.Ingester
+	worker       *worker.Worker
+	uploadWorker *worker.UploadWorker
+	dataDir      string
+	libraryDir   string
 }
 
 func NewBookHandler(
 	repo repository.StorageEngine,
 	ingester *scanner.Ingester,
 	worker *worker.Worker,
+	uploadWorker *worker.UploadWorker,
 	dataDir string,
 	libraryDir string,
 ) *BookHandler {
 	return &BookHandler{
-		repo:       repo,
-		ingester:   ingester,
-		worker:     worker,
-		dataDir:    dataDir,
-		libraryDir: libraryDir,
+		repo:         repo,
+		ingester:     ingester,
+		worker:       worker,
+		uploadWorker: uploadWorker,
+		dataDir:      dataDir,
+		libraryDir:   libraryDir,
 	}
 }
 
@@ -289,65 +293,124 @@ func (h *BookHandler) UploadBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Stage upload to a temporary file in dataDir/tmp
-	tmpDir := filepath.Join(h.dataDir, "tmp")
-	_ = os.MkdirAll(tmpDir, 0755)
-	tmpFile, err := os.CreateTemp(tmpDir, "upload-*.epub")
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Failed to create temp file")
+	// 1. Stage upload to dataDir/uploads/<job_id>.epub
+	jobID := uuid.NewString()
+	uploadsDir := filepath.Join(h.dataDir, "uploads")
+	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to create uploads directory")
 		return
 	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(tmpFile, file); err != nil {
-		tmpFile.Close()
-		writeJSONError(w, http.StatusInternalServerError, "Failed to write uploaded file")
+	stagedPath := filepath.Join(uploadsDir, jobID+".epub")
+	stagedFile, err := os.OpenFile(stagedPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to create staged upload file")
 		return
 	}
-	tmpFile.Close()
 
-	// 2. Open EPUB to read Author and Title metadata
-	epubReader, err := epub.Open(tmpPath)
+	if _, err := io.Copy(stagedFile, file); err != nil {
+		stagedFile.Close()
+		_ = os.Remove(stagedPath)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to write staged upload file")
+		return
+	}
+	stagedFile.Close()
+
+	// 2. Validate zip archive header
+	zipReader, err := zip.OpenReader(stagedPath)
 	if err != nil {
+		_ = os.Remove(stagedPath)
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid EPUB archive: %v", err))
 		return
 	}
-	parsed, err := epubReader.ParseBook()
-	epubReader.Close()
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse EPUB metadata: %v", err))
+	zipReader.Close()
+
+	// 3. Create upload job in database
+	job := &repository.UploadJob{
+		ID:         jobID,
+		Filename:   header.Filename,
+		StagedPath: stagedPath,
+		Status:     "queued",
+	}
+	if err := h.repo.CreateUploadJob(r.Context(), job); err != nil {
+		_ = os.Remove(stagedPath)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to enqueue upload job: %v", err))
 		return
 	}
 
-	author := "Unknown"
-	if len(parsed.Authors) > 0 && strings.TrimSpace(parsed.Authors[0].Name) != "" {
-		author = parsed.Authors[0].Name
-	}
-	title := strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
-	if strings.TrimSpace(parsed.Title) != "" {
-		title = parsed.Title
+	// 4. Trigger upload background worker
+	if h.uploadWorker != nil {
+		h.uploadWorker.Trigger()
 	}
 
-	// 3. Save directly into Audiobookshelf library structure and ingest
-	stagedFile, err := os.Open(tmpPath)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Failed to read staged upload")
+	// 5. Return 202 Accepted
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"job_id":     job.ID,
+		"status":     job.Status,
+		"filename":   job.Filename,
+		"message":    "Upload enqueued for processing",
+		"created_at": job.CreatedAt,
+	})
+}
+
+func (h *BookHandler) GetUploadJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	defer stagedFile.Close()
 
-	book, err := h.ingester.SaveUpload(r.Context(), author, title, stagedFile)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to ingest book: %v", err))
+	jobID := r.PathValue("id")
+	if jobID == "" {
+		jobID = extractIDFromPath(r.URL.Path, "jobs")
+	}
+	if jobID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Job ID required")
 		return
 	}
 
-	if h.worker != nil {
-		h.worker.Trigger()
+	job, err := h.repo.GetUploadJob(r.Context(), jobID)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeJSONError(w, http.StatusNotFound, "Upload job not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get upload job: %v", err))
+		return
 	}
 
-	writeJSON(w, http.StatusCreated, book)
+	writeJSON(w, http.StatusOK, job)
+}
+
+func (h *BookHandler) ListUploadJobs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	limit := 20
+	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+		if val, err := strconv.Atoi(rawLimit); err == nil && val > 0 {
+			limit = val
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	jobs, err := h.repo.ListUploadJobs(r.Context(), limit)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to list upload jobs: %v", err))
+		return
+	}
+
+	if jobs == nil {
+		jobs = []*repository.UploadJob{}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"jobs":  jobs,
+		"total": len(jobs),
+	})
 }
 
 func extractIDFromPath(path, segment string) string {

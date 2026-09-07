@@ -675,3 +675,124 @@ func TestChapterSummaryAndVectorSearch(t *testing.T) {
 	}
 }
 
+func TestUploadJobs(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupTestDB(t)
+	defer repo.Close()
+
+	// 1. Create upload job
+	job := &repository.UploadJob{
+		ID:         "job-1",
+		Filename:   "dune.epub",
+		StagedPath: "/data/uploads/job-1.epub",
+	}
+	if err := repo.CreateUploadJob(ctx, job); err != nil {
+		t.Fatalf("failed to create upload job: %v", err)
+	}
+
+	// 2. Get upload job
+	fetched, err := repo.GetUploadJob(ctx, "job-1")
+	if err != nil {
+		t.Fatalf("failed to get upload job: %v", err)
+	}
+	if fetched.ID != "job-1" || fetched.Filename != "dune.epub" || fetched.Status != "queued" {
+		t.Fatalf("unexpected fetched job: %+v", fetched)
+	}
+	if fetched.StagedPath != "/data/uploads/job-1.epub" {
+		t.Fatalf("unexpected staged path: %s", fetched.StagedPath)
+	}
+
+	// 3. Update status to processing
+	if err := repo.UpdateUploadJobStatus(ctx, "job-1", "processing", nil, nil); err != nil {
+		t.Fatalf("failed to update status to processing: %v", err)
+	}
+	fetched, _ = repo.GetUploadJob(ctx, "job-1")
+	if fetched.Status != "processing" {
+		t.Fatalf("expected status processing, got %s", fetched.Status)
+	}
+
+	// 4. Create a book to link to completed job
+	book := &repository.Book{
+		ID:       "book-uploaded-1",
+		Title:    "Uploaded Dune",
+		FilePath: "Frank Herbert/Uploaded Dune/Uploaded Dune.epub",
+	}
+	if err := repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("failed to create book: %v", err)
+	}
+
+	// Update status to completed with book_id
+	if err := repo.UpdateUploadJobStatus(ctx, "job-1", "completed", &book.ID, nil); err != nil {
+		t.Fatalf("failed to update status to completed: %v", err)
+	}
+	fetched, _ = repo.GetUploadJob(ctx, "job-1")
+	if fetched.Status != "completed" || fetched.BookID == nil || *fetched.BookID != book.ID {
+		t.Fatalf("unexpected completed job: %+v", fetched)
+	}
+
+	// 5. Test error / failed job
+	job2 := &repository.UploadJob{
+		ID:         "job-2",
+		Filename:   "bad.epub",
+		StagedPath: "/data/uploads/job-2.epub",
+	}
+	if err := repo.CreateUploadJob(ctx, job2); err != nil {
+		t.Fatalf("failed to create job2: %v", err)
+	}
+	errMsg := "corrupted zip archive"
+	if err := repo.UpdateUploadJobStatus(ctx, "job-2", "failed", nil, &errMsg); err != nil {
+		t.Fatalf("failed to update job2 to failed: %v", err)
+	}
+	fetched2, err := repo.GetUploadJob(ctx, "job-2")
+	if err != nil {
+		t.Fatalf("failed to get job2: %v", err)
+	}
+	if fetched2.Status != "failed" || fetched2.ErrorMessage == nil || *fetched2.ErrorMessage != errMsg {
+		t.Fatalf("unexpected failed job: %+v", fetched2)
+	}
+
+	// 6. Test GetPendingUploadJobs
+	job3 := &repository.UploadJob{
+		ID:         "job-3",
+		Filename:   "pending.epub",
+		StagedPath: "/data/uploads/job-3.epub",
+	}
+	if err := repo.CreateUploadJob(ctx, job3); err != nil {
+		t.Fatalf("failed to create job3: %v", err)
+	}
+
+	pending, err := repo.GetPendingUploadJobs(ctx, 10)
+	if err != nil {
+		t.Fatalf("failed to get pending upload jobs: %v", err)
+	}
+	// Only job3 should be pending (job-1 is completed, job-2 is failed)
+	if len(pending) != 1 || pending[0].ID != "job-3" {
+		t.Fatalf("expected 1 pending job (job-3), got %d: %+v", len(pending), pending)
+	}
+
+	// 7. Test ListUploadJobs
+	allJobs, err := repo.ListUploadJobs(ctx, 10)
+	if err != nil {
+		t.Fatalf("failed to list upload jobs: %v", err)
+	}
+	if len(allJobs) != 3 {
+		t.Fatalf("expected 3 total jobs in list, got %d", len(allJobs))
+	}
+
+	// 8. Test Not Found
+	_, err = repo.GetUploadJob(ctx, "nonexistent-job")
+	if err != repository.ErrNotFound {
+		t.Fatalf("expected ErrNotFound for nonexistent job, got %v", err)
+	}
+
+	// 9. Test Book Deletion ON DELETE SET NULL
+	if err := repo.DeleteBook(ctx, book.ID); err != nil {
+		t.Fatalf("failed to delete book: %v", err)
+	}
+	fetched, _ = repo.GetUploadJob(ctx, "job-1")
+	if fetched.BookID != nil {
+		t.Fatalf("expected book_id to be set to NULL on book delete, got %v", *fetched.BookID)
+	}
+}
+
+

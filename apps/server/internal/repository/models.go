@@ -125,3 +125,16 @@ type SearchFilter struct {
 	SeriesID *string
 	Limit    int
 }
+
+// UploadJob represents an asynchronous book ingestion task.
+type UploadJob struct {
+	ID           string    `json:"id"`
+	Filename     string    `json:"filename"`
+	StagedPath   string    `json:"-"`
+	Status       string    `json:"status"` // queued, processing, completed, failed
+	BookID       *string   `json:"book_id,omitempty"`
+	ErrorMessage *string   `json:"error_message,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
