@@ -556,6 +556,50 @@ func (r *SQLiteStorageEngine) GetChapterByID(ctx context.Context, id string) (*C
 	return c, nil
 }
 
+func (r *SQLiteStorageEngine) UpdateChapterSummary(ctx context.Context, chapterID string, summary string) error {
+	query := `UPDATE chapters SET summary = ? WHERE id = ?`
+	res, err := r.db.ExecContext(ctx, query, summary, chapterID)
+	if err != nil {
+		return fmt.Errorf("updating chapter summary: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking affected rows: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) GetUnindexedChapters(ctx context.Context, limit int) ([]*Chapter, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `
+		SELECT id, book_id, chapter_index, title, summary, content_plain, created_at
+		FROM chapters
+		WHERE summary = ''
+		ORDER BY created_at ASC, chapter_index ASC
+		LIMIT ?
+	`
+	rows, err := r.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("getting unindexed chapters: %w", err)
+	}
+	defer rows.Close()
+
+	var chapters []*Chapter
+	for rows.Next() {
+		c := &Chapter{}
+		if err := rows.Scan(&c.ID, &c.BookID, &c.ChapterIndex, &c.Title, &c.Summary, &c.ContentPlain, &c.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning unindexed chapter: %w", err)
+		}
+		chapters = append(chapters, c)
+	}
+	return chapters, rows.Err()
+}
+
 func (r *SQLiteStorageEngine) InsertChapterVector(ctx context.Context, chapterID string, embedding []float32) error {
 	blob, err := sqlite_vec.SerializeFloat32(embedding)
 	if err != nil {
@@ -571,6 +615,96 @@ func (r *SQLiteStorageEngine) InsertChapterVector(ctx context.Context, chapterID
 		return fmt.Errorf("inserting chapter vector: %w", err)
 	}
 	return nil
+}
+
+func (r *SQLiteStorageEngine) SearchVectorChapters(ctx context.Context, queryEmbedding []float32, filter SearchFilter) ([]*SearchHit, error) {
+	blob, err := sqlite_vec.SerializeFloat32(queryEmbedding)
+	if err != nil {
+		return nil, fmt.Errorf("serializing query embedding: %w", err)
+	}
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	k := limit
+	if filter.AuthorID != nil || filter.GenreID != nil || filter.SeriesID != nil {
+		if k < 100 {
+			k = 100
+		}
+	}
+
+	authorID := ""
+	if filter.AuthorID != nil {
+		authorID = *filter.AuthorID
+	}
+	genreID := ""
+	if filter.GenreID != nil {
+		genreID = *filter.GenreID
+	}
+	seriesID := ""
+	if filter.SeriesID != nil {
+		seriesID = *filter.SeriesID
+	}
+
+	query := `
+		SELECT
+			b.id AS book_id,
+			b.title AS book_title,
+			b.cover_path AS cover_path,
+			(SELECT a.name FROM authors a JOIN book_authors ba ON a.id = ba.author_id WHERE ba.book_id = b.id LIMIT 1) AS author_name,
+			(SELECT s.name FROM series s JOIN book_series bs ON s.id = bs.series_id WHERE bs.book_id = b.id LIMIT 1) AS series_name,
+			(SELECT bs.sequence_number FROM book_series bs WHERE bs.book_id = b.id LIMIT 1) AS series_index,
+			c.id AS chapter_id,
+			c.chapter_index AS chapter_index,
+			c.title AS chapter_title,
+			c.summary AS chapter_summary,
+			vec_distance_cosine(v.embedding, ?) AS distance
+		FROM vec_chapters v
+		JOIN chapters c ON v.chapter_id = c.id
+		JOIN books b ON c.book_id = b.id
+		WHERE v.embedding MATCH ? AND k = ?
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
+		ORDER BY distance ASC
+		LIMIT ?
+	`
+
+	rows, err := r.db.QueryContext(ctx, query,
+		blob, blob, k,
+		authorID, authorID,
+		genreID, genreID,
+		seriesID, seriesID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("executing vector search query: %w", err)
+	}
+	defer rows.Close()
+
+	var hits []*SearchHit
+	for rows.Next() {
+		hit := &SearchHit{}
+		if err := rows.Scan(
+			&hit.BookID,
+			&hit.BookTitle,
+			&hit.CoverPath,
+			&hit.AuthorName,
+			&hit.SeriesName,
+			&hit.SeriesIndex,
+			&hit.ChapterID,
+			&hit.ChapterIndex,
+			&hit.ChapterTitle,
+			&hit.Summary,
+			&hit.Distance,
+		); err != nil {
+			return nil, fmt.Errorf("scanning search hit: %w", err)
+		}
+		hits = append(hits, hit)
+	}
+
+	return hits, rows.Err()
 }
 
 // --- Users & Tokens ---

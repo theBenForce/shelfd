@@ -102,3 +102,26 @@ type BookFilter struct {
 	Limit    int
 	Offset   int
 }
+
+// SearchHit represents a semantic vector search result across chapter summaries.
+type SearchHit struct {
+	BookID       string   `json:"book_id"`
+	BookTitle    string   `json:"book_title"`
+	CoverPath    *string  `json:"cover_path,omitempty"`
+	AuthorName   *string  `json:"author_name,omitempty"`
+	SeriesName   *string  `json:"series_name,omitempty"`
+	SeriesIndex  *float64 `json:"series_index,omitempty"`
+	ChapterID    string   `json:"chapter_id"`
+	ChapterIndex int      `json:"chapter_index"`
+	ChapterTitle *string  `json:"chapter_title,omitempty"`
+	Summary      string   `json:"summary"`
+	Distance     float64  `json:"distance"`
+}
+
+// SearchFilter specifies filters applied in conjunction with vector search.
+type SearchFilter struct {
+	AuthorID *string
+	GenreID  *string
+	SeriesID *string
+	Limit    int
+}

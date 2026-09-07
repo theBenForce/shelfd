@@ -478,3 +478,176 @@ func TestUsersAndTokens(t *testing.T) {
 		t.Errorf("expected ErrNotFound on deleting missing token, got %v", err)
 	}
 }
+
+func TestChapterSummaryAndVectorSearch(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupTestDB(t)
+	defer repo.Close()
+
+	// 1. Setup metadata
+	author, err := repo.UpsertAuthor(ctx, "William Gibson")
+	if err != nil {
+		t.Fatalf("upsert author: %v", err)
+	}
+	genre, err := repo.UpsertGenre(ctx, "Cyberpunk")
+	if err != nil {
+		t.Fatalf("upsert genre: %v", err)
+	}
+	series, err := repo.UpsertSeries(ctx, "Sprawl Trilogy", nil)
+	if err != nil {
+		t.Fatalf("upsert series: %v", err)
+	}
+
+	book1 := &repository.Book{
+		Title:    "Neuromancer",
+		FilePath: "William Gibson/Neuromancer/Neuromancer.epub",
+	}
+	if err := repo.CreateBook(ctx, book1); err != nil {
+		t.Fatalf("create book 1: %v", err)
+	}
+	repo.LinkBookAuthor(ctx, book1.ID, author.ID, "author")
+	repo.LinkBookGenre(ctx, book1.ID, genre.ID)
+	seq1 := 1.0
+	repo.LinkBookSeries(ctx, book1.ID, series.ID, &seq1)
+
+	// Create chapters with empty summary
+	ch1Title := "Chiba City Blues"
+	ch1 := &repository.Chapter{
+		BookID:       book1.ID,
+		ChapterIndex: 1,
+		Title:        &ch1Title,
+		Summary:      "",
+		ContentPlain: "The sky above the port was the color of television, tuned to a dead channel.",
+	}
+	if err := repo.CreateChapter(ctx, ch1); err != nil {
+		t.Fatalf("create ch1: %v", err)
+	}
+
+	ch2Title := "Shopping Expedition"
+	ch2 := &repository.Chapter{
+		BookID:       book1.ID,
+		ChapterIndex: 2,
+		Title:        &ch2Title,
+		Summary:      "",
+		ContentPlain: "Case sat in the sushi shop, waiting for Molly.",
+	}
+	if err := repo.CreateChapter(ctx, ch2); err != nil {
+		t.Fatalf("create ch2: %v", err)
+	}
+
+	// 2. Test GetUnindexedChapters
+	unindexed, err := repo.GetUnindexedChapters(ctx, 10)
+	if err != nil {
+		t.Fatalf("get unindexed chapters: %v", err)
+	}
+	if len(unindexed) != 2 {
+		t.Fatalf("expected 2 unindexed chapters, got %d", len(unindexed))
+	}
+
+	// 3. Test UpdateChapterSummary
+	summary1 := "Case meets Molly in Night City and gets hired for an impossible heist."
+	if err := repo.UpdateChapterSummary(ctx, ch1.ID, summary1); err != nil {
+		t.Fatalf("update chapter summary: %v", err)
+	}
+
+	if err := repo.UpdateChapterSummary(ctx, "missing-chapter", "summary"); err != repository.ErrNotFound {
+		t.Errorf("expected ErrNotFound on missing chapter summary update, got %v", err)
+	}
+
+	// Verify unindexed chapters decreased
+	unindexedAfter, err := repo.GetUnindexedChapters(ctx, 10)
+	if err != nil || len(unindexedAfter) != 1 || unindexedAfter[0].ID != ch2.ID {
+		t.Fatalf("expected 1 unindexed chapter (ch2), got %v", unindexedAfter)
+	}
+
+	summary2 := "Case and Molly visit the black clinics to repair his neural damage."
+	if err := repo.UpdateChapterSummary(ctx, ch2.ID, summary2); err != nil {
+		t.Fatalf("update ch2 summary: %v", err)
+	}
+
+	// 4. Test InsertChapterVector and SearchVectorChapters
+	vec1 := make([]float32, 1536)
+	vec1[0] = 1.0 // Vector pointing along dimension 0
+	vec2 := make([]float32, 1536)
+	vec2[1] = 1.0 // Vector pointing along dimension 1
+
+	if err := repo.InsertChapterVector(ctx, ch1.ID, vec1); err != nil {
+		t.Fatalf("insert vec1: %v", err)
+	}
+	if err := repo.InsertChapterVector(ctx, ch2.ID, vec2); err != nil {
+		t.Fatalf("insert vec2: %v", err)
+	}
+
+	// Search query matching vec1
+	queryVec := make([]float32, 1536)
+	queryVec[0] = 0.95
+	queryVec[1] = 0.05
+
+	hits, err := repo.SearchVectorChapters(ctx, queryVec, repository.SearchFilter{Limit: 5})
+	if err != nil {
+		t.Fatalf("search vector chapters: %v", err)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("expected 2 hits, got %d", len(hits))
+	}
+	if hits[0].ChapterID != ch1.ID {
+		t.Fatalf("expected first hit to be ch1, got %s", hits[0].ChapterID)
+	}
+	if hits[0].BookTitle != "Neuromancer" {
+		t.Errorf("expected book title Neuromancer, got %s", hits[0].BookTitle)
+	}
+	if hits[0].AuthorName == nil || *hits[0].AuthorName != "William Gibson" {
+		t.Errorf("expected author William Gibson, got %v", hits[0].AuthorName)
+	}
+	if hits[0].SeriesName == nil || *hits[0].SeriesName != "Sprawl Trilogy" {
+		t.Errorf("expected series Sprawl Trilogy, got %v", hits[0].SeriesName)
+	}
+	if hits[0].Distance > 0.1 {
+		t.Errorf("expected cosine distance < 0.1, got %f", hits[0].Distance)
+	}
+
+	// Test SearchFilter by AuthorID
+	authorHits, err := repo.SearchVectorChapters(ctx, queryVec, repository.SearchFilter{
+		AuthorID: &author.ID,
+		Limit:    5,
+	})
+	if err != nil || len(authorHits) != 2 {
+		t.Fatalf("expected 2 hits for author, got %v", authorHits)
+	}
+
+	nonMatchingAuthorID := "different-author-id"
+	noHits, err := repo.SearchVectorChapters(ctx, queryVec, repository.SearchFilter{
+		AuthorID: &nonMatchingAuthorID,
+		Limit:    5,
+	})
+	if err != nil || len(noHits) != 0 {
+		t.Fatalf("expected 0 hits for non-matching author, got %d", len(noHits))
+	}
+
+	// Test SearchFilter by GenreID
+	genreHits, err := repo.SearchVectorChapters(ctx, queryVec, repository.SearchFilter{
+		GenreID: &genre.ID,
+		Limit:   5,
+	})
+	if err != nil || len(genreHits) != 2 {
+		t.Fatalf("expected 2 hits for genre, got %v", genreHits)
+	}
+
+	// Test SearchFilter by SeriesID
+	seriesHits, err := repo.SearchVectorChapters(ctx, queryVec, repository.SearchFilter{
+		SeriesID: &series.ID,
+		Limit:    5,
+	})
+	if err != nil || len(seriesHits) != 2 {
+		t.Fatalf("expected 2 hits for series, got %v", seriesHits)
+	}
+
+	// Test Limit = 1
+	limitOneHits, err := repo.SearchVectorChapters(ctx, queryVec, repository.SearchFilter{
+		Limit: 1,
+	})
+	if err != nil || len(limitOneHits) != 1 {
+		t.Fatalf("expected 1 hit with limit 1, got %d", len(limitOneHits))
+	}
+}
+

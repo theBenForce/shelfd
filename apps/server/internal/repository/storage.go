@@ -43,9 +43,12 @@ type StorageEngine interface {
 	CreateChapter(ctx context.Context, chapter *Chapter) error
 	GetChaptersByBookID(ctx context.Context, bookID string) ([]*Chapter, error)
 	GetChapterByID(ctx context.Context, id string) (*Chapter, error)
+	UpdateChapterSummary(ctx context.Context, chapterID string, summary string) error
+	GetUnindexedChapters(ctx context.Context, limit int) ([]*Chapter, error)
 
 	// Vectors
 	InsertChapterVector(ctx context.Context, chapterID string, embedding []float32) error
+	SearchVectorChapters(ctx context.Context, queryEmbedding []float32, filter SearchFilter) ([]*SearchHit, error)
 
 	// Users & Tokens
 	CreateUser(ctx context.Context, user *User) error
