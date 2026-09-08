@@ -131,6 +131,20 @@ void main() {
       expect(chapter.toJson(), json);
     });
 
+    test('Chapter fromJson with content_plain key', () {
+      final json = {
+        'id': 'chap-2',
+        'book_id': 'book-42',
+        'chapter_index': 5,
+        'title': 'Chapter 5',
+        'summary': '',
+        'content_plain': 'Plain text content from server API.',
+      };
+      final chapter = Chapter.fromJson(json);
+      expect(chapter.id, 'chap-2');
+      expect(chapter.content, 'Plain text content from server API.');
+    });
+
     test('SemanticSearchHit fromJson & toJson', () {
       final json = {
         'book_id': 'book-42',

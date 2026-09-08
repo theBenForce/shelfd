@@ -22,7 +22,7 @@ class Chapter {
       chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
       title: json['title'] as String? ?? '',
       summary: json['summary'] as String? ?? '',
-      content: json['content'] as String?,
+      content: (json['content_plain'] ?? json['content']) as String?,
     );
   }
 
