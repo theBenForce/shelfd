@@ -18,14 +18,14 @@ func TestOpenSQLiteOnDisk(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Verify WAL mode
+	// Verify journal mode (defaults to DELETE for sqlite-vec single-file stability)
 	var journalMode string
 	err = db.QueryRow("PRAGMA journal_mode;").Scan(&journalMode)
 	if err != nil {
 		t.Fatalf("querying journal_mode: %v", err)
 	}
-	if journalMode != "wal" {
-		t.Errorf("expected wal journal_mode, got %s", journalMode)
+	if journalMode != "delete" && journalMode != "wal" {
+		t.Errorf("expected delete or wal journal_mode, got %s", journalMode)
 	}
 
 	// Verify foreign keys pragma

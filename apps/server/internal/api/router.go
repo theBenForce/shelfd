@@ -32,6 +32,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	taxHandler := NewTaxonomyHandler(cfg.Repo)
 	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, nil)
 	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version)
+	queueHandler := NewQueueHandler(cfg.Repo, cfg.Worker, cfg.UploadWorker)
 
 	auth := AuthMiddleware(cfg.Repo, cfg.JWTSecret)
 
@@ -56,6 +57,9 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/authors", auth(http.HandlerFunc(taxHandler.ListAuthors)))
 	mux.Handle("GET /api/v1/genres", auth(http.HandlerFunc(taxHandler.ListGenres)))
 	mux.Handle("GET /api/v1/series", auth(http.HandlerFunc(taxHandler.ListSeries)))
+
+	mux.Handle("GET /api/v1/queue/status", auth(http.HandlerFunc(queueHandler.GetStatus)))
+	mux.Handle("GET /api/v1/queue/events", auth(http.HandlerFunc(queueHandler.StreamEvents)))
 
 	mux.Handle("POST /api/v1/library/scan", auth(http.HandlerFunc(libHandler.Scan)))
 

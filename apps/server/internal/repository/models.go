@@ -138,3 +138,15 @@ type UploadJob struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+// QueueStatus represents the aggregate state of background processing jobs.
+type QueueStatus struct {
+	TotalChapters   int     `json:"total_chapters"`
+	IndexedChapters int     `json:"indexed_chapters"`
+	PendingChapters int     `json:"pending_chapters"`
+	PendingUploads  int     `json:"pending_uploads"`
+	ProgressPercent float64 `json:"progress_percent"`
+	IsActive        bool    `json:"is_active"`
+	CurrentBook     string  `json:"current_book,omitempty"`
+	CurrentChapter  string  `json:"current_chapter,omitempty"`
+}
+

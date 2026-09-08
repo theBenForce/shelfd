@@ -728,3 +728,75 @@ func TestAPI_EdgeCasesAndCORS(t *testing.T) {
 	}
 }
 
+func TestQueueAPI(t *testing.T) {
+	f := setupAPITest(t)
+	token := f.loginAndGetToken(t)
+
+	// 1. Unauthenticated request to /api/v1/queue/status
+	unauthReq := httptest.NewRequest(http.MethodGet, "/api/v1/queue/status", nil)
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, unauthReq)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 unauthorized, got %d", rec.Code)
+	}
+
+	// 2. Authenticated request to /api/v1/queue/status
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/queue/status", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 ok, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var status repository.QueueStatus
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("failed to decode queue status: %v", err)
+	}
+
+	if status.TotalChapters != 0 {
+		t.Errorf("expected 0 total chapters, got %d", status.TotalChapters)
+	}
+
+	// 3. Create a book and an unindexed chapter
+	ctx := context.Background()
+	book := &repository.Book{
+		ID:       "queue-test-book",
+		Title:    "Queue Test Book",
+		FilePath: "/test/book.epub",
+	}
+	if err := f.repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("failed to create book: %v", err)
+	}
+	title := "Chapter 1"
+	ch := &repository.Chapter{
+		ID:           "queue-test-ch1",
+		BookID:       book.ID,
+		ChapterIndex: 1,
+		Title:        &title,
+		ContentPlain: "Some content here",
+	}
+	if err := f.repo.CreateChapter(ctx, ch); err != nil {
+		t.Fatalf("failed to create chapter: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/queue/status", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 ok, got %d", rec.Code)
+	}
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("failed to decode queue status: %v", err)
+	}
+
+	if status.TotalChapters != 1 || status.PendingChapters != 1 {
+		t.Errorf("expected 1 total and 1 pending chapter, got total=%d, pending=%d", status.TotalChapters, status.PendingChapters)
+	}
+	if !status.IsActive {
+		t.Errorf("expected queue to be active with pending chapters")
+	}
+}
+

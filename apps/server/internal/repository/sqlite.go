@@ -1017,3 +1017,33 @@ func (r *SQLiteStorageEngine) ListUploadJobs(ctx context.Context, limit int) ([]
 	return jobs, rows.Err()
 }
 
+func (r *SQLiteStorageEngine) GetQueueStatus(ctx context.Context) (*QueueStatus, error) {
+	status := &QueueStatus{}
+
+	// 1. Total chapters
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM chapters").Scan(&status.TotalChapters); err != nil {
+		return nil, fmt.Errorf("counting total chapters: %w", err)
+	}
+
+	// 2. Pending chapters (unindexed chapters where summary = '')
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM chapters WHERE summary = ''").Scan(&status.PendingChapters); err != nil {
+		return nil, fmt.Errorf("counting pending chapters: %w", err)
+	}
+
+	status.IndexedChapters = status.TotalChapters - status.PendingChapters
+	if status.TotalChapters > 0 {
+		status.ProgressPercent = (float64(status.IndexedChapters) / float64(status.TotalChapters)) * 100.0
+	} else {
+		status.ProgressPercent = 100.0
+	}
+
+	// 3. Pending uploads
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM upload_jobs WHERE status IN ('queued', 'processing')").Scan(&status.PendingUploads); err != nil {
+		return nil, fmt.Errorf("counting pending uploads: %w", err)
+	}
+
+	status.IsActive = status.PendingChapters > 0 || status.PendingUploads > 0
+
+	return status, nil
+}
+

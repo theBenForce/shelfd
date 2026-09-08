@@ -68,6 +68,9 @@ type StorageEngine interface {
 	GetPendingUploadJobs(ctx context.Context, limit int) ([]*UploadJob, error)
 	ListUploadJobs(ctx context.Context, limit int) ([]*UploadJob, error)
 
+	// Queue & Background Jobs Status
+	GetQueueStatus(ctx context.Context) (*QueueStatus, error)
+
 	// Lifecycle
 	Close() error
 }

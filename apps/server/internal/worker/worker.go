@@ -19,6 +19,14 @@ type Config struct {
 	Logger       *slog.Logger
 }
 
+// RuntimeStatus holds live worker execution information.
+type RuntimeStatus struct {
+	IsBusy         bool      `json:"is_busy"`
+	CurrentBook    string    `json:"current_book,omitempty"`
+	CurrentChapter string    `json:"current_chapter,omitempty"`
+	LastProcessed  time.Time `json:"last_processed,omitempty"`
+}
+
 // Worker processes unindexed chapters by summarizing them and storing vector embeddings.
 type Worker struct {
 	repo         repository.StorageEngine
@@ -30,6 +38,15 @@ type Worker struct {
 	stopCh       chan struct{}
 	stopOnce     sync.Once
 	wg           sync.WaitGroup
+
+	statusMu       sync.RWMutex
+	currentBook    string
+	currentChapter string
+	isBusy         bool
+	lastProcessed  time.Time
+
+	listenersMu sync.Mutex
+	listeners   map[chan struct{}]struct{}
 }
 
 // NewWorker initializes a new background chapter indexing worker.
@@ -55,6 +72,50 @@ func NewWorker(repo repository.StorageEngine, aiClient ai.Client, cfg Config) *W
 		logger:       logger,
 		notifyCh:     make(chan struct{}, 1),
 		stopCh:       make(chan struct{}),
+		listeners:    make(map[chan struct{}]struct{}),
+	}
+}
+
+// GetRuntimeStatus returns thread-safe current indexing state.
+func (w *Worker) GetRuntimeStatus() RuntimeStatus {
+	w.statusMu.RLock()
+	defer w.statusMu.RUnlock()
+	return RuntimeStatus{
+		IsBusy:         w.isBusy,
+		CurrentBook:    w.currentBook,
+		CurrentChapter: w.currentChapter,
+		LastProcessed:  w.lastProcessed,
+	}
+}
+
+// Subscribe returns a channel that signals whenever a chapter is processed or status changes.
+func (w *Worker) Subscribe() chan struct{} {
+	w.listenersMu.Lock()
+	defer w.listenersMu.Unlock()
+	ch := make(chan struct{}, 1)
+	if w.listeners == nil {
+		w.listeners = make(map[chan struct{}]struct{})
+	}
+	w.listeners[ch] = struct{}{}
+	return ch
+}
+
+// Unsubscribe removes a registered listener channel.
+func (w *Worker) Unsubscribe(ch chan struct{}) {
+	w.listenersMu.Lock()
+	defer w.listenersMu.Unlock()
+	delete(w.listeners, ch)
+	close(ch)
+}
+
+func (w *Worker) broadcast() {
+	w.listenersMu.Lock()
+	defer w.listenersMu.Unlock()
+	for ch := range w.listeners {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -69,6 +130,15 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
+	defer func() {
+		w.statusMu.Lock()
+		w.isBusy = false
+		w.currentBook = ""
+		w.currentChapter = ""
+		w.statusMu.Unlock()
+		w.broadcast()
+	}()
+
 	processed := 0
 	for _, ch := range chapters {
 		if err := ctx.Err(); err != nil {
@@ -79,6 +149,18 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 		if ch.Title != nil {
 			title = *ch.Title
 		}
+
+		bookTitle := ""
+		if book, err := w.repo.GetBookByID(ctx, ch.BookID); err == nil && book != nil {
+			bookTitle = book.Title
+		}
+
+		w.statusMu.Lock()
+		w.isBusy = true
+		w.currentBook = bookTitle
+		w.currentChapter = title
+		w.statusMu.Unlock()
+		w.broadcast()
 
 		content := strings.TrimSpace(ch.ContentPlain)
 		if content == "" {
@@ -114,6 +196,11 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 			w.logger.Error("failed to insert chapter vector", "chapter_id", ch.ID, "error", err)
 			continue
 		}
+
+		w.statusMu.Lock()
+		w.lastProcessed = time.Now()
+		w.statusMu.Unlock()
+		w.broadcast()
 
 		processed++
 	}
