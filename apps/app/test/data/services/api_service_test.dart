@@ -174,5 +174,131 @@ void main() {
       expect(status.currentBook, 'Solaris');
       expect(status.currentChapter, 'The Station');
     });
+
+    test('createBookmark, getBookmarks, deleteBookmark', () async {
+      final mockClient = MockClient((request) async {
+        if (request.method == 'POST' && request.url.path == '/api/v1/books/book-1/bookmarks') {
+          return http.Response(
+            jsonEncode({
+              'id': 'bm-new',
+              'book_id': 'book-1',
+              'title': 'Test Mark',
+              'progress': 0.5,
+            }),
+            201,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'GET' && request.url.path == '/api/v1/books/book-1/bookmarks') {
+          return http.Response(
+            jsonEncode([
+              {
+                'id': 'bm-new',
+                'book_id': 'book-1',
+                'title': 'Test Mark',
+                'progress': 0.5,
+              }
+            ]),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'DELETE' && request.url.path == '/api/v1/bookmarks/bm-new') {
+          return http.Response(jsonEncode({'status': 'deleted'}), 200,
+              headers: {'content-type': 'application/json'});
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final created = await apiService.createBookmark('book-1', title: 'Test Mark', progress: 0.5);
+      expect(created.id, 'bm-new');
+      expect(created.title, 'Test Mark');
+
+      final list = await apiService.getBookmarks('book-1');
+      expect(list.length, 1);
+      expect(list.first.id, 'bm-new');
+
+      await expectLater(apiService.deleteBookmark('bm-new'), completes);
+    });
+
+    test('createHighlight, getHighlights, deleteHighlight', () async {
+      final mockClient = MockClient((request) async {
+        if (request.method == 'POST' && request.url.path == '/api/v1/books/book-1/highlights') {
+          return http.Response(
+            jsonEncode({
+              'id': 'hl-new',
+              'book_id': 'book-1',
+              'selected_text': 'A famous line.',
+              'color': 'yellow',
+            }),
+            201,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'GET' && request.url.path == '/api/v1/books/book-1/highlights') {
+          return http.Response(
+            jsonEncode([
+              {
+                'id': 'hl-new',
+                'book_id': 'book-1',
+                'selected_text': 'A famous line.',
+                'color': 'yellow',
+              }
+            ]),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'DELETE' && request.url.path == '/api/v1/highlights/hl-new') {
+          return http.Response(jsonEncode({'status': 'deleted'}), 200,
+              headers: {'content-type': 'application/json'});
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final created = await apiService.createHighlight('book-1', selectedText: 'A famous line.');
+      expect(created.id, 'hl-new');
+      expect(created.selectedText, 'A famous line.');
+
+      final list = await apiService.getHighlights('book-1');
+      expect(list.length, 1);
+      expect(list.first.id, 'hl-new');
+
+      await expectLater(apiService.deleteHighlight('hl-new'), completes);
+    });
+
+    test('chatWithBook calls API with message and returns citations', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.method, 'POST');
+        expect(request.url.path, '/api/v1/books/book-1/chat');
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['message'], 'What happens in Chapter 1?');
+
+        return http.Response(
+          jsonEncode({
+            'reply': 'In Chapter 1, Ishmael embarks on his journey.',
+            'citations': [
+              {
+                'chapter_id': 'chap-1',
+                'chapter_index': 1,
+                'chapter_title': 'Loomings',
+                'summary': 'Ishmael travels to New Bedford.',
+              }
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final res = await apiService.chatWithBook('book-1', 'What happens in Chapter 1?');
+      expect(res.reply, contains('Ishmael embarks on his journey'));
+      expect(res.citations.length, 1);
+      expect(res.citations.first.chapterIndex, 1);
+      expect(res.citations.first.chapterTitle, 'Loomings');
+    });
   });
 }

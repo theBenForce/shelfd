@@ -66,6 +66,19 @@ class AppTypography {
     );
   }
 
+  static TextStyle captionSans({
+    double fontSize = 12.0,
+    FontWeight fontWeight = FontWeight.w400,
+    Color color = AppTokens.mutedCopy,
+  }) {
+    return TextStyle(
+      fontFamilyFallback: sansFallbacks,
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+    );
+  }
+
   static TextStyle readerText({
     required double fontSize,
     required double lineHeight,

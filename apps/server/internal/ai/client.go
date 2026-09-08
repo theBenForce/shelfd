@@ -10,10 +10,17 @@ import (
 	"github.com/shelfd/shelfd/internal/config"
 )
 
-// Client defines the universal interface for LLM summarization and vector embedding generation.
+// ChatMessage represents an individual conversational message.
+type ChatMessage struct {
+	Role    string `json:"role"` // "system", "user", "assistant"
+	Content string `json:"content"`
+}
+
+// Client defines the universal interface for LLM summarization, vector embedding generation, and chat.
 type Client interface {
 	SummarizeChapter(ctx context.Context, title, content string) (string, error)
 	GenerateEmbedding(ctx context.Context, text string) ([]float32, error)
+	Chat(ctx context.Context, messages []ChatMessage) (string, error)
 }
 
 // SystemSummarizePrompt defines the prompt constraints for chapter summarization.

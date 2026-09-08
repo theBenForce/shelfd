@@ -121,3 +121,54 @@ func (c *OllamaClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 
 	return res.Embedding, nil
 }
+
+func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
+	ollamaMessages := make([]map[string]string, len(messages))
+	for i, m := range messages {
+		ollamaMessages[i] = map[string]string{
+			"role":    m.Role,
+			"content": m.Content,
+		}
+	}
+
+	payload := map[string]interface{}{
+		"model":    c.summaryModel,
+		"messages": ollamaMessages,
+		"stream":   false,
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshaling ollama chat request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/chat", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("sending ollama chat request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("ollama chat returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var res struct {
+		Message struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", fmt.Errorf("decoding ollama chat response: %w", err)
+	}
+
+	return strings.TrimSpace(res.Message.Content), nil
+}
+

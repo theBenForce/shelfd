@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../data/services/storage_service.dart';
+import 'features/book_detail/book_detail_view.dart';
 import 'features/connect/connect_view.dart';
 import 'features/library/library_view.dart';
 import 'features/reader/reader_view.dart';
@@ -37,10 +38,30 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
         builder: (context, state) => const SearchView(),
       ),
       GoRoute(
-        path: '/reader/:bookId',
+        path: '/reader/:bookId/read',
         builder: (context, state) {
           final bookId = state.pathParameters['bookId'] ?? '';
           return ReaderView(
+            bookId: bookId,
+          );
+        },
+      ),
+      GoRoute(
+        path: '/reader/:bookId/read/:chapterIdentifier',
+        builder: (context, state) {
+          final bookId = state.pathParameters['bookId'] ?? '';
+          final chapterIdentifier = state.pathParameters['chapterIdentifier'];
+          return ReaderView(
+            bookId: bookId,
+            chapterIdentifier: chapterIdentifier,
+          );
+        },
+      ),
+      GoRoute(
+        path: '/reader/:bookId',
+        builder: (context, state) {
+          final bookId = state.pathParameters['bookId'] ?? '';
+          return BookDetailView(
             bookId: bookId,
           );
         },
@@ -50,6 +71,9 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
         builder: (context, state) {
           final bookId = state.pathParameters['bookId'] ?? '';
           final chapterIdentifier = state.pathParameters['chapterIdentifier'];
+          if (chapterIdentifier == 'read') {
+            return ReaderView(bookId: bookId);
+          }
           return ReaderView(
             bookId: bookId,
             chapterIdentifier: chapterIdentifier,

@@ -74,6 +74,16 @@ type StorageEngine interface {
 	// Queue & Background Jobs Status
 	GetQueueStatus(ctx context.Context) (*QueueStatus, error)
 
+	// Bookmarks
+	CreateBookmark(ctx context.Context, bookmark *Bookmark) error
+	ListBookmarksByBookID(ctx context.Context, bookID string) ([]*Bookmark, error)
+	DeleteBookmark(ctx context.Context, id string) error
+
+	// Highlights
+	CreateHighlight(ctx context.Context, highlight *Highlight) error
+	ListHighlightsByBookID(ctx context.Context, bookID string) ([]*Highlight, error)
+	DeleteHighlight(ctx context.Context, id string) error
+
 	// Lifecycle
 	Close() error
 }

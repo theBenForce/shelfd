@@ -129,10 +129,32 @@ type SearchHit struct {
 
 // SearchFilter specifies filters applied in conjunction with vector search.
 type SearchFilter struct {
+	BookID   *string
 	AuthorID *string
 	GenreID  *string
 	SeriesID *string
 	Limit    int
+}
+
+// Bookmark represents a saved reading location or user bookmark.
+type Bookmark struct {
+	ID        string    `json:"id"`
+	BookID    string    `json:"book_id"`
+	ChapterID *string   `json:"chapter_id,omitempty"`
+	Title     string    `json:"title"`
+	Progress  float64   `json:"progress"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Highlight represents a user-highlighted text passage with optional notes.
+type Highlight struct {
+	ID           string    `json:"id"`
+	BookID       string    `json:"book_id"`
+	ChapterID    *string   `json:"chapter_id,omitempty"`
+	SelectedText string    `json:"selected_text"`
+	Note         *string   `json:"note,omitempty"`
+	Color        string    `json:"color"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // UploadJob represents an asynchronous book ingestion task.

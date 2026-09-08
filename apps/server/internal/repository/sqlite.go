@@ -717,6 +717,10 @@ func (r *SQLiteStorageEngine) SearchVectorChapters(ctx context.Context, queryEmb
 		}
 	}
 
+	bookID := ""
+	if filter.BookID != nil {
+		bookID = *filter.BookID
+	}
 	authorID := ""
 	if filter.AuthorID != nil {
 		authorID = *filter.AuthorID
@@ -747,6 +751,7 @@ func (r *SQLiteStorageEngine) SearchVectorChapters(ctx context.Context, queryEmb
 		JOIN chapters c ON v.chapter_id = c.id
 		JOIN books b ON c.book_id = b.id
 		WHERE v.embedding MATCH ? AND k = ?
+		  AND (? = '' OR b.id = ?)
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
@@ -756,6 +761,7 @@ func (r *SQLiteStorageEngine) SearchVectorChapters(ctx context.Context, queryEmb
 
 	rows, err := r.db.QueryContext(ctx, query,
 		blob, blob, k,
+		bookID, bookID,
 		authorID, authorID,
 		genreID, genreID,
 		seriesID, seriesID,
@@ -1106,4 +1112,145 @@ func (r *SQLiteStorageEngine) GetQueueStatus(ctx context.Context) (*QueueStatus,
 
 	return status, nil
 }
+
+func (r *SQLiteStorageEngine) CreateBookmark(ctx context.Context, bookmark *Bookmark) error {
+	if bookmark.ID == "" {
+		bookmark.ID = uuid.NewString()
+	}
+	if bookmark.CreatedAt.IsZero() {
+		bookmark.CreatedAt = time.Now()
+	}
+
+	query := `
+		INSERT INTO bookmarks (id, book_id, chapter_id, title, progress, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		bookmark.ID,
+		bookmark.BookID,
+		bookmark.ChapterID,
+		bookmark.Title,
+		bookmark.Progress,
+		bookmark.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("inserting bookmark: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) ListBookmarksByBookID(ctx context.Context, bookID string) ([]*Bookmark, error) {
+	query := `
+		SELECT id, book_id, chapter_id, title, progress, created_at
+		FROM bookmarks
+		WHERE book_id = ?
+		ORDER BY created_at DESC
+	`
+	rows, err := r.db.QueryContext(ctx, query, bookID)
+	if err != nil {
+		return nil, fmt.Errorf("querying bookmarks: %w", err)
+	}
+	defer rows.Close()
+
+	var bookmarks []*Bookmark
+	for rows.Next() {
+		b := &Bookmark{}
+		if err := rows.Scan(&b.ID, &b.BookID, &b.ChapterID, &b.Title, &b.Progress, &b.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning bookmark: %w", err)
+		}
+		bookmarks = append(bookmarks, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating bookmarks: %w", err)
+	}
+	if bookmarks == nil {
+		bookmarks = []*Bookmark{}
+	}
+	return bookmarks, nil
+}
+
+func (r *SQLiteStorageEngine) DeleteBookmark(ctx context.Context, id string) error {
+	res, err := r.db.ExecContext(ctx, "DELETE FROM bookmarks WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("deleting bookmark: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) CreateHighlight(ctx context.Context, highlight *Highlight) error {
+	if highlight.ID == "" {
+		highlight.ID = uuid.NewString()
+	}
+	if highlight.CreatedAt.IsZero() {
+		highlight.CreatedAt = time.Now()
+	}
+	if highlight.Color == "" {
+		highlight.Color = "yellow"
+	}
+
+	query := `
+		INSERT INTO highlights (id, book_id, chapter_id, selected_text, note, color, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		highlight.ID,
+		highlight.BookID,
+		highlight.ChapterID,
+		highlight.SelectedText,
+		highlight.Note,
+		highlight.Color,
+		highlight.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("inserting highlight: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) ListHighlightsByBookID(ctx context.Context, bookID string) ([]*Highlight, error) {
+	query := `
+		SELECT id, book_id, chapter_id, selected_text, note, color, created_at
+		FROM highlights
+		WHERE book_id = ?
+		ORDER BY created_at DESC
+	`
+	rows, err := r.db.QueryContext(ctx, query, bookID)
+	if err != nil {
+		return nil, fmt.Errorf("querying highlights: %w", err)
+	}
+	defer rows.Close()
+
+	var highlights []*Highlight
+	for rows.Next() {
+		h := &Highlight{}
+		if err := rows.Scan(&h.ID, &h.BookID, &h.ChapterID, &h.SelectedText, &h.Note, &h.Color, &h.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning highlight: %w", err)
+		}
+		highlights = append(highlights, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating highlights: %w", err)
+	}
+	if highlights == nil {
+		highlights = []*Highlight{}
+	}
+	return highlights, nil
+}
+
+func (r *SQLiteStorageEngine) DeleteHighlight(ctx context.Context, id string) error {
+	res, err := r.db.ExecContext(ctx, "DELETE FROM highlights WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("deleting highlight: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 

@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
+	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/database"
 	"github.com/shelfd/shelfd/internal/mcp"
 	"github.com/shelfd/shelfd/internal/repository"
@@ -49,6 +50,10 @@ func (m *mockAIClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 	vec := make([]float32, 1536)
 	vec[0] = 1.0
 	return vec, nil
+}
+
+func (m *mockAIClient) Chat(ctx context.Context, messages []ai.ChatMessage) (string, error) {
+	return "Standard MCP AI response", nil
 }
 
 func setupTestEnvironment(t *testing.T) (*sql.DB, repository.StorageEngine, string, *mcp.Server) {

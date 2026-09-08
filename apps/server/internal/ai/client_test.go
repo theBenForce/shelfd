@@ -47,6 +47,22 @@ func TestOllamaClient(t *testing.T) {
 				"embedding": []float32{0.1, 0.2, 0.3, 0.4},
 			})
 
+		case "/api/chat":
+			var req map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if req["model"] != "llama3.2:3b" {
+				t.Errorf("expected model llama3.2:3b, got %v", req["model"])
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"message": map[string]string{
+					"role":    "assistant",
+					"content": "Paul was tested with the Gom Jabbar.",
+				},
+			})
+
 		default:
 			http.NotFound(w, r)
 		}
@@ -80,6 +96,14 @@ func TestOllamaClient(t *testing.T) {
 	}
 	if len(embedding) != 4 || embedding[0] != 0.1 {
 		t.Errorf("unexpected embedding: %v", embedding)
+	}
+
+	reply, err := client.Chat(ctx, []ai.ChatMessage{{Role: "user", Content: "What was Paul's test?"}})
+	if err != nil {
+		t.Fatalf("Chat error: %v", err)
+	}
+	if !strings.Contains(reply, "Gom Jabbar") {
+		t.Errorf("unexpected chat reply: %s", reply)
 	}
 }
 
@@ -163,6 +187,14 @@ func TestOpenAIClient(t *testing.T) {
 	}
 	if len(embedding) != 4 || embedding[0] != 0.5 {
 		t.Errorf("unexpected embedding: %v", embedding)
+	}
+
+	reply, err := client.Chat(ctx, []ai.ChatMessage{{Role: "user", Content: "Who hired Case?"}})
+	if err != nil {
+		t.Fatalf("Chat error: %v", err)
+	}
+	if !strings.Contains(reply, "Case is hired") {
+		t.Errorf("unexpected chat reply: %s", reply)
 	}
 }
 

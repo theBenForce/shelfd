@@ -1,9 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
+import 'package:shelf/data/models/book_chat.dart';
+import 'package:shelf/data/models/bookmark.dart';
 import 'package:shelf/data/models/chapter.dart';
 import 'package:shelf/data/models/connect_info.dart';
 import 'package:shelf/data/models/genre.dart';
+import 'package:shelf/data/models/highlight.dart';
 import 'package:shelf/data/models/queue_status.dart';
 import 'package:shelf/data/models/search_result.dart';
 import 'package:shelf/data/models/series.dart';
@@ -187,6 +190,105 @@ void main() {
       expect(status.currentBook, 'Hyperion');
       expect(status.currentChapter, 'The Priest\'s Tale');
       expect(status.toJson(), json);
+    });
+
+    test('Bookmark fromJson & toJson', () {
+      final json = {
+        'id': 'bm-1',
+        'book_id': 'book-42',
+        'chapter_id': 'chap-1',
+        'title': 'Chapter 4',
+        'progress': 0.35,
+        'created_at': '2026-09-08T12:00:00.000Z',
+      };
+      final bm = Bookmark.fromJson(json);
+      expect(bm.id, 'bm-1');
+      expect(bm.bookId, 'book-42');
+      expect(bm.chapterId, 'chap-1');
+      expect(bm.title, 'Chapter 4');
+      expect(bm.progress, 0.35);
+      expect(bm.toJson()['id'], 'bm-1');
+      expect(bm.toJson()['progress'], 0.35);
+    });
+
+    test('Highlight fromJson & toJson', () {
+      final json = {
+        'id': 'hl-1',
+        'book_id': 'book-42',
+        'chapter_id': 'chap-2',
+        'selected_text': 'To be or not to be.',
+        'note': 'Hamlet soliloquy',
+        'color': 'green',
+        'created_at': '2026-09-08T12:00:00.000Z',
+      };
+      final hl = Highlight.fromJson(json);
+      expect(hl.id, 'hl-1');
+      expect(hl.bookId, 'book-42');
+      expect(hl.selectedText, 'To be or not to be.');
+      expect(hl.note, 'Hamlet soliloquy');
+      expect(hl.color, 'green');
+      expect(hl.toJson()['selected_text'], 'To be or not to be.');
+      expect(hl.toJson()['color'], 'green');
+    });
+
+    test('BookCitation, BookChatMessage, BookChatResponse fromJson & toJson', () {
+      final citationJson = {
+        'chapter_id': 'chap-1',
+        'chapter_index': 1,
+        'chapter_title': 'Loomings',
+        'summary': 'Ishmael travels to New Bedford.',
+      };
+      final citation = BookCitation.fromJson(citationJson);
+      expect(citation.chapterId, 'chap-1');
+      expect(citation.chapterIndex, 1);
+      expect(citation.chapterTitle, 'Loomings');
+      expect(citation.summary, 'Ishmael travels to New Bedford.');
+      expect(citation.toJson(), citationJson);
+
+      final msg = BookChatMessage(
+        role: 'assistant',
+        content: 'Ishmael goes to sea because he feels restless.',
+        citations: [citation],
+      );
+      expect(msg.role, 'assistant');
+      expect(msg.citations.length, 1);
+      expect(msg.toJson()['role'], 'assistant');
+      expect(msg.toJson()['citations'], isNotEmpty);
+
+      final chatRes = BookChatResponse.fromJson({
+        'reply': 'This is the reply.',
+        'citations': [citationJson],
+      });
+      expect(chatRes.reply, 'This is the reply.');
+      expect(chatRes.citations.length, 1);
+    });
+
+    test('Book fromJson with bookmarks and highlights', () {
+      final bookJson = {
+        'id': 'book-42',
+        'title': 'The Left Hand of Darkness',
+        'bookmarks': [
+          {'id': 'bm-1', 'book_id': 'book-42', 'title': 'My Mark', 'progress': 0.5}
+        ],
+        'highlights': [
+          {'id': 'hl-1', 'book_id': 'book-42', 'selected_text': 'Great quote', 'color': 'yellow'}
+        ],
+        'publisher': 'Ace Books',
+        'published_date': '1969',
+        'language': 'en',
+        'file_size_bytes': 1024000,
+      };
+
+      final book = Book.fromJson(bookJson);
+      expect(book.bookmarks.length, 1);
+      expect(book.bookmarks.first.title, 'My Mark');
+      expect(book.highlights.length, 1);
+      expect(book.highlights.first.selectedText, 'Great quote');
+      expect(book.publisher, 'Ace Books');
+      expect(book.publishedDate, '1969');
+      expect(book.language, 'en');
+      expect(book.fileSizeBytes, 1024000);
+      expect(book.toJson()['publisher'], 'Ace Books');
     });
   });
 }

@@ -152,3 +152,61 @@ func (c *OpenAIClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 
 	return res.Data[0].Embedding, nil
 }
+
+func (c *OpenAIClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
+	openAIMessages := make([]map[string]string, len(messages))
+	for i, m := range messages {
+		openAIMessages[i] = map[string]string{
+			"role":    m.Role,
+			"content": m.Content,
+		}
+	}
+
+	payload := map[string]interface{}{
+		"model":    c.summaryModel,
+		"messages": openAIMessages,
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshaling openai chat request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("sending openai chat request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("openai chat returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var res struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", fmt.Errorf("decoding openai chat response: %w", err)
+	}
+
+	if len(res.Choices) == 0 {
+		return "", fmt.Errorf("no completion choices returned by openai")
+	}
+
+	return strings.TrimSpace(res.Choices[0].Message.Content), nil
+}
+

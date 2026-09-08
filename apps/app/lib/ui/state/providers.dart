@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/author.dart';
 import '../../data/models/book.dart';
+import '../../data/models/book_chat.dart';
 import '../../data/models/genre.dart';
 import '../../data/models/queue_status.dart';
 import '../../data/models/search_result.dart';
@@ -431,4 +432,215 @@ class QueueNotifier extends Notifier<QueueState> {
 }
 
 final queueProvider = NotifierProvider<QueueNotifier, QueueState>(QueueNotifier.new);
+
+// Book Detail State
+class BookDetailState {
+  final Book? book;
+  final bool isLoading;
+  final String? error;
+
+  const BookDetailState({
+    this.book,
+    this.isLoading = false,
+    this.error,
+  });
+
+  BookDetailState copyWith({
+    Book? book,
+    bool? isLoading,
+    String? error,
+  }) {
+    return BookDetailState(
+      book: book ?? this.book,
+      isLoading: isLoading ?? this.isLoading,
+      error: error,
+    );
+  }
+}
+
+class BookDetailNotifier extends Notifier<BookDetailState> {
+  final String bookId;
+  BookDetailNotifier(this.bookId);
+
+  @override
+  BookDetailState build() {
+    Future.microtask(() => loadBook());
+    return const BookDetailState(isLoading: true);
+  }
+
+  Future<void> loadBook() async {
+    try {
+      final repo = ref.read(bookRepositoryProvider);
+      final book = await repo.getBookDetail(bookId);
+      state = BookDetailState(book: book, isLoading: false);
+    } catch (e) {
+      state = BookDetailState(isLoading: false, error: e.toString());
+    }
+  }
+
+  Future<void> addBookmark({
+    required String title,
+    double progress = 0.0,
+    String? chapterId,
+  }) async {
+    try {
+      final repo = ref.read(bookRepositoryProvider);
+      final bm = await repo.createBookmark(
+        bookId,
+        title: title,
+        progress: progress,
+        chapterId: chapterId,
+      );
+      if (state.book != null) {
+        final updatedBookmarks = [bm, ...state.book!.bookmarks];
+        state = state.copyWith(book: state.book!.copyWith(bookmarks: updatedBookmarks));
+      }
+    } catch (e) {
+      debugPrint('addBookmark error: $e');
+    }
+  }
+
+  Future<void> removeBookmark(String bookmarkId) async {
+    try {
+      final repo = ref.read(bookRepositoryProvider);
+      await repo.deleteBookmark(bookmarkId, bookId: bookId);
+      if (state.book != null) {
+        final updatedBookmarks = state.book!.bookmarks.where((b) => b.id != bookmarkId).toList();
+        state = state.copyWith(book: state.book!.copyWith(bookmarks: updatedBookmarks));
+      }
+    } catch (e) {
+      debugPrint('removeBookmark error: $e');
+    }
+  }
+
+  Future<void> addHighlight({
+    required String selectedText,
+    String color = 'yellow',
+    String? note,
+    String? chapterId,
+  }) async {
+    try {
+      final repo = ref.read(bookRepositoryProvider);
+      final hl = await repo.createHighlight(
+        bookId,
+        selectedText: selectedText,
+        color: color,
+        note: note,
+        chapterId: chapterId,
+      );
+      if (state.book != null) {
+        final updatedHighlights = [hl, ...state.book!.highlights];
+        state = state.copyWith(book: state.book!.copyWith(highlights: updatedHighlights));
+      }
+    } catch (e) {
+      debugPrint('addHighlight error: $e');
+    }
+  }
+
+  Future<void> removeHighlight(String highlightId) async {
+    try {
+      final repo = ref.read(bookRepositoryProvider);
+      await repo.deleteHighlight(highlightId, bookId: bookId);
+      if (state.book != null) {
+        final updatedHighlights = state.book!.highlights.where((h) => h.id != highlightId).toList();
+        state = state.copyWith(book: state.book!.copyWith(highlights: updatedHighlights));
+      }
+    } catch (e) {
+      debugPrint('removeHighlight error: $e');
+    }
+  }
+}
+
+final bookDetailProvider =
+    NotifierProvider.family<BookDetailNotifier, BookDetailState, String>(
+  BookDetailNotifier.new,
+);
+
+// Book Chat State
+class BookChatState {
+  final List<BookChatMessage> messages;
+  final bool isSending;
+  final String? error;
+
+  const BookChatState({
+    this.messages = const [],
+    this.isSending = false,
+    this.error,
+  });
+
+  BookChatState copyWith({
+    List<BookChatMessage>? messages,
+    bool? isSending,
+    String? error,
+  }) {
+    return BookChatState(
+      messages: messages ?? this.messages,
+      isSending: isSending ?? this.isSending,
+      error: error,
+    );
+  }
+}
+
+class BookChatNotifier extends Notifier<BookChatState> {
+  final String bookId;
+  BookChatNotifier(this.bookId);
+
+  @override
+  BookChatState build() {
+    return const BookChatState();
+  }
+
+  Future<void> sendMessage(String text) async {
+    final query = text.trim();
+    if (query.isEmpty) return;
+
+    final userMsg = BookChatMessage(
+      role: 'user',
+      content: query,
+      timestamp: DateTime.now(),
+    );
+
+    final currentMessages = [...state.messages, userMsg];
+    state = state.copyWith(
+      messages: currentMessages,
+      isSending: true,
+      error: null,
+    );
+
+    try {
+      final repo = ref.read(bookRepositoryProvider);
+      final history = currentMessages
+          .take(currentMessages.length - 1)
+          .map((m) => {'role': m.role, 'content': m.content})
+          .toList();
+
+      final res = await repo.chatWithBook(bookId, query, history: history);
+      final assistantMsg = BookChatMessage(
+        role: 'assistant',
+        content: res.reply,
+        citations: res.citations,
+        timestamp: DateTime.now(),
+      );
+
+      state = state.copyWith(
+        messages: [...currentMessages, assistantMsg],
+        isSending: false,
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isSending: false,
+        error: e.toString(),
+      );
+    }
+  }
+
+  void clearChat() {
+    state = const BookChatState();
+  }
+}
+
+final bookChatProvider =
+    NotifierProvider.family<BookChatNotifier, BookChatState, String>(
+  BookChatNotifier.new,
+);
 

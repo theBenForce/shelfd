@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 	"github.com/shelfd/shelfd/internal/worker"
@@ -15,6 +16,7 @@ type RouterConfig struct {
 	Scanner      *scanner.Scanner
 	Worker       *worker.Worker
 	UploadWorker *worker.UploadWorker
+	AIClient     ai.Client
 	DataDir      string
 	LibraryDir   string
 	JWTSecret    string
@@ -28,7 +30,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux := http.NewServeMux()
 
 	authHandler := NewAuthHandler(cfg.Repo, cfg.JWTSecret)
-	bookHandler := NewBookHandler(cfg.Repo, cfg.Ingester, cfg.Worker, cfg.UploadWorker, cfg.DataDir, cfg.LibraryDir)
+	bookHandler := NewBookHandler(cfg.Repo, cfg.Ingester, cfg.Worker, cfg.UploadWorker, cfg.AIClient, cfg.DataDir, cfg.LibraryDir)
 	taxHandler := NewTaxonomyHandler(cfg.Repo)
 	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, nil)
 	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version)
@@ -53,8 +55,21 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/books/upload/jobs/{id}", auth(http.HandlerFunc(bookHandler.GetUploadJob)))
 	mux.Handle("GET /api/v1/books/{id}", auth(http.HandlerFunc(bookHandler.GetBook)))
 	mux.Handle("POST /api/v1/books/{id}/reparse", auth(http.HandlerFunc(bookHandler.ReparseBook)))
+	mux.Handle("POST /api/v1/books/{id}/chat", auth(http.HandlerFunc(bookHandler.ChatBook)))
 	mux.Handle("GET /api/v1/books/{id}/chapters/{index}", auth(http.HandlerFunc(bookHandler.GetChapter)))
 	mux.Handle("GET /api/v1/chapters/{id}", auth(http.HandlerFunc(bookHandler.GetChapterDirect)))
+
+	mux.Handle("GET /api/v1/books/{id}/bookmarks", auth(http.HandlerFunc(bookHandler.ListBookmarks)))
+	mux.Handle("POST /api/v1/books/{id}/bookmarks", auth(http.HandlerFunc(bookHandler.CreateBookmark)))
+	mux.Handle("DELETE /api/v1/books/{id}/bookmarks/{bookmarkId}", auth(http.HandlerFunc(bookHandler.DeleteBookmark)))
+	mux.Handle("DELETE /api/v1/bookmarks/{bookmarkId}", auth(http.HandlerFunc(bookHandler.DeleteBookmark)))
+
+	mux.Handle("GET /api/v1/books/{id}/highlights", auth(http.HandlerFunc(bookHandler.ListHighlights)))
+	mux.Handle("POST /api/v1/books/{id}/highlights", auth(http.HandlerFunc(bookHandler.CreateHighlight)))
+	mux.Handle("DELETE /api/v1/books/{id}/highlights/{highlightId}", auth(http.HandlerFunc(bookHandler.DeleteHighlight)))
+	mux.Handle("DELETE /api/v1/highlights/{highlightId}", auth(http.HandlerFunc(bookHandler.DeleteHighlight)))
+
+	mux.Handle("GET /api/v1/search", auth(http.HandlerFunc(bookHandler.SearchLibrary)))
 
 	mux.Handle("GET /api/v1/authors", auth(http.HandlerFunc(taxHandler.ListAuthors)))
 	mux.Handle("GET /api/v1/genres", auth(http.HandlerFunc(taxHandler.ListGenres)))

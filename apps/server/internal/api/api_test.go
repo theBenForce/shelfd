@@ -18,6 +18,7 @@ import (
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/api"
 	"github.com/shelfd/shelfd/internal/database"
 	"github.com/shelfd/shelfd/internal/repository"
@@ -29,6 +30,47 @@ func init() {
 	sqlite_vec.Auto()
 }
 
+type mockAIClient struct {
+	summaryResp string
+	summaryErr  error
+	embedResp   []float32
+	embedErr    error
+	chatResp    string
+	chatErr     error
+}
+
+func (m *mockAIClient) SummarizeChapter(ctx context.Context, title, content string) (string, error) {
+	if m.summaryErr != nil {
+		return "", m.summaryErr
+	}
+	if m.summaryResp != "" {
+		return m.summaryResp, nil
+	}
+	return "Mock summary for " + title, nil
+}
+
+func (m *mockAIClient) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
+	if m.embedErr != nil {
+		return nil, m.embedErr
+	}
+	if len(m.embedResp) > 0 {
+		return m.embedResp, nil
+	}
+	vec := make([]float32, 768)
+	vec[0] = 0.1
+	return vec, nil
+}
+
+func (m *mockAIClient) Chat(ctx context.Context, messages []ai.ChatMessage) (string, error) {
+	if m.chatErr != nil {
+		return "", m.chatErr
+	}
+	if m.chatResp != "" {
+		return m.chatResp, nil
+	}
+	return "Mock AI response about the book.", nil
+}
+
 type testFixture struct {
 	db           *sql.DB
 	repo         repository.StorageEngine
@@ -36,6 +78,7 @@ type testFixture struct {
 	scanner      *scanner.Scanner
 	worker       *worker.Worker
 	uploadWorker *worker.UploadWorker
+	aiClient     *mockAIClient
 	handler      http.Handler
 	jwtSecret    string
 	dataDir      string
@@ -78,6 +121,7 @@ func setupAPITest(t *testing.T) *testFixture {
 	jwtSecret := "super-secure-jwt-test-secret-key-123"
 
 	uploadWorker := worker.NewUploadWorker(repo, ingester, nil, worker.UploadWorkerConfig{})
+	aiClient := &mockAIClient{}
 
 	handler := api.NewRouter(api.RouterConfig{
 		Repo:         repo,
@@ -85,6 +129,7 @@ func setupAPITest(t *testing.T) *testFixture {
 		Scanner:      s,
 		Worker:       nil,
 		UploadWorker: uploadWorker,
+		AIClient:     aiClient,
 		DataDir:      dataDir,
 		LibraryDir:   libDir,
 		JWTSecret:    jwtSecret,
@@ -100,6 +145,7 @@ func setupAPITest(t *testing.T) *testFixture {
 		scanner:      s,
 		worker:       nil,
 		uploadWorker: uploadWorker,
+		aiClient:     aiClient,
 		handler:      handler,
 		jwtSecret:    jwtSecret,
 		dataDir:      dataDir,
@@ -917,4 +963,281 @@ func TestQueueAPI(t *testing.T) {
 		t.Errorf("expected queue to be active with pending chapters")
 	}
 }
+
+func TestBookmarksEndpoints(t *testing.T) {
+	f := setupAPITest(t)
+	token := f.loginAndGetToken(t)
+	ctx := context.Background()
+
+	book := &repository.Book{
+		ID:       "bm-book-1",
+		Title:    "Bookmark Book",
+		FilePath: "/test/bm.epub",
+	}
+	if err := f.repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("failed to create book: %v", err)
+	}
+
+	// 1. Create Bookmark
+	createPayload := `{"title": "Chapter Two", "progress": 0.45}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/bm-book-1/bookmarks", strings.NewReader(createPayload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 created, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var bm repository.Bookmark
+	if err := json.Unmarshal(rec.Body.Bytes(), &bm); err != nil {
+		t.Fatalf("failed to decode bookmark: %v", err)
+	}
+	if bm.ID == "" || bm.BookID != "bm-book-1" || bm.Title != "Chapter Two" || bm.Progress != 0.45 {
+		t.Fatalf("unexpected bookmark values: %+v", bm)
+	}
+
+	// 2. List Bookmarks
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/bm-book-1/bookmarks", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 ok, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var bms []repository.Bookmark
+	if err := json.Unmarshal(rec.Body.Bytes(), &bms); err != nil {
+		t.Fatalf("failed to decode bookmarks: %v", err)
+	}
+	if len(bms) != 1 || bms[0].ID != bm.ID {
+		t.Fatalf("expected 1 bookmark with id %s, got %d", bm.ID, len(bms))
+	}
+
+	// 3. GetBook includes bookmarks
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/bm-book-1", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 ok, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var bookRes api.BookDetailResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &bookRes); err != nil {
+		t.Fatalf("failed to decode book response: %v", err)
+	}
+	if len(bookRes.Bookmarks) != 1 {
+		t.Fatalf("expected 1 bookmark embedded in book, got %d", len(bookRes.Bookmarks))
+	}
+
+	// 4. Delete Bookmark
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/bookmarks/"+bm.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 ok, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 5. Verify list is empty
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/bm-book-1/bookmarks", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	var emptyBms []repository.Bookmark
+	json.Unmarshal(rec.Body.Bytes(), &emptyBms)
+	if len(emptyBms) != 0 {
+		t.Fatalf("expected 0 bookmarks, got %d", len(emptyBms))
+	}
+}
+
+func TestHighlightsEndpoints(t *testing.T) {
+	f := setupAPITest(t)
+	token := f.loginAndGetToken(t)
+	ctx := context.Background()
+
+	book := &repository.Book{
+		ID:       "hl-book-1",
+		Title:    "Highlight Book",
+		FilePath: "/test/hl.epub",
+	}
+	if err := f.repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("failed to create book: %v", err)
+	}
+
+	// 1. Create Highlight
+	createPayload := `{"selected_text": "Call me Ishmael.", "color": "yellow", "note": "Famous opening line"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/hl-book-1/highlights", strings.NewReader(createPayload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 created, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var hl repository.Highlight
+	if err := json.Unmarshal(rec.Body.Bytes(), &hl); err != nil {
+		t.Fatalf("failed to decode highlight: %v", err)
+	}
+	if hl.ID == "" || hl.BookID != "hl-book-1" || hl.SelectedText != "Call me Ishmael." || hl.Color != "yellow" {
+		t.Fatalf("unexpected highlight values: %+v", hl)
+	}
+
+	// 2. List Highlights
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/hl-book-1/highlights", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 ok, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var hls []repository.Highlight
+	if err := json.Unmarshal(rec.Body.Bytes(), &hls); err != nil {
+		t.Fatalf("failed to decode highlights: %v", err)
+	}
+	if len(hls) != 1 || hls[0].ID != hl.ID {
+		t.Fatalf("expected 1 highlight, got %d", len(hls))
+	}
+
+	// 3. GetBook includes highlights
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/hl-book-1", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	var bookRes api.BookDetailResponse
+	json.Unmarshal(rec.Body.Bytes(), &bookRes)
+	if len(bookRes.Highlights) != 1 {
+		t.Fatalf("expected 1 highlight in book, got %d", len(bookRes.Highlights))
+	}
+
+	// 4. Delete Highlight
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/highlights/"+hl.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 ok, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 5. Verify list is empty
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/hl-book-1/highlights", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	var emptyHls []repository.Highlight
+	json.Unmarshal(rec.Body.Bytes(), &emptyHls)
+	if len(emptyHls) != 0 {
+		t.Fatalf("expected 0 highlights, got %d", len(emptyHls))
+	}
+}
+
+func TestChatBookEndpoint(t *testing.T) {
+	f := setupAPITest(t)
+	token := f.loginAndGetToken(t)
+	ctx := context.Background()
+
+	book := &repository.Book{
+		ID:       "chat-book-1",
+		Title:    "Moby Dick",
+		FilePath: "/test/moby.epub",
+	}
+	if err := f.repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("failed to create book: %v", err)
+	}
+	title := "Loomings"
+	summary := "Ishmael decides to go to sea and travels to New Bedford."
+	ch := &repository.Chapter{
+		ID:           "ch-moby-1",
+		BookID:       book.ID,
+		ChapterIndex: 1,
+		Title:        &title,
+		Summary:      summary,
+		ContentPlain: "Call me Ishmael. Some years ago...",
+	}
+	if err := f.repo.CreateChapter(ctx, ch); err != nil {
+		t.Fatalf("failed to create chapter: %v", err)
+	}
+
+	// Valid chat request
+	chatPayload := `{"query": "Why does Ishmael go to sea?"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/chat-book-1/chat", strings.NewReader(chatPayload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 ok, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var chatRes map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &chatRes); err != nil {
+		t.Fatalf("failed to decode chat response: %v", err)
+	}
+	if chatRes["response"] == "" {
+		t.Errorf("expected non-empty response, got %+v", chatRes)
+	}
+	citations, ok := chatRes["citations"].([]interface{})
+	if !ok || len(citations) == 0 {
+		t.Errorf("expected citations array, got %+v", chatRes["citations"])
+	}
+
+	// Empty query error
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/books/chat-book-1/chat", strings.NewReader(`{"query": ""}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 bad request for empty query, got %d", rec.Code)
+	}
+
+	// Non-existent book error
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/books/nonexistent/chat", strings.NewReader(`{"query": "hello"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected 404 not found for nonexistent book, got %d", rec.Code)
+	}
+}
+
+func TestSearchLibraryEndpoint(t *testing.T) {
+	f := setupAPITest(t)
+	token := f.loginAndGetToken(t)
+
+	// Valid search query
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/search?q=whale", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 ok, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var hits []*repository.SearchHit
+	if err := json.Unmarshal(rec.Body.Bytes(), &hits); err != nil {
+		t.Fatalf("failed to decode search response: %v", err)
+	}
+
+	// Empty query returns empty array
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/search?q=", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 OK for empty query, got %d", rec.Code)
+	}
+}
+
 

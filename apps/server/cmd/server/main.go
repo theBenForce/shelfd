@@ -157,6 +157,7 @@ func main() {
 		Scanner:      scannerInst,
 		Worker:       chapterWorker,
 		UploadWorker: uploadWorker,
+		AIClient:     aiClient,
 		DataDir:      cfg.Storage.DataDir,
 		LibraryDir:   cfg.Storage.LibraryDir,
 		JWTSecret:    cfg.Server.JWTSecret,

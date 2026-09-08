@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 	"github.com/shelfd/shelfd/internal/ulid"
@@ -23,6 +25,7 @@ type BookHandler struct {
 	ingester     *scanner.Ingester
 	worker       *worker.Worker
 	uploadWorker *worker.UploadWorker
+	aiClient     ai.Client
 	dataDir      string
 	libraryDir   string
 }
@@ -32,6 +35,7 @@ func NewBookHandler(
 	ingester *scanner.Ingester,
 	worker *worker.Worker,
 	uploadWorker *worker.UploadWorker,
+	aiClient ai.Client,
 	dataDir string,
 	libraryDir string,
 ) *BookHandler {
@@ -40,6 +44,7 @@ func NewBookHandler(
 		ingester:     ingester,
 		worker:       worker,
 		uploadWorker: uploadWorker,
+		aiClient:     aiClient,
 		dataDir:      dataDir,
 		libraryDir:   libraryDir,
 	}
@@ -63,8 +68,28 @@ type BookListItem struct {
 
 type BookDetailResponse struct {
 	BookListItem
-	Spine    []*repository.SpineItem `json:"spine"`
-	Chapters []*repository.Chapter   `json:"chapters"`
+	Spine      []*repository.SpineItem   `json:"spine"`
+	Chapters   []*repository.Chapter     `json:"chapters"`
+	Bookmarks  []*repository.Bookmark    `json:"bookmarks"`
+	Highlights []*repository.Highlight   `json:"highlights"`
+}
+
+type BookCitation struct {
+	ChapterID    string  `json:"chapter_id"`
+	ChapterIndex int     `json:"chapter_index"`
+	ChapterTitle *string `json:"chapter_title,omitempty"`
+	Summary      string  `json:"summary"`
+}
+
+type BookChatRequest struct {
+	Message string           `json:"message"`
+	Query   string           `json:"query,omitempty"`
+	History []ai.ChatMessage `json:"history,omitempty"`
+}
+
+type BookChatResponse struct {
+	Reply     string         `json:"reply"`
+	Citations []BookCitation `json:"citations"`
 }
 
 func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +210,8 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 	for _, c := range chapters {
 		c.ContentPlain = ""
 	}
+	bookmarks, _ := h.repo.ListBookmarksByBookID(r.Context(), book.ID)
+	highlights, _ := h.repo.ListHighlightsByBookID(r.Context(), book.ID)
 
 	writeJSON(w, http.StatusOK, BookDetailResponse{
 		BookListItem: BookListItem{
@@ -202,8 +229,10 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 			Genres:        genres,
 			Series:        seriesList,
 		},
-		Spine:    spine,
-		Chapters: chapters,
+		Spine:      spine,
+		Chapters:   chapters,
+		Bookmarks:  bookmarks,
+		Highlights: highlights,
 	})
 }
 
@@ -510,4 +539,351 @@ func (h *BookHandler) ReparseBook(w http.ResponseWriter, r *http.Request) {
 		"message": "Book chapters reparsed successfully",
 	})
 }
+
+func (h *BookHandler) ChatBook(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book: %v", err))
+		return
+	}
+
+	if h.aiClient == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "AI service is not configured")
+		return
+	}
+
+	var req BookChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request payload: %v", err))
+		return
+	}
+	message := strings.TrimSpace(req.Message)
+	if message == "" {
+		message = strings.TrimSpace(req.Query)
+	}
+	if message == "" {
+		writeJSONError(w, http.StatusBadRequest, "Message cannot be empty")
+		return
+	}
+
+	var citations []BookCitation
+	var contextBuilder strings.Builder
+
+	// RAG: 1. Generate query embedding and search chapters scoped to bookID
+	queryEmbedding, err := h.aiClient.GenerateEmbedding(r.Context(), message)
+	if err == nil && len(queryEmbedding) > 0 {
+		hits, err := h.repo.SearchVectorChapters(r.Context(), queryEmbedding, repository.SearchFilter{
+			BookID: &bookID,
+			Limit:  3,
+		})
+		if err == nil && len(hits) > 0 {
+			for _, hit := range hits {
+				chTitle := fmt.Sprintf("Chapter %d", hit.ChapterIndex)
+				if hit.ChapterTitle != nil && *hit.ChapterTitle != "" {
+					chTitle = fmt.Sprintf("Chapter %d: %s", hit.ChapterIndex, *hit.ChapterTitle)
+				}
+				contextBuilder.WriteString(fmt.Sprintf("[%s]\n%s\n\n", chTitle, hit.Summary))
+				citations = append(citations, BookCitation{
+					ChapterID:    hit.ChapterID,
+					ChapterIndex: hit.ChapterIndex,
+					ChapterTitle: hit.ChapterTitle,
+					Summary:      hit.Summary,
+				})
+			}
+		}
+	}
+
+	// Fallback if vector search yielded no chapters (e.g. still indexing)
+	if len(citations) == 0 {
+		chapters, _ := h.repo.GetChaptersByBookID(r.Context(), bookID)
+		for i, c := range chapters {
+			if i >= 3 {
+				break
+			}
+			if c.Summary != "" {
+				title := fmt.Sprintf("Chapter %d", c.ChapterIndex)
+				if c.Title != nil && *c.Title != "" {
+					title = fmt.Sprintf("Chapter %d: %s", c.ChapterIndex, *c.Title)
+				}
+				contextBuilder.WriteString(fmt.Sprintf("[%s]\n%s\n\n", title, c.Summary))
+				citations = append(citations, BookCitation{
+					ChapterID:    c.ID,
+					ChapterIndex: c.ChapterIndex,
+					ChapterTitle: c.Title,
+					Summary:      c.Summary,
+				})
+			}
+		}
+	}
+
+	systemPrompt := fmt.Sprintf(
+		"You are an insightful, knowledgeable literary companion assisting a reader with the book \"%s\". "+
+			"Answer the reader's question thoughtfully and accurately based on the book context below. "+
+			"Ground your answer in the provided chapter text and summaries, and mention relevant chapters where applicable.\n\n"+
+			"Retrieved Book Context:\n%s",
+		book.Title, contextBuilder.String(),
+	)
+
+	messages := []ai.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+	}
+
+	// Append recent conversation history (last 6 items)
+	if len(req.History) > 0 {
+		history := req.History
+		if len(history) > 6 {
+			history = history[len(history)-6:]
+		}
+		for _, m := range history {
+			if m.Role == "user" || m.Role == "assistant" {
+				messages = append(messages, m)
+			}
+		}
+	}
+	messages = append(messages, ai.ChatMessage{Role: "user", Content: message})
+
+	reply, err := h.aiClient.Chat(r.Context(), messages)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("AI chat failed: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, BookChatResponse{
+		Reply:     reply,
+		Citations: citations,
+	})
+}
+
+func (h *BookHandler) ListBookmarks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	bookmarks, err := h.repo.ListBookmarksByBookID(r.Context(), bookID)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to list bookmarks: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, bookmarks)
+}
+
+func (h *BookHandler) CreateBookmark(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	var bm repository.Bookmark
+	if err := json.NewDecoder(r.Body).Decode(&bm); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request payload: %v", err))
+		return
+	}
+
+	bm.BookID = bookID
+	if strings.TrimSpace(bm.Title) == "" {
+		bm.Title = "Bookmark"
+	}
+
+	if err := h.repo.CreateBookmark(r.Context(), &bm); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to create bookmark: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, bm)
+}
+
+func (h *BookHandler) DeleteBookmark(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookmarkID := r.PathValue("bookmarkId")
+	if bookmarkID == "" {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		bookmarkID = parts[len(parts)-1]
+	}
+
+	if err := h.repo.DeleteBookmark(r.Context(), bookmarkID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			writeJSONError(w, http.StatusNotFound, "Bookmark not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete bookmark: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (h *BookHandler) ListHighlights(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	highlights, err := h.repo.ListHighlightsByBookID(r.Context(), bookID)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to list highlights: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, highlights)
+}
+
+func (h *BookHandler) CreateHighlight(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	var hl repository.Highlight
+	if err := json.NewDecoder(r.Body).Decode(&hl); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request payload: %v", err))
+		return
+	}
+
+	hl.BookID = bookID
+	if strings.TrimSpace(hl.SelectedText) == "" {
+		writeJSONError(w, http.StatusBadRequest, "Selected text cannot be empty")
+		return
+	}
+
+	if err := h.repo.CreateHighlight(r.Context(), &hl); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to create highlight: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, hl)
+}
+
+func (h *BookHandler) DeleteHighlight(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	highlightID := r.PathValue("highlightId")
+	if highlightID == "" {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		highlightID = parts[len(parts)-1]
+	}
+
+	if err := h.repo.DeleteHighlight(r.Context(), highlightID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			writeJSONError(w, http.StatusNotFound, "Highlight not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete highlight: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (h *BookHandler) SearchLibrary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		writeJSON(w, http.StatusOK, []*repository.SearchHit{})
+		return
+	}
+
+	limit := 10
+	if rawLimit := r.URL.Query().Get("limit"); rawLimit != "" {
+		if val, err := strconv.Atoi(rawLimit); err == nil && val > 0 {
+			limit = val
+		}
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	if h.aiClient == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "AI service not configured for semantic search")
+		return
+	}
+
+	queryEmbedding, err := h.aiClient.GenerateEmbedding(r.Context(), query)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to generate embedding: %v", err))
+		return
+	}
+
+	filter := repository.SearchFilter{
+		Limit: limit,
+	}
+	hits, err := h.repo.SearchVectorChapters(r.Context(), queryEmbedding, filter)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Vector search failed: %v", err))
+		return
+	}
+
+	if hits == nil {
+		hits = []*repository.SearchHit{}
+	}
+
+	writeJSON(w, http.StatusOK, hits)
+}
+
 

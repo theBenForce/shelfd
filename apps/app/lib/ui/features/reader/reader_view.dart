@@ -164,7 +164,7 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
               if (context.canPop()) {
                 context.pop();
               } else {
-                context.go('/library');
+                context.go('/reader/${widget.bookId}');
               }
             },
           ),
@@ -176,6 +176,27 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
             ),
           ),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.bookmark_add_outlined),
+              tooltip: 'Bookmark Location',
+              onPressed: () {
+                final title = displayTitle;
+                final spineProgress = _spine.isNotEmpty && spineIdx >= 0
+                    ? (spineIdx + 1) / _spine.length
+                    : 0.0;
+                ref.read(bookDetailProvider(widget.bookId).notifier).addBookmark(
+                      title: title,
+                      progress: spineProgress,
+                      chapterId: _currentChapter?.id,
+                    );
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Bookmarked "$title"'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
             IconButton(
               icon: const Icon(Icons.text_fields_rounded),
               tooltip: 'Typography Settings',

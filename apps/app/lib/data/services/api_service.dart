@@ -2,9 +2,12 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/author.dart';
 import '../models/book.dart';
+import '../models/book_chat.dart';
+import '../models/bookmark.dart';
 import '../models/chapter.dart';
 import '../models/connect_info.dart';
 import '../models/genre.dart';
+import '../models/highlight.dart';
 import '../models/queue_status.dart';
 import '../models/search_result.dart';
 import '../models/series.dart';
@@ -236,5 +239,109 @@ class ApiService {
     }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return QueueStatus.fromJson(data);
+  }
+
+  Future<Bookmark> createBookmark(
+    String bookId, {
+    required String title,
+    double progress = 0.0,
+    String? chapterId,
+  }) async {
+    final response = await client.post(
+      _uri('/api/v1/books/$bookId/bookmarks'),
+      headers: _headers(),
+      body: jsonEncode({
+        'title': title,
+        'progress': progress,
+        if (chapterId != null && chapterId.isNotEmpty) 'chapter_id': chapterId,
+      }),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return Bookmark.fromJson(data);
+  }
+
+  Future<List<Bookmark>> getBookmarks(String bookId) async {
+    final response = await client.get(_uri('/api/v1/books/$bookId/bookmarks'), headers: _headers());
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as List<dynamic>? ?? [];
+    return data.whereType<Map<String, dynamic>>().map((b) => Bookmark.fromJson(b)).toList();
+  }
+
+  Future<void> deleteBookmark(String bookmarkId, {String? bookId}) async {
+    final path = (bookId != null && bookId.isNotEmpty)
+        ? '/api/v1/books/$bookId/bookmarks/$bookmarkId'
+        : '/api/v1/bookmarks/$bookmarkId';
+    final response = await client.delete(_uri(path), headers: _headers());
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+  }
+
+  Future<Highlight> createHighlight(
+    String bookId, {
+    required String selectedText,
+    String color = 'yellow',
+    String? note,
+    String? chapterId,
+  }) async {
+    final response = await client.post(
+      _uri('/api/v1/books/$bookId/highlights'),
+      headers: _headers(),
+      body: jsonEncode({
+        'selected_text': selectedText,
+        'color': color,
+        if (note != null && note.isNotEmpty) 'note': note,
+        if (chapterId != null && chapterId.isNotEmpty) 'chapter_id': chapterId,
+      }),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return Highlight.fromJson(data);
+  }
+
+  Future<List<Highlight>> getHighlights(String bookId) async {
+    final response = await client.get(_uri('/api/v1/books/$bookId/highlights'), headers: _headers());
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as List<dynamic>? ?? [];
+    return data.whereType<Map<String, dynamic>>().map((h) => Highlight.fromJson(h)).toList();
+  }
+
+  Future<void> deleteHighlight(String highlightId, {String? bookId}) async {
+    final path = (bookId != null && bookId.isNotEmpty)
+        ? '/api/v1/books/$bookId/highlights/$highlightId'
+        : '/api/v1/highlights/$highlightId';
+    final response = await client.delete(_uri(path), headers: _headers());
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+  }
+
+  Future<BookChatResponse> chatWithBook(
+    String bookId,
+    String message, {
+    List<Map<String, dynamic>>? history,
+  }) async {
+    final response = await client.post(
+      _uri('/api/v1/books/$bookId/chat'),
+      headers: _headers(),
+      body: jsonEncode({
+        'message': message,
+        if (history != null && history.isNotEmpty) 'history': history,
+      }),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return BookChatResponse.fromJson(data);
   }
 }

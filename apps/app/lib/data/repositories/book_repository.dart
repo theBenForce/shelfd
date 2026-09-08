@@ -1,6 +1,9 @@
 import '../models/author.dart';
 import '../models/book.dart';
+import '../models/book_chat.dart';
+import '../models/bookmark.dart';
 import '../models/genre.dart';
+import '../models/highlight.dart';
 import '../models/series.dart';
 import '../services/api_service.dart';
 import '../services/storage_service.dart';
@@ -47,4 +50,49 @@ class BookRepository {
   Future<List<Genre>> getGenres() => apiService.getGenres();
   Future<List<Series>> getSeries() => apiService.getSeries();
   Future<void> triggerScan() => apiService.triggerLibraryScan();
+
+  Future<Bookmark> createBookmark(
+    String bookId, {
+    required String title,
+    double progress = 0.0,
+    String? chapterId,
+  }) =>
+      apiService.createBookmark(
+        bookId,
+        title: title,
+        progress: progress,
+        chapterId: chapterId,
+      );
+
+  Future<List<Bookmark>> getBookmarks(String bookId) => apiService.getBookmarks(bookId);
+
+  Future<void> deleteBookmark(String bookmarkId, {String? bookId}) =>
+      apiService.deleteBookmark(bookmarkId, bookId: bookId);
+
+  Future<Highlight> createHighlight(
+    String bookId, {
+    required String selectedText,
+    String color = 'yellow',
+    String? note,
+    String? chapterId,
+  }) =>
+      apiService.createHighlight(
+        bookId,
+        selectedText: selectedText,
+        color: color,
+        note: note,
+        chapterId: chapterId,
+      );
+
+  Future<List<Highlight>> getHighlights(String bookId) => apiService.getHighlights(bookId);
+
+  Future<void> deleteHighlight(String highlightId, {String? bookId}) =>
+      apiService.deleteHighlight(highlightId, bookId: bookId);
+
+  Future<BookChatResponse> chatWithBook(
+    String bookId,
+    String message, {
+    List<Map<String, dynamic>>? history,
+  }) =>
+      apiService.chatWithBook(bookId, message, history: history);
 }

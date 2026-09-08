@@ -1,5 +1,7 @@
 import 'author.dart';
+import 'bookmark.dart';
 import 'genre.dart';
+import 'highlight.dart';
 import 'series.dart';
 
 class Book {
@@ -13,6 +15,12 @@ class Book {
   final double? seriesSequence;
   final double readingProgress;
   final List<SpineItem> spine;
+  final List<Bookmark> bookmarks;
+  final List<Highlight> highlights;
+  final String? publisher;
+  final String? publishedDate;
+  final String? language;
+  final int? fileSizeBytes;
 
   const Book({
     required this.id,
@@ -25,6 +33,12 @@ class Book {
     this.seriesSequence,
     this.readingProgress = 0.0,
     this.spine = const [],
+    this.bookmarks = const [],
+    this.highlights = const [],
+    this.publisher,
+    this.publishedDate,
+    this.language,
+    this.fileSizeBytes,
   });
 
   String get authorDisplay {
@@ -35,6 +49,8 @@ class Book {
   factory Book.fromJson(Map<String, dynamic> json, {String? baseUrl}) {
     final rawAuthors = json['authors'] as List<dynamic>? ?? [];
     final rawGenres = json['genres'] as List<dynamic>? ?? [];
+    final rawBookmarks = json['bookmarks'] as List<dynamic>? ?? [];
+    final rawHighlights = json['highlights'] as List<dynamic>? ?? [];
 
     Series? seriesObj;
     double? seqNum;
@@ -78,6 +94,18 @@ class Book {
           .whereType<Map<String, dynamic>>()
           .map((s) => SpineItem.fromJson(s))
           .toList(),
+      bookmarks: rawBookmarks
+          .whereType<Map<String, dynamic>>()
+          .map((b) => Bookmark.fromJson(b))
+          .toList(),
+      highlights: rawHighlights
+          .whereType<Map<String, dynamic>>()
+          .map((h) => Highlight.fromJson(h))
+          .toList(),
+      publisher: json['publisher'] as String?,
+      publishedDate: json['published_date'] as String?,
+      language: json['language'] as String?,
+      fileSizeBytes: (json['file_size_bytes'] as num?)?.toInt(),
     );
   }
 
@@ -93,6 +121,12 @@ class Book {
       if (seriesSequence != null) 'series_sequence': seriesSequence,
       'reading_progress': readingProgress,
       if (spine.isNotEmpty) 'spine': spine.map((s) => s.toJson()).toList(),
+      if (bookmarks.isNotEmpty) 'bookmarks': bookmarks.map((b) => b.toJson()).toList(),
+      if (highlights.isNotEmpty) 'highlights': highlights.map((h) => h.toJson()).toList(),
+      if (publisher != null) 'publisher': publisher,
+      if (publishedDate != null) 'published_date': publishedDate,
+      if (language != null) 'language': language,
+      if (fileSizeBytes != null) 'file_size_bytes': fileSizeBytes,
     };
   }
 
@@ -107,6 +141,12 @@ class Book {
     double? seriesSequence,
     double? readingProgress,
     List<SpineItem>? spine,
+    List<Bookmark>? bookmarks,
+    List<Highlight>? highlights,
+    String? publisher,
+    String? publishedDate,
+    String? language,
+    int? fileSizeBytes,
   }) {
     return Book(
       id: id ?? this.id,
@@ -119,6 +159,12 @@ class Book {
       seriesSequence: seriesSequence ?? this.seriesSequence,
       readingProgress: readingProgress ?? this.readingProgress,
       spine: spine ?? this.spine,
+      bookmarks: bookmarks ?? this.bookmarks,
+      highlights: highlights ?? this.highlights,
+      publisher: publisher ?? this.publisher,
+      publishedDate: publishedDate ?? this.publishedDate,
+      language: language ?? this.language,
+      fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
     );
   }
 }
@@ -128,12 +174,14 @@ class SpineItem {
   final String bookId;
   final int chapterIndex;
   final String title;
+  final String summary;
 
   const SpineItem({
     required this.id,
     required this.bookId,
     required this.chapterIndex,
     required this.title,
+    this.summary = '',
   });
 
   factory SpineItem.fromJson(Map<String, dynamic> json) {
@@ -142,6 +190,7 @@ class SpineItem {
       bookId: json['book_id'] as String? ?? '',
       chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
       title: json['title'] as String? ?? 'Chapter ${json['chapter_index'] ?? 0}',
+      summary: json['summary'] as String? ?? '',
     );
   }
 
@@ -151,6 +200,7 @@ class SpineItem {
       'book_id': bookId,
       'chapter_index': chapterIndex,
       'title': title,
+      if (summary.isNotEmpty) 'summary': summary,
     };
   }
 }

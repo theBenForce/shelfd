@@ -944,4 +944,136 @@ func TestUpdateChapterContent(t *testing.T) {
 	}
 }
 
+func TestBookmarksAndHighlights(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupTestDB(t)
+	defer repo.Close()
+
+	book := &repository.Book{ID: "book-1", Title: "Dune", FilePath: "dune.epub"}
+	if err := repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("create book: %v", err)
+	}
+
+	chapter := &repository.Chapter{
+		ID:           "ch-1",
+		BookID:       book.ID,
+		ChapterIndex: 1,
+		Title:        nil,
+		Summary:      "Chapter 1 summary",
+		ContentPlain: "Chapter 1 content",
+	}
+	if err := repo.CreateChapter(ctx, chapter); err != nil {
+		t.Fatalf("create chapter: %v", err)
+	}
+
+	// 1. Bookmarks CRUD
+	chID := chapter.ID
+	bm := &repository.Bookmark{
+		BookID:    book.ID,
+		ChapterID: &chID,
+		Title:     "Chapter 1 - The Gom Jabbar",
+		Progress:  0.25,
+	}
+	if err := repo.CreateBookmark(ctx, bm); err != nil {
+		t.Fatalf("create bookmark: %v", err)
+	}
+	if bm.ID == "" {
+		t.Fatalf("expected bookmark ID to be populated")
+	}
+
+	bms, err := repo.ListBookmarksByBookID(ctx, book.ID)
+	if err != nil {
+		t.Fatalf("list bookmarks: %v", err)
+	}
+	if len(bms) != 1 || bms[0].Title != bm.Title {
+		t.Fatalf("unexpected bookmarks: %+v", bms)
+	}
+
+	// Delete bookmark
+	if err := repo.DeleteBookmark(ctx, bm.ID); err != nil {
+		t.Fatalf("delete bookmark: %v", err)
+	}
+	bmsAfter, _ := repo.ListBookmarksByBookID(ctx, book.ID)
+	if len(bmsAfter) != 0 {
+		t.Fatalf("expected 0 bookmarks after deletion, got %d", len(bmsAfter))
+	}
+
+	// 2. Highlights CRUD
+	note := "A powerful philosophical insight."
+	hl := &repository.Highlight{
+		BookID:       book.ID,
+		ChapterID:    &chID,
+		SelectedText: "The mystery of life isn't a problem to solve, but a reality to experience.",
+		Note:         &note,
+		Color:        "amber",
+	}
+	if err := repo.CreateHighlight(ctx, hl); err != nil {
+		t.Fatalf("create highlight: %v", err)
+	}
+	if hl.ID == "" {
+		t.Fatalf("expected highlight ID to be populated")
+	}
+
+	hls, err := repo.ListHighlightsByBookID(ctx, book.ID)
+	if err != nil {
+		t.Fatalf("list highlights: %v", err)
+	}
+	if len(hls) != 1 || hls[0].SelectedText != hl.SelectedText || *hls[0].Note != note {
+		t.Fatalf("unexpected highlights: %+v", hls)
+	}
+
+	// Delete highlight
+	if err := repo.DeleteHighlight(ctx, hl.ID); err != nil {
+		t.Fatalf("delete highlight: %v", err)
+	}
+	hlsAfter, _ := repo.ListHighlightsByBookID(ctx, book.ID)
+	if len(hlsAfter) != 0 {
+		t.Fatalf("expected 0 highlights after deletion, got %d", len(hlsAfter))
+	}
+}
+
+func TestSearchVectorChaptersWithBookID(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupTestDB(t)
+	defer repo.Close()
+
+	b1 := &repository.Book{ID: "b-1", Title: "Book One", FilePath: "b1.epub"}
+	b2 := &repository.Book{ID: "b-2", Title: "Book Two", FilePath: "b2.epub"}
+	_ = repo.CreateBook(ctx, b1)
+	_ = repo.CreateBook(ctx, b2)
+
+	ch1 := &repository.Chapter{ID: "ch-b1", BookID: b1.ID, ChapterIndex: 1, Summary: "Sum 1", ContentPlain: "Text 1"}
+	ch2 := &repository.Chapter{ID: "ch-b2", BookID: b2.ID, ChapterIndex: 1, Summary: "Sum 2", ContentPlain: "Text 2"}
+	_ = repo.CreateChapter(ctx, ch1)
+	_ = repo.CreateChapter(ctx, ch2)
+
+	// Create dummy embeddings of 1536 dims
+	vec1 := make([]float32, 1536)
+	vec1[0] = 1.0
+	vec2 := make([]float32, 1536)
+	vec2[0] = 0.9
+
+	_ = repo.InsertChapterVector(ctx, ch1.ID, vec1)
+	_ = repo.InsertChapterVector(ctx, ch2.ID, vec2)
+
+	queryVec := make([]float32, 1536)
+	queryVec[0] = 1.0
+
+	// Filter with BookID = b1.ID
+	hits, err := repo.SearchVectorChapters(ctx, queryVec, repository.SearchFilter{
+		BookID: &b1.ID,
+		Limit:  10,
+	})
+	if err != nil {
+		t.Fatalf("search vector chapters: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("expected 1 hit for book 1, got %d", len(hits))
+	}
+	if hits[0].BookID != b1.ID {
+		t.Errorf("expected book_id %s, got %s", b1.ID, hits[0].BookID)
+	}
+}
+
+
 

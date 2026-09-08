@@ -559,9 +559,9 @@ class _QueueStatusCard extends ConsumerWidget {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: AppTokens.boneContainer.withOpacity(0.5),
+            color: AppTokens.boneContainer.withValues(alpha: 0.5),
             borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-            border: Border.all(color: AppTokens.crispBorder.withOpacity(0.6)),
+            border: Border.all(color: AppTokens.crispBorder.withValues(alpha: 0.6)),
           ),
           child: Row(
             children: [
@@ -594,9 +594,9 @@ class _QueueStatusCard extends ConsumerWidget {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: AppTokens.boneContainer.withOpacity(0.5),
+          color: AppTokens.boneContainer.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-          border: Border.all(color: AppTokens.crispBorder.withOpacity(0.6)),
+          border: Border.all(color: AppTokens.crispBorder.withValues(alpha: 0.6)),
         ),
         child: Row(
           children: [
