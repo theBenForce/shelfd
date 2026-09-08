@@ -344,21 +344,56 @@ func TestAPI_Books_CRUDAndBrowsing(t *testing.T) {
 	if len(detailResp.Chapters) != 1 || detailResp.Chapters[0].Summary == "" {
 		t.Errorf("expected 1 chapter with summary, got %v", detailResp.Chapters)
 	}
+	if len(detailResp.Spine) != 1 || detailResp.Spine[0].ID == "" {
+		t.Errorf("expected 1 spine item with valid ID, got %v", detailResp.Spine)
+	}
 
-	// 5. Get chapter reading content
+	chapterID := detailResp.Spine[0].ID
+
+	// 5. Get chapter reading content by index (1)
 	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/books/%s/chapters/1", book.ID), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec = httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 on get chapter, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 200 on get chapter by index, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	var chResp repository.Chapter
 	json.Unmarshal(rec.Body.Bytes(), &chResp)
 	if !strings.Contains(chResp.ContentPlain, "A drought of ten million years") {
 		t.Errorf("unexpected chapter content: %s", chResp.ContentPlain)
+	}
+
+	// 5a. Get chapter reading content by chapter ID (ULID/UUID)
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/books/%s/chapters/%s", book.ID, chapterID), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on get chapter by ID, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 5b. Get chapter reading content by index 0 (legacy fallback to first spine item)
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/books/%s/chapters/0", book.ID), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on get chapter index 0 fallback, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 5c. Direct chapter endpoint GET /api/v1/chapters/{id}
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/chapters/%s", chapterID), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on direct get chapter, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	// 6. Get non-existent chapter

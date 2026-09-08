@@ -244,7 +244,7 @@ func (te *ToolExecutor) getBookMetadata(ctx context.Context, args map[string]any
 			if ch.Title != nil && *ch.Title != "" {
 				title = fmt.Sprintf("Chapter %d: %s", ch.ChapterIndex, *ch.Title)
 			}
-			sb.WriteString(fmt.Sprintf("\n- **%s**\n", title))
+			sb.WriteString(fmt.Sprintf("\n- **%s** (ID: `%s`)\n", title, ch.ID))
 			if ch.Summary != "" {
 				sb.WriteString(fmt.Sprintf("  Summary: %s\n", ch.Summary))
 			}
@@ -267,15 +267,23 @@ func (te *ToolExecutor) readChapterContent(ctx context.Context, args map[string]
 		}, nil
 	}
 
+	chapterID, _ := args["chapter_id"].(string)
+	chapterID = strings.TrimSpace(chapterID)
+
 	var chapterIndex int
+	hasIndex := false
 	if rawIdx, ok := args["chapter_index"].(float64); ok {
 		chapterIndex = int(rawIdx)
+		hasIndex = true
 	} else if rawIdxInt, ok := args["chapter_index"].(int); ok {
 		chapterIndex = rawIdxInt
-	} else {
+		hasIndex = true
+	}
+
+	if chapterID == "" && !hasIndex {
 		return &CallToolResult{
 			IsError: true,
-			Content: []ContentItem{{Type: "text", Text: "argument 'chapter_index' is required as an integer"}},
+			Content: []ContentItem{{Type: "text", Text: "either 'chapter_id' or 'chapter_index' is required"}},
 		}, nil
 	}
 
@@ -287,12 +295,23 @@ func (te *ToolExecutor) readChapterContent(ctx context.Context, args map[string]
 		}, nil
 	}
 
-	chapter, err := te.repo.GetChapterByBookAndIndex(ctx, bookID, chapterIndex)
-	if err != nil {
-		return &CallToolResult{
-			IsError: true,
-			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("chapter %d not found in book '%s'", chapterIndex, book.Title)}},
-		}, nil
+	var chapter *repository.Chapter
+	if chapterID != "" {
+		chapter, err = te.repo.GetChapterByID(ctx, chapterID)
+		if err != nil || (chapter != nil && chapter.BookID != bookID) {
+			return &CallToolResult{
+				IsError: true,
+				Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("chapter '%s' not found in book '%s'", chapterID, book.Title)}},
+			}, nil
+		}
+	} else {
+		chapter, err = te.repo.GetChapterByBookAndIndex(ctx, bookID, chapterIndex)
+		if err != nil {
+			return &CallToolResult{
+				IsError: true,
+				Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("chapter %d not found in book '%s'", chapterIndex, book.Title)}},
+			}, nil
+		}
 	}
 
 	// Split into paragraphs

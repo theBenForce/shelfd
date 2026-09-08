@@ -142,6 +142,10 @@ func AvailableTools() []Tool {
 						"type":        "string",
 						"description": "The unique UUID of the book",
 					},
+					"chapter_id": map[string]any{
+						"type":        "string",
+						"description": "Optional unique chapter ID (ULID or UUID)",
+					},
 					"chapter_index": map[string]any{
 						"type":        "integer",
 						"description": "The chapter sequence index (e.g. 1 for Chapter 1)",
@@ -155,7 +159,7 @@ func AvailableTools() []Tool {
 						"description": "Optional 1-based end paragraph number (inclusive, maximum 50 paragraphs per call)",
 					},
 				},
-				"required": []string{"book_id", "chapter_index"},
+				"required": []string{"book_id"},
 			},
 		},
 	}

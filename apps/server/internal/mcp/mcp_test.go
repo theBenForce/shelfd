@@ -471,6 +471,24 @@ func TestMCPServer_ToolCall_ReadChapterContent(t *testing.T) {
 	if !resp.Result.IsError {
 		t.Errorf("expected isError: true when start paragraph exceeds bounds")
 	}
+
+	// 5. Read chapter using chapter_id
+	body = fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read_chapter_content","arguments":{"book_id":"%s","chapter_id":"%s"}}}`, book.ID, ch.ID)
+	req = httptest.NewRequest(http.MethodPost, "/mcp/messages", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	var resp5 struct {
+		Result mcp.CallToolResult `json:"result"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &resp5)
+	if resp5.Result.IsError {
+		t.Fatalf("unexpected error reading by chapter_id: %v", resp5.Result.Content)
+	}
+	if !strings.Contains(resp5.Result.Content[0].Text, "Showing paragraphs 1 through 4 of 4 total") {
+		t.Errorf("unexpected content response for chapter_id: %s", resp5.Result.Content[0].Text)
+	}
 }
 
 func TestMCPServer_SSEFlow(t *testing.T) {

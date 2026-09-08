@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
+	"github.com/shelfd/shelfd/internal/ulid"
 	"github.com/shelfd/shelfd/internal/worker"
 )
 
@@ -62,7 +63,8 @@ type BookListItem struct {
 
 type BookDetailResponse struct {
 	BookListItem
-	Chapters []*repository.Chapter `json:"chapters"`
+	Spine    []*repository.SpineItem `json:"spine"`
+	Chapters []*repository.Chapter   `json:"chapters"`
 }
 
 func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +179,12 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 	authors, _ := h.repo.GetBookAuthors(r.Context(), book.ID)
 	genres, _ := h.repo.GetBookGenres(r.Context(), book.ID)
 	seriesList, _ := h.repo.GetBookSeries(r.Context(), book.ID)
+	spine, _ := h.repo.GetBookSpine(r.Context(), book.ID)
 	chapters, _ := h.repo.GetChaptersByBookID(r.Context(), book.ID)
+	// Clear ContentPlain on chapters in BookDetailResponse to keep payload lightweight
+	for _, c := range chapters {
+		c.ContentPlain = ""
+	}
 
 	writeJSON(w, http.StatusOK, BookDetailResponse{
 		BookListItem: BookListItem{
@@ -195,6 +202,7 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 			Genres:        genres,
 			Series:        seriesList,
 		},
+		Spine:    spine,
 		Chapters: chapters,
 	})
 }
@@ -244,20 +252,65 @@ func (h *BookHandler) GetChapter(w http.ResponseWriter, r *http.Request) {
 	if bookID == "" {
 		bookID = extractIDFromPath(r.URL.Path, "books")
 	}
-	indexStr := r.PathValue("index")
-	if indexStr == "" {
+	identifier := r.PathValue("index")
+	if identifier == "" {
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-		indexStr = parts[len(parts)-1]
+		identifier = parts[len(parts)-1]
 	}
 
-	index, err := strconv.Atoi(indexStr)
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "Invalid chapter index")
+	var chapter *repository.Chapter
+	var err error
+
+	if index, parseErr := strconv.Atoi(identifier); parseErr == nil {
+		if index == 0 {
+			// Fallback: Resolve legacy index 0 gracefully to the first chapter in the book's spine
+			spine, spineErr := h.repo.GetBookSpine(r.Context(), bookID)
+			if spineErr == nil && len(spine) > 0 {
+				chapter, err = h.repo.GetChapterByID(r.Context(), spine[0].ID)
+			} else {
+				err = repository.ErrNotFound
+			}
+		} else {
+			chapter, err = h.repo.GetChapterByBookAndIndex(r.Context(), bookID, index)
+		}
+	} else if ulid.IsValid(identifier) || isUUID(identifier) {
+		// Lookup by chapter ID (ULID or UUID)
+		chapter, err = h.repo.GetChapterByID(r.Context(), identifier)
+		if err == nil && chapter != nil && chapter.BookID != bookID {
+			writeJSONError(w, http.StatusNotFound, "Chapter not found")
+			return
+		}
+	} else {
+		writeJSONError(w, http.StatusBadRequest, "Invalid chapter identifier")
 		return
 	}
 
-	chapter, err := h.repo.GetChapterByBookAndIndex(r.Context(), bookID, index)
-	if errors.Is(err, repository.ErrNotFound) {
+	if errors.Is(err, repository.ErrNotFound) || chapter == nil {
+		writeJSONError(w, http.StatusNotFound, "Chapter not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get chapter: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, chapter)
+}
+
+func (h *BookHandler) GetChapterDirect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	chapterID := r.PathValue("id")
+	if chapterID == "" {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		chapterID = parts[len(parts)-1]
+	}
+
+	chapter, err := h.repo.GetChapterByID(r.Context(), chapterID)
+	if errors.Is(err, repository.ErrNotFound) || chapter == nil {
 		writeJSONError(w, http.StatusNotFound, "Chapter not found")
 		return
 	}
@@ -422,3 +475,9 @@ func extractIDFromPath(path, segment string) string {
 	}
 	return ""
 }
+
+func isUUID(s string) bool {
+	_, err := uuid.Parse(s)
+	return err == nil
+}
+
