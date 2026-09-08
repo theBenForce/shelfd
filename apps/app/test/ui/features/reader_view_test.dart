@@ -63,4 +63,48 @@ void main() {
     expect(find.text('Sans'), findsOneWidget);
     expect(find.byType(Slider), findsOneWidget);
   });
+
+  testWidgets('ReaderView renders rich markdown headings, blockquotes, and inline footnotes',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final formattedChapter = const Chapter(
+      id: 'chap-6',
+      bookId: 'book-42',
+      chapterIndex: 6,
+      title: 'Chapter 1: The Realignment',
+      summary: 'History of the Dixiecrats.',
+      content:
+          '> Authoritarian enclaves were founded in the South.[3]\n\n## The reign of the Dixiecrats\n\nRed-blooded men know what I mean.”[5] He won the race.',
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: ReaderView(
+            bookId: 'book-42',
+            chapterIndex: 6,
+            initialChapter: formattedChapter,
+          ),
+        ),
+      ),
+    );
+
+    // Verify heading renders
+    expect(find.text('The reign of the Dixiecrats'), findsOneWidget);
+
+    // Verify blockquote text renders
+    expect(find.textContaining('Authoritarian enclaves were founded'), findsOneWidget);
+
+    // Verify footnote superscripts render inline
+    expect(find.text('3'), findsOneWidget);
+    expect(find.text('5'), findsOneWidget);
+    expect(find.textContaining('Red-blooded men know what I mean.”'), findsOneWidget);
+    expect(find.textContaining('He won the race.'), findsOneWidget);
+  });
 }
