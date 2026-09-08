@@ -9,6 +9,7 @@ type StorageEngine interface {
 	// Books
 	CreateBook(ctx context.Context, book *Book) error
 	GetBookByID(ctx context.Context, id string) (*Book, error)
+	GetBookByFilePath(ctx context.Context, filePath string) (*Book, error)
 	UpdateBook(ctx context.Context, book *Book) error
 	DeleteBook(ctx context.Context, id string) error
 	ListBooks(ctx context.Context, filter BookFilter) ([]*Book, error)
@@ -47,6 +48,7 @@ type StorageEngine interface {
 	GetChapterByID(ctx context.Context, id string) (*Chapter, error)
 	GetChapterByBookAndIndex(ctx context.Context, bookID string, chapterIndex int) (*Chapter, error)
 	UpdateChapterSummary(ctx context.Context, chapterID string, summary string) error
+	UpdateChapterContent(ctx context.Context, chapterID string, contentPlain string) error
 	GetUnindexedChapters(ctx context.Context, limit int) ([]*Chapter, error)
 
 	// Vectors

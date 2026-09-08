@@ -3,6 +3,7 @@ package repository_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 
@@ -868,6 +869,78 @@ func TestCreateChapter_ULIDAndSpine(t *testing.T) {
 	}
 	if spine[1].ID != ch2.ID || spine[1].ChapterIndex != 2 || *spine[1].Title != title2 {
 		t.Errorf("unexpected spine item 1: %+v", spine[1])
+	}
+}
+
+func TestGetBookByFilePath(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if err := database.RunMigrations(ctx, db); err != nil {
+		t.Fatalf("migrations: %v", err)
+	}
+	repo := repository.NewSQLiteStorageEngine(db)
+
+	book := &repository.Book{
+		ID:       "book-path-test",
+		Title:    "Test Path Book",
+		FilePath: "Author/Title/Book.epub",
+	}
+	if err := repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("create book: %v", err)
+	}
+
+	found, err := repo.GetBookByFilePath(ctx, "Author/Title/Book.epub")
+	if err != nil {
+		t.Fatalf("get by path: %v", err)
+	}
+	if found.ID != book.ID || found.Title != book.Title {
+		t.Errorf("unexpected found book: %+v", found)
+	}
+
+	_, err = repo.GetBookByFilePath(ctx, "nonexistent.epub")
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Errorf("expected ErrNotFound for nonexistent file path, got %v", err)
+	}
+}
+
+func TestUpdateChapterContent(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if err := database.RunMigrations(ctx, db); err != nil {
+		t.Fatalf("migrations: %v", err)
+	}
+	repo := repository.NewSQLiteStorageEngine(db)
+
+	book := &repository.Book{ID: "b-1", Title: "B1", FilePath: "p1"}
+	_ = repo.CreateBook(ctx, book)
+
+	ch := &repository.Chapter{
+		ID:           "ch-1",
+		BookID:       book.ID,
+		ChapterIndex: 1,
+		ContentPlain: "Old raw content",
+	}
+	_ = repo.CreateChapter(ctx, ch)
+
+	newContent := "## Markdown Heading\n\nNew formatted content"
+	if err := repo.UpdateChapterContent(ctx, ch.ID, newContent); err != nil {
+		t.Fatalf("update content: %v", err)
+	}
+
+	updated, err := repo.GetChapterByID(ctx, ch.ID)
+	if err != nil {
+		t.Fatalf("get chapter: %v", err)
+	}
+	if updated.ContentPlain != newContent {
+		t.Errorf("expected %s, got %s", newContent, updated.ContentPlain)
 	}
 }
 

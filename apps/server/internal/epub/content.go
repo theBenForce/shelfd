@@ -1,24 +1,23 @@
 package epub
 
 import (
+	"bytes"
 	"fmt"
 	"html"
 	"path"
 	"regexp"
 	"strings"
+
+	nethtml "golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 var (
-	scriptStyleRegex = regexp.MustCompile(`(?is)<(script|style)[^>]*>.*?</(script|style)>`)
-	titleTagRegex    = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
-	headerTagRegex   = regexp.MustCompile(`(?is)<h[1-3][^>]*>(.*?)</h[1-3]>`)
-	blockTagsRegex   = regexp.MustCompile(`(?i)<(?:p|div|h[1-6]|li|tr|br|blockquote)[^>]*>`)
-	allTagsRegex     = regexp.MustCompile(`(?s)<[^>]+>`)
-	multiSpaceRegex  = regexp.MustCompile(`[ \t\r]+`)
-	multiNLRegex     = regexp.MustCompile(`\n{3,}`)
+	whitespaceRegex = regexp.MustCompile(`[ \t\r\n]+`)
+	multiNLRegex    = regexp.MustCompile(`\n{3,}`)
 )
 
-// ExtractChapters walks spine itemrefs in order and converts XHTML content into clean plaintext.
+// ExtractChapters walks spine itemrefs in order and converts XHTML content into clean plaintext/markdown.
 func (r *Reader) ExtractChapters() ([]*ParsedChapter, error) {
 	if r.opf == nil {
 		return nil, fmt.Errorf("no opf package loaded")
@@ -76,56 +75,338 @@ func (r *Reader) ExtractChapters() ([]*ParsedChapter, error) {
 }
 
 func extractTextFromHTML(raw string) (*string, string) {
-	// Try extracting title from <title> or <h1>-<h3>
-	var title *string
-	if m := titleTagRegex.FindStringSubmatch(raw); len(m) > 1 {
-		clean := cleanSnippet(m[1])
-		if clean != "" {
-			title = &clean
-		}
-	}
-	if title == nil {
-		if m := headerTagRegex.FindStringSubmatch(raw); len(m) > 1 {
-			clean := cleanSnippet(m[1])
-			if clean != "" {
-				title = &clean
-			}
-		}
+	doc, err := nethtml.Parse(strings.NewReader(raw))
+	if err != nil {
+		// Fallback to basic string extraction on malformed HTML
+		return nil, strings.TrimSpace(raw)
 	}
 
-	// 1. Remove <script> and <style>
-	s := scriptStyleRegex.ReplaceAllString(raw, "")
+	title := extractChapterTitle(doc)
+	var blocks []string
+	collectBlocks(doc, &blocks, false)
 
-	// 2. Insert paragraph/block newlines
-	s = blockTagsRegex.ReplaceAllString(s, "\n\n")
-
-	// 3. Strip all remaining HTML tags
-	s = allTagsRegex.ReplaceAllString(s, "")
-
-	// 4. Decode HTML entities
-	s = html.UnescapeString(s)
-
-	// 5. Clean whitespace and linebreaks
-	lines := strings.Split(s, "\n")
-	var cleanedLines []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(multiSpaceRegex.ReplaceAllString(line, " "))
-		if trimmed != "" {
-			cleanedLines = append(cleanedLines, trimmed)
-		} else if len(cleanedLines) > 0 && cleanedLines[len(cleanedLines)-1] != "" {
-			cleanedLines = append(cleanedLines, "")
-		}
-	}
-
-	result := strings.Join(cleanedLines, "\n\n")
+	result := strings.Join(blocks, "\n\n")
 	result = multiNLRegex.ReplaceAllString(result, "\n\n")
 	result = strings.TrimSpace(result)
 
 	return title, result
 }
 
-func cleanSnippet(raw string) string {
-	s := allTagsRegex.ReplaceAllString(raw, "")
-	s = html.UnescapeString(s)
-	return strings.TrimSpace(multiSpaceRegex.ReplaceAllString(s, " "))
+func extractChapterTitle(doc *nethtml.Node) *string {
+	var h1Title, h2Title, h3Title, docTitle string
+
+	var walk func(*nethtml.Node)
+	walk = func(n *nethtml.Node) {
+		if n.Type == nethtml.ElementNode {
+			switch n.DataAtom {
+			case atom.Title:
+				if docTitle == "" {
+					docTitle = cleanInlineText(collectNodeText(n))
+				}
+			case atom.H1:
+				if h1Title == "" {
+					h1Title = cleanInlineText(collectNodeText(n))
+				}
+			case atom.H2:
+				if h2Title == "" {
+					h2Title = cleanInlineText(collectNodeText(n))
+				}
+			case atom.H3:
+				if h3Title == "" {
+					h3Title = cleanInlineText(collectNodeText(n))
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+
+	if h1Title != "" {
+		return &h1Title
+	}
+	if h2Title != "" {
+		return &h2Title
+	}
+	if h3Title != "" {
+		return &h3Title
+	}
+	if docTitle != "" {
+		return &docTitle
+	}
+	return nil
+}
+
+func collectBlocks(n *nethtml.Node, blocks *[]string, inBlockquote bool) {
+	if n == nil {
+		return
+	}
+
+	if n.Type == nethtml.ElementNode {
+		switch n.DataAtom {
+		case atom.Head, atom.Script, atom.Style, atom.Svg, atom.Img:
+			return
+		case atom.Hr:
+			*blocks = append(*blocks, "---")
+			return
+		case atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6:
+			prefix := "# "
+			switch n.DataAtom {
+			case atom.H2:
+				prefix = "## "
+			case atom.H3:
+				prefix = "### "
+			case atom.H4, atom.H5, atom.H6:
+				prefix = "#### "
+			}
+			inline := extractInlineMarkdown(n)
+			cleaned := cleanInlineText(inline)
+			if cleaned != "" {
+				*blocks = append(*blocks, prefix+cleaned)
+			}
+			return
+		case atom.Blockquote:
+			var quoteBlocks []string
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				collectBlocks(c, &quoteBlocks, true)
+			}
+			if len(quoteBlocks) == 0 {
+				inline := extractInlineMarkdown(n)
+				cleaned := cleanInlineText(inline)
+				if cleaned != "" {
+					quoteBlocks = append(quoteBlocks, cleaned)
+				}
+			}
+			for _, qb := range quoteBlocks {
+				lines := strings.Split(qb, "\n")
+				for i, l := range lines {
+					lines[i] = "> " + l
+				}
+				*blocks = append(*blocks, strings.Join(lines, "\n"))
+			}
+			return
+		case atom.P, atom.Li:
+			inline := extractInlineMarkdown(n)
+			cleaned := cleanInlineText(inline)
+			if cleaned != "" {
+				if n.DataAtom == atom.Li {
+					cleaned = "- " + cleaned
+				}
+				*blocks = append(*blocks, cleaned)
+			}
+			return
+		}
+
+		// Container elements: div, section, article, etc.
+		if isContainerTag(n.DataAtom) {
+			if hasBlockDescendant(n) {
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					collectBlocks(c, blocks, inBlockquote)
+				}
+				return
+			}
+			// Leaf container with no block children: treat as paragraph
+			inline := extractInlineMarkdown(n)
+			cleaned := cleanInlineText(inline)
+			if cleaned != "" {
+				*blocks = append(*blocks, cleaned)
+			}
+			return
+		}
+	}
+
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		collectBlocks(c, blocks, inBlockquote)
+	}
+}
+
+func hasBlockDescendant(n *nethtml.Node) bool {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == nethtml.ElementNode {
+			if isBlockTag(c.DataAtom) || hasBlockDescendant(c) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isBlockTag(a atom.Atom) bool {
+	switch a {
+	case atom.P, atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6,
+		atom.Blockquote, atom.Hr, atom.Ul, atom.Ol, atom.Li, atom.Pre:
+		return true
+	}
+	return false
+}
+
+func isContainerTag(a atom.Atom) bool {
+	switch a {
+	case atom.Div, atom.Section, atom.Article, atom.Main, atom.Header, atom.Footer, atom.Body:
+		return true
+	}
+	return false
+}
+
+func extractInlineMarkdown(n *nethtml.Node) string {
+	var buf bytes.Buffer
+
+	var walk func(*nethtml.Node)
+	walk = func(node *nethtml.Node) {
+		if node == nil {
+			return
+		}
+
+		switch node.Type {
+		case nethtml.TextNode:
+			text := html.UnescapeString(node.Data)
+			// Collapse internal whitespace (including newlines) to single space
+			collapsed := whitespaceRegex.ReplaceAllString(text, " ")
+			buf.WriteString(collapsed)
+		case nethtml.ElementNode:
+			switch node.DataAtom {
+			case atom.Head, atom.Script, atom.Style, atom.Svg:
+				return
+			case atom.Br:
+				buf.WriteString("\n")
+				return
+			case atom.Em, atom.I:
+				inner := collectInlineChildren(node)
+				trimmed := strings.TrimSpace(inner)
+				if trimmed != "" {
+					if strings.HasPrefix(inner, " ") {
+						buf.WriteString(" ")
+					}
+					buf.WriteString("*" + trimmed + "*")
+					if strings.HasSuffix(inner, " ") {
+						buf.WriteString(" ")
+					}
+				}
+				return
+			case atom.Strong, atom.B:
+				inner := collectInlineChildren(node)
+				trimmed := strings.TrimSpace(inner)
+				if trimmed != "" {
+					if strings.HasPrefix(inner, " ") {
+						buf.WriteString(" ")
+					}
+					buf.WriteString("**" + trimmed + "**")
+					if strings.HasSuffix(inner, " ") {
+						buf.WriteString(" ")
+					}
+				}
+				return
+			case atom.Sup:
+				inner := strings.TrimSpace(collectInlineChildren(node))
+				if inner != "" {
+					if !strings.HasPrefix(inner, "[") {
+						buf.WriteString("[" + inner + "]")
+					} else {
+						buf.WriteString(inner)
+					}
+				}
+				return
+			}
+		}
+
+		for c := node.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		walk(c)
+	}
+
+	return buf.String()
+}
+
+func collectInlineChildren(n *nethtml.Node) string {
+	var buf bytes.Buffer
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		buf.WriteString(extractInlineMarkdownNode(c))
+	}
+	return buf.String()
+}
+
+func extractInlineMarkdownNode(node *nethtml.Node) string {
+	if node == nil {
+		return ""
+	}
+	if node.Type == nethtml.TextNode {
+		text := html.UnescapeString(node.Data)
+		return whitespaceRegex.ReplaceAllString(text, " ")
+	}
+	if node.Type == nethtml.ElementNode {
+		switch node.DataAtom {
+		case atom.Head, atom.Script, atom.Style, atom.Svg:
+			return ""
+		case atom.Br:
+			return "\n"
+		case atom.Em, atom.I:
+			inner := collectInlineChildren(node)
+			trimmed := strings.TrimSpace(inner)
+			if trimmed == "" {
+				return ""
+			}
+			res := "*" + trimmed + "*"
+			if strings.HasPrefix(inner, " ") {
+				res = " " + res
+			}
+			if strings.HasSuffix(inner, " ") {
+				res = res + " "
+			}
+			return res
+		case atom.Strong, atom.B:
+			inner := collectInlineChildren(node)
+			trimmed := strings.TrimSpace(inner)
+			if trimmed == "" {
+				return ""
+			}
+			res := "**" + trimmed + "**"
+			if strings.HasPrefix(inner, " ") {
+				res = " " + res
+			}
+			if strings.HasSuffix(inner, " ") {
+				res = res + " "
+			}
+			return res
+		case atom.Sup:
+			inner := strings.TrimSpace(collectInlineChildren(node))
+			if inner == "" {
+				return ""
+			}
+			if !strings.HasPrefix(inner, "[") {
+				return "[" + inner + "]"
+			}
+			return inner
+		}
+	}
+
+	var buf bytes.Buffer
+	for c := node.FirstChild; c != nil; c = c.NextSibling {
+		buf.WriteString(extractInlineMarkdownNode(c))
+	}
+	return buf.String()
+}
+
+func collectNodeText(n *nethtml.Node) string {
+	var buf bytes.Buffer
+	var walk func(*nethtml.Node)
+	walk = func(node *nethtml.Node) {
+		if node.Type == nethtml.TextNode {
+			buf.WriteString(html.UnescapeString(node.Data))
+		}
+		for c := node.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(n)
+	return buf.String()
+}
+
+func cleanInlineText(raw string) string {
+	trimmed := strings.TrimSpace(whitespaceRegex.ReplaceAllString(raw, " "))
+	return trimmed
 }

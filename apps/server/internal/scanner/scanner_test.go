@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shelfd/shelfd/internal/database"
@@ -202,5 +203,53 @@ func TestIngesterAndUpload(t *testing.T) {
 	expectedUploadDiskPath := filepath.Join(tempLib, expectedUploadedRel)
 	if _, err := os.Stat(expectedUploadDiskPath); err != nil {
 		t.Errorf("uploaded file missing on disk: %v", err)
+	}
+
+	// 3. Test ReparseBookChapters
+	// Modify EPUB content on disk
+	updatedEPUBBytes := createSampleEPUB("Dune", "Frank Herbert", "Science Fiction", "Dune Chronicles", 1.0)
+	// Replace ch1.xhtml inside updatedEPUB with formatted markdown content
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	zr, err := zip.NewReader(bytes.NewReader(updatedEPUBBytes), int64(len(updatedEPUBBytes)))
+	if err != nil {
+		t.Fatalf("reading epub zip: %v", err)
+	}
+	for _, f := range zr.File {
+		w, _ := zw.Create(f.Name)
+		if f.Name == "ch1.xhtml" {
+			w.Write([]byte(`<html><body><h2>Updated Heading</h2><p>Updated *italic* text.</p></body></html>`))
+		} else {
+			rc, _ := f.Open()
+			bufCopy := new(bytes.Buffer)
+			bufCopy.ReadFrom(rc)
+			rc.Close()
+			w.Write(bufCopy.Bytes())
+		}
+	}
+	zw.Close()
+	os.WriteFile(epubPath, buf.Bytes(), 0644)
+
+	// Call ReparseBookChapters
+	if err := ingester.ReparseBookChapters(ctx, book.ID); err != nil {
+		t.Fatalf("ReparseBookChapters failed: %v", err)
+	}
+
+	// Verify chapter content was updated in repo
+	updatedChapters, err := repo.GetChaptersByBookID(ctx, book.ID)
+	if err != nil || len(updatedChapters) == 0 {
+		t.Fatalf("GetChaptersByBookID failed: %v", err)
+	}
+	if !strings.Contains(updatedChapters[0].ContentPlain, "## Updated Heading") {
+		t.Errorf("expected content to contain ## Updated Heading, got %s", updatedChapters[0].ContentPlain)
+	}
+
+	// Also verify IngestFile on existing file reparses without error
+	reingested, err := ingester.IngestFile(ctx, epubPath, relPath)
+	if err != nil {
+		t.Fatalf("IngestFile on existing book failed: %v", err)
+	}
+	if reingested.ID != book.ID {
+		t.Errorf("expected same book ID %s, got %s", book.ID, reingested.ID)
 	}
 }

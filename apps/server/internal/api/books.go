@@ -481,3 +481,33 @@ func isUUID(s string) bool {
 	return err == nil
 }
 
+func (h *BookHandler) ReparseBook(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	if err := h.ingester.ReparseBookChapters(r.Context(), bookID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			writeJSONError(w, http.StatusNotFound, "Book not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to reparse book chapters: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": "Book chapters reparsed successfully",
+	})
+}
+

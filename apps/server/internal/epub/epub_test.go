@@ -301,3 +301,110 @@ func TestZipSlipRejection(t *testing.T) {
 		t.Errorf("expected illegal path traversal error, got: %v", err)
 	}
 }
+
+func TestExtractChapters_PreservesMarkdownFormatting(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfXML := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Formatting Test</dc:title>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch01.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>`
+
+	ch1HTML := `<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Chapter 2: The Dixiecrat Dilemma</title></head>
+  <body>
+    <h1>Chapter 2: The Dixiecrat Dilemma</h1>
+    <p>Demythologizing our past is necessary if we are to understand our present.</p>
+    <h2 class="h2">
+      <span class="line">The reign of the Dixiecrats</span>
+    </h2>
+    <p class="noindent">
+      During much of the twentieth century, the Democratic Party’s rule was hegemonic.
+      Democratic senator Theodore Bilbo was <em>chillingly</em> blunt: <strong>Red-blooded men know what I mean.</strong>
+      <a id="ch02endnote_5" href="endnotes.xhtml#ch02endnote-5">
+        <sup class="sup">5</sup>
+      </a>
+    </p>
+    <blockquote>
+      <p>A house divided against itself cannot stand.</p>
+    </blockquote>
+    <hr/>
+    <p>The post-war era transformed politics.</p>
+  </body>
+</html>`
+
+	files := map[string][]byte{
+		"META-INF/container.xml": []byte(containerXML),
+		"content.opf":            []byte(opfXML),
+		"ch01.xhtml":             []byte(ch1HTML),
+	}
+
+	epubBytes := createTestEPUB(files)
+	tempDir := t.TempDir()
+	epubPath := filepath.Join(tempDir, "formatting_test.epub")
+	if err := os.WriteFile(epubPath, epubBytes, 0644); err != nil {
+		t.Fatalf("write epub file: %v", err)
+	}
+
+	reader, err := epub.Open(epubPath)
+	if err != nil {
+		t.Fatalf("epub.Open failed: %v", err)
+	}
+	defer reader.Close()
+
+	chapters, err := reader.ExtractChapters()
+	if err != nil {
+		t.Fatalf("extract chapters error: %v", err)
+	}
+	if len(chapters) != 1 {
+		t.Fatalf("expected 1 chapter, got %d", len(chapters))
+	}
+
+	content := chapters[0].ContentPlain
+
+	// 1. Heading preserved with Markdown ##
+	if !strings.Contains(content, "## The reign of the Dixiecrats") {
+		t.Errorf("expected ## The reign of the Dixiecrats, got:\n%s", content)
+	}
+
+	// 2. Inline footnote [5] attached to sentence, NOT split into its own paragraph
+	if strings.Contains(content, "\n\n5\n\n") || strings.Contains(content, "\n5\n") {
+		t.Errorf("footnote 5 was split into separate line:\n%s", content)
+	}
+	if !strings.Contains(content, "[5]") {
+		t.Errorf("expected inline [5] footnote marker in content, got:\n%s", content)
+	}
+
+	// 3. Emphasis and bold preserved
+	if !strings.Contains(content, "*chillingly*") {
+		t.Errorf("expected *chillingly* italic formatting, got:\n%s", content)
+	}
+	if !strings.Contains(content, "**Red-blooded men know what I mean.**") {
+		t.Errorf("expected **bold** formatting, got:\n%s", content)
+	}
+
+	// 4. Blockquote preserved with >
+	if !strings.Contains(content, "> A house divided against itself cannot stand.") {
+		t.Errorf("expected blockquote with > prefix, got:\n%s", content)
+	}
+
+	// 5. Divider preserved
+	if !strings.Contains(content, "---") {
+		t.Errorf("expected divider ---, got:\n%s", content)
+	}
+}
+

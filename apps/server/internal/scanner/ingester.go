@@ -30,6 +30,11 @@ func NewIngester(repo repository.StorageEngine, libraryDir, dataDir string) *Ing
 
 // IngestFile parses an EPUB file and registers its metadata, chapters, and cover in storage.
 func (in *Ingester) IngestFile(ctx context.Context, fullPath, relativePath string) (*repository.Book, error) {
+	if existingBook, err := in.repo.GetBookByFilePath(ctx, relativePath); err == nil && existingBook != nil {
+		_ = in.ReparseBookChapters(ctx, existingBook.ID)
+		return existingBook, nil
+	}
+
 	reader, err := epub.Open(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("opening epub: %w", err)
@@ -175,4 +180,55 @@ func (in *Ingester) SaveUpload(ctx context.Context, authorName, title string, r 
 	// 3. Ingest newly uploaded book
 	relPath := filepath.Join(sanitizedAuthor, sanitizedTitle, finalFilename)
 	return in.IngestFile(ctx, finalFilePath, relPath)
+}
+
+// ReparseBookChapters reads the EPUB file on disk for a book and updates the content_plain of its chapters in the repository.
+func (in *Ingester) ReparseBookChapters(ctx context.Context, bookID string) error {
+	book, err := in.repo.GetBookByID(ctx, bookID)
+	if err != nil {
+		return fmt.Errorf("fetching book: %w", err)
+	}
+
+	fullPath := filepath.Join(in.libraryDir, book.FilePath)
+	reader, err := epub.Open(fullPath)
+	if err != nil {
+		return fmt.Errorf("opening epub: %w", err)
+	}
+	defer reader.Close()
+
+	chapters, err := reader.ExtractChapters()
+	if err != nil {
+		return fmt.Errorf("extracting chapters: %w", err)
+	}
+
+	existingChapters, err := in.repo.GetChaptersByBookID(ctx, bookID)
+	if err != nil {
+		return fmt.Errorf("fetching existing chapters: %w", err)
+	}
+
+	chapterMap := make(map[int]*repository.Chapter, len(existingChapters))
+	for _, ch := range existingChapters {
+		chapterMap[ch.ChapterIndex] = ch
+	}
+
+	for _, ch := range chapters {
+		if existing, ok := chapterMap[ch.Index]; ok {
+			if err := in.repo.UpdateChapterContent(ctx, existing.ID, ch.ContentPlain); err != nil {
+				return fmt.Errorf("updating chapter %d content: %w", ch.Index, err)
+			}
+		} else {
+			chapter := &repository.Chapter{
+				BookID:       book.ID,
+				ChapterIndex: ch.Index,
+				Title:        ch.Title,
+				Summary:      "",
+				ContentPlain: ch.ContentPlain,
+			}
+			if err := in.repo.CreateChapter(ctx, chapter); err != nil {
+				return fmt.Errorf("creating chapter %d: %w", ch.Index, err)
+			}
+		}
+	}
+
+	return nil
 }

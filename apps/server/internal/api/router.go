@@ -52,6 +52,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/books/upload/jobs", auth(http.HandlerFunc(bookHandler.ListUploadJobs)))
 	mux.Handle("GET /api/v1/books/upload/jobs/{id}", auth(http.HandlerFunc(bookHandler.GetUploadJob)))
 	mux.Handle("GET /api/v1/books/{id}", auth(http.HandlerFunc(bookHandler.GetBook)))
+	mux.Handle("POST /api/v1/books/{id}/reparse", auth(http.HandlerFunc(bookHandler.ReparseBook)))
 	mux.Handle("GET /api/v1/books/{id}/chapters/{index}", auth(http.HandlerFunc(bookHandler.GetChapter)))
 	mux.Handle("GET /api/v1/chapters/{id}", auth(http.HandlerFunc(bookHandler.GetChapterDirect)))
 

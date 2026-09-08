@@ -406,6 +406,89 @@ func TestAPI_Books_CRUDAndBrowsing(t *testing.T) {
 	}
 }
 
+func TestAPI_Books_Reparse(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	ctx := context.Background()
+	token := f.loginAndGetToken(t)
+
+	// Create a minimal EPUB file in f.libDir
+	bookDir := filepath.Join(f.libDir, "Author", "Title")
+	if err := os.MkdirAll(bookDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	epubPath := filepath.Join(bookDir, "Title.epub")
+
+	writeEPUB := func(chContent string) {
+		buf := new(bytes.Buffer)
+		zw := zip.NewWriter(buf)
+		m, _ := zw.Create("mimetype")
+		m.Write([]byte("application/epub+zip"))
+		w, _ := zw.Create("META-INF/container.xml")
+		w.Write([]byte(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`))
+		opf, _ := zw.Create("content.opf")
+		opf.Write([]byte(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Test Title</dc:title><dc:creator>Author</dc:creator></metadata><manifest><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>`))
+		ch1, _ := zw.Create("ch1.xhtml")
+		ch1.Write([]byte(chContent))
+		zw.Close()
+		os.WriteFile(epubPath, buf.Bytes(), 0644)
+	}
+
+	writeEPUB(`<html><body><h1>Old Heading</h1><p>Old text</p></body></html>`)
+	relPath := filepath.Join("Author", "Title", "Title.epub")
+	book, err := f.ingester.IngestFile(ctx, epubPath, relPath)
+	if err != nil {
+		t.Fatalf("IngestFile: %v", err)
+	}
+
+	// Update EPUB content on disk
+	writeEPUB(`<html><body><h2>New Subheading</h2><p>New formatted text with <em>italics</em> and <a href="#fn"><sup class="sup">1</sup></a> footnote.</p></body></html>`)
+
+	// 1. Call POST /api/v1/books/{id}/reparse
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/books/%s/reparse", book.ID), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on reparse, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 2. Fetch chapter content via API
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/books/%s/chapters/0", book.ID), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on get chapter, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var chResp repository.Chapter
+	if err := json.Unmarshal(rec.Body.Bytes(), &chResp); err != nil {
+		t.Fatalf("unmarshal chapter: %v", err)
+	}
+
+	if !strings.Contains(chResp.ContentPlain, "## New Subheading") {
+		t.Errorf("expected content to contain ## New Subheading, got: %s", chResp.ContentPlain)
+	}
+	if !strings.Contains(chResp.ContentPlain, "[1]") {
+		t.Errorf("expected content to contain [1], got: %s", chResp.ContentPlain)
+	}
+
+	// 3. Test reparse non-existent book
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/books/nonexistent-id/reparse", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for nonexistent book reparse, got %d", rec.Code)
+	}
+}
+
 func TestAPI_Books_Cover(t *testing.T) {
 	f := setupAPITest(t)
 	defer f.db.Close()

@@ -76,6 +76,25 @@ func (r *SQLiteStorageEngine) GetBookByID(ctx context.Context, id string) (*Book
 	return b, nil
 }
 
+func (r *SQLiteStorageEngine) GetBookByFilePath(ctx context.Context, filePath string) (*Book, error) {
+	query := `
+		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, published_date, created_at
+		FROM books WHERE file_path = ?
+	`
+	b := &Book{}
+	err := r.db.QueryRowContext(ctx, query, filePath).Scan(
+		&b.ID, &b.Title, &b.Description, &b.Language, &b.Publisher, &b.Identifier,
+		&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &b.PublishedDate, &b.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying book by file path: %w", err)
+	}
+	return b, nil
+}
+
 func (r *SQLiteStorageEngine) UpdateBook(ctx context.Context, b *Book) error {
 	query := `
 		UPDATE books
@@ -604,6 +623,22 @@ func (r *SQLiteStorageEngine) UpdateChapterSummary(ctx context.Context, chapterI
 	res, err := r.db.ExecContext(ctx, query, summary, chapterID)
 	if err != nil {
 		return fmt.Errorf("updating chapter summary: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking affected rows: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) UpdateChapterContent(ctx context.Context, chapterID string, contentPlain string) error {
+	query := `UPDATE chapters SET content_plain = ? WHERE id = ?`
+	res, err := r.db.ExecContext(ctx, query, contentPlain, chapterID)
+	if err != nil {
+		return fmt.Errorf("updating chapter content: %w", err)
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
