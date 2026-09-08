@@ -17,4 +17,5 @@ This directory contains the architectural decision records (ADRs) for `shelfd`, 
 | [ADR-0009](0009-authentication-architecture-jwt-and-api-tokens.md) | Authentication Architecture — JWT & Scoped API Tokens | Accepted | 2026-09-07 |
 | [ADR-0010](0010-single-container-docker-and-homelab-deployment.md) | Single-Container Docker & Homelab Deployment | Accepted | 2026-09-07 |
 | [ADR-0011](0011-asynchronous-upload-processing-queue.md) | Asynchronous Upload Processing Queue | Accepted | 2026-09-07 |
+| [ADR-0012](0012-spine-manifest-and-ulid-chapter-identifiers.md) | Spine Manifest & ULID Chapter Identifiers | Accepted | 2026-09-08 |
 
