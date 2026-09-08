@@ -9,6 +9,7 @@ import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
+import 'reader_markdown.dart';
 
 class ReaderView extends ConsumerStatefulWidget {
   final String bookId;
@@ -117,11 +118,7 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
     final theme = AppTheme.buildTheme(settings.themeMode);
     final spineIdx = _currentSpineIndex;
 
-    final paragraphs = (_currentChapter?.content ?? '')
-        .split('\n\n')
-        .map((p) => p.trim())
-        .where((p) => p.isNotEmpty)
-        .toList();
+    final blocks = parseReaderBlocks(_currentChapter?.content ?? '');
 
     final canPrev = _spine.isNotEmpty
         ? spineIdx > 0
@@ -339,19 +336,12 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                           horizontal: Responsive.horizontalPadding(context),
                           vertical: AppTokens.space24,
                         ),
-                        itemCount: paragraphs.length,
+                        itemCount: blocks.length,
                         itemBuilder: (context, idx) {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: AppTokens.space16),
-                            child: Text(
-                              paragraphs[idx],
-                              style: AppTypography.readerText(
-                                fontSize: settings.fontSize,
-                                lineHeight: settings.lineHeight,
-                                isSerif: settings.isSerif,
-                                color: theme.colorScheme.onSurface,
-                              ),
-                            ),
+                          return buildReaderBlockWidget(
+                            block: blocks[idx],
+                            settings: settings,
+                            theme: theme,
                           );
                         },
                       ),
