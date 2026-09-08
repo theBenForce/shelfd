@@ -10,6 +10,7 @@ import (
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/google/uuid"
+	"github.com/shelfd/shelfd/internal/ulid"
 )
 
 var (
@@ -495,7 +496,7 @@ func (r *SQLiteStorageEngine) GetBookSeries(ctx context.Context, bookID string) 
 
 func (r *SQLiteStorageEngine) CreateChapter(ctx context.Context, c *Chapter) error {
 	if c.ID == "" {
-		c.ID = uuid.NewString()
+		c.ID = ulid.New()
 	}
 	if c.CreatedAt.IsZero() {
 		c.CreatedAt = time.Now().UTC()
@@ -536,6 +537,30 @@ func (r *SQLiteStorageEngine) GetChaptersByBookID(ctx context.Context, bookID st
 		chapters = append(chapters, c)
 	}
 	return chapters, rows.Err()
+}
+
+func (r *SQLiteStorageEngine) GetBookSpine(ctx context.Context, bookID string) ([]*SpineItem, error) {
+	query := `
+		SELECT id, book_id, chapter_index, title, summary
+		FROM chapters
+		WHERE book_id = ?
+		ORDER BY chapter_index ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, bookID)
+	if err != nil {
+		return nil, fmt.Errorf("getting book spine: %w", err)
+	}
+	defer rows.Close()
+
+	var spine []*SpineItem
+	for rows.Next() {
+		item := &SpineItem{}
+		if err := rows.Scan(&item.ID, &item.BookID, &item.ChapterIndex, &item.Title, &item.Summary); err != nil {
+			return nil, fmt.Errorf("scanning spine row: %w", err)
+		}
+		spine = append(spine, item)
+	}
+	return spine, rows.Err()
 }
 
 func (r *SQLiteStorageEngine) GetChapterByID(ctx context.Context, id string) (*Chapter, error) {

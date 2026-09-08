@@ -76,6 +76,15 @@ type Chapter struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// SpineItem represents a lightweight chapter entry in a book's reading order without plaintext content.
+type SpineItem struct {
+	ID           string  `json:"id"`
+	BookID       string  `json:"book_id"`
+	ChapterIndex int     `json:"chapter_index"`
+	Title        *string `json:"title,omitempty"`
+	Summary      string  `json:"summary,omitempty"`
+}
+
 // User represents a user account for authentication.
 type User struct {
 	ID           string    `json:"id"`

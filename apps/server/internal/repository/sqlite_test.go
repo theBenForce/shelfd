@@ -8,6 +8,7 @@ import (
 
 	"github.com/shelfd/shelfd/internal/database"
 	"github.com/shelfd/shelfd/internal/repository"
+	"github.com/shelfd/shelfd/internal/ulid"
 )
 
 func setupTestDB(t *testing.T) (*sql.DB, repository.StorageEngine) {
@@ -114,6 +115,14 @@ func TestBookCascadeDeletion(t *testing.T) {
 	chapters, err := repo.GetChaptersByBookID(ctx, book.ID)
 	if err != nil || len(chapters) != 1 {
 		t.Fatalf("unexpected book chapters: %v", chapters)
+	}
+
+	spine, err := repo.GetBookSpine(ctx, book.ID)
+	if err != nil || len(spine) != 1 {
+		t.Fatalf("unexpected book spine: %v", spine)
+	}
+	if spine[0].ID != chapter.ID || spine[0].ChapterIndex != 1 || *spine[0].Title != chapterTitle {
+		t.Fatalf("unexpected spine item data: %+v", spine[0])
 	}
 
 	var count int
@@ -797,6 +806,68 @@ func TestUploadJobs(t *testing.T) {
 	fetched, _ = repo.GetUploadJob(ctx, "job-1")
 	if fetched.BookID != nil {
 		t.Fatalf("expected book_id to be set to NULL on book delete, got %v", *fetched.BookID)
+	}
+}
+
+func TestCreateChapter_ULIDAndSpine(t *testing.T) {
+	ctx := context.Background()
+	db, repo := setupTestDB(t)
+	defer repo.Close()
+	defer db.Close()
+
+	book := &repository.Book{
+		Title:    "Neuromancer",
+		FilePath: "William Gibson/Neuromancer/Neuromancer.epub",
+	}
+	if err := repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("failed to create book: %v", err)
+	}
+
+	title1 := "Chapter 1"
+	title2 := "Chapter 2"
+
+	ch1 := &repository.Chapter{
+		BookID:       book.ID,
+		ChapterIndex: 1,
+		Title:        &title1,
+		ContentPlain: "The sky above the port was the color of television.",
+	}
+	ch2 := &repository.Chapter{
+		BookID:       book.ID,
+		ChapterIndex: 2,
+		Title:        &title2,
+		ContentPlain: "Night City was like a deranged experiment in social Darwinism.",
+	}
+
+	if err := repo.CreateChapter(ctx, ch1); err != nil {
+		t.Fatalf("failed to create chapter 1: %v", err)
+	}
+	if err := repo.CreateChapter(ctx, ch2); err != nil {
+		t.Fatalf("failed to create chapter 2: %v", err)
+	}
+
+	if !ulid.IsValid(ch1.ID) {
+		t.Fatalf("expected ch1.ID to be valid ULID, got %s", ch1.ID)
+	}
+	if !ulid.IsValid(ch2.ID) {
+		t.Fatalf("expected ch2.ID to be valid ULID, got %s", ch2.ID)
+	}
+	if ch1.ID >= ch2.ID {
+		t.Fatalf("expected monotonic ordering ch1.ID < ch2.ID, got ch1=%s, ch2=%s", ch1.ID, ch2.ID)
+	}
+
+	spine, err := repo.GetBookSpine(ctx, book.ID)
+	if err != nil {
+		t.Fatalf("failed to get book spine: %v", err)
+	}
+	if len(spine) != 2 {
+		t.Fatalf("expected 2 spine items, got %d", len(spine))
+	}
+	if spine[0].ID != ch1.ID || spine[0].ChapterIndex != 1 || *spine[0].Title != title1 {
+		t.Errorf("unexpected spine item 0: %+v", spine[0])
+	}
+	if spine[1].ID != ch2.ID || spine[1].ChapterIndex != 2 || *spine[1].Title != title2 {
+		t.Errorf("unexpected spine item 1: %+v", spine[1])
 	}
 }
 
