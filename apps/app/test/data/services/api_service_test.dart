@@ -120,5 +120,35 @@ void main() {
       final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
       expect(() => apiService.getMe(), throwsA(isA<ApiException>()));
     });
+
+    test('getQueueStatus returns QueueStatus', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.url.path, '/api/v1/queue/status');
+        return http.Response(
+          jsonEncode({
+            'total_chapters': 25,
+            'indexed_chapters': 10,
+            'pending_chapters': 15,
+            'pending_uploads': 0,
+            'progress_percent': 40.0,
+            'is_active': true,
+            'current_book': 'Solaris',
+            'current_chapter': 'The Station',
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final status = await apiService.getQueueStatus();
+      expect(status.totalChapters, 25);
+      expect(status.indexedChapters, 10);
+      expect(status.pendingChapters, 15);
+      expect(status.progressPercent, 40.0);
+      expect(status.isActive, isTrue);
+      expect(status.currentBook, 'Solaris');
+      expect(status.currentChapter, 'The Station');
+    });
   });
 }

@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/author.dart';
 import '../../data/models/book.dart';
 import '../../data/models/genre.dart';
+import '../../data/models/queue_status.dart';
 import '../../data/models/search_result.dart';
 import '../../data/models/series.dart';
 import '../../data/models/user.dart';
@@ -349,3 +351,84 @@ class SearchNotifier extends Notifier<SearchState> {
 }
 
 final searchProvider = NotifierProvider<SearchNotifier, SearchState>(SearchNotifier.new);
+
+// Background Queue State & Notifier
+class QueueState {
+  final QueueStatus? status;
+  final bool isLoading;
+  final String? error;
+
+  const QueueState({
+    this.status,
+    this.isLoading = false,
+    this.error,
+  });
+
+  QueueState copyWith({
+    QueueStatus? status,
+    bool? isLoading,
+    String? error,
+  }) {
+    return QueueState(
+      status: status ?? this.status,
+      isLoading: isLoading ?? this.isLoading,
+      error: error,
+    );
+  }
+}
+
+class QueueNotifier extends Notifier<QueueState> {
+  Timer? _timer;
+
+  @override
+  QueueState build() {
+    ref.onDispose(() {
+      _timer?.cancel();
+    });
+
+    Future.microtask(() {
+      refresh();
+    });
+
+    return const QueueState(isLoading: true);
+  }
+
+  void _schedulePoll(Duration delay) {
+    _timer?.cancel();
+    _timer = Timer(delay, () {
+      refresh();
+    });
+  }
+
+  Future<void> refresh() async {
+    final apiService = ref.read(apiServiceProvider);
+    final storage = ref.read(storageServiceProvider);
+    final token = apiService.token ?? storage.getAuthToken();
+    if (token == null || token.isEmpty) {
+      state = const QueueState(isLoading: false);
+      _schedulePoll(const Duration(seconds: 15));
+      return;
+    }
+
+    if (apiService.token == null || apiService.token!.isEmpty) {
+      apiService.updateConnection(newToken: token);
+    }
+
+    try {
+      final status = await apiService.getQueueStatus();
+      state = QueueState(status: status, isLoading: false);
+
+      final nextDelay = (status.isActive || status.pendingChapters > 0 || status.pendingUploads > 0)
+          ? const Duration(seconds: 3)
+          : const Duration(seconds: 15);
+      _schedulePoll(nextDelay);
+    } catch (e) {
+      debugPrint('QueueNotifier error: $e');
+      state = state.copyWith(isLoading: false, error: e.toString());
+      _schedulePoll(const Duration(seconds: 15));
+    }
+  }
+}
+
+final queueProvider = NotifierProvider<QueueNotifier, QueueState>(QueueNotifier.new);
+

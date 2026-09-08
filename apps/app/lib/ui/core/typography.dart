@@ -1,16 +1,35 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'tokens.dart';
 
 class AppTypography {
   AppTypography._();
+
+  static const List<String> serifFallbacks = [
+    'Charter',
+    'Georgia',
+    'Cambria',
+    'Times New Roman',
+    'serif',
+  ];
+
+  static const List<String> sansFallbacks = [
+    '-apple-system',
+    'BlinkMacSystemFont',
+    'Segoe UI',
+    'Roboto',
+    'Helvetica Neue',
+    'Arial',
+    'sans-serif',
+  ];
 
   static TextStyle titleSerif({
     double fontSize = 22.0,
     FontWeight fontWeight = FontWeight.w600,
     Color color = AppTokens.charcoalInk,
   }) {
-    return GoogleFonts.sourceSerif4(
+    return TextStyle(
+      fontFamily: 'Georgia',
+      fontFamilyFallback: serifFallbacks,
       fontSize: fontSize,
       fontWeight: fontWeight,
       color: color,
@@ -24,7 +43,8 @@ class AppTypography {
     Color color = AppTokens.mutedCopy,
     double lineHeight = 1.5,
   }) {
-    return GoogleFonts.inter(
+    return TextStyle(
+      fontFamilyFallback: sansFallbacks,
       fontSize: fontSize,
       fontWeight: fontWeight,
       color: color,
@@ -37,7 +57,8 @@ class AppTypography {
     FontWeight fontWeight = FontWeight.w600,
     Color color = AppTokens.mutedCopy,
   }) {
-    return GoogleFonts.inter(
+    return TextStyle(
+      fontFamilyFallback: sansFallbacks,
       fontSize: fontSize,
       fontWeight: fontWeight,
       color: color,
@@ -51,17 +72,13 @@ class AppTypography {
     required bool isSerif,
     required Color color,
   }) {
-    if (isSerif) {
-      return GoogleFonts.sourceSerif4(
-        fontSize: fontSize,
-        height: lineHeight,
-        color: color,
-      );
-    }
-    return GoogleFonts.inter(
+    return TextStyle(
+      fontFamily: isSerif ? 'Georgia' : null,
+      fontFamilyFallback: isSerif ? serifFallbacks : sansFallbacks,
       fontSize: fontSize,
       height: lineHeight,
       color: color,
     );
   }
 }
+

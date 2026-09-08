@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../state/providers.dart';
 import 'responsive.dart';
 import 'tokens.dart';
 import 'typography.dart';
@@ -403,6 +405,10 @@ class ShelfdSideNav extends StatelessWidget {
 
           const Spacer(),
 
+          // Live AI indexing queue progress card
+          const _QueueStatusCard(),
+          const SizedBox(height: AppTokens.space12),
+
           // Rescan Library Button (if callback provided)
           if (onRescan != null) ...[
             SizedBox(
@@ -540,6 +546,181 @@ class _SideNavItem extends StatelessWidget {
   }
 }
 
+class _QueueStatusCard extends ConsumerWidget {
+  const _QueueStatusCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final queueState = ref.watch(queueProvider);
+    final status = queueState.status;
+
+    if (status == null) {
+      if (queueState.isLoading) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppTokens.boneContainer.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+            border: Border.all(color: AppTokens.crispBorder.withOpacity(0.6)),
+          ),
+          child: Row(
+            children: [
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(strokeWidth: 1.5, color: AppTokens.mutedCopy),
+              ),
+              const SizedBox(width: AppTokens.space8),
+              Expanded(
+                child: Text(
+                  'Checking queue...',
+                  style: AppTypography.bodySans(
+                    fontSize: 11,
+                    color: AppTokens.mutedCopy,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+      return const SizedBox.shrink();
+    }
+
+    final isActive = status.isActive || status.pendingChapters > 0 || status.pendingUploads > 0;
+
+    if (!isActive) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppTokens.boneContainer.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+          border: Border.all(color: AppTokens.crispBorder.withOpacity(0.6)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle_outline_rounded, size: 14, color: Color(0xFF2B8A3E)),
+            const SizedBox(width: AppTokens.space8),
+            Expanded(
+              child: Text(
+                'AI Catalog Synced (${status.totalChapters} ch)',
+                style: AppTypography.bodySans(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: AppTokens.mutedCopy,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final progress = (status.progressPercent / 100.0).clamp(0.0, 1.0);
+    final title = (status.currentBook != null && status.currentBook!.isNotEmpty)
+        ? status.currentBook!
+        : (status.pendingUploads > 0 ? 'Processing uploads...' : 'Generating chapter summaries...');
+
+    final subtext = (status.currentChapter != null && status.currentChapter!.isNotEmpty)
+        ? status.currentChapter!
+        : '${status.indexedChapters} of ${status.totalChapters} indexed (${status.progressPercent.toStringAsFixed(0)}%)';
+
+    return InkWell(
+      onTap: () => ref.read(queueProvider.notifier).refresh(),
+      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+      child: Container(
+        padding: const EdgeInsets.all(AppTokens.space12),
+        decoration: BoxDecoration(
+          color: AppTokens.boneSurface,
+          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+          border: Border.all(color: AppTokens.crispBorder),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x0A000000),
+              blurRadius: 4,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF4E6),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Icon(
+                    Icons.auto_awesome_rounded,
+                    size: 14,
+                    color: Color(0xFFD9480F),
+                  ),
+                ),
+                const SizedBox(width: AppTokens.space8),
+                Expanded(
+                  child: Text(
+                    'AI Indexing',
+                    style: AppTypography.bodySans(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTokens.charcoalInk,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${status.progressPercent.toStringAsFixed(0)}%',
+                  style: AppTypography.bodySans(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFFD9480F),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppTokens.space8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 4,
+                backgroundColor: AppTokens.boneContainer,
+                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFD9480F)),
+              ),
+            ),
+            const SizedBox(height: AppTokens.space8),
+            Text(
+              title,
+              style: AppTypography.bodySans(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: AppTokens.charcoalInk,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtext,
+              style: AppTypography.bodySans(
+                fontSize: 10,
+                color: AppTokens.mutedCopy,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class ShelfdAdaptiveScaffold extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onNavTap;
@@ -651,6 +832,77 @@ void showShelfdSettingsModal(
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: AppTokens.space16),
+            Consumer(
+              builder: (context, ref, _) {
+                final queueState = ref.watch(queueProvider);
+                final status = queueState.status;
+                if (status == null) return const SizedBox.shrink();
+
+                final progress = (status.progressPercent / 100.0).clamp(0.0, 1.0);
+
+                return Container(
+                  padding: const EdgeInsets.all(AppTokens.space12),
+                  decoration: BoxDecoration(
+                    color: AppTokens.boneSurface,
+                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                    border: Border.all(color: AppTokens.crispBorder),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.auto_awesome_rounded, size: 16, color: Color(0xFFD9480F)),
+                          const SizedBox(width: AppTokens.space8),
+                          Text(
+                            'AI Chapter Summaries & Vectors',
+                            style: AppTypography.bodySans(fontSize: 13, fontWeight: FontWeight.w600),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '${status.progressPercent.toStringAsFixed(0)}%',
+                            style: AppTypography.bodySans(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: const Color(0xFFD9480F),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppTokens.space8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          minHeight: 4,
+                          backgroundColor: AppTokens.boneContainer,
+                          valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFD9480F)),
+                        ),
+                      ),
+                      const SizedBox(height: AppTokens.space8),
+                      Text(
+                        '${status.indexedChapters} of ${status.totalChapters} chapters processed (${status.pendingChapters} pending)',
+                        style: AppTypography.bodySans(fontSize: 12, color: AppTokens.mutedCopy),
+                      ),
+                      if (status.currentBook != null && status.currentBook!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Now processing: ${status.currentBook}',
+                          style: AppTypography.bodySans(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: AppTokens.charcoalInk,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              },
             ),
             const SizedBox(height: AppTokens.space24),
             OutlinedButton.icon(

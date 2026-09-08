@@ -5,6 +5,7 @@ import '../models/book.dart';
 import '../models/chapter.dart';
 import '../models/connect_info.dart';
 import '../models/genre.dart';
+import '../models/queue_status.dart';
 import '../models/search_result.dart';
 import '../models/series.dart';
 import '../models/user.dart';
@@ -226,5 +227,14 @@ class ApiService {
     if (response.statusCode >= 400) {
       throw ApiException(response.statusCode, response.body);
     }
+  }
+
+  Future<QueueStatus> getQueueStatus() async {
+    final response = await client.get(_uri('/api/v1/queue/status'), headers: _headers());
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return QueueStatus.fromJson(data);
   }
 }

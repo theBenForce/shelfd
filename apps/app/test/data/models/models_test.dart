@@ -4,6 +4,7 @@ import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/chapter.dart';
 import 'package:shelf/data/models/connect_info.dart';
 import 'package:shelf/data/models/genre.dart';
+import 'package:shelf/data/models/queue_status.dart';
 import 'package:shelf/data/models/search_result.dart';
 import 'package:shelf/data/models/series.dart';
 import 'package:shelf/data/models/user.dart';
@@ -128,6 +129,29 @@ void main() {
       expect(hit.score, 0.94);
       expect(hit.matchPercentage, 94);
       expect(hit.toJson(), json);
+    });
+
+    test('QueueStatus fromJson & toJson', () {
+      final json = {
+        'total_chapters': 100,
+        'indexed_chapters': 40,
+        'pending_chapters': 60,
+        'pending_uploads': 2,
+        'progress_percent': 40.0,
+        'is_active': true,
+        'current_book': 'Hyperion',
+        'current_chapter': 'The Priest\'s Tale',
+      };
+      final status = QueueStatus.fromJson(json);
+      expect(status.totalChapters, 100);
+      expect(status.indexedChapters, 40);
+      expect(status.pendingChapters, 60);
+      expect(status.pendingUploads, 2);
+      expect(status.progressPercent, 40.0);
+      expect(status.isActive, isTrue);
+      expect(status.currentBook, 'Hyperion');
+      expect(status.currentChapter, 'The Priest\'s Tale');
+      expect(status.toJson(), json);
     });
   });
 }

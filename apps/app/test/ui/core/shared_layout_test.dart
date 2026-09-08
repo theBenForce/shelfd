@@ -1,8 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shelf/data/models/queue_status.dart';
 import 'package:shelf/ui/core/shared_layout.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/core/tokens.dart';
+import 'package:shelf/ui/state/providers.dart';
+
+class FakeQueueNotifier extends QueueNotifier {
+  final QueueState _initial;
+  FakeQueueNotifier([this._initial = const QueueState()]);
+
+  @override
+  QueueState build() => _initial;
+}
 
 void main() {
   group('Shared Layout Widgets Tests', () {
@@ -107,12 +118,17 @@ void main() {
     testWidgets('ShelfdSideNav renders branding, items, and connection status', (tester) async {
       int selectedNav = 0;
       await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
-          home: Scaffold(
-            body: ShelfdSideNav(
-              currentIndex: selectedNav,
-              onTap: (i) => selectedNav = i,
+        ProviderScope(
+          overrides: [
+            queueProvider.overrideWith(() => FakeQueueNotifier()),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              body: ShelfdSideNav(
+                currentIndex: selectedNav,
+                onTap: (i) => selectedNav = i,
+              ),
             ),
           ),
         ),
@@ -130,6 +146,71 @@ void main() {
       expect(selectedNav, 1);
     });
 
+    testWidgets('ShelfdSideNav renders active AI Indexing progress card', (tester) async {
+      final activeStatus = const QueueStatus(
+        totalChapters: 45,
+        indexedChapters: 15,
+        pendingChapters: 30,
+        pendingUploads: 0,
+        progressPercent: 33.3,
+        isActive: true,
+        currentBook: 'Dune Messiah',
+        currentChapter: 'Chapter 4',
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            queueProvider.overrideWith(() => FakeQueueNotifier(QueueState(status: activeStatus))),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              body: ShelfdSideNav(
+                currentIndex: 0,
+                onTap: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('AI Indexing'), findsOneWidget);
+      expect(find.text('33%'), findsOneWidget);
+      expect(find.text('Dune Messiah'), findsOneWidget);
+      expect(find.text('Chapter 4'), findsOneWidget);
+    });
+
+    testWidgets('ShelfdSideNav renders synced badge when idle', (tester) async {
+      final idleStatus = const QueueStatus(
+        totalChapters: 50,
+        indexedChapters: 50,
+        pendingChapters: 0,
+        pendingUploads: 0,
+        progressPercent: 100.0,
+        isActive: false,
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            queueProvider.overrideWith(() => FakeQueueNotifier(QueueState(status: idleStatus))),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              body: ShelfdSideNav(
+                currentIndex: 0,
+                onTap: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('AI Catalog Synced (50 ch)'), findsOneWidget);
+    });
+
     testWidgets('ShelfdAdaptiveScaffold switches between ShelfdBottomNav and ShelfdSideNav', (tester) async {
       tester.view.physicalSize = const Size(600, 900);
       tester.view.devicePixelRatio = 1.0;
@@ -139,12 +220,17 @@ void main() {
       });
 
       await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
-          home: ShelfdAdaptiveScaffold(
-            currentIndex: 0,
-            onNavTap: (_) {},
-            body: const Center(child: Text('Content')),
+        ProviderScope(
+          overrides: [
+            queueProvider.overrideWith(() => FakeQueueNotifier()),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: ShelfdAdaptiveScaffold(
+              currentIndex: 0,
+              onNavTap: (_) {},
+              body: const Center(child: Text('Content')),
+            ),
           ),
         ),
       );
@@ -154,12 +240,17 @@ void main() {
 
       tester.view.physicalSize = const Size(1440, 900);
       await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
-          home: ShelfdAdaptiveScaffold(
-            currentIndex: 0,
-            onNavTap: (_) {},
-            body: const Center(child: Text('Content')),
+        ProviderScope(
+          overrides: [
+            queueProvider.overrideWith(() => FakeQueueNotifier()),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: ShelfdAdaptiveScaffold(
+              currentIndex: 0,
+              onNavTap: (_) {},
+              body: const Center(child: Text('Content')),
+            ),
           ),
         ),
       );
