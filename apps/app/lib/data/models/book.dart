@@ -12,6 +12,7 @@ class Book {
   final Series? series;
   final double? seriesSequence;
   final double readingProgress;
+  final List<SpineItem> spine;
 
   const Book({
     required this.id,
@@ -23,6 +24,7 @@ class Book {
     this.series,
     this.seriesSequence,
     this.readingProgress = 0.0,
+    this.spine = const [],
   });
 
   String get authorDisplay {
@@ -72,6 +74,10 @@ class Book {
       series: seriesObj,
       seriesSequence: seqNum ?? (json['series_sequence'] as num?)?.toDouble(),
       readingProgress: (json['reading_progress'] as num?)?.toDouble() ?? 0.0,
+      spine: (json['spine'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map((s) => SpineItem.fromJson(s))
+          .toList(),
     );
   }
 
@@ -86,6 +92,7 @@ class Book {
       if (series != null) 'series': series!.toJson(),
       if (seriesSequence != null) 'series_sequence': seriesSequence,
       'reading_progress': readingProgress,
+      if (spine.isNotEmpty) 'spine': spine.map((s) => s.toJson()).toList(),
     };
   }
 
@@ -99,6 +106,7 @@ class Book {
     Series? series,
     double? seriesSequence,
     double? readingProgress,
+    List<SpineItem>? spine,
   }) {
     return Book(
       id: id ?? this.id,
@@ -110,6 +118,40 @@ class Book {
       series: series ?? this.series,
       seriesSequence: seriesSequence ?? this.seriesSequence,
       readingProgress: readingProgress ?? this.readingProgress,
+      spine: spine ?? this.spine,
     );
   }
 }
+
+class SpineItem {
+  final String id;
+  final String bookId;
+  final int chapterIndex;
+  final String title;
+
+  const SpineItem({
+    required this.id,
+    required this.bookId,
+    required this.chapterIndex,
+    required this.title,
+  });
+
+  factory SpineItem.fromJson(Map<String, dynamic> json) {
+    return SpineItem(
+      id: json['id'] as String? ?? '',
+      bookId: json['book_id'] as String? ?? '',
+      chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
+      title: json['title'] as String? ?? 'Chapter ${json['chapter_index'] ?? 0}',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'book_id': bookId,
+      'chapter_index': chapterIndex,
+      'title': title,
+    };
+  }
+}
+

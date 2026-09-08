@@ -238,7 +238,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                                 return _BookCard(
                                   book: book,
                                   onTap: () {
-                                    context.go('/reader/${book.id}/0');
+                                    context.go('/reader/${book.id}');
                                   },
                                 );
                               },

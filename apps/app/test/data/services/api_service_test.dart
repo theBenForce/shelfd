@@ -111,6 +111,30 @@ void main() {
       expect(chapter.content, contains('Paragraph one.'));
     });
 
+    test('getChapter with string chapterId returns chapter content', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.url.path, '/api/v1/books/book-1/chapters/01J7SPINE1');
+        return http.Response(
+          jsonEncode({
+            'id': '01J7SPINE1',
+            'book_id': 'book-1',
+            'chapter_index': 1,
+            'title': 'Chapter 1: The Beginning',
+            'summary': 'Summary of chapter 1',
+            'content': 'Paragraph one.\n\nParagraph two.',
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final chapter = await apiService.getChapter('book-1', '01J7SPINE1');
+      expect(chapter.id, '01J7SPINE1');
+      expect(chapter.title, 'Chapter 1: The Beginning');
+      expect(chapter.content, contains('Paragraph one.'));
+    });
+
     test('handles 401 Unauthorized by throwing ApiException', () async {
       final mockClient = MockClient((request) async {
         return http.Response(jsonEncode({'error': 'Unauthorized'}), 401,

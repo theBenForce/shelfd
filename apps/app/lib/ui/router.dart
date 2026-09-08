@@ -37,13 +37,22 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
         builder: (context, state) => const SearchView(),
       ),
       GoRoute(
-        path: '/reader/:bookId/:chapterIndex',
+        path: '/reader/:bookId',
         builder: (context, state) {
           final bookId = state.pathParameters['bookId'] ?? '';
-          final chapterIndex = int.tryParse(state.pathParameters['chapterIndex'] ?? '0') ?? 0;
           return ReaderView(
             bookId: bookId,
-            chapterIndex: chapterIndex,
+          );
+        },
+      ),
+      GoRoute(
+        path: '/reader/:bookId/:chapterIdentifier',
+        builder: (context, state) {
+          final bookId = state.pathParameters['bookId'] ?? '';
+          final chapterIdentifier = state.pathParameters['chapterIdentifier'];
+          return ReaderView(
+            bookId: bookId,
+            chapterIdentifier: chapterIdentifier,
           );
         },
       ),

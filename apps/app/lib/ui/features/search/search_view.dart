@@ -181,7 +181,8 @@ class _SearchViewState extends ConsumerState<SearchView> {
                                 return _SearchHitCard(
                                   hit: hit,
                                   onTap: () {
-                                    context.go('/reader/${hit.bookId}/${hit.chapterIndex}');
+                                    final target = (hit.chapterId != null && hit.chapterId!.isNotEmpty) ? hit.chapterId! : hit.chapterIndex;
+                                    context.go('/reader/${hit.bookId}/$target');
                                   },
                                 );
                               },

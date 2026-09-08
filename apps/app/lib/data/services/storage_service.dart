@@ -51,11 +51,11 @@ class StorageService {
   }
 
   // Offline chapter caching
-  String? getCachedChapter(String bookId, int chapterIndex) {
-    return _prefs.getString('$_prefixChapter${bookId}_$chapterIndex');
+  String? getCachedChapter(String bookId, dynamic chapterIdentifier) {
+    return _prefs.getString('$_prefixChapter${bookId}_$chapterIdentifier');
   }
 
-  Future<void> cacheChapter(String bookId, int chapterIndex, String content) async {
-    await _prefs.setString('$_prefixChapter${bookId}_$chapterIndex', content);
+  Future<void> cacheChapter(String bookId, dynamic chapterIdentifier, String content) async {
+    await _prefs.setString('$_prefixChapter${bookId}_$chapterIdentifier', content);
   }
 }

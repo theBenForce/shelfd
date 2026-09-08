@@ -137,9 +137,9 @@ class ApiService {
     return Book.fromJson(data, baseUrl: baseUrl);
   }
 
-  Future<Chapter> getChapter(String bookId, int chapterIndex) async {
+  Future<Chapter> getChapter(String bookId, dynamic chapterIdentifier) async {
     final response = await client.get(
-      _uri('/api/v1/books/$bookId/chapters/$chapterIndex'),
+      _uri('/api/v1/books/$bookId/chapters/$chapterIdentifier'),
       headers: _headers(),
     );
     if (response.statusCode >= 400) {

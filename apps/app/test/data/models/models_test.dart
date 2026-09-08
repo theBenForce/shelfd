@@ -76,6 +76,9 @@ void main() {
         ],
         'series': {'id': 'ser-1', 'name': 'Hainish Cycle'},
         'series_sequence': 4.0,
+        'spine': [
+          {'id': '01J7SPINE1', 'book_id': 'book-42', 'chapter_index': 1, 'title': 'Prologue'}
+        ],
       };
 
       final book = Book.fromJson(bookJson);
@@ -89,6 +92,24 @@ void main() {
       expect(book.series?.name, 'Hainish Cycle');
       expect(book.seriesSequence, 4.0);
       expect(book.authorDisplay, 'Ursula K. Le Guin');
+      expect(book.spine.length, 1);
+      expect(book.spine.first.id, '01J7SPINE1');
+      expect(book.spine.first.title, 'Prologue');
+    });
+
+    test('SpineItem fromJson & toJson', () {
+      final json = {
+        'id': '01J7SPINE1',
+        'book_id': 'book-42',
+        'chapter_index': 1,
+        'title': 'Prologue',
+      };
+      final item = SpineItem.fromJson(json);
+      expect(item.id, '01J7SPINE1');
+      expect(item.bookId, 'book-42');
+      expect(item.chapterIndex, 1);
+      expect(item.title, 'Prologue');
+      expect(item.toJson(), json);
     });
 
     test('Chapter fromJson & toJson', () {
