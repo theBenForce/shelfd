@@ -109,3 +109,13 @@ graph TD
 * **Actions**:
   * If a new architectural pattern, storage format, or invariant was created or modified, record an individual MADR in `docs/decisions/XXXX-<title>.md`.
   * Update the index table in `docs/decisions/index.md`.
+
+---
+
+## Toolchain & Environment Execution
+
+All toolchain commands (`go`, `flutter`, `pnpm`, `node`) MUST be executed through `mise exec -- <command>`:
+* Go: `mise exec -- go test ./...`
+* Flutter: `mise exec -- flutter test`
+* Pnpm: `mise exec -- pnpm test`
+
