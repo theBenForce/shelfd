@@ -14,10 +14,11 @@ import (
 
 // OllamaClient communicates with a local or remote Ollama instance.
 type OllamaClient struct {
-	baseURL        string
-	summaryModel   string
-	embeddingModel string
-	httpClient     *http.Client
+	baseURL             string
+	summaryModel        string
+	embeddingModel      string
+	embeddingDimensions int
+	httpClient          *http.Client
 }
 
 // NewOllamaClient creates an Ollama client instance.
@@ -34,12 +35,17 @@ func NewOllamaClient(cfg *config.AIConfig) *OllamaClient {
 	if embeddingModel == "" {
 		embeddingModel = "nomic-embed-text"
 	}
+	embeddingDimensions := cfg.EmbeddingDimensions
+	if embeddingDimensions <= 0 {
+		embeddingDimensions = 256
+	}
 
 	return &OllamaClient{
-		baseURL:        baseURL,
-		summaryModel:   summaryModel,
-		embeddingModel: embeddingModel,
-		httpClient:     &http.Client{Timeout: defaultTimeout},
+		baseURL:             baseURL,
+		summaryModel:        summaryModel,
+		embeddingModel:      embeddingModel,
+		embeddingDimensions: embeddingDimensions,
+		httpClient:          &http.Client{Timeout: defaultTimeout},
 	}
 }
 
@@ -119,7 +125,7 @@ func (c *OllamaClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 		return nil, fmt.Errorf("decoding ollama embedding response: %w", err)
 	}
 
-	return res.Embedding, nil
+	return NormalizeAndTruncateMRL(res.Embedding, c.embeddingDimensions), nil
 }
 
 func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {

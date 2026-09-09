@@ -19,13 +19,13 @@
 * **Audiobookshelf Coexistence**: Mounts `/library` directly from the host, reading existing EPUBs and writing new uploads to `<Author>/<Title>/<Title>.epub` without touching ABS metadata.
 * **EPUB Ingestion**: Extracts Dublin Core metadata, cover images, chapter structures, and series indexes.
 * **Normalized Relational Library**: Filterable authors, genres, and series with sequence numbers.
-* **Semantic Vector Search**: Chapter-level summaries generated via external LLMs (Ollama or OpenAI-compatible) and embedded via `sqlite-vec`.
+* **Semantic Vector & Lexical Search**: Instant full-text search via SQLite FTS5 on upload, plus 256-dimension per-paragraph embeddings via `sqlite-vec` for fine-grained semantic retrieval and in-book RAG.
 * **Model Context Protocol (MCP) Server**: HTTP/SSE transport exposing `search_library`, `get_book_metadata`, and `read_chapter_content`.
 * **Flutter Client (Shelf)**: Clean cross-platform UI for browsing, uploading, and reading.
 * **Turborepo Monorepo**: All lifecycle scripts managed via pnpm and Turbo.
 
 ## 5. Non-Goals (Deferred to Post-MVP)
 * **Audiobooks**: Handled by Audiobookshelf. Shelfd focuses exclusively on ebooks.
-* **Full-text Sliding-Window Chunking**: Deferred to Phase 2 (evaluating LanceDB vs sqlite-vec at scale).
+* **Multi-Million Vector External Stores**: Deferred to Phase 2 (evaluating LanceDB vs sqlite-vec when library exceeds 500k paragraphs).
 * **Cross-device Reading State Sync & Annotations**: Deferred to Phase 2.
 * **Multi-tenant Social Features & Public Registration**: Private family self-hosting only.

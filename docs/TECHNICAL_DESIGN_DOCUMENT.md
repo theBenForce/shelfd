@@ -127,7 +127,7 @@ CREATE TABLE book_series (
 );
 CREATE INDEX idx_book_series_seq ON book_series(series_id, sequence_number);
 
--- Chapters (Text & Summaries)
+-- Chapters (Spine & Content)
 CREATE TABLE chapters (
     id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
@@ -137,11 +137,34 @@ CREATE TABLE chapters (
     content_plain TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_chapters_book ON chapters(book_id, chapter_index);
 
--- Virtual Vector Table (1536 float embeddings)
-CREATE VIRTUAL TABLE vec_chapters USING vec0(
-    chapter_id TEXT PRIMARY KEY,
-    embedding float[1536]
+-- Paragraphs (Passage Chunks)
+CREATE TABLE paragraphs (
+    id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    chapter_id TEXT NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+    chapter_index INTEGER NOT NULL,
+    start_paragraph INTEGER NOT NULL,
+    end_paragraph INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_paragraphs_book ON paragraphs(book_id);
+CREATE INDEX idx_paragraphs_chapter ON paragraphs(chapter_id, chapter_index);
+
+-- Virtual Vector Table (256 float embeddings)
+CREATE VIRTUAL TABLE vec_paragraphs USING vec0(
+    paragraph_id TEXT PRIMARY KEY,
+    embedding float[256]
+);
+
+-- Full-Text Search (FTS5)
+CREATE VIRTUAL TABLE paragraphs_fts USING fts5(
+    paragraph_id UNINDEXED,
+    book_id UNINDEXED,
+    chapter_id UNINDEXED,
+    content
 );
 ```
 
@@ -156,14 +179,14 @@ CREATE VIRTUAL TABLE vec_chapters USING vec0(
 
 ### Exposed Tools
 1. **`search_library`**:
-   * Semantic vector search across chapter summaries.
+   * Semantic vector search across 256-dimension paragraph embeddings.
    * Parameters:
      * `query` (string, required): Natural language search prompt.
      * `author` (string, optional): Author name filter.
      * `genre` (string, optional): Genre filter.
      * `series` (string, optional): Series name filter.
      * `limit` (int, default 5): Top K results.
-   * Returns: List of search hits with book title, author, chapter title, sequence, score, and summary.
+   * Returns: List of search hits with book title, author, chapter title, paragraph range (`Paragraphs 14–16`), score, and excerpt (< 100 tokens).
 2. **`get_book_metadata`**:
    * Retrieves complete book details, TOC, and all chapter summaries.
    * Parameters: `book_id` (string, required).
@@ -201,7 +224,7 @@ ai:
   base_url: "http://host.docker.internal:11434"
   api_key: ""
   embedding_model: "nomic-embed-text"
-  embedding_dimensions: 1536
+  embedding_dimensions: 256
   summary_model: "llama3.2:3b"
 
 mcp:

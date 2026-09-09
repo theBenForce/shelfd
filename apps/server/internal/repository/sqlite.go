@@ -10,6 +10,7 @@ import (
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/google/uuid"
+	"github.com/shelfd/shelfd/internal/epub"
 	"github.com/shelfd/shelfd/internal/ulid"
 )
 
@@ -679,121 +680,30 @@ func (r *SQLiteStorageEngine) GetUnindexedChapters(ctx context.Context, limit in
 }
 
 func (r *SQLiteStorageEngine) InsertChapterVector(ctx context.Context, chapterID string, embedding []float32) error {
-	blob, err := sqlite_vec.SerializeFloat32(embedding)
-	if err != nil {
-		return fmt.Errorf("serializing embedding: %w", err)
+	paras, err := r.GetParagraphsByChapterID(ctx, chapterID)
+	if err != nil || len(paras) == 0 {
+		ch, chErr := r.GetChapterByID(ctx, chapterID)
+		if chErr != nil {
+			return chErr
+		}
+		p := &Paragraph{
+			BookID:         ch.BookID,
+			ChapterID:      ch.ID,
+			ChapterIndex:   ch.ChapterIndex,
+			StartParagraph: 1,
+			EndParagraph:   1,
+			Content:        ch.ContentPlain,
+		}
+		if err := r.CreateParagraphs(ctx, []*Paragraph{p}); err != nil {
+			return err
+		}
+		paras = []*Paragraph{p}
 	}
-
-	// sqlite-vec's vec0 virtual table does not support INSERT OR REPLACE semantics
-	// and will fail with a shadow table constraint error if chapter_id exists.
-	// We explicitly delete any existing vector entry for this chapter first.
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM vec_chapters WHERE chapter_id = ?", chapterID)
-
-	query := `
-		INSERT INTO vec_chapters (chapter_id, embedding)
-		VALUES (?, ?)
-	`
-	_, err = r.db.ExecContext(ctx, query, chapterID, blob)
-	if err != nil {
-		return fmt.Errorf("inserting chapter vector: %w", err)
-	}
-	return nil
+	return r.InsertParagraphVector(ctx, paras[0].ID, embedding)
 }
 
 func (r *SQLiteStorageEngine) SearchVectorChapters(ctx context.Context, queryEmbedding []float32, filter SearchFilter) ([]*SearchHit, error) {
-	blob, err := sqlite_vec.SerializeFloat32(queryEmbedding)
-	if err != nil {
-		return nil, fmt.Errorf("serializing query embedding: %w", err)
-	}
-
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 20
-	}
-	k := limit
-	if filter.AuthorID != nil || filter.GenreID != nil || filter.SeriesID != nil {
-		if k < 100 {
-			k = 100
-		}
-	}
-
-	bookID := ""
-	if filter.BookID != nil {
-		bookID = *filter.BookID
-	}
-	authorID := ""
-	if filter.AuthorID != nil {
-		authorID = *filter.AuthorID
-	}
-	genreID := ""
-	if filter.GenreID != nil {
-		genreID = *filter.GenreID
-	}
-	seriesID := ""
-	if filter.SeriesID != nil {
-		seriesID = *filter.SeriesID
-	}
-
-	query := `
-		SELECT
-			b.id AS book_id,
-			b.title AS book_title,
-			b.cover_path AS cover_path,
-			(SELECT a.name FROM authors a JOIN book_authors ba ON a.id = ba.author_id WHERE ba.book_id = b.id LIMIT 1) AS author_name,
-			(SELECT s.name FROM series s JOIN book_series bs ON s.id = bs.series_id WHERE bs.book_id = b.id LIMIT 1) AS series_name,
-			(SELECT bs.sequence_number FROM book_series bs WHERE bs.book_id = b.id LIMIT 1) AS series_index,
-			c.id AS chapter_id,
-			c.chapter_index AS chapter_index,
-			c.title AS chapter_title,
-			c.summary AS chapter_summary,
-			vec_distance_cosine(v.embedding, ?) AS distance
-		FROM vec_chapters v
-		JOIN chapters c ON v.chapter_id = c.id
-		JOIN books b ON c.book_id = b.id
-		WHERE v.embedding MATCH ? AND k = ?
-		  AND (? = '' OR b.id = ?)
-		  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
-		  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
-		  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
-		ORDER BY distance ASC
-		LIMIT ?
-	`
-
-	rows, err := r.db.QueryContext(ctx, query,
-		blob, blob, k,
-		bookID, bookID,
-		authorID, authorID,
-		genreID, genreID,
-		seriesID, seriesID,
-		limit,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("executing vector search query: %w", err)
-	}
-	defer rows.Close()
-
-	var hits []*SearchHit
-	for rows.Next() {
-		hit := &SearchHit{}
-		if err := rows.Scan(
-			&hit.BookID,
-			&hit.BookTitle,
-			&hit.CoverPath,
-			&hit.AuthorName,
-			&hit.SeriesName,
-			&hit.SeriesIndex,
-			&hit.ChapterID,
-			&hit.ChapterIndex,
-			&hit.ChapterTitle,
-			&hit.Summary,
-			&hit.Distance,
-		); err != nil {
-			return nil, fmt.Errorf("scanning search hit: %w", err)
-		}
-		hits = append(hits, hit)
-	}
-
-	return hits, rows.Err()
+	return r.SearchVectorParagraphs(ctx, queryEmbedding, filter)
 }
 
 func (r *SQLiteStorageEngine) CountBooks(ctx context.Context, filter BookFilter) (int, error) {
@@ -1251,6 +1161,444 @@ func (r *SQLiteStorageEngine) DeleteHighlight(ctx context.Context, id string) er
 		return ErrNotFound
 	}
 	return nil
+}
+
+// --- Paragraphs & Passage Retrieval ---
+
+func (r *SQLiteStorageEngine) CreateParagraphs(ctx context.Context, paragraphs []*Paragraph) error {
+	if len(paragraphs) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("starting transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO paragraphs (id, book_id, chapter_id, chapter_index, start_paragraph, end_paragraph, content, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("preparing paragraph insert: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now().UTC()
+	for _, p := range paragraphs {
+		if p.ID == "" {
+			p.ID = ulid.New()
+		}
+		if p.CreatedAt.IsZero() {
+			p.CreatedAt = now
+		}
+		_, err := stmt.ExecContext(ctx,
+			p.ID,
+			p.BookID,
+			p.ChapterID,
+			p.ChapterIndex,
+			p.StartParagraph,
+			p.EndParagraph,
+			p.Content,
+			p.CreatedAt,
+		)
+		if err != nil {
+			return fmt.Errorf("inserting paragraph %s: %w", p.ID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing paragraphs: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) GetParagraphsByBookID(ctx context.Context, bookID string) ([]*Paragraph, error) {
+	query := `
+		SELECT id, book_id, chapter_id, chapter_index, start_paragraph, end_paragraph, content, created_at
+		FROM paragraphs
+		WHERE book_id = ?
+		ORDER BY chapter_index ASC, start_paragraph ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, bookID)
+	if err != nil {
+		return nil, fmt.Errorf("querying paragraphs by book ID: %w", err)
+	}
+	defer rows.Close()
+
+	var paras []*Paragraph
+	for rows.Next() {
+		p := &Paragraph{}
+		if err := rows.Scan(&p.ID, &p.BookID, &p.ChapterID, &p.ChapterIndex, &p.StartParagraph, &p.EndParagraph, &p.Content, &p.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning paragraph: %w", err)
+		}
+		paras = append(paras, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating paragraphs: %w", err)
+	}
+	if paras == nil {
+		paras = []*Paragraph{}
+	}
+	return paras, nil
+}
+
+func (r *SQLiteStorageEngine) GetParagraphsByChapterID(ctx context.Context, chapterID string) ([]*Paragraph, error) {
+	query := `
+		SELECT id, book_id, chapter_id, chapter_index, start_paragraph, end_paragraph, content, created_at
+		FROM paragraphs
+		WHERE chapter_id = ?
+		ORDER BY start_paragraph ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, chapterID)
+	if err != nil {
+		return nil, fmt.Errorf("querying paragraphs by chapter ID: %w", err)
+	}
+	defer rows.Close()
+
+	var paras []*Paragraph
+	for rows.Next() {
+		p := &Paragraph{}
+		if err := rows.Scan(&p.ID, &p.BookID, &p.ChapterID, &p.ChapterIndex, &p.StartParagraph, &p.EndParagraph, &p.Content, &p.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning paragraph: %w", err)
+		}
+		paras = append(paras, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating paragraphs: %w", err)
+	}
+	if paras == nil {
+		paras = []*Paragraph{}
+	}
+	return paras, nil
+}
+
+func (r *SQLiteStorageEngine) GetUnindexedParagraphs(ctx context.Context, limit int) ([]*Paragraph, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `
+		SELECT p.id, p.book_id, p.chapter_id, p.chapter_index, p.start_paragraph, p.end_paragraph, p.content, p.created_at
+		FROM paragraphs p
+		LEFT JOIN vec_paragraphs v ON p.id = v.paragraph_id
+		WHERE v.paragraph_id IS NULL
+		ORDER BY p.created_at ASC, p.chapter_index ASC, p.start_paragraph ASC
+		LIMIT ?
+	`
+	rows, err := r.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying unindexed paragraphs: %w", err)
+	}
+	defer rows.Close()
+
+	var paras []*Paragraph
+	for rows.Next() {
+		p := &Paragraph{}
+		if err := rows.Scan(&p.ID, &p.BookID, &p.ChapterID, &p.ChapterIndex, &p.StartParagraph, &p.EndParagraph, &p.Content, &p.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning unindexed paragraph: %w", err)
+		}
+		paras = append(paras, p)
+	}
+	if paras == nil {
+		paras = []*Paragraph{}
+	}
+	return paras, rows.Err()
+}
+
+func (r *SQLiteStorageEngine) DeleteParagraphsByBookID(ctx context.Context, bookID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM paragraphs WHERE book_id = ?", bookID)
+	if err != nil {
+		return fmt.Errorf("deleting paragraphs by book ID: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) InsertParagraphVector(ctx context.Context, paragraphID string, embedding []float32) error {
+	blob, err := sqlite_vec.SerializeFloat32(embedding)
+	if err != nil {
+		return fmt.Errorf("serializing embedding: %w", err)
+	}
+
+	_, _ = r.db.ExecContext(ctx, "DELETE FROM vec_paragraphs WHERE paragraph_id = ?", paragraphID)
+
+	query := `
+		INSERT INTO vec_paragraphs (paragraph_id, embedding)
+		VALUES (?, ?)
+	`
+	_, err = r.db.ExecContext(ctx, query, paragraphID, blob)
+	if err != nil {
+		return fmt.Errorf("inserting paragraph vector: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) SearchVectorParagraphs(ctx context.Context, queryEmbedding []float32, filter SearchFilter) ([]*SearchHit, error) {
+	blob, err := sqlite_vec.SerializeFloat32(queryEmbedding)
+	if err != nil {
+		return nil, fmt.Errorf("serializing query embedding: %w", err)
+	}
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	k := limit
+	if filter.AuthorID != nil || filter.GenreID != nil || filter.SeriesID != nil || filter.BookID != nil {
+		if k < 100 {
+			k = 100
+		}
+	}
+
+	bookID := ""
+	if filter.BookID != nil {
+		bookID = *filter.BookID
+	}
+	authorID := ""
+	if filter.AuthorID != nil {
+		authorID = *filter.AuthorID
+	}
+	genreID := ""
+	if filter.GenreID != nil {
+		genreID = *filter.GenreID
+	}
+	seriesID := ""
+	if filter.SeriesID != nil {
+		seriesID = *filter.SeriesID
+	}
+
+	query := `
+		SELECT
+			b.id AS book_id,
+			b.title AS book_title,
+			b.cover_path AS cover_path,
+			(SELECT a.name FROM authors a JOIN book_authors ba ON a.id = ba.author_id WHERE ba.book_id = b.id LIMIT 1) AS author_name,
+			(SELECT s.name FROM series s JOIN book_series bs ON s.id = bs.series_id WHERE bs.book_id = b.id LIMIT 1) AS series_name,
+			(SELECT bs.sequence_number FROM book_series bs WHERE bs.book_id = b.id LIMIT 1) AS series_index,
+			c.id AS chapter_id,
+			c.chapter_index AS chapter_index,
+			c.title AS chapter_title,
+			p.start_paragraph AS start_paragraph,
+			p.end_paragraph AS end_paragraph,
+			p.content AS content,
+			vec_distance_cosine(v.embedding, ?) AS distance
+		FROM vec_paragraphs v
+		JOIN paragraphs p ON v.paragraph_id = p.id
+		JOIN chapters c ON p.chapter_id = c.id
+		JOIN books b ON p.book_id = b.id
+		WHERE v.embedding MATCH ? AND k = ?
+		  AND (? = '' OR b.id = ?)
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
+		ORDER BY distance ASC
+		LIMIT ?
+	`
+
+	rows, err := r.db.QueryContext(ctx, query,
+		blob, blob, k,
+		bookID, bookID,
+		authorID, authorID,
+		genreID, genreID,
+		seriesID, seriesID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("executing vector paragraph search query: %w", err)
+	}
+	defer rows.Close()
+
+	var hits []*SearchHit
+	for rows.Next() {
+		hit := &SearchHit{}
+		if err := rows.Scan(
+			&hit.BookID,
+			&hit.BookTitle,
+			&hit.CoverPath,
+			&hit.AuthorName,
+			&hit.SeriesName,
+			&hit.SeriesIndex,
+			&hit.ChapterID,
+			&hit.ChapterIndex,
+			&hit.ChapterTitle,
+			&hit.StartParagraph,
+			&hit.EndParagraph,
+			&hit.Content,
+			&hit.Distance,
+		); err != nil {
+			return nil, fmt.Errorf("scanning search hit: %w", err)
+		}
+		hit.Summary = hit.Content
+		hits = append(hits, hit)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating search hits: %w", err)
+	}
+	if hits == nil {
+		hits = []*SearchHit{}
+	}
+	return hits, nil
+}
+
+func (r *SQLiteStorageEngine) SearchFTSParagraphs(ctx context.Context, queryText string, filter SearchFilter) ([]*SearchHit, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+
+	bookID := ""
+	if filter.BookID != nil {
+		bookID = *filter.BookID
+	}
+	authorID := ""
+	if filter.AuthorID != nil {
+		authorID = *filter.AuthorID
+	}
+	genreID := ""
+	if filter.GenreID != nil {
+		genreID = *filter.GenreID
+	}
+	seriesID := ""
+	if filter.SeriesID != nil {
+		seriesID = *filter.SeriesID
+	}
+
+	cleanQuery := strings.TrimSpace(queryText)
+	if cleanQuery == "" {
+		return []*SearchHit{}, nil
+	}
+
+	query := `
+		SELECT
+			b.id AS book_id,
+			b.title AS book_title,
+			b.cover_path AS cover_path,
+			(SELECT a.name FROM authors a JOIN book_authors ba ON a.id = ba.author_id WHERE ba.book_id = b.id LIMIT 1) AS author_name,
+			(SELECT s.name FROM series s JOIN book_series bs ON s.id = bs.series_id WHERE bs.book_id = b.id LIMIT 1) AS series_name,
+			(SELECT bs.sequence_number FROM book_series bs WHERE bs.book_id = b.id LIMIT 1) AS series_index,
+			c.id AS chapter_id,
+			c.chapter_index AS chapter_index,
+			c.title AS chapter_title,
+			p.start_paragraph AS start_paragraph,
+			p.end_paragraph AS end_paragraph,
+			p.content AS content,
+			bm25(paragraphs_fts) AS rank
+		FROM paragraphs_fts f
+		JOIN paragraphs p ON f.paragraph_id = p.id
+		JOIN chapters c ON p.chapter_id = c.id
+		JOIN books b ON p.book_id = b.id
+		WHERE paragraphs_fts MATCH ?
+		  AND (? = '' OR b.id = ?)
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
+		ORDER BY rank ASC
+		LIMIT ?
+	`
+
+	rows, err := r.db.QueryContext(ctx, query,
+		cleanQuery,
+		bookID, bookID,
+		authorID, authorID,
+		genreID, genreID,
+		seriesID, seriesID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("executing FTS paragraph search query: %w", err)
+	}
+	defer rows.Close()
+
+	var hits []*SearchHit
+	for rows.Next() {
+		hit := &SearchHit{}
+		var rank float64
+		if err := rows.Scan(
+			&hit.BookID,
+			&hit.BookTitle,
+			&hit.CoverPath,
+			&hit.AuthorName,
+			&hit.SeriesName,
+			&hit.SeriesIndex,
+			&hit.ChapterID,
+			&hit.ChapterIndex,
+			&hit.ChapterTitle,
+			&hit.StartParagraph,
+			&hit.EndParagraph,
+			&hit.Content,
+			&rank,
+		); err != nil {
+			return nil, fmt.Errorf("scanning FTS search hit: %w", err)
+		}
+		hit.Distance = rank
+		hit.Summary = hit.Content
+		hits = append(hits, hit)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating FTS search hits: %w", err)
+	}
+	if hits == nil {
+		hits = []*SearchHit{}
+	}
+	return hits, nil
+}
+
+func (r *SQLiteStorageEngine) BackfillParagraphs(ctx context.Context) (int, error) {
+	query := `
+		SELECT id, book_id, chapter_index, content_plain
+		FROM chapters
+		WHERE id NOT IN (SELECT DISTINCT chapter_id FROM paragraphs)
+		ORDER BY book_id ASC, chapter_index ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return 0, fmt.Errorf("querying unmigrated chapters: %w", err)
+	}
+	defer rows.Close()
+
+	type chInfo struct {
+		id           string
+		bookID       string
+		chapterIndex int
+		contentPlain string
+	}
+
+	var toChunk []chInfo
+	for rows.Next() {
+		var c chInfo
+		if err := rows.Scan(&c.id, &c.bookID, &c.chapterIndex, &c.contentPlain); err != nil {
+			return 0, fmt.Errorf("scanning chapter for backfill: %w", err)
+		}
+		toChunk = append(toChunk, c)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterating chapters for backfill: %w", err)
+	}
+
+	totalBackfilled := 0
+	for _, c := range toChunk {
+		chunks := epub.ChunkChapterParagraphs(c.contentPlain, 400, 1200)
+		if len(chunks) == 0 {
+			continue
+		}
+		var paras []*Paragraph
+		for _, chk := range chunks {
+			paras = append(paras, &Paragraph{
+				BookID:         c.bookID,
+				ChapterID:      c.id,
+				ChapterIndex:   c.chapterIndex,
+				StartParagraph: chk.StartParagraph,
+				EndParagraph:   chk.EndParagraph,
+				Content:        chk.Content,
+			})
+		}
+		if err := r.CreateParagraphs(ctx, paras); err != nil {
+			return totalBackfilled, fmt.Errorf("creating paragraphs for chapter %s: %w", c.id, err)
+		}
+		totalBackfilled += len(paras)
+	}
+
+	return totalBackfilled, nil
 }
 
 

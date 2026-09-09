@@ -84,7 +84,7 @@ func DefaultConfig() *Config {
 			BaseURL:             "http://host.docker.internal:11434",
 			APIKey:              "",
 			EmbeddingModel:      "nomic-embed-text",
-			EmbeddingDimensions: 1536,
+			EmbeddingDimensions: 256,
 			SummaryModel:        "llama3.2:3b",
 		},
 		MCP: MCPConfig{
@@ -180,7 +180,7 @@ func (c *Config) Validate() error {
 	}
 
 	if c.AI.EmbeddingDimensions <= 0 {
-		c.AI.EmbeddingDimensions = 1536
+		c.AI.EmbeddingDimensions = 256
 	}
 
 	// SSRF guard: reject cloud metadata IP addresses in AI base_url

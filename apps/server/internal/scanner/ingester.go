@@ -121,9 +121,10 @@ func (in *Ingester) IngestFile(ctx context.Context, fullPath, relativePath strin
 		}
 	}
 
-	// Extract and register Chapters
+	// Extract and register Chapters and Paragraphs
 	chapters, err := reader.ExtractChapters()
 	if err == nil {
+		var allParagraphs []*repository.Paragraph
 		for _, ch := range chapters {
 			chapter := &repository.Chapter{
 				BookID:       book.ID,
@@ -133,6 +134,21 @@ func (in *Ingester) IngestFile(ctx context.Context, fullPath, relativePath strin
 				ContentPlain: ch.ContentPlain,
 			}
 			_ = in.repo.CreateChapter(ctx, chapter)
+
+			chunks := epub.ChunkChapterParagraphs(ch.ContentPlain, 400, 1200)
+			for _, chk := range chunks {
+				allParagraphs = append(allParagraphs, &repository.Paragraph{
+					BookID:         book.ID,
+					ChapterID:      chapter.ID,
+					ChapterIndex:   chapter.ChapterIndex,
+					StartParagraph: chk.StartParagraph,
+					EndParagraph:   chk.EndParagraph,
+					Content:        chk.Content,
+				})
+			}
+		}
+		if len(allParagraphs) > 0 {
+			_ = in.repo.CreateParagraphs(ctx, allParagraphs)
 		}
 	}
 
@@ -211,11 +227,19 @@ func (in *Ingester) ReparseBookChapters(ctx context.Context, bookID string) erro
 		chapterMap[ch.ChapterIndex] = ch
 	}
 
+	// Delete existing paragraphs for this book so they are re-chunked and re-indexed
+	_ = in.repo.DeleteParagraphsByBookID(ctx, bookID)
+
+	var allParagraphs []*repository.Paragraph
 	for _, ch := range chapters {
+		var chapterID string
+		var chapterIndex int
 		if existing, ok := chapterMap[ch.Index]; ok {
 			if err := in.repo.UpdateChapterContent(ctx, existing.ID, ch.ContentPlain); err != nil {
 				return fmt.Errorf("updating chapter %d content: %w", ch.Index, err)
 			}
+			chapterID = existing.ID
+			chapterIndex = existing.ChapterIndex
 		} else {
 			chapter := &repository.Chapter{
 				BookID:       book.ID,
@@ -227,7 +251,24 @@ func (in *Ingester) ReparseBookChapters(ctx context.Context, bookID string) erro
 			if err := in.repo.CreateChapter(ctx, chapter); err != nil {
 				return fmt.Errorf("creating chapter %d: %w", ch.Index, err)
 			}
+			chapterID = chapter.ID
+			chapterIndex = chapter.ChapterIndex
 		}
+
+		chunks := epub.ChunkChapterParagraphs(ch.ContentPlain, 400, 1200)
+		for _, chk := range chunks {
+			allParagraphs = append(allParagraphs, &repository.Paragraph{
+				BookID:         book.ID,
+				ChapterID:      chapterID,
+				ChapterIndex:   chapterIndex,
+				StartParagraph: chk.StartParagraph,
+				EndParagraph:   chk.EndParagraph,
+				Content:        chk.Content,
+			})
+		}
+	}
+	if len(allParagraphs) > 0 {
+		_ = in.repo.CreateParagraphs(ctx, allParagraphs)
 	}
 
 	return nil

@@ -3,12 +3,38 @@ package ai
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/shelfd/shelfd/internal/config"
 )
+
+// NormalizeAndTruncateMRL truncates an embedding vector to targetDim and L2-normalizes it.
+func NormalizeAndTruncateMRL(vec []float32, targetDim int) []float32 {
+	if len(vec) == 0 {
+		return vec
+	}
+	if targetDim > 0 && len(vec) > targetDim {
+		vec = vec[:targetDim]
+	}
+
+	var sumSq float64
+	for _, v := range vec {
+		sumSq += float64(v * v)
+	}
+	if sumSq == 0 {
+		return vec
+	}
+
+	norm := float32(1.0 / math.Sqrt(sumSq))
+	res := make([]float32, len(vec))
+	for i, v := range vec {
+		res[i] = v * norm
+	}
+	return res
+}
 
 // ChatMessage represents an individual conversational message.
 type ChatMessage struct {

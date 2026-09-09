@@ -64,9 +64,9 @@ func TestEnsureVectorDimensions(t *testing.T) {
 
 	// Verify table exists and can accept 768-dim query/insert
 	var count int
-	err = db.QueryRowContext(ctx, "SELECT count(*) FROM vec_chapters").Scan(&count)
+	err = db.QueryRowContext(ctx, "SELECT count(*) FROM vec_paragraphs").Scan(&count)
 	if err != nil {
-		t.Fatalf("querying vec_chapters count: %v", err)
+		t.Fatalf("querying vec_paragraphs count: %v", err)
 	}
 	if count != 0 {
 		t.Errorf("expected 0, got %d", count)

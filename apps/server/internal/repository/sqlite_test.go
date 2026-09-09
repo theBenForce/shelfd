@@ -88,8 +88,8 @@ func TestBookCascadeDeletion(t *testing.T) {
 		t.Fatalf("failed to create chapter: %v", err)
 	}
 
-	// 5. Insert 1536-dimensional vector embedding for chapter
-	embedding := make([]float32, 1536)
+	// 5. Insert 256-dimensional vector embedding for chapter
+	embedding := make([]float32, 256)
 	for i := range embedding {
 		embedding[i] = float32(i) * 0.001
 	}
@@ -127,7 +127,7 @@ func TestBookCascadeDeletion(t *testing.T) {
 	}
 
 	var count int
-	db.QueryRowContext(ctx, "SELECT count(*) FROM vec_chapters WHERE chapter_id = ?", chapter.ID).Scan(&count)
+	db.QueryRowContext(ctx, "SELECT count(*) FROM vec_paragraphs").Scan(&count)
 	if count != 1 {
 		t.Fatalf("expected 1 vector row before delete, got %d", count)
 	}
@@ -165,10 +165,14 @@ func TestBookCascadeDeletion(t *testing.T) {
 		t.Errorf("expected 0 chapters after delete, got %d", count)
 	}
 
-	// Verify vector is cascade-cleaned up via trigger
-	db.QueryRowContext(ctx, "SELECT count(*) FROM vec_chapters WHERE chapter_id = ?", chapter.ID).Scan(&count)
+	// Verify paragraphs and vectors are cascade-cleaned up via trigger
+	db.QueryRowContext(ctx, "SELECT count(*) FROM paragraphs WHERE book_id = ?", book.ID).Scan(&count)
 	if count != 0 {
-		t.Errorf("expected 0 vec_chapters after delete, got %d", count)
+		t.Errorf("expected 0 paragraphs after delete, got %d", count)
+	}
+	db.QueryRowContext(ctx, "SELECT count(*) FROM vec_paragraphs").Scan(&count)
+	if count != 0 {
+		t.Errorf("expected 0 vec_paragraphs after delete, got %d", count)
 	}
 
 	// Verify normalized entities still exist
@@ -600,9 +604,9 @@ func TestChapterSummaryAndVectorSearch(t *testing.T) {
 	}
 
 	// 4. Test InsertChapterVector and SearchVectorChapters
-	vec1 := make([]float32, 1536)
+	vec1 := make([]float32, 256)
 	vec1[0] = 1.0 // Vector pointing along dimension 0
-	vec2 := make([]float32, 1536)
+	vec2 := make([]float32, 256)
 	vec2[1] = 1.0 // Vector pointing along dimension 1
 
 	if err := repo.InsertChapterVector(ctx, ch1.ID, vec1); err != nil {
@@ -618,7 +622,7 @@ func TestChapterSummaryAndVectorSearch(t *testing.T) {
 	}
 
 	// Search query matching vec1
-	queryVec := make([]float32, 1536)
+	queryVec := make([]float32, 256)
 	queryVec[0] = 0.95
 	queryVec[1] = 0.05
 
@@ -1047,16 +1051,16 @@ func TestSearchVectorChaptersWithBookID(t *testing.T) {
 	_ = repo.CreateChapter(ctx, ch1)
 	_ = repo.CreateChapter(ctx, ch2)
 
-	// Create dummy embeddings of 1536 dims
-	vec1 := make([]float32, 1536)
+	// Create dummy embeddings of 256 dims
+	vec1 := make([]float32, 256)
 	vec1[0] = 1.0
-	vec2 := make([]float32, 1536)
+	vec2 := make([]float32, 256)
 	vec2[0] = 0.9
 
 	_ = repo.InsertChapterVector(ctx, ch1.ID, vec1)
 	_ = repo.InsertChapterVector(ctx, ch2.ID, vec2)
 
-	queryVec := make([]float32, 1536)
+	queryVec := make([]float32, 256)
 	queryVec[0] = 1.0
 
 	// Filter with BookID = b1.ID
@@ -1075,5 +1079,169 @@ func TestSearchVectorChaptersWithBookID(t *testing.T) {
 	}
 }
 
+func TestParagraphStorageAndSearch(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupTestDB(t)
+	defer repo.Close()
 
+	b := &repository.Book{
+		ID:       "book-p1",
+		Title:    "Neuromancer",
+		FilePath: "neuromancer.epub",
+	}
+	if err := repo.CreateBook(ctx, b); err != nil {
+		t.Fatalf("create book: %v", err)
+	}
 
+	ch := &repository.Chapter{
+		ID:           "ch-p1",
+		BookID:       b.ID,
+		ChapterIndex: 1,
+		Summary:      "Chiba City Blues",
+		ContentPlain: "The sky above the port was the color of television, tuned to a dead channel.",
+	}
+	if err := repo.CreateChapter(ctx, ch); err != nil {
+		t.Fatalf("create chapter: %v", err)
+	}
+
+	// 1. Create paragraphs
+	paras := []*repository.Paragraph{
+		{
+			BookID:         b.ID,
+			ChapterID:      ch.ID,
+			ChapterIndex:   1,
+			StartParagraph: 1,
+			EndParagraph:   1,
+			Content:        "The sky above the port was the color of television, tuned to a dead channel.",
+		},
+		{
+			BookID:         b.ID,
+			ChapterID:      ch.ID,
+			ChapterIndex:   1,
+			StartParagraph: 2,
+			EndParagraph:   2,
+			Content:        "It was a cool night in Chiba City. Case was drinking at the Chatsubo bar.",
+		},
+	}
+	if err := repo.CreateParagraphs(ctx, paras); err != nil {
+		t.Fatalf("create paragraphs: %v", err)
+	}
+
+	// 2. Verify GetParagraphsByChapterID
+	fetchedParas, err := repo.GetParagraphsByChapterID(ctx, ch.ID)
+	if err != nil {
+		t.Fatalf("get paragraphs by chapter: %v", err)
+	}
+	if len(fetchedParas) != 2 {
+		t.Fatalf("expected 2 paragraphs, got %d", len(fetchedParas))
+	}
+
+	// 3. Verify GetUnindexedParagraphs
+	unindexed, err := repo.GetUnindexedParagraphs(ctx, 10)
+	if err != nil {
+		t.Fatalf("get unindexed paragraphs: %v", err)
+	}
+	if len(unindexed) != 2 {
+		t.Fatalf("expected 2 unindexed paragraphs, got %d", len(unindexed))
+	}
+
+	// 4. Insert vector for first paragraph
+	vec := make([]float32, 256)
+	vec[0] = 1.0
+	if err := repo.InsertParagraphVector(ctx, fetchedParas[0].ID, vec); err != nil {
+		t.Fatalf("insert paragraph vector: %v", err)
+	}
+
+	// Now only 1 unindexed paragraph should remain
+	unindexedAfter, err := repo.GetUnindexedParagraphs(ctx, 10)
+	if err != nil {
+		t.Fatalf("get unindexed paragraphs after index: %v", err)
+	}
+	if len(unindexedAfter) != 1 {
+		t.Fatalf("expected 1 unindexed paragraph, got %d", len(unindexedAfter))
+	}
+	if unindexedAfter[0].ID != fetchedParas[1].ID {
+		t.Errorf("expected paragraph 2 to be unindexed, got %s", unindexedAfter[0].ID)
+	}
+
+	// 5. Test SearchVectorParagraphs
+	queryVec := make([]float32, 256)
+	queryVec[0] = 1.0
+	vecHits, err := repo.SearchVectorParagraphs(ctx, queryVec, repository.SearchFilter{Limit: 5})
+	if err != nil {
+		t.Fatalf("search vector paragraphs: %v", err)
+	}
+	if len(vecHits) != 1 {
+		t.Fatalf("expected 1 vector hit, got %d", len(vecHits))
+	}
+	if vecHits[0].Content != paras[0].Content {
+		t.Errorf("expected hit content %q, got %q", paras[0].Content, vecHits[0].Content)
+	}
+	if vecHits[0].BookTitle != "Neuromancer" {
+		t.Errorf("expected book title Neuromancer, got %s", vecHits[0].BookTitle)
+	}
+
+	// 6. Test SearchFTSParagraphs
+	ftsHits, err := repo.SearchFTSParagraphs(ctx, "Chatsubo", repository.SearchFilter{Limit: 5})
+	if err != nil {
+		t.Fatalf("search FTS paragraphs: %v", err)
+	}
+	if len(ftsHits) != 1 {
+		t.Fatalf("expected 1 FTS hit for Chatsubo, got %d", len(ftsHits))
+	}
+	if ftsHits[0].Content != paras[1].Content {
+		t.Errorf("expected hit content %q, got %q", paras[1].Content, ftsHits[0].Content)
+	}
+}
+
+func TestBackfillParagraphs(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupTestDB(t)
+	defer repo.Close()
+
+	b := &repository.Book{
+		ID:       "book-bf1",
+		Title:    "Snow Crash",
+		FilePath: "snowcrash.epub",
+	}
+	if err := repo.CreateBook(ctx, b); err != nil {
+		t.Fatalf("create book: %v", err)
+	}
+
+	content := "The Deliverator belongs to an elite order.\n\nHis car has enough potential energy packed into its batteries to fire a pound of bacon into the Asteroid Belt."
+	ch := &repository.Chapter{
+		ID:           "ch-bf1",
+		BookID:       b.ID,
+		ChapterIndex: 1,
+		ContentPlain: content,
+	}
+	if err := repo.CreateChapter(ctx, ch); err != nil {
+		t.Fatalf("create chapter: %v", err)
+	}
+
+	// Run backfill
+	count, err := repo.BackfillParagraphs(ctx)
+	if err != nil {
+		t.Fatalf("backfill paragraphs: %v", err)
+	}
+	if count == 0 {
+		t.Fatalf("expected at least 1 backfilled paragraph, got 0")
+	}
+
+	paras, err := repo.GetParagraphsByChapterID(ctx, ch.ID)
+	if err != nil {
+		t.Fatalf("get paragraphs after backfill: %v", err)
+	}
+	if len(paras) != count {
+		t.Errorf("expected %d paragraphs, got %d", count, len(paras))
+	}
+
+	// Running backfill again should process 0 chapters
+	count2, err := repo.BackfillParagraphs(ctx)
+	if err != nil {
+		t.Fatalf("backfill paragraphs second time: %v", err)
+	}
+	if count2 != 0 {
+		t.Errorf("expected 0 backfilled paragraphs second time, got %d", count2)
+	}
+}

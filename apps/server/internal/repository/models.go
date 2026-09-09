@@ -112,19 +112,34 @@ type BookFilter struct {
 	Offset   int
 }
 
-// SearchHit represents a semantic vector search result across chapter summaries.
+// Paragraph represents a consolidated text passage within a chapter.
+type Paragraph struct {
+	ID             string    `json:"id"`
+	BookID         string    `json:"book_id"`
+	ChapterID      string    `json:"chapter_id"`
+	ChapterIndex   int       `json:"chapter_index"`
+	StartParagraph int       `json:"start_paragraph"`
+	EndParagraph   int       `json:"end_paragraph"`
+	Content        string    `json:"content"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// SearchHit represents a vector or full-text search result across paragraphs.
 type SearchHit struct {
-	BookID       string   `json:"book_id"`
-	BookTitle    string   `json:"book_title"`
-	CoverPath    *string  `json:"cover_path,omitempty"`
-	AuthorName   *string  `json:"author_name,omitempty"`
-	SeriesName   *string  `json:"series_name,omitempty"`
-	SeriesIndex  *float64 `json:"series_index,omitempty"`
-	ChapterID    string   `json:"chapter_id"`
-	ChapterIndex int      `json:"chapter_index"`
-	ChapterTitle *string  `json:"chapter_title,omitempty"`
-	Summary      string   `json:"summary"`
-	Distance     float64  `json:"distance"`
+	BookID         string   `json:"book_id"`
+	BookTitle      string   `json:"book_title"`
+	CoverPath      *string  `json:"cover_path,omitempty"`
+	AuthorName     *string  `json:"author_name,omitempty"`
+	SeriesName     *string  `json:"series_name,omitempty"`
+	SeriesIndex    *float64 `json:"series_index,omitempty"`
+	ChapterID      string   `json:"chapter_id"`
+	ChapterIndex   int      `json:"chapter_index"`
+	ChapterTitle   *string  `json:"chapter_title,omitempty"`
+	StartParagraph int      `json:"start_paragraph,omitempty"`
+	EndParagraph   int      `json:"end_paragraph,omitempty"`
+	Content        string   `json:"content,omitempty"`
+	Summary        string   `json:"summary"` // Maintained for backward compatibility
+	Distance       float64  `json:"distance"`
 }
 
 // SearchFilter specifies filters applied in conjunction with vector search.

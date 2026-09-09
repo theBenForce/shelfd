@@ -75,10 +75,13 @@ type BookDetailResponse struct {
 }
 
 type BookCitation struct {
-	ChapterID    string  `json:"chapter_id"`
-	ChapterIndex int     `json:"chapter_index"`
-	ChapterTitle *string `json:"chapter_title,omitempty"`
-	Summary      string  `json:"summary"`
+	ChapterID      string  `json:"chapter_id"`
+	ChapterIndex   int     `json:"chapter_index"`
+	ChapterTitle   *string `json:"chapter_title,omitempty"`
+	StartParagraph int     `json:"start_paragraph,omitempty"`
+	EndParagraph   int     `json:"end_paragraph,omitempty"`
+	Excerpt        string  `json:"excerpt,omitempty"`
+	Summary        string  `json:"summary"`
 }
 
 type BookChatRequest struct {
@@ -587,12 +590,12 @@ func (h *BookHandler) ChatBook(w http.ResponseWriter, r *http.Request) {
 	var citations []BookCitation
 	var contextBuilder strings.Builder
 
-	// RAG: 1. Generate query embedding and search chapters scoped to bookID
+	// RAG: 1. Generate query embedding and search paragraphs scoped to bookID
 	queryEmbedding, err := h.aiClient.GenerateEmbedding(r.Context(), message)
 	if err == nil && len(queryEmbedding) > 0 {
-		hits, err := h.repo.SearchVectorChapters(r.Context(), queryEmbedding, repository.SearchFilter{
+		hits, err := h.repo.SearchVectorParagraphs(r.Context(), queryEmbedding, repository.SearchFilter{
 			BookID: &bookID,
-			Limit:  3,
+			Limit:  5,
 		})
 		if err == nil && len(hits) > 0 {
 			for _, hit := range hits {
@@ -600,18 +603,47 @@ func (h *BookHandler) ChatBook(w http.ResponseWriter, r *http.Request) {
 				if hit.ChapterTitle != nil && *hit.ChapterTitle != "" {
 					chTitle = fmt.Sprintf("Chapter %d: %s", hit.ChapterIndex, *hit.ChapterTitle)
 				}
-				contextBuilder.WriteString(fmt.Sprintf("[%s]\n%s\n\n", chTitle, hit.Summary))
+				contextBuilder.WriteString(fmt.Sprintf("[%s (Paragraphs %d-%d)]\n%s\n\n", chTitle, hit.StartParagraph, hit.EndParagraph, hit.Content))
 				citations = append(citations, BookCitation{
-					ChapterID:    hit.ChapterID,
-					ChapterIndex: hit.ChapterIndex,
-					ChapterTitle: hit.ChapterTitle,
-					Summary:      hit.Summary,
+					ChapterID:      hit.ChapterID,
+					ChapterIndex:   hit.ChapterIndex,
+					ChapterTitle:   hit.ChapterTitle,
+					StartParagraph: hit.StartParagraph,
+					EndParagraph:   hit.EndParagraph,
+					Excerpt:        hit.Content,
+					Summary:        hit.Content,
 				})
 			}
 		}
 	}
 
-	// Fallback if vector search yielded no chapters (e.g. still indexing)
+	// 2. Fallback to FTS5 search across paragraphs if vector search yielded no hits
+	if len(citations) == 0 {
+		ftsHits, err := h.repo.SearchFTSParagraphs(r.Context(), message, repository.SearchFilter{
+			BookID: &bookID,
+			Limit:  5,
+		})
+		if err == nil && len(ftsHits) > 0 {
+			for _, hit := range ftsHits {
+				chTitle := fmt.Sprintf("Chapter %d", hit.ChapterIndex)
+				if hit.ChapterTitle != nil && *hit.ChapterTitle != "" {
+					chTitle = fmt.Sprintf("Chapter %d: %s", hit.ChapterIndex, *hit.ChapterTitle)
+				}
+				contextBuilder.WriteString(fmt.Sprintf("[%s (Paragraphs %d-%d)]\n%s\n\n", chTitle, hit.StartParagraph, hit.EndParagraph, hit.Content))
+				citations = append(citations, BookCitation{
+					ChapterID:      hit.ChapterID,
+					ChapterIndex:   hit.ChapterIndex,
+					ChapterTitle:   hit.ChapterTitle,
+					StartParagraph: hit.StartParagraph,
+					EndParagraph:   hit.EndParagraph,
+					Excerpt:        hit.Content,
+					Summary:        hit.Content,
+				})
+			}
+		}
+	}
+
+	// 3. Fallback to chapter summaries if still empty (e.g. legacy un-chunked book)
 	if len(citations) == 0 {
 		chapters, _ := h.repo.GetChaptersByBookID(r.Context(), bookID)
 		for i, c := range chapters {
@@ -628,6 +660,7 @@ func (h *BookHandler) ChatBook(w http.ResponseWriter, r *http.Request) {
 					ChapterID:    c.ID,
 					ChapterIndex: c.ChapterIndex,
 					ChapterTitle: c.Title,
+					Excerpt:      c.Summary,
 					Summary:      c.Summary,
 				})
 			}
@@ -873,7 +906,7 @@ func (h *BookHandler) SearchLibrary(w http.ResponseWriter, r *http.Request) {
 	filter := repository.SearchFilter{
 		Limit: limit,
 	}
-	hits, err := h.repo.SearchVectorChapters(r.Context(), queryEmbedding, filter)
+	hits, err := h.repo.SearchVectorParagraphs(r.Context(), queryEmbedding, filter)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Vector search failed: %v", err))
 		return

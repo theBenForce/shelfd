@@ -19,3 +19,5 @@ This directory contains the architectural decision records (ADRs) for `shelfd`, 
 | [ADR-0011](0011-asynchronous-upload-processing-queue.md) | Asynchronous Upload Processing Queue | Accepted | 2026-09-07 |
 | [ADR-0012](0012-spine-manifest-and-ulid-chapter-identifiers.md) | Spine Manifest & ULID Chapter Identifiers | Accepted | 2026-09-08 |
 | [ADR-0013](0013-book-details-page-and-rag-chat.md) | Book Details Page & In-Book RAG Chat | Accepted | 2026-09-08 |
+| [ADR-0014](0014-per-paragraph-embeddings-and-fts5-retrieval.md) | Per-Paragraph 256-Dimension Vector Embeddings & SQLite FTS5 Retrieval | Accepted | 2026-09-08 |
+

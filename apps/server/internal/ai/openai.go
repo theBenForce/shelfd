@@ -14,11 +14,12 @@ import (
 
 // OpenAIClient communicates with an OpenAI-compatible endpoint.
 type OpenAIClient struct {
-	baseURL        string
-	apiKey         string
-	summaryModel   string
-	embeddingModel string
-	httpClient     *http.Client
+	baseURL             string
+	apiKey              string
+	summaryModel        string
+	embeddingModel      string
+	embeddingDimensions int
+	httpClient          *http.Client
 }
 
 // NewOpenAIClient creates an OpenAI-compatible client instance.
@@ -36,13 +37,18 @@ func NewOpenAIClient(cfg *config.AIConfig) *OpenAIClient {
 	if embeddingModel == "" {
 		embeddingModel = "text-embedding-3-small"
 	}
+	embeddingDimensions := cfg.EmbeddingDimensions
+	if embeddingDimensions <= 0 {
+		embeddingDimensions = 256
+	}
 
 	return &OpenAIClient{
-		baseURL:        baseURL,
-		apiKey:         cfg.APIKey,
-		summaryModel:   summaryModel,
-		embeddingModel: embeddingModel,
-		httpClient:     &http.Client{Timeout: defaultTimeout},
+		baseURL:             baseURL,
+		apiKey:              cfg.APIKey,
+		summaryModel:        summaryModel,
+		embeddingModel:      embeddingModel,
+		embeddingDimensions: embeddingDimensions,
+		httpClient:          &http.Client{Timeout: defaultTimeout},
 	}
 }
 
@@ -111,6 +117,9 @@ func (c *OpenAIClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 		"model": c.embeddingModel,
 		"input": text,
 	}
+	if c.embeddingDimensions > 0 {
+		payload["dimensions"] = c.embeddingDimensions
+	}
 
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -150,7 +159,7 @@ func (c *OpenAIClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 		return nil, fmt.Errorf("no embedding data returned by openai")
 	}
 
-	return res.Data[0].Embedding, nil
+	return NormalizeAndTruncateMRL(res.Data[0].Embedding, c.embeddingDimensions), nil
 }
 
 func (c *OpenAIClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {

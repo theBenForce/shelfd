@@ -46,7 +46,7 @@ func (m *mockAIClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 	if m.embeddingErr != nil {
 		return nil, m.embeddingErr
 	}
-	vec := make([]float32, 1536)
+	vec := make([]float32, 256)
 	vec[0] = 1.0
 	return vec, nil
 }
@@ -214,7 +214,19 @@ func TestWorker_ProcessBatch_AiErrors(t *testing.T) {
 		t.Fatalf("expected 0 processed due to error, got %d", count)
 	}
 
-	// 2. Embedding error
+	// 2. Embedding error on paragraph
+	para := &repository.Paragraph{
+		BookID:         book.ID,
+		ChapterID:      ch.ID,
+		ChapterIndex:   1,
+		StartParagraph: 1,
+		EndParagraph:   1,
+		Content:        "Testing paragraph embedding error handling.",
+	}
+	if err := repo.CreateParagraphs(ctx, []*repository.Paragraph{para}); err != nil {
+		t.Fatalf("create paragraph: %v", err)
+	}
+
 	aiMock.summaryErr = nil
 	aiMock.embeddingErr = errors.New("upstream embedding failed")
 	count, err = w.ProcessBatch(ctx)
@@ -279,4 +291,64 @@ func TestWorker_BackgroundTriggerAndStop(t *testing.T) {
 	}
 
 	w.Stop()
+}
+
+func TestWorker_ProcessParagraphs(t *testing.T) {
+	ctx := context.Background()
+	db, repo := setupTestDB(t)
+	defer db.Close()
+	defer repo.Close()
+
+	book := &repository.Book{
+		Title:    "Neuromancer",
+		FilePath: "William Gibson/Neuromancer/Neuromancer.epub",
+	}
+	if err := repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("create book: %v", err)
+	}
+
+	ch := &repository.Chapter{
+		BookID:       book.ID,
+		ChapterIndex: 1,
+		ContentPlain: "The sky above the port was the color of television, tuned to a dead channel.",
+	}
+	if err := repo.CreateChapter(ctx, ch); err != nil {
+		t.Fatalf("create chapter: %v", err)
+	}
+
+	para := &repository.Paragraph{
+		BookID:         book.ID,
+		ChapterID:      ch.ID,
+		ChapterIndex:   1,
+		StartParagraph: 1,
+		EndParagraph:   1,
+		Content:        ch.ContentPlain,
+	}
+	if err := repo.CreateParagraphs(ctx, []*repository.Paragraph{para}); err != nil {
+		t.Fatalf("create paragraph: %v", err)
+	}
+
+	aiMock := &mockAIClient{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w := worker.NewWorker(repo, aiMock, worker.Config{
+		BatchSize: 10,
+		Logger:    logger,
+	})
+
+	n, err := w.ProcessBatch(ctx)
+	if err != nil {
+		t.Fatalf("ProcessBatch error: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 processed paragraph, got %d", n)
+	}
+
+	// Verify paragraph is indexed in vec_paragraphs
+	unindexed, err := repo.GetUnindexedParagraphs(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetUnindexedParagraphs error: %v", err)
+	}
+	if len(unindexed) != 0 {
+		t.Errorf("expected 0 unindexed paragraphs, got %d", len(unindexed))
+	}
 }

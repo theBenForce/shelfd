@@ -112,7 +112,7 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 		}, nil
 	}
 
-	hits, err := te.repo.SearchVectorChapters(ctx, queryEmbedding, filter)
+	hits, err := te.repo.SearchVectorParagraphs(ctx, queryEmbedding, filter)
 	if err != nil {
 		return &CallToolResult{
 			IsError: true,
@@ -122,12 +122,12 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 
 	if len(hits) == 0 {
 		return &CallToolResult{
-			Content: []ContentItem{{Type: "text", Text: "No matching chapters found."}},
+			Content: []ContentItem{{Type: "text", Text: "No matching passages found."}},
 		}, nil
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Found %d relevant chapter(s):\n\n", len(hits)))
+	sb.WriteString(fmt.Sprintf("Found %d relevant passage(s):\n\n", len(hits)))
 
 	for i, hit := range hits {
 		author := "Unknown"
@@ -140,13 +140,16 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 		}
 
 		// Enforce Level-of-Detail limit (< 100 tokens / ~400 characters)
-		summary := hit.Summary
-		if len(summary) > 400 {
-			cutoff := strings.LastIndex(summary[:400], " ")
+		excerpt := hit.Content
+		if excerpt == "" {
+			excerpt = hit.Summary
+		}
+		if len(excerpt) > 400 {
+			cutoff := strings.LastIndex(excerpt[:400], " ")
 			if cutoff > 250 {
-				summary = summary[:cutoff] + "..."
+				excerpt = excerpt[:cutoff] + "..."
 			} else {
-				summary = summary[:400] + "..."
+				excerpt = excerpt[:400] + "..."
 			}
 		}
 
@@ -160,9 +163,13 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 			}
 		}
 		sb.WriteString(fmt.Sprintf("   Section: %s (Chapter ID: `%s`)\n", chTitle, hit.ChapterID))
+		if hit.StartParagraph > 0 {
+			sb.WriteString(fmt.Sprintf("   Passage: Paragraphs %d–%d\n", hit.StartParagraph, hit.EndParagraph))
+		}
 		sb.WriteString(fmt.Sprintf("   Cosine Distance: %.4f\n", hit.Distance))
-		sb.WriteString(fmt.Sprintf("   Summary: %s\n\n", summary))
+		sb.WriteString(fmt.Sprintf("   Excerpt: %s\n\n", excerpt))
 	}
+	sb.WriteString("(Tip: Call read_chapter_content with book_id, chapter_index, start_paragraph, and end_paragraph to read full context.)")
 
 	return &CallToolResult{
 		Content: []ContentItem{{Type: "text", Text: strings.TrimSpace(sb.String())}},

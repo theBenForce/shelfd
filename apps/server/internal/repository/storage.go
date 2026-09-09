@@ -51,9 +51,20 @@ type StorageEngine interface {
 	UpdateChapterContent(ctx context.Context, chapterID string, contentPlain string) error
 	GetUnindexedChapters(ctx context.Context, limit int) ([]*Chapter, error)
 
-	// Vectors
+	// Paragraphs
+	CreateParagraphs(ctx context.Context, paragraphs []*Paragraph) error
+	GetParagraphsByBookID(ctx context.Context, bookID string) ([]*Paragraph, error)
+	GetParagraphsByChapterID(ctx context.Context, chapterID string) ([]*Paragraph, error)
+	GetUnindexedParagraphs(ctx context.Context, limit int) ([]*Paragraph, error)
+	DeleteParagraphsByBookID(ctx context.Context, bookID string) error
+	BackfillParagraphs(ctx context.Context) (int, error)
+
+	// Vectors & Full-Text Search
 	InsertChapterVector(ctx context.Context, chapterID string, embedding []float32) error
 	SearchVectorChapters(ctx context.Context, queryEmbedding []float32, filter SearchFilter) ([]*SearchHit, error)
+	InsertParagraphVector(ctx context.Context, paragraphID string, embedding []float32) error
+	SearchVectorParagraphs(ctx context.Context, queryEmbedding []float32, filter SearchFilter) ([]*SearchHit, error)
+	SearchFTSParagraphs(ctx context.Context, query string, filter SearchFilter) ([]*SearchHit, error)
 
 	// Users & Tokens
 	CreateUser(ctx context.Context, user *User) error

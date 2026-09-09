@@ -16,6 +16,7 @@ RUN go mod download
 # Copy server source code and compile with Cgo
 COPY apps/server ./
 RUN CGO_ENABLED=1 GOOS=linux go build \
+    -tags sqlite_fts5 \
     -ldflags="-s -w -X main.Version=0.1.0" \
     -o /out/shelfd \
     ./cmd/server

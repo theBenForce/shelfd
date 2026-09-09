@@ -119,9 +119,57 @@ func (w *Worker) broadcast() {
 	}
 }
 
-// ProcessBatch fetches a batch of unindexed chapters, generates summaries and embeddings, and persists them.
-// Returns the number of successfully indexed chapters.
+// ProcessBatch fetches a batch of unindexed items and persists embeddings or summaries.
+// It prioritizes embedding unindexed paragraphs (for fast vector search),
+// and secondarily generates chapter summaries when paragraphs are indexed.
 func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
+	// 1. Process unindexed paragraphs first (fast vector embedding)
+	unindexedParas, err := w.repo.GetUnindexedParagraphs(ctx, w.batchSize)
+	if err == nil && len(unindexedParas) > 0 {
+		defer func() {
+			w.statusMu.Lock()
+			w.isBusy = false
+			w.currentBook = ""
+			w.currentChapter = ""
+			w.statusMu.Unlock()
+			w.broadcast()
+		}()
+
+		processed := 0
+		for _, p := range unindexedParas {
+			if err := ctx.Err(); err != nil {
+				return processed, err
+			}
+
+			w.statusMu.Lock()
+			w.isBusy = true
+			w.currentBook = p.BookID
+			w.currentChapter = fmt.Sprintf("Chapter %d (p.%d-%d)", p.ChapterIndex, p.StartParagraph, p.EndParagraph)
+			w.statusMu.Unlock()
+			w.broadcast()
+
+			embedding, err := w.aiClient.GenerateEmbedding(ctx, p.Content)
+			if err != nil {
+				w.logger.Error("failed to generate embedding for paragraph", "paragraph_id", p.ID, "error", err)
+				continue
+			}
+
+			if err := w.repo.InsertParagraphVector(ctx, p.ID, embedding); err != nil {
+				w.logger.Error("failed to insert paragraph vector", "paragraph_id", p.ID, "error", err)
+				continue
+			}
+
+			w.statusMu.Lock()
+			w.lastProcessed = time.Now()
+			w.statusMu.Unlock()
+			w.broadcast()
+
+			processed++
+		}
+		return processed, nil
+	}
+
+	// 2. Process unindexed chapters (generative summarization)
 	chapters, err := w.repo.GetUnindexedChapters(ctx, w.batchSize)
 	if err != nil {
 		return 0, fmt.Errorf("getting unindexed chapters: %w", err)
@@ -183,17 +231,6 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 
 		if err := w.repo.UpdateChapterSummary(ctx, ch.ID, summary); err != nil {
 			w.logger.Error("failed to update chapter summary", "chapter_id", ch.ID, "error", err)
-			continue
-		}
-
-		embedding, err := w.aiClient.GenerateEmbedding(ctx, summary)
-		if err != nil {
-			w.logger.Error("failed to generate embedding for chapter summary", "chapter_id", ch.ID, "error", err)
-			continue
-		}
-
-		if err := w.repo.InsertChapterVector(ctx, ch.ID, embedding); err != nil {
-			w.logger.Error("failed to insert chapter vector", "chapter_id", ch.ID, "error", err)
 			continue
 		}
 

@@ -47,7 +47,7 @@ func (m *mockAIClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 	if len(m.embeddingVec) > 0 {
 		return m.embeddingVec, nil
 	}
-	vec := make([]float32, 1536)
+	vec := make([]float32, 256)
 	vec[0] = 1.0
 	return vec, nil
 }
@@ -288,7 +288,7 @@ func TestMCPServer_ToolCall_SearchLibrary(t *testing.T) {
 	repo.CreateChapter(ctx, ch)
 
 	// Insert vector matching mock AI client embedding (dimension 0 = 1.0)
-	vec := make([]float32, 1536)
+	vec := make([]float32, 256)
 	vec[0] = 1.0
 	repo.InsertChapterVector(ctx, ch.ID, vec)
 

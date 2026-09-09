@@ -51,34 +51,34 @@ func OpenSQLite(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-// EnsureVectorDimensions dynamically ensures the vec_chapters virtual table matches the configured vector dimensions.
+// EnsureVectorDimensions dynamically ensures the vec_paragraphs virtual table matches the configured vector dimensions.
 // If the table is empty or uninitialized, it recreates it with the target dimension.
 func EnsureVectorDimensions(ctx context.Context, db *sql.DB, dimensions int) error {
 	if dimensions <= 0 {
-		dimensions = 1536
+		dimensions = 256
 	}
 
 	var count int
-	err := db.QueryRowContext(ctx, "SELECT count(*) FROM vec_chapters").Scan(&count)
+	err := db.QueryRowContext(ctx, "SELECT count(*) FROM vec_paragraphs").Scan(&count)
 	if err == nil && count > 0 {
 		// Existing vector data exists; preserve populated table
 		return nil
 	}
 
-	_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS vec_chapters;")
-	query := fmt.Sprintf("CREATE VIRTUAL TABLE IF NOT EXISTS vec_chapters USING vec0(chapter_id TEXT PRIMARY KEY, embedding float[%d]);", dimensions)
+	_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS vec_paragraphs;")
+	query := fmt.Sprintf("CREATE VIRTUAL TABLE IF NOT EXISTS vec_paragraphs USING vec0(paragraph_id TEXT PRIMARY KEY, embedding float[%d]);", dimensions)
 	if _, err := db.ExecContext(ctx, query); err != nil {
-		return fmt.Errorf("creating vec_chapters virtual table with %d dimensions: %w", dimensions, err)
+		return fmt.Errorf("creating vec_paragraphs virtual table with %d dimensions: %w", dimensions, err)
 	}
 
 	triggerQuery := `
-		CREATE TRIGGER IF NOT EXISTS trg_delete_chapter_vec AFTER DELETE ON chapters
+		CREATE TRIGGER IF NOT EXISTS trg_delete_paragraph_vec AFTER DELETE ON paragraphs
 		BEGIN
-			DELETE FROM vec_chapters WHERE chapter_id = OLD.id;
+			DELETE FROM vec_paragraphs WHERE paragraph_id = OLD.id;
 		END;
 	`
 	if _, err := db.ExecContext(ctx, triggerQuery); err != nil {
-		return fmt.Errorf("creating trg_delete_chapter_vec trigger: %w", err)
+		return fmt.Errorf("creating trg_delete_paragraph_vec trigger: %w", err)
 	}
 
 	return nil

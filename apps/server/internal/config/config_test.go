@@ -23,8 +23,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Storage.LibraryDir != "/library" {
 		t.Errorf("expected /library, got %s", cfg.Storage.LibraryDir)
 	}
-	if cfg.AI.EmbeddingDimensions != 1536 {
-		t.Errorf("expected 1536, got %d", cfg.AI.EmbeddingDimensions)
+	if cfg.AI.EmbeddingDimensions != 256 {
+		t.Errorf("expected 256, got %d", cfg.AI.EmbeddingDimensions)
 	}
 }
 

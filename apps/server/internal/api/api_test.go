@@ -56,7 +56,7 @@ func (m *mockAIClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 	if len(m.embedResp) > 0 {
 		return m.embedResp, nil
 	}
-	vec := make([]float32, 768)
+	vec := make([]float32, 256)
 	vec[0] = 0.1
 	return vec, nil
 }

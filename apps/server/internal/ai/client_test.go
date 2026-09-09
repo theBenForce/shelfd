@@ -94,8 +94,15 @@ func TestOllamaClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateEmbedding error: %v", err)
 	}
-	if len(embedding) != 4 || embedding[0] != 0.1 {
-		t.Errorf("unexpected embedding: %v", embedding)
+	if len(embedding) != 4 {
+		t.Errorf("expected 4 elements, got %d: %v", len(embedding), embedding)
+	}
+	var normSq float32
+	for _, v := range embedding {
+		normSq += v * v
+	}
+	if normSq < 0.99 || normSq > 1.01 {
+		t.Errorf("expected unit L2 norm ~1.0, got %f", normSq)
 	}
 
 	reply, err := client.Chat(ctx, []ai.ChatMessage{{Role: "user", Content: "What was Paul's test?"}})
@@ -185,8 +192,15 @@ func TestOpenAIClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateEmbedding error: %v", err)
 	}
-	if len(embedding) != 4 || embedding[0] != 0.5 {
-		t.Errorf("unexpected embedding: %v", embedding)
+	if len(embedding) != 4 {
+		t.Errorf("expected 4 elements, got %d: %v", len(embedding), embedding)
+	}
+	var normSq float32
+	for _, v := range embedding {
+		normSq += v * v
+	}
+	if normSq < 0.99 || normSq > 1.01 {
+		t.Errorf("expected unit L2 norm ~1.0, got %f", normSq)
 	}
 
 	reply, err := client.Chat(ctx, []ai.ChatMessage{{Role: "user", Content: "Who hired Case?"}})
@@ -209,5 +223,34 @@ func TestSSRFBlocking(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "prohibited cloud metadata address") {
 		t.Errorf("expected SSRF error message, got: %v", err)
+	}
+}
+
+func TestNormalizeAndTruncateMRL(t *testing.T) {
+	// Truncate from 6 to 3 and normalize
+	input := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0}
+	res := ai.NormalizeAndTruncateMRL(input, 3)
+	if len(res) != 3 {
+		t.Fatalf("expected length 3, got %d", len(res))
+	}
+	var sumSq float32
+	for _, v := range res {
+		sumSq += v * v
+	}
+	if sumSq < 0.99 || sumSq > 1.01 {
+		t.Errorf("expected unit L2 norm ~1.0, got %f", sumSq)
+	}
+
+	// Empty vector
+	empty := ai.NormalizeAndTruncateMRL(nil, 4)
+	if len(empty) != 0 {
+		t.Errorf("expected empty vector, got %v", empty)
+	}
+
+	// All zeros
+	zeros := []float32{0, 0, 0}
+	zeroRes := ai.NormalizeAndTruncateMRL(zeros, 3)
+	if len(zeroRes) != 3 {
+		t.Errorf("expected length 3, got %d", len(zeroRes))
 	}
 }
