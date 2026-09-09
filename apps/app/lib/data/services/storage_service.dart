@@ -53,12 +53,36 @@ class StorageService {
   }
 
   // Offline chapter caching
+  Map<String, dynamic>? getCachedChapterData(String bookId, dynamic chapterIdentifier) {
+    final raw = _prefs.getString('$_prefixChapter${bookId}_$chapterIdentifier');
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   String? getCachedChapter(String bookId, dynamic chapterIdentifier) {
-    return _prefs.getString('$_prefixChapter${bookId}_$chapterIdentifier');
+    final raw = _prefs.getString('$_prefixChapter${bookId}_$chapterIdentifier');
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return (decoded['content_plain'] ?? decoded['content']) as String?;
+      }
+    } catch (_) {}
+    return raw;
   }
 
   Future<void> cacheChapter(String bookId, dynamic chapterIdentifier, String content) async {
     await _prefs.setString('$_prefixChapter${bookId}_$chapterIdentifier', content);
+  }
+
+  Future<void> cacheChapterData(String bookId, dynamic chapterIdentifier, Map<String, dynamic> data) async {
+    await _prefs.setString('$_prefixChapter${bookId}_$chapterIdentifier', jsonEncode(data));
   }
 
   // Offline highlights caching

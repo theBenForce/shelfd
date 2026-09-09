@@ -57,6 +57,20 @@ void main() {
       await storage.cacheChapter('book-1', 3, 'Chapter three content');
       expect(storage.getCachedChapter('book-1', 3), 'Chapter three content');
       expect(storage.getCachedChapter('book-1', 4), isNull);
+      expect(storage.getCachedChapterData('book-1', 3), isNull);
+
+      await storage.cacheChapterData('book-1', '01M22YCE6D6GZJAXZC8A39AVKE', {
+        'id': '01M22YCE6D6GZJAXZC8A39AVKE',
+        'book_id': 'book-1',
+        'chapter_index': 5,
+        'title': 'Chapter 5: Demographic Threat',
+        'content': 'Chapter 5 text content',
+      });
+      final cachedData = storage.getCachedChapterData('book-1', '01M22YCE6D6GZJAXZC8A39AVKE');
+      expect(cachedData, isNotNull);
+      expect(cachedData!['title'], 'Chapter 5: Demographic Threat');
+      expect(cachedData['chapter_index'], 5);
+      expect(storage.getCachedChapter('book-1', '01M22YCE6D6GZJAXZC8A39AVKE'), 'Chapter 5 text content');
     });
   });
 }

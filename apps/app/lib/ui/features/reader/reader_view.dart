@@ -39,12 +39,12 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
   dynamic _activeIdentifier;
   String? _selectedText;
 
-  int get _currentSpineIndex {
-    if (_spine.isEmpty) return -1;
-    return _spine.indexWhere((s) =>
+  int _getSpineIndex(List<SpineItem> spine) {
+    if (spine.isEmpty) return -1;
+    return spine.indexWhere((s) =>
         s.id == _currentChapter?.id ||
         (s.id.isNotEmpty && s.id == _activeIdentifier?.toString()) ||
-        s.chapterIndex == _currentChapter?.chapterIndex);
+        (s.chapterIndex > 0 && s.chapterIndex == _currentChapter?.chapterIndex));
   }
 
   @override
@@ -74,7 +74,9 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
     } catch (_) {}
 
     if (_currentChapter == null) {
-      final target = _activeIdentifier ?? (_spine.isNotEmpty ? _spine.first.id : 1);
+      final bookDetail = ref.read(bookDetailProvider(widget.bookId)).book;
+      final availableSpine = _spine.isNotEmpty ? _spine : (bookDetail?.spine ?? const []);
+      final target = _activeIdentifier ?? (availableSpine.isNotEmpty ? availableSpine.first.id : 1);
       _loadChapter(target);
     }
   }
@@ -206,9 +208,10 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
   Widget build(BuildContext context) {
     final settings = ref.watch(readerSettingsProvider);
     final theme = AppTheme.buildTheme(settings.themeMode);
-    final spineIdx = _currentSpineIndex;
-
     final bookDetailState = ref.watch(bookDetailProvider(widget.bookId));
+    final effectiveSpine = _spine.isNotEmpty ? _spine : (bookDetailState.book?.spine ?? const []);
+    final spineIdx = _getSpineIndex(effectiveSpine);
+
     final chapterHighlights = (bookDetailState.book?.highlights ?? const []).where((h) {
       if (_currentChapter == null) return false;
       if (h.chapterId != null && h.chapterId!.isNotEmpty) {
@@ -219,18 +222,18 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
 
     final blocks = parseReaderBlocks(_currentChapter?.content ?? '');
 
-    final canPrev = _spine.isNotEmpty
+    final canPrev = effectiveSpine.isNotEmpty
         ? spineIdx > 0
         : (_currentChapter != null ? _currentChapter!.chapterIndex > 1 : false);
-    final canNext = _spine.isNotEmpty
-        ? (spineIdx >= 0 && spineIdx < _spine.length - 1)
+    final canNext = effectiveSpine.isNotEmpty
+        ? (spineIdx >= 0 && spineIdx < effectiveSpine.length - 1)
         : true;
 
     VoidCallback? onPrev;
     if (canPrev) {
       onPrev = () {
-        if (_spine.isNotEmpty && spineIdx > 0) {
-          _loadChapter(_spine[spineIdx - 1].id);
+        if (effectiveSpine.isNotEmpty && spineIdx > 0) {
+          _loadChapter(effectiveSpine[spineIdx - 1].id);
         } else if (_currentChapter != null && _currentChapter!.chapterIndex > 1) {
           _loadChapter(_currentChapter!.chapterIndex - 1);
         }
@@ -240,16 +243,31 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
     VoidCallback? onNext;
     if (canNext) {
       onNext = () {
-        if (_spine.isNotEmpty && spineIdx >= 0 && spineIdx < _spine.length - 1) {
-          _loadChapter(_spine[spineIdx + 1].id);
+        if (effectiveSpine.isNotEmpty && spineIdx >= 0 && spineIdx < effectiveSpine.length - 1) {
+          _loadChapter(effectiveSpine[spineIdx + 1].id);
         } else if (_currentChapter != null) {
           _loadChapter(_currentChapter!.chapterIndex + 1);
         }
       };
     }
 
-    final displayTitle = _currentChapter?.title ??
-        (_spine.isNotEmpty && spineIdx >= 0 ? _spine[spineIdx].title : 'Reader');
+    String? resolvedTitle;
+    if (_currentChapter?.title != null) {
+      final t = _currentChapter!.title.trim();
+      final isSyntheticId = t.isEmpty ||
+          RegExp(r'^Chapter\s+([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F-]{36})$', caseSensitive: false).hasMatch(t) ||
+          RegExp(r'^([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F-]{36})$', caseSensitive: false).hasMatch(t);
+      if (!isSyntheticId) {
+        resolvedTitle = t;
+      }
+    }
+
+    final spineTitle = effectiveSpine.isNotEmpty && spineIdx >= 0 ? effectiveSpine[spineIdx].title : null;
+    final displayTitle = resolvedTitle ??
+        spineTitle ??
+        (_currentChapter != null && _currentChapter!.chapterIndex > 0
+            ? 'Chapter ${_currentChapter!.chapterIndex}'
+            : 'Reader');
 
     return Theme(
       data: theme,
@@ -280,8 +298,8 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
               tooltip: 'Bookmark Location',
               onPressed: () {
                 final title = displayTitle;
-                final spineProgress = _spine.isNotEmpty && spineIdx >= 0
-                    ? (spineIdx + 1) / _spine.length
+                final spineProgress = effectiveSpine.isNotEmpty && spineIdx >= 0
+                    ? (spineIdx + 1) / effectiveSpine.length
                     : 0.0;
                 ref.read(bookDetailProvider(widget.bookId).notifier).addBookmark(
                       title: title,
@@ -332,11 +350,11 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                 ),
                 const Divider(color: AppTokens.crispBorder, height: 1),
                 Expanded(
-                  child: _spine.isNotEmpty
+                  child: effectiveSpine.isNotEmpty
                       ? ListView.builder(
-                          itemCount: _spine.length,
+                          itemCount: effectiveSpine.length,
                           itemBuilder: (context, idx) {
-                            final item = _spine[idx];
+                            final item = effectiveSpine[idx];
                             final isSelected = idx == spineIdx;
                             return ListTile(
                               selected: isSelected,

@@ -220,6 +220,60 @@ void main() {
     expect(find.text('Location: p.1:0'), findsOneWidget);
     expect(find.text('Delete Highlight'), findsOneWidget);
   });
+
+  testWidgets('ReaderView resolves displayTitle using spine manifest when chapter title is synthetic ULID or empty',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final testChapter = const Chapter(
+      id: '01M22YCE6D6GZJAXZC8A39AVKE',
+      bookId: 'book-200',
+      chapterIndex: 5,
+      title: 'Chapter 01M22YCE6D6GZJAXZC8A39AVKE',
+      content: 'Chapter 5 body content about demographic changes.',
+    );
+
+    final mockBook = Book(
+      id: 'book-200',
+      title: 'Why We Are Polarized',
+      spine: const [
+        SpineItem(
+          id: '01M22YCE6D6GZJAXZC8A39AVKE',
+          bookId: 'book-200',
+          title: 'Chapter 5: Demographic Threat',
+          chapterIndex: 5,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookDetailProvider('book-200').overrideWith(() => _MockBookDetailNotifier(mockBook)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: ReaderView(
+            bookId: 'book-200',
+            chapterIdentifier: '01M22YCE6D6GZJAXZC8A39AVKE',
+            initialChapter: testChapter,
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    // Verify AppBar renders the human-readable spine title instead of the synthetic ULID title
+    expect(find.text('Chapter 5: Demographic Threat'), findsOneWidget);
+    expect(find.text('Chapter 01M22YCE6D6GZJAXZC8A39AVKE'), findsNothing);
+
+    // Verify bottom bar also renders the human-readable spine title
+    expect(find.textContaining('Chapter 5: Demographic Threat • 8 mins left'), findsOneWidget);
+    expect(find.textContaining('Chapter 01M22YCE6D6GZJAXZC8A39AVKE • 8 mins left'), findsNothing);
+  });
 }
 
 class _MockBookDetailNotifier extends BookDetailNotifier {

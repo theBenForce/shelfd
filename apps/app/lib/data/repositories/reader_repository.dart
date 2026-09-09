@@ -12,23 +12,29 @@ class ReaderRepository {
   });
 
   Future<Chapter> loadChapter(String bookId, dynamic chapterIdentifier) async {
+    final cachedData = storageService.getCachedChapterData(bookId, chapterIdentifier);
+    if (cachedData != null) {
+      return Chapter.fromJson(cachedData);
+    }
+
     final cached = storageService.getCachedChapter(bookId, chapterIdentifier);
     if (cached != null && cached.isNotEmpty) {
       final index = chapterIdentifier is int ? chapterIdentifier : 0;
+      final fallbackTitle = chapterIdentifier is int ? 'Chapter $chapterIdentifier' : '';
       return Chapter(
         id: '${bookId}_$chapterIdentifier',
         bookId: bookId,
         chapterIndex: index,
-        title: 'Chapter $chapterIdentifier',
+        title: fallbackTitle,
         content: cached,
       );
     }
 
     final chapter = await apiService.getChapter(bookId, chapterIdentifier);
     if (chapter.content != null) {
-      await storageService.cacheChapter(bookId, chapterIdentifier, chapter.content!);
+      await storageService.cacheChapterData(bookId, chapterIdentifier, chapter.toJson());
       if (chapterIdentifier != chapter.id && chapter.id.isNotEmpty) {
-        await storageService.cacheChapter(bookId, chapter.id, chapter.content!);
+        await storageService.cacheChapterData(bookId, chapter.id, chapter.toJson());
       }
     }
     return chapter;
