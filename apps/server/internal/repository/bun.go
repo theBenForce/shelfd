@@ -1389,16 +1389,40 @@ func (r *BunStorageEngine) ListUploadJobs(ctx context.Context, limit int) ([]*Up
 // --- Queue Status ---
 
 func (r *BunStorageEngine) GetQueueStatus(ctx context.Context) (*QueueStatus, error) {
-	totalChapters, err := r.db.NewSelect().Table("chapters").Count(ctx)
+	totalParagraphs, err := r.db.NewSelect().Table("paragraphs").Count(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("counting total chapters: %w", err)
+		return nil, fmt.Errorf("counting total paragraphs: %w", err)
 	}
 
-	pendingChapters, err := r.db.NewSelect().Table("chapters").
-		Where("summary = '' OR summary = 'No summary available.'").
-		Count(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("counting pending chapters: %w", err)
+	var pendingParagraphs, indexedParagraphs, totalCount int
+	var progressPercent float64
+
+	if totalParagraphs > 0 {
+		pending, err := r.db.NewSelect().
+			TableExpr("paragraphs AS p").
+			Join("LEFT JOIN vec_paragraphs AS v ON p.id = v.paragraph_id").
+			Where("v.paragraph_id IS NULL").
+			Count(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("counting pending paragraphs: %w", err)
+		}
+		pendingParagraphs = pending
+		indexedParagraphs = totalParagraphs - pendingParagraphs
+		totalCount = totalParagraphs
+		progressPercent = (float64(indexedParagraphs) / float64(totalParagraphs)) * 100.0
+	} else {
+		totalChapters, err := r.db.NewSelect().Table("chapters").Count(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("counting total chapters: %w", err)
+		}
+		totalCount = totalChapters
+		if totalChapters > 0 {
+			pendingParagraphs = totalChapters
+			indexedParagraphs = 0
+			progressPercent = 0.0
+		} else {
+			progressPercent = 100.0
+		}
 	}
 
 	pendingUploads, err := r.db.NewSelect().Table("upload_jobs").
@@ -1408,21 +1432,13 @@ func (r *BunStorageEngine) GetQueueStatus(ctx context.Context) (*QueueStatus, er
 		return nil, fmt.Errorf("counting pending uploads: %w", err)
 	}
 
-	indexedChapters := totalChapters - pendingChapters
-	var progressPercent float64
-	if totalChapters > 0 {
-		progressPercent = (float64(indexedChapters) / float64(totalChapters)) * 100.0
-	} else {
-		progressPercent = 100.0
-	}
-
 	return &QueueStatus{
-		TotalChapters:   totalChapters,
-		IndexedChapters: indexedChapters,
-		PendingChapters: pendingChapters,
+		TotalChapters:   totalCount,
+		IndexedChapters: indexedParagraphs,
+		PendingChapters: pendingParagraphs,
 		PendingUploads:  pendingUploads,
 		ProgressPercent: progressPercent,
-		IsActive:        pendingChapters > 0 || pendingUploads > 0,
+		IsActive:        pendingParagraphs > 0 || pendingUploads > 0,
 	}, nil
 }
 

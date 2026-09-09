@@ -275,7 +275,7 @@ void main() {
         ),
       );
 
-      expect(find.text('AI Catalog Synced (50 ch)'), findsOneWidget);
+      expect(find.text('AI Catalog Synced (50 passages)'), findsOneWidget);
     });
 
     testWidgets('ShelfdAdaptiveScaffold switches between ShelfdBottomNav and ShelfdSideNav', (tester) async {

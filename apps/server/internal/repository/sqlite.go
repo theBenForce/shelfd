@@ -996,24 +996,42 @@ func (r *SQLiteStorageEngine) ListUploadJobs(ctx context.Context, limit int) ([]
 func (r *SQLiteStorageEngine) GetQueueStatus(ctx context.Context) (*QueueStatus, error) {
 	status := &QueueStatus{}
 
-	// 1. Total chapters
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM chapters").Scan(&status.TotalChapters); err != nil {
-		return nil, fmt.Errorf("counting total chapters: %w", err)
+	var totalParagraphs, pendingParagraphs int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM paragraphs").Scan(&totalParagraphs); err != nil {
+		return nil, fmt.Errorf("counting total paragraphs: %w", err)
 	}
 
-	// 2. Pending chapters (unindexed chapters where summary = '')
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM chapters WHERE summary = ''").Scan(&status.PendingChapters); err != nil {
-		return nil, fmt.Errorf("counting pending chapters: %w", err)
-	}
-
-	status.IndexedChapters = status.TotalChapters - status.PendingChapters
-	if status.TotalChapters > 0 {
-		status.ProgressPercent = (float64(status.IndexedChapters) / float64(status.TotalChapters)) * 100.0
+	if totalParagraphs > 0 {
+		query := `
+			SELECT COUNT(*)
+			FROM paragraphs p
+			LEFT JOIN vec_paragraphs v ON p.id = v.paragraph_id
+			WHERE v.paragraph_id IS NULL
+		`
+		if err := r.db.QueryRowContext(ctx, query).Scan(&pendingParagraphs); err != nil {
+			return nil, fmt.Errorf("counting pending paragraphs: %w", err)
+		}
+		status.TotalChapters = totalParagraphs
+		status.PendingChapters = pendingParagraphs
+		status.IndexedChapters = totalParagraphs - pendingParagraphs
+		status.ProgressPercent = (float64(status.IndexedChapters) / float64(totalParagraphs)) * 100.0
 	} else {
-		status.ProgressPercent = 100.0
+		// Fallback when no paragraphs have been chunked yet but chapters exist
+		var totalChapters int
+		if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM chapters").Scan(&totalChapters); err != nil {
+			return nil, fmt.Errorf("counting total chapters: %w", err)
+		}
+		status.TotalChapters = totalChapters
+		if totalChapters > 0 {
+			status.PendingChapters = totalChapters
+			status.IndexedChapters = 0
+			status.ProgressPercent = 0.0
+		} else {
+			status.ProgressPercent = 100.0
+		}
 	}
 
-	// 3. Pending uploads
+	// Pending uploads
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM upload_jobs WHERE status IN ('queued', 'processing')").Scan(&status.PendingUploads); err != nil {
 		return nil, fmt.Errorf("counting pending uploads: %w", err)
 	}

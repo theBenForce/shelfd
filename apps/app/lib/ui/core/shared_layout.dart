@@ -612,7 +612,7 @@ class _QueueStatusCard extends ConsumerWidget {
             const SizedBox(width: AppTokens.space8),
             Expanded(
               child: Text(
-                'AI Catalog Synced (${status.totalChapters} ch)',
+                'AI Catalog Synced (${status.totalChapters} passages)',
                 style: AppTypography.bodySans(
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
@@ -631,7 +631,7 @@ class _QueueStatusCard extends ConsumerWidget {
     final progress = (status.progressPercent / 100.0).clamp(0.0, 1.0);
     final title = (resolvedBook != null && resolvedBook.isNotEmpty)
         ? resolvedBook
-        : (status.pendingUploads > 0 ? 'Processing uploads...' : 'Generating chapter summaries...');
+        : (status.pendingUploads > 0 ? 'Processing uploads...' : 'Indexing library passages...');
 
     final subtext = (status.currentChapter != null && status.currentChapter!.isNotEmpty)
         ? status.currentChapter!
@@ -869,7 +869,7 @@ void showShelfdSettingsModal(
                           const Icon(Icons.auto_awesome_rounded, size: 16, color: Color(0xFFD9480F)),
                           const SizedBox(width: AppTokens.space8),
                           Text(
-                            'AI Chapter Summaries & Vectors',
+                            'AI Passage Indexing & Vectors',
                             style: AppTypography.bodySans(fontSize: 13, fontWeight: FontWeight.w600),
                           ),
                           const Spacer(),
