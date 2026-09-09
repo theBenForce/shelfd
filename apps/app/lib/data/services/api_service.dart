@@ -129,6 +129,8 @@ class ApiService {
     final params = <String, dynamic>{
       'page': page,
       'per_page': perPage,
+      'limit': perPage,
+      'offset': (page - 1) * perPage,
       if (authorId != null && authorId.isNotEmpty) 'author_id': authorId,
       if (genreId != null && genreId.isNotEmpty) 'genre_id': genreId,
       if (seriesId != null && seriesId.isNotEmpty) 'series_id': seriesId,

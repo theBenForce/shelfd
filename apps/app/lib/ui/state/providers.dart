@@ -206,7 +206,7 @@ class LibraryNotifier extends Notifier<LibraryState> {
     state = state.copyWith(isLoading: true, error: null);
     final bookRepo = ref.read(bookRepositoryProvider);
     try {
-      final books = await bookRepo.getBooks();
+      final books = await bookRepo.getBooks(perPage: 500);
       final authors = await bookRepo.getAuthors();
       final genres = await bookRepo.getGenres();
       final series = await bookRepo.getSeries();

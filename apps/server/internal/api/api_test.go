@@ -1067,6 +1067,28 @@ func TestAPI_EdgeCasesAndCORS(t *testing.T) {
 		t.Errorf("expected 200 for genre and series query, got %d", rec.Code)
 	}
 
+	// 6b. Pagination with per_page and page
+	pageReq := httptest.NewRequest(http.MethodGet, "/api/v1/books?page=2&per_page=5", nil)
+	pageReq.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, pageReq)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for per_page and page query, got %d", rec.Code)
+	}
+	var pageResp struct {
+		Limit  int `json:"limit"`
+		Offset int `json:"offset"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &pageResp); err != nil {
+		t.Fatalf("failed to decode page response: %v", err)
+	}
+	if pageResp.Limit != 5 {
+		t.Errorf("expected limit 5, got %d", pageResp.Limit)
+	}
+	if pageResp.Offset != 5 {
+		t.Errorf("expected offset 5, got %d", pageResp.Offset)
+	}
+
 	// 7. Missing 'file' in multipart upload
 	emptyFormBody := &bytes.Buffer{}
 	mpw := multipart.NewWriter(emptyFormBody)

@@ -119,14 +119,18 @@ func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
 		filter.Search = &search
 	}
 
-	limit := 20
+	limit := 50
 	if rawLimit := q.Get("limit"); rawLimit != "" {
 		if val, err := strconv.Atoi(rawLimit); err == nil && val > 0 {
 			limit = val
 		}
+	} else if rawPerPage := q.Get("per_page"); rawPerPage != "" {
+		if val, err := strconv.Atoi(rawPerPage); err == nil && val > 0 {
+			limit = val
+		}
 	}
-	if limit > 100 {
-		limit = 100
+	if limit > 1000 {
+		limit = 1000
 	}
 	filter.Limit = limit
 
@@ -134,6 +138,10 @@ func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
 	if rawOffset := q.Get("offset"); rawOffset != "" {
 		if val, err := strconv.Atoi(rawOffset); err == nil && val >= 0 {
 			offset = val
+		}
+	} else if rawPage := q.Get("page"); rawPage != "" {
+		if val, err := strconv.Atoi(rawPage); err == nil && val > 0 {
+			offset = (val - 1) * limit
 		}
 	}
 	filter.Offset = offset
