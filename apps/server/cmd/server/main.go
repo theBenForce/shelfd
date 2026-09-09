@@ -70,32 +70,28 @@ func main() {
 	log.Printf("shelfd %s starting on %s:%d", Version, cfg.Server.Host, cfg.Server.Port)
 	log.Printf("Library directory: %s | Data directory: %s", cfg.Storage.LibraryDir, cfg.Storage.DataDir)
 
-	if cfg.Database.Type != "sqlite" {
-		log.Fatalf("Database type '%s' is not supported in Phase 1 MVP", cfg.Database.Type)
-	}
-
-	log.Printf("Opening SQLite database at %s...", cfg.Database.SQLite.Path)
-	db, err := database.OpenSQLite(cfg.Database.SQLite.Path)
+	log.Printf("Opening %s database...", cfg.Database.Type)
+	bunDB, err := database.OpenDB(cfg)
 	if err != nil {
-		log.Fatalf("Failed to open SQLite database: %v", err)
+		log.Fatalf("Failed to open %s database: %v", cfg.Database.Type, err)
 	}
-	defer db.Close()
+	defer bunDB.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	log.Printf("Executing database schema migrations...")
-	if err := database.RunMigrations(ctx, db); err != nil {
+	if err := database.RunBunMigrations(ctx, bunDB); err != nil {
 		log.Fatalf("Failed to execute migrations: %v", err)
 	}
 
-	if err := database.EnsureVectorDimensions(ctx, db, cfg.AI.EmbeddingDimensions); err != nil {
+	if err := database.EnsureVectorDimensions(ctx, bunDB, cfg.AI.EmbeddingDimensions); err != nil {
 		log.Fatalf("Failed to configure vector dimensions: %v", err)
 	}
 
-	repo := repository.NewSQLiteStorageEngine(db)
+	repo := repository.NewBunStorageEngine(bunDB)
 	defer repo.Close()
-	log.Printf("Storage engine initialized successfully.")
+	log.Printf("Storage engine (%s via Bun) initialized successfully.", cfg.Database.Type)
 
 	// Backfill paragraphs for any existing chapters lacking passage chunks
 	if backfilled, err := repo.BackfillParagraphs(ctx); err == nil && backfilled > 0 {

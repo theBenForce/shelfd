@@ -1,6 +1,6 @@
 module github.com/shelfd/shelfd
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
@@ -19,6 +19,7 @@ require (
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/pgvector/pgvector-go v0.4.1 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect

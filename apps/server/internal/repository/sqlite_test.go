@@ -16,18 +16,18 @@ func setupTestDB(t *testing.T) (*sql.DB, repository.StorageEngine) {
 	t.Helper()
 	ctx := context.Background()
 
-	db, err := database.OpenSQLite(":memory:")
+	bunDB, err := database.OpenBunSQLite(":memory:")
 	if err != nil {
 		t.Fatalf("failed to open in-memory sqlite db: %v", err)
 	}
 
-	if err := database.RunMigrations(ctx, db); err != nil {
-		db.Close()
+	if err := database.RunBunMigrations(ctx, bunDB); err != nil {
+		bunDB.Close()
 		t.Fatalf("failed to run migrations: %v", err)
 	}
 
-	repo := repository.NewSQLiteStorageEngine(db)
-	return db, repo
+	repo := repository.NewBunStorageEngine(bunDB)
+	return bunDB.DB, repo
 }
 
 func TestBookCascadeDeletion(t *testing.T) {
