@@ -69,7 +69,9 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		ctx := context.Background()
 
 		// Backfill any database chapters that haven't been chunked into paragraphs yet
-		if backfilled, err := h.repo.BackfillParagraphs(ctx); err == nil && backfilled > 0 {
+		backfilled := 0
+		if n, err := h.repo.BackfillParagraphs(ctx); err == nil && n > 0 {
+			backfilled = n
 			h.logger.Info("backfilled paragraphs from existing chapters", "count", backfilled)
 		}
 
@@ -80,18 +82,34 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.logger.Info("scan discovered files", "count", len(discovered))
+		newCount := 0
+		modifiedCount := 0
+		unchangedCount := 0
 		for _, f := range discovered {
-			_, err := h.ingester.IngestFile(ctx, f.FullPath, f.RelativePath)
+			_, status, err := h.ingester.SyncFile(ctx, f.FullPath, f.RelativePath)
 			if err != nil {
-				h.logger.Error("failed to ingest discovered file", "file", f.RelativePath, "error", err)
+				h.logger.Error("failed to sync discovered file", "file", f.RelativePath, "error", err)
 				continue
+			}
+			switch status {
+			case scanner.SyncStatusNew:
+				newCount++
+			case scanner.SyncStatusModified:
+				modifiedCount++
+			case scanner.SyncStatusUnchanged:
+				unchangedCount++
 			}
 		}
 
-		if h.worker != nil {
+		h.logger.Info("background scan and ingestion finished",
+			"new", newCount,
+			"modified", modifiedCount,
+			"unchanged", unchangedCount,
+		)
+
+		if (newCount > 0 || modifiedCount > 0 || backfilled > 0) && h.worker != nil {
 			h.worker.Trigger()
 		}
-		h.logger.Info("background scan and ingestion finished")
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]string{

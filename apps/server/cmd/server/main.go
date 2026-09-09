@@ -220,15 +220,27 @@ func runScan(ctx context.Context, repo repository.StorageEngine, cfg *config.Con
 	log.Printf("Discovered %d EPUB files.", len(discovered))
 
 	ingester := scanner.NewIngester(repo, cfg.Storage.LibraryDir, cfg.Storage.DataDir)
+	newCount := 0
+	modifiedCount := 0
+	unchangedCount := 0
 	for _, f := range discovered {
-		book, err := ingester.IngestFile(ctx, f.FullPath, f.RelativePath)
+		book, status, err := ingester.SyncFile(ctx, f.FullPath, f.RelativePath)
 		if err != nil {
 			log.Printf("Failed to ingest %s: %v", f.RelativePath, err)
 			continue
 		}
-		log.Printf("Successfully cataloged: %s (ID: %s)", book.Title, book.ID)
+		switch status {
+		case scanner.SyncStatusNew:
+			newCount++
+			log.Printf("Successfully cataloged new book: %s (ID: %s)", book.Title, book.ID)
+		case scanner.SyncStatusModified:
+			modifiedCount++
+			log.Printf("Updated modified book: %s (ID: %s)", book.Title, book.ID)
+		case scanner.SyncStatusUnchanged:
+			unchangedCount++
+		}
 	}
-	log.Printf("Scan and ingestion complete.")
+	log.Printf("Scan and ingestion complete: %d new, %d modified, %d unchanged.", newCount, modifiedCount, unchangedCount)
 }
 
 func ensureSeedToken(ctx context.Context, repo repository.StorageEngine, cfg *config.Config) {

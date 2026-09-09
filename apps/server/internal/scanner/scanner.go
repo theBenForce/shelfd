@@ -5,12 +5,15 @@ import (
 	"io/fs"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // DiscoveredFile represents an EPUB discovered during library scanning.
 type DiscoveredFile struct {
 	FullPath     string
 	RelativePath string
+	ModTime      time.Time
+	SizeBytes    int64
 }
 
 // Scanner crawls the library directory for EPUB files without mutating sidecars.
@@ -56,9 +59,16 @@ func (s *Scanner) Scan() ([]DiscoveredFile, error) {
 			return fmt.Errorf("calculating relative path: %w", err)
 		}
 
+		info, err := d.Info()
+		if err != nil {
+			return fmt.Errorf("getting file info for %s: %w", path, err)
+		}
+
 		discovered = append(discovered, DiscoveredFile{
 			FullPath:     path,
 			RelativePath: relPath,
+			ModTime:      info.ModTime(),
+			SizeBytes:    info.Size(),
 		})
 
 		return nil

@@ -12,9 +12,10 @@ type Book struct {
 	Identifier    *string   `json:"identifier,omitempty" bun:"identifier"`
 	FilePath      string    `json:"file_path" bun:"file_path,notnull"`
 	CoverPath     *string   `json:"cover_path,omitempty" bun:"cover_path"`
-	FileSizeBytes *int64    `json:"file_size_bytes,omitempty" bun:"file_size_bytes"`
-	PublishedDate *string   `json:"published_date,omitempty" bun:"published_date"`
-	CreatedAt     time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+	FileSizeBytes  *int64     `json:"file_size_bytes,omitempty" bun:"file_size_bytes"`
+	FileModifiedAt *time.Time `json:"file_modified_at,omitempty" bun:"file_modified_at"`
+	PublishedDate  *string    `json:"published_date,omitempty" bun:"published_date"`
+	CreatedAt      time.Time  `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // Author represents a book creator or contributor.

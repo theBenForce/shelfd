@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shelfd/shelfd/internal/ai"
@@ -60,6 +61,7 @@ type BookListItem struct {
 	FilePath       string                         `json:"file_path"`
 	CoverPath      *string                        `json:"cover_path,omitempty"`
 	FileSizeBytes  *int64                         `json:"file_size_bytes,omitempty"`
+	FileModifiedAt *time.Time                     `json:"file_modified_at,omitempty"`
 	PublishedDate  *string                        `json:"published_date,omitempty"`
 	Authors        []*repository.Author           `json:"authors"`
 	Genres         []*repository.Genre            `json:"genres"`
@@ -161,10 +163,11 @@ func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
 			Language:      b.Language,
 			Publisher:     b.Publisher,
 			Identifier:    b.Identifier,
-			FilePath:      b.FilePath,
-			CoverPath:     b.CoverPath,
-			FileSizeBytes: b.FileSizeBytes,
-			PublishedDate: b.PublishedDate,
+			FilePath:       b.FilePath,
+			CoverPath:      b.CoverPath,
+			FileSizeBytes:  b.FileSizeBytes,
+			FileModifiedAt: b.FileModifiedAt,
+			PublishedDate:  b.PublishedDate,
 			Authors:       authors,
 			Genres:        genres,
 			Series:        seriesList,
@@ -224,10 +227,11 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 			Language:      book.Language,
 			Publisher:     book.Publisher,
 			Identifier:    book.Identifier,
-			FilePath:      book.FilePath,
-			CoverPath:     book.CoverPath,
-			FileSizeBytes: book.FileSizeBytes,
-			PublishedDate: book.PublishedDate,
+			FilePath:       book.FilePath,
+			CoverPath:      book.CoverPath,
+			FileSizeBytes:  book.FileSizeBytes,
+			FileModifiedAt: book.FileModifiedAt,
+			PublishedDate:  book.PublishedDate,
 			Authors:       authors,
 			Genres:        genres,
 			Series:        seriesList,

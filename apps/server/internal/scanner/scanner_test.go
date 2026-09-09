@@ -363,3 +363,153 @@ func TestIngesterReadOnlyLibraryFallback(t *testing.T) {
 		t.Errorf("fallback cover missing at %s: %v", expectedFallbackPath, err)
 	}
 }
+
+func TestIncrementalScanPreservesVectors(t *testing.T) {
+	ctx := context.Background()
+	tempLib := t.TempDir()
+	tempData := t.TempDir()
+
+	db, err := database.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if err := database.RunMigrations(ctx, db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+	repo := repository.NewSQLiteStorageEngine(db)
+	defer repo.Close()
+
+	ingester := scanner.NewIngester(repo, tempLib, tempData)
+
+	// 1. Create Book 1 on disk and perform initial scan
+	book1Dir := filepath.Join(tempLib, "Frank Herbert", "Dune")
+	os.MkdirAll(book1Dir, 0755)
+	book1Path := filepath.Join(book1Dir, "Dune.epub")
+	book1Rel := filepath.Join("Frank Herbert", "Dune", "Dune.epub")
+	os.WriteFile(book1Path, createSampleEPUB("Dune", "Frank Herbert", "Sci-Fi", "Dune Chronicles", 1.0), 0644)
+
+	book1, status1, err := ingester.SyncFile(ctx, book1Path, book1Rel)
+	if err != nil {
+		t.Fatalf("SyncFile book 1: %v", err)
+	}
+	if status1 != scanner.SyncStatusNew {
+		t.Fatalf("expected SyncStatusNew for initial scan, got %v", status1)
+	}
+
+	paras1, err := repo.GetParagraphsByBookID(ctx, book1.ID)
+	if err != nil || len(paras1) == 0 {
+		t.Fatalf("expected paragraphs for book 1, got %v", paras1)
+	}
+
+	// 2. Simulate background worker indexing: insert embeddings for book 1 paragraphs
+	dummyVec := make([]float32, 256)
+	dummyVec[0] = 0.5
+	var vecBatch []repository.ParagraphVector
+	for _, p := range paras1 {
+		vecBatch = append(vecBatch, repository.ParagraphVector{
+			ParagraphID: p.ID,
+			Embedding:   dummyVec,
+		})
+	}
+	if err := repo.InsertParagraphVectors(ctx, vecBatch); err != nil {
+		t.Fatalf("inserting vectors: %v", err)
+	}
+
+	// Verify 0 unindexed paragraphs remain
+	unindexed, err := repo.GetUnindexedParagraphs(ctx, 100)
+	if err != nil {
+		t.Fatalf("getting unindexed: %v", err)
+	}
+	if len(unindexed) != 0 {
+		t.Fatalf("expected 0 unindexed paragraphs, got %d", len(unindexed))
+	}
+
+	// 3. Re-scan library without modifying book 1
+	book1Rescan, statusRescan, err := ingester.SyncFile(ctx, book1Path, book1Rel)
+	if err != nil {
+		t.Fatalf("re-scan SyncFile: %v", err)
+	}
+	if statusRescan != scanner.SyncStatusUnchanged {
+		t.Fatalf("expected SyncStatusUnchanged on re-scan, got %v", statusRescan)
+	}
+	if book1Rescan.ID != book1.ID {
+		t.Fatalf("expected book ID to remain unchanged: %s vs %s", book1.ID, book1Rescan.ID)
+	}
+
+	// Invariant: Vector embeddings must NOT have been deleted or invalidated!
+	unindexedAfterRescan, err := repo.GetUnindexedParagraphs(ctx, 100)
+	if err != nil {
+		t.Fatalf("getting unindexed after rescan: %v", err)
+	}
+	if len(unindexedAfterRescan) != 0 {
+		t.Fatalf("re-scan invalidated vectors! Expected 0 unindexed, got %d", len(unindexedAfterRescan))
+	}
+
+	// 4. Add Book 2 ("Neuromancer")
+	book2Dir := filepath.Join(tempLib, "William Gibson", "Neuromancer")
+	os.MkdirAll(book2Dir, 0755)
+	book2Path := filepath.Join(book2Dir, "Neuromancer.epub")
+	book2Rel := filepath.Join("William Gibson", "Neuromancer", "Neuromancer.epub")
+	os.WriteFile(book2Path, createSampleEPUB("Neuromancer", "William Gibson", "Cyberpunk", "Sprawl", 1.0), 0644)
+
+	// Scan Book 1 again (should still be unchanged)
+	_, status1Again, err := ingester.SyncFile(ctx, book1Path, book1Rel)
+	if err != nil || status1Again != scanner.SyncStatusUnchanged {
+		t.Fatalf("expected Book 1 to remain unchanged, got status %v, err %v", status1Again, err)
+	}
+
+	// Scan Book 2 (should be new)
+	book2, status2, err := ingester.SyncFile(ctx, book2Path, book2Rel)
+	if err != nil || status2 != scanner.SyncStatusNew {
+		t.Fatalf("expected Book 2 to be SyncStatusNew, got status %v, err %v", status2, err)
+	}
+
+	// Unindexed paragraphs must ONLY belong to Book 2!
+	unindexedWithBook2, err := repo.GetUnindexedParagraphs(ctx, 100)
+	if err != nil {
+		t.Fatalf("getting unindexed with book 2: %v", err)
+	}
+	if len(unindexedWithBook2) == 0 {
+		t.Fatalf("expected unindexed paragraphs for book 2")
+	}
+	for _, p := range unindexedWithBook2 {
+		if p.BookID != book2.ID {
+			t.Fatalf("unexpected unindexed paragraph belonging to book %s, expected %s", p.BookID, book2.ID)
+		}
+	}
+
+	// 5. Modify Book 2 on disk
+	modifiedEPUB := createSampleEPUB("Neuromancer", "William Gibson", "Cyberpunk Novel", "Sprawl Trilogy", 1.0)
+	// Append extra data to definitely alter file size and content
+	modifiedEPUB = append(modifiedEPUB, []byte("\n")...)
+	os.WriteFile(book2Path, modifiedEPUB, 0644)
+
+	// Re-scan Book 1 and Book 2
+	_, status1PostMod, err := ingester.SyncFile(ctx, book1Path, book1Rel)
+	if err != nil || status1PostMod != scanner.SyncStatusUnchanged {
+		t.Fatalf("expected Book 1 to remain unchanged post Book 2 modification, got %v", status1PostMod)
+	}
+
+	book2Modified, status2Mod, err := ingester.SyncFile(ctx, book2Path, book2Rel)
+	if err != nil {
+		t.Fatalf("SyncFile on modified book 2: %v", err)
+	}
+	if status2Mod != scanner.SyncStatusModified {
+		t.Fatalf("expected SyncStatusModified for modified book 2, got %v", status2Mod)
+	}
+	if book2Modified.ID != book2.ID {
+		t.Fatalf("expected same book ID after modification: %s vs %s", book2.ID, book2Modified.ID)
+	}
+
+	// Book 1 vector embeddings must still be completely untouched!
+	unindexedFinal, err := repo.GetUnindexedParagraphs(ctx, 100)
+	if err != nil {
+		t.Fatalf("getting final unindexed: %v", err)
+	}
+	for _, p := range unindexedFinal {
+		if p.BookID == book1.ID {
+			t.Fatalf("Book 1 vector embeddings were re-created during re-scan!")
+		}
+	}
+}

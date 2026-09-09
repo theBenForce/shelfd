@@ -2,10 +2,12 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shelfd/shelfd/internal/epub"
@@ -28,13 +30,72 @@ func NewIngester(repo repository.StorageEngine, libraryDir, dataDir string) *Ing
 	}
 }
 
-// IngestFile parses an EPUB file and registers its metadata, chapters, and cover in storage.
-func (in *Ingester) IngestFile(ctx context.Context, fullPath, relativePath string) (*repository.Book, error) {
-	if existingBook, err := in.repo.GetBookByFilePath(ctx, relativePath); err == nil && existingBook != nil {
-		_ = in.ReparseBookChapters(ctx, existingBook.ID)
-		return existingBook, nil
+// SyncStatus represents the synchronization outcome for an EPUB file.
+type SyncStatus int
+
+const (
+	SyncStatusUnchanged SyncStatus = iota
+	SyncStatusNew
+	SyncStatusModified
+)
+
+// SyncFile synchronizes an EPUB file with the catalog: importing if new,
+// updating if modified, or skipping if unchanged to preserve vector embeddings.
+func (in *Ingester) SyncFile(ctx context.Context, fullPath, relativePath string) (*repository.Book, SyncStatus, error) {
+	fi, err := os.Stat(fullPath)
+	if err != nil {
+		return nil, SyncStatusUnchanged, fmt.Errorf("stating book file: %w", err)
+	}
+	sizeBytes := fi.Size()
+	modTime := fi.ModTime().UTC().Truncate(time.Second)
+
+	existingBook, err := in.repo.GetBookByFilePath(ctx, relativePath)
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return nil, SyncStatusUnchanged, fmt.Errorf("checking existing book: %w", err)
 	}
 
+	if existingBook != nil {
+		isModified := false
+		if existingBook.FileSizeBytes == nil || *existingBook.FileSizeBytes != sizeBytes {
+			isModified = true
+		} else if existingBook.FileModifiedAt != nil {
+			if existingBook.FileModifiedAt.Unix() != fi.ModTime().Unix() {
+				isModified = true
+			}
+		} else {
+			// Legacy record: file size matches but FileModifiedAt is not recorded.
+			// Backfill FileModifiedAt without reparsing or invalidating vector embeddings.
+			existingBook.FileModifiedAt = &modTime
+			_ = in.repo.UpdateBook(ctx, existingBook)
+		}
+
+		if !isModified {
+			return existingBook, SyncStatusUnchanged, nil
+		}
+
+		updatedBook, err := in.updateModifiedBook(ctx, existingBook, fullPath, relativePath, fi)
+		if err != nil {
+			return nil, SyncStatusUnchanged, fmt.Errorf("updating modified book: %w", err)
+		}
+		return updatedBook, SyncStatusModified, nil
+	}
+
+	book, err := in.importNewBook(ctx, fullPath, relativePath, fi)
+	if err != nil {
+		return nil, SyncStatusUnchanged, err
+	}
+	return book, SyncStatusNew, nil
+}
+
+// IngestFile parses an EPUB file and registers its metadata, chapters, and cover in storage.
+// If the book already exists and is unmodified on disk, it returns the existing book
+// without re-chunking or invalidating vector embeddings.
+func (in *Ingester) IngestFile(ctx context.Context, fullPath, relativePath string) (*repository.Book, error) {
+	book, _, err := in.SyncFile(ctx, fullPath, relativePath)
+	return book, err
+}
+
+func (in *Ingester) importNewBook(ctx context.Context, fullPath, relativePath string, fi os.FileInfo) (*repository.Book, error) {
 	reader, err := epub.Open(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("opening epub: %w", err)
@@ -46,12 +107,8 @@ func (in *Ingester) IngestFile(ctx context.Context, fullPath, relativePath strin
 		return nil, fmt.Errorf("parsing book metadata: %w", err)
 	}
 
-	fi, err := os.Stat(fullPath)
-	if err != nil {
-		return nil, fmt.Errorf("stating book file: %w", err)
-	}
 	sizeBytes := fi.Size()
-
+	modTime := fi.ModTime().UTC().Truncate(time.Second)
 	bookID := uuid.NewString()
 
 	bookDirFull := filepath.Dir(fullPath)
@@ -59,11 +116,12 @@ func (in *Ingester) IngestFile(ctx context.Context, fullPath, relativePath strin
 	coverRelPath := in.resolveCover(reader, bookDirFull, bookDirRel, bookID)
 
 	book := &repository.Book{
-		ID:            bookID,
-		Title:         parsed.Title,
-		FilePath:      relativePath,
-		CoverPath:     coverRelPath,
-		FileSizeBytes: &sizeBytes,
+		ID:             bookID,
+		Title:          parsed.Title,
+		FilePath:       relativePath,
+		CoverPath:      coverRelPath,
+		FileSizeBytes:  &sizeBytes,
+		FileModifiedAt: &modTime,
 	}
 	if parsed.Description != "" {
 		book.Description = &parsed.Description
@@ -112,34 +170,86 @@ func (in *Ingester) IngestFile(ctx context.Context, fullPath, relativePath strin
 	}
 
 	// Extract and register Chapters and Paragraphs
-	chapters, err := reader.ExtractChapters()
-	if err == nil {
-		var allParagraphs []*repository.Paragraph
-		for _, ch := range chapters {
-			chapter := &repository.Chapter{
-				BookID:       book.ID,
-				ChapterIndex: ch.Index,
-				Title:        ch.Title,
-				Summary:      "", // Summaries populated by async worker in Milestone 3
-				ContentPlain: ch.ContentPlain,
-			}
-			_ = in.repo.CreateChapter(ctx, chapter)
+	if err := in.reparseChaptersFromReader(ctx, book.ID, reader); err != nil {
+		return nil, fmt.Errorf("registering chapters and paragraphs: %w", err)
+	}
 
-			chunks := epub.ChunkChapterParagraphs(ch.ContentPlain, 400, 1200)
-			for _, chk := range chunks {
-				allParagraphs = append(allParagraphs, &repository.Paragraph{
-					BookID:         book.ID,
-					ChapterID:      chapter.ID,
-					ChapterIndex:   chapter.ChapterIndex,
-					StartParagraph: chk.StartParagraph,
-					EndParagraph:   chk.EndParagraph,
-					Content:        chk.Content,
-				})
-			}
+	return book, nil
+}
+
+func (in *Ingester) updateModifiedBook(ctx context.Context, book *repository.Book, fullPath, relativePath string, fi os.FileInfo) (*repository.Book, error) {
+	reader, err := epub.Open(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("opening epub: %w", err)
+	}
+	defer reader.Close()
+
+	parsed, err := reader.ParseBook()
+	if err != nil {
+		return nil, fmt.Errorf("parsing book metadata: %w", err)
+	}
+
+	sizeBytes := fi.Size()
+	modTime := fi.ModTime().UTC().Truncate(time.Second)
+
+	book.Title = parsed.Title
+	book.FileSizeBytes = &sizeBytes
+	book.FileModifiedAt = &modTime
+	if parsed.Description != "" {
+		book.Description = &parsed.Description
+	}
+	if parsed.Publisher != "" {
+		book.Publisher = &parsed.Publisher
+	}
+	if parsed.Language != "" {
+		book.Language = &parsed.Language
+	}
+	if parsed.Identifier != "" {
+		book.Identifier = &parsed.Identifier
+	}
+	if parsed.PublishedDate != "" {
+		book.PublishedDate = &parsed.PublishedDate
+	}
+
+	bookDirFull := filepath.Dir(fullPath)
+	bookDirRel := filepath.Dir(relativePath)
+	coverRelPath := in.resolveCover(reader, bookDirFull, bookDirRel, book.ID)
+	if coverRelPath != nil {
+		book.CoverPath = coverRelPath
+	}
+
+	if err := in.repo.UpdateBook(ctx, book); err != nil {
+		return nil, fmt.Errorf("updating book in database: %w", err)
+	}
+
+	// Link Authors
+	for _, a := range parsed.Authors {
+		author, err := in.repo.UpsertAuthor(ctx, a.Name)
+		if err != nil {
+			continue
 		}
-		if len(allParagraphs) > 0 {
-			_ = in.repo.CreateParagraphs(ctx, allParagraphs)
+		_ = in.repo.LinkBookAuthor(ctx, book.ID, author.ID, a.Role)
+	}
+
+	// Link Genres
+	for _, g := range parsed.Genres {
+		genre, err := in.repo.UpsertGenre(ctx, g)
+		if err != nil {
+			continue
 		}
+		_ = in.repo.LinkBookGenre(ctx, book.ID, genre.ID)
+	}
+
+	// Link Series
+	if parsed.Series != nil && parsed.Series.Name != "" {
+		series, err := in.repo.UpsertSeries(ctx, parsed.Series.Name, nil)
+		if err == nil {
+			_ = in.repo.LinkBookSeries(ctx, book.ID, series.ID, parsed.Series.SequenceNumber)
+		}
+	}
+
+	if err := in.reparseChaptersFromReader(ctx, book.ID, reader); err != nil {
+		return nil, fmt.Errorf("reparsing chapters: %w", err)
 	}
 
 	return book, nil
@@ -196,12 +306,24 @@ func (in *Ingester) ReparseBookChapters(ctx context.Context, bookID string) erro
 	}
 
 	fullPath := filepath.Join(in.libraryDir, book.FilePath)
+	if fi, err := os.Stat(fullPath); err == nil {
+		modTime := fi.ModTime().UTC().Truncate(time.Second)
+		sizeBytes := fi.Size()
+		book.FileModifiedAt = &modTime
+		book.FileSizeBytes = &sizeBytes
+		_ = in.repo.UpdateBook(ctx, book)
+	}
+
 	reader, err := epub.Open(fullPath)
 	if err != nil {
 		return fmt.Errorf("opening epub: %w", err)
 	}
 	defer reader.Close()
 
+	return in.reparseChaptersFromReader(ctx, bookID, reader)
+}
+
+func (in *Ingester) reparseChaptersFromReader(ctx context.Context, bookID string, reader *epub.Reader) error {
 	chapters, err := reader.ExtractChapters()
 	if err != nil {
 		return fmt.Errorf("extracting chapters: %w", err)
@@ -232,7 +354,7 @@ func (in *Ingester) ReparseBookChapters(ctx context.Context, bookID string) erro
 			chapterIndex = existing.ChapterIndex
 		} else {
 			chapter := &repository.Chapter{
-				BookID:       book.ID,
+				BookID:       bookID,
 				ChapterIndex: ch.Index,
 				Title:        ch.Title,
 				Summary:      "",
@@ -248,7 +370,7 @@ func (in *Ingester) ReparseBookChapters(ctx context.Context, bookID string) erro
 		chunks := epub.ChunkChapterParagraphs(ch.ContentPlain, 400, 1200)
 		for _, chk := range chunks {
 			allParagraphs = append(allParagraphs, &repository.Paragraph{
-				BookID:         book.ID,
+				BookID:         bookID,
 				ChapterID:      chapterID,
 				ChapterIndex:   chapterIndex,
 				StartParagraph: chk.StartParagraph,

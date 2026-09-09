@@ -45,12 +45,12 @@ func (r *SQLiteStorageEngine) CreateBook(ctx context.Context, b *Book) error {
 	}
 
 	query := `
-		INSERT INTO books (id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, published_date, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO books (id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		b.ID, b.Title, b.Description, b.Language, b.Publisher, b.Identifier,
-		b.FilePath, b.CoverPath, b.FileSizeBytes, b.PublishedDate, b.CreatedAt,
+		b.FilePath, b.CoverPath, b.FileSizeBytes, b.FileModifiedAt, b.PublishedDate, b.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("creating book: %w", err)
@@ -60,13 +60,14 @@ func (r *SQLiteStorageEngine) CreateBook(ctx context.Context, b *Book) error {
 
 func (r *SQLiteStorageEngine) GetBookByID(ctx context.Context, id string) (*Book, error) {
 	query := `
-		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, published_date, created_at
+		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, created_at
 		FROM books WHERE id = ?
 	`
 	b := &Book{}
+	var fileModAt sql.NullTime
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&b.ID, &b.Title, &b.Description, &b.Language, &b.Publisher, &b.Identifier,
-		&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &b.PublishedDate, &b.CreatedAt,
+		&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate, &b.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -74,24 +75,31 @@ func (r *SQLiteStorageEngine) GetBookByID(ctx context.Context, id string) (*Book
 	if err != nil {
 		return nil, fmt.Errorf("querying book by id: %w", err)
 	}
+	if fileModAt.Valid {
+		b.FileModifiedAt = &fileModAt.Time
+	}
 	return b, nil
 }
 
 func (r *SQLiteStorageEngine) GetBookByFilePath(ctx context.Context, filePath string) (*Book, error) {
 	query := `
-		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, published_date, created_at
+		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, created_at
 		FROM books WHERE file_path = ?
 	`
 	b := &Book{}
+	var fileModAt sql.NullTime
 	err := r.db.QueryRowContext(ctx, query, filePath).Scan(
 		&b.ID, &b.Title, &b.Description, &b.Language, &b.Publisher, &b.Identifier,
-		&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &b.PublishedDate, &b.CreatedAt,
+		&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate, &b.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying book by file path: %w", err)
+	}
+	if fileModAt.Valid {
+		b.FileModifiedAt = &fileModAt.Time
 	}
 	return b, nil
 }
@@ -100,12 +108,12 @@ func (r *SQLiteStorageEngine) UpdateBook(ctx context.Context, b *Book) error {
 	query := `
 		UPDATE books
 		SET title = ?, description = ?, language = ?, publisher = ?, identifier = ?,
-		    file_path = ?, cover_path = ?, file_size_bytes = ?, published_date = ?
+		    file_path = ?, cover_path = ?, file_size_bytes = ?, file_modified_at = ?, published_date = ?
 		WHERE id = ?
 	`
 	res, err := r.db.ExecContext(ctx, query,
 		b.Title, b.Description, b.Language, b.Publisher, b.Identifier,
-		b.FilePath, b.CoverPath, b.FileSizeBytes, b.PublishedDate, b.ID,
+		b.FilePath, b.CoverPath, b.FileSizeBytes, b.FileModifiedAt, b.PublishedDate, b.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating book: %w", err)
@@ -157,7 +165,7 @@ func (r *SQLiteStorageEngine) ListBooks(ctx context.Context, filter BookFilter) 
 	}
 
 	query := `
-		SELECT b.id, b.title, b.description, b.language, b.publisher, b.identifier, b.file_path, b.cover_path, b.file_size_bytes, b.published_date, b.created_at
+		SELECT b.id, b.title, b.description, b.language, b.publisher, b.identifier, b.file_path, b.cover_path, b.file_size_bytes, b.file_modified_at, b.published_date, b.created_at
 		FROM books b
 	`
 	if len(conditions) > 0 {
@@ -186,12 +194,16 @@ func (r *SQLiteStorageEngine) ListBooks(ctx context.Context, filter BookFilter) 
 	var books []*Book
 	for rows.Next() {
 		b := &Book{}
+		var fileModAt sql.NullTime
 		err := rows.Scan(
 			&b.ID, &b.Title, &b.Description, &b.Language, &b.Publisher, &b.Identifier,
-			&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &b.PublishedDate, &b.CreatedAt,
+			&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate, &b.CreatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning book row: %w", err)
+		}
+		if fileModAt.Valid {
+			b.FileModifiedAt = &fileModAt.Time
 		}
 		books = append(books, b)
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shelfd/shelfd/internal/database"
 	"github.com/shelfd/shelfd/internal/repository"
@@ -205,11 +206,13 @@ func TestBookCRUDAndFiltering(t *testing.T) {
 	// 2. Create books
 	desc := "Classic cyberpunk novel"
 	size := int64(450000)
+	modTime := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
 	book1 := &repository.Book{
-		Title:         "Neuromancer",
-		Description:   &desc,
-		FilePath:      "William Gibson/Neuromancer/Neuromancer.epub",
-		FileSizeBytes: &size,
+		Title:          "Neuromancer",
+		Description:    &desc,
+		FilePath:       "William Gibson/Neuromancer/Neuromancer.epub",
+		FileSizeBytes:  &size,
+		FileModifiedAt: &modTime,
 	}
 	if err := repo.CreateBook(ctx, book1); err != nil {
 		t.Fatalf("create book 1: %v", err)
@@ -231,7 +234,9 @@ func TestBookCRUDAndFiltering(t *testing.T) {
 
 	// 3. Update book
 	newTitle := "Neuromancer: 20th Anniversary Edition"
+	newModTime := time.Date(2026, 9, 10, 15, 30, 0, 0, time.UTC)
 	book1.Title = newTitle
+	book1.FileModifiedAt = &newModTime
 	if err := repo.UpdateBook(ctx, book1); err != nil {
 		t.Fatalf("update book: %v", err)
 	}
@@ -239,6 +244,14 @@ func TestBookCRUDAndFiltering(t *testing.T) {
 	fetched, err := repo.GetBookByID(ctx, book1.ID)
 	if err != nil || fetched.Title != newTitle {
 		t.Fatalf("expected updated title %s, got %v", newTitle, fetched)
+	}
+	if fetched.FileModifiedAt == nil || !fetched.FileModifiedAt.Equal(newModTime) {
+		t.Fatalf("expected file modified at %v, got %v", newModTime, fetched.FileModifiedAt)
+	}
+
+	byPath, err := repo.GetBookByFilePath(ctx, book1.FilePath)
+	if err != nil || byPath.FileModifiedAt == nil || !byPath.FileModifiedAt.Equal(newModTime) {
+		t.Fatalf("expected GetBookByFilePath to return file modified at %v, got %v", newModTime, byPath.FileModifiedAt)
 	}
 
 	// Update non-existent book
