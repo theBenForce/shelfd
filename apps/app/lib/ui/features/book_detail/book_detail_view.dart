@@ -5,6 +5,7 @@ import '../../../data/models/book.dart';
 import '../../../data/models/book_chat.dart';
 import '../../../data/models/bookmark.dart';
 import '../../../data/models/highlight.dart';
+import '../../core/html_text.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
 import '../../core/tokens.dart';
@@ -726,9 +727,10 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             style: AppTypography.titleSerif(fontSize: 18, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: AppTokens.space12),
-          Text(
-            book.synopsis.isNotEmpty ? book.synopsis : 'No synopsis provided for this book.',
+          HtmlText(
+            html: book.synopsis,
             style: AppTypography.bodySans(fontSize: 15, lineHeight: 1.6),
+            emptyPlaceholder: 'No synopsis provided for this book.',
           ),
           const SizedBox(height: AppTokens.space32),
           const Divider(height: 1, color: AppTokens.crispBorder),

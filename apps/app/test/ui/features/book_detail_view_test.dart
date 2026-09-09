@@ -165,6 +165,43 @@ void main() {
     expect(find.text('Themes include duality, gender, and diplomacy.'), findsOneWidget);
     expect(find.text('Ch. 1: A Parade in Erhenrang'), findsOneWidget);
   });
+
+  testWidgets('BookDetailView renders HTML synopsis without raw markup tags', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final bookWithHtmlSynopsis = testBook.copyWith(
+      synopsis: '<p><b>Important hook:</b><br>Story details in <i>italics</i>.</p>',
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookDetailProvider('book-42').overrideWith(() => _MockBookDetailNotifier(bookWithHtmlSynopsis)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const BookDetailView(bookId: 'book-42'),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('Synopsis'), findsOneWidget);
+    expect(find.textContaining('Important hook:'), findsOneWidget);
+    expect(find.textContaining('Story details in italics.'), findsOneWidget);
+    expect(find.textContaining('<p>'), findsNothing);
+    expect(find.textContaining('<b>'), findsNothing);
+    expect(find.textContaining('<i>'), findsNothing);
+    expect(find.textContaining('<br>'), findsNothing);
+  });
 }
 
 class _MockBookDetailNotifier extends BookDetailNotifier {
