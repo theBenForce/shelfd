@@ -22,7 +22,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/shelfd/shelfd:latest
+    image: ghcr.io/thebenforce/shelved:latest
     container_name: shelfd
     restart: unless-stopped
     depends_on:
