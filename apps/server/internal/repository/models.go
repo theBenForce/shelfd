@@ -4,59 +4,59 @@ import "time"
 
 // Book represents an ebook in the catalog.
 type Book struct {
-	ID            string    `json:"id"`
-	Title         string    `json:"title"`
-	Description   *string   `json:"description,omitempty"`
-	Language      *string   `json:"language,omitempty"`
-	Publisher     *string   `json:"publisher,omitempty"`
-	Identifier    *string   `json:"identifier,omitempty"`
-	FilePath      string    `json:"file_path"`
-	CoverPath     *string   `json:"cover_path,omitempty"`
-	FileSizeBytes *int64    `json:"file_size_bytes,omitempty"`
-	PublishedDate *string   `json:"published_date,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            string    `json:"id" bun:"id,pk"`
+	Title         string    `json:"title" bun:"title,notnull"`
+	Description   *string   `json:"description,omitempty" bun:"description"`
+	Language      *string   `json:"language,omitempty" bun:"language"`
+	Publisher     *string   `json:"publisher,omitempty" bun:"publisher"`
+	Identifier    *string   `json:"identifier,omitempty" bun:"identifier"`
+	FilePath      string    `json:"file_path" bun:"file_path,notnull"`
+	CoverPath     *string   `json:"cover_path,omitempty" bun:"cover_path"`
+	FileSizeBytes *int64    `json:"file_size_bytes,omitempty" bun:"file_size_bytes"`
+	PublishedDate *string   `json:"published_date,omitempty" bun:"published_date"`
+	CreatedAt     time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // Author represents a book creator or contributor.
 type Author struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id" bun:"id,pk"`
+	Name      string    `json:"name" bun:"name,notnull"`
+	CreatedAt time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // Genre represents a subject, category, or tag.
 type Genre struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id" bun:"id,pk"`
+	Name      string    `json:"name" bun:"name,notnull"`
+	CreatedAt time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // Series represents an overarching book series.
 type Series struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description *string   `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string    `json:"id" bun:"id,pk"`
+	Name        string    `json:"name" bun:"name,notnull"`
+	Description *string   `json:"description,omitempty" bun:"description"`
+	CreatedAt   time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // BookAuthor links a book to an author with an attributed role.
 type BookAuthor struct {
-	BookID   string `json:"book_id"`
-	AuthorID string `json:"author_id"`
-	Role     string `json:"role"`
+	BookID   string `json:"book_id" bun:"book_id,pk"`
+	AuthorID string `json:"author_id" bun:"author_id,pk"`
+	Role     string `json:"role" bun:"role"`
 }
 
 // BookGenre links a book to a genre.
 type BookGenre struct {
-	BookID  string `json:"book_id"`
-	GenreID string `json:"genre_id"`
+	BookID  string `json:"book_id" bun:"book_id,pk"`
+	GenreID string `json:"genre_id" bun:"genre_id,pk"`
 }
 
 // BookSeries links a book to a series with an optional sequence number (e.g. 1.0, 2.5).
 type BookSeries struct {
-	BookID         string   `json:"book_id"`
-	SeriesID       string   `json:"series_id"`
-	SequenceNumber *float64 `json:"sequence_number,omitempty"`
+	BookID         string   `json:"book_id" bun:"book_id,pk"`
+	SeriesID       string   `json:"series_id" bun:"series_id,pk"`
+	SequenceNumber *float64 `json:"sequence_number,omitempty" bun:"sequence_number"`
 }
 
 // BookSeriesDetail represents series metadata bundled with a book's sequence number.
@@ -67,39 +67,39 @@ type BookSeriesDetail struct {
 
 // Chapter represents a parsed section/spine item from an EPUB with summary and text content.
 type Chapter struct {
-	ID           string    `json:"id"`
-	BookID       string    `json:"book_id"`
-	ChapterIndex int       `json:"chapter_index"`
-	Title        *string   `json:"title,omitempty"`
-	Summary      string    `json:"summary"`
-	ContentPlain string    `json:"content_plain"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           string    `json:"id" bun:"id,pk"`
+	BookID       string    `json:"book_id" bun:"book_id,notnull"`
+	ChapterIndex int       `json:"chapter_index" bun:"chapter_index,notnull"`
+	Title        *string   `json:"title,omitempty" bun:"title"`
+	Summary      string    `json:"summary" bun:"summary,notnull"`
+	ContentPlain string    `json:"content_plain" bun:"content_plain,notnull"`
+	CreatedAt    time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // SpineItem represents a lightweight chapter entry in a book's reading order without plaintext content.
 type SpineItem struct {
-	ID           string  `json:"id"`
-	BookID       string  `json:"book_id"`
-	ChapterIndex int     `json:"chapter_index"`
-	Title        *string `json:"title,omitempty"`
-	Summary      string  `json:"summary,omitempty"`
+	ID           string  `json:"id" bun:"id,pk"`
+	BookID       string  `json:"book_id" bun:"book_id,notnull"`
+	ChapterIndex int     `json:"chapter_index" bun:"chapter_index,notnull"`
+	Title        *string `json:"title,omitempty" bun:"title"`
+	Summary      string  `json:"summary,omitempty" bun:"summary"`
 }
 
 // User represents a user account for authentication.
 type User struct {
-	ID           string    `json:"id"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"-"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           string    `json:"id" bun:"id,pk"`
+	Username     string    `json:"username" bun:"username,notnull"`
+	PasswordHash string    `json:"-" bun:"password_hash,notnull"`
+	CreatedAt    time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // APIToken represents a bearer token for MCP agents and API access.
 type APIToken struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	TokenHash string    `json:"token_hash"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id" bun:"id,pk"`
+	UserID    string    `json:"user_id" bun:"user_id,notnull"`
+	TokenHash string    `json:"token_hash" bun:"token_hash,notnull"`
+	Name      string    `json:"name" bun:"name,notnull"`
+	CreatedAt time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // BookFilter specifies search and filtering criteria for books.
@@ -114,14 +114,14 @@ type BookFilter struct {
 
 // Paragraph represents a consolidated text passage within a chapter.
 type Paragraph struct {
-	ID             string    `json:"id"`
-	BookID         string    `json:"book_id"`
-	ChapterID      string    `json:"chapter_id"`
-	ChapterIndex   int       `json:"chapter_index"`
-	StartParagraph int       `json:"start_paragraph"`
-	EndParagraph   int       `json:"end_paragraph"`
-	Content        string    `json:"content"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             string    `json:"id" bun:"id,pk"`
+	BookID         string    `json:"book_id" bun:"book_id,notnull"`
+	ChapterID      string    `json:"chapter_id" bun:"chapter_id,notnull"`
+	ChapterIndex   int       `json:"chapter_index" bun:"chapter_index,notnull"`
+	StartParagraph int       `json:"start_paragraph" bun:"start_paragraph,notnull"`
+	EndParagraph   int       `json:"end_paragraph" bun:"end_paragraph,notnull"`
+	Content        string    `json:"content" bun:"content,notnull"`
+	CreatedAt      time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // SearchHit represents a vector or full-text search result across paragraphs.
@@ -153,35 +153,35 @@ type SearchFilter struct {
 
 // Bookmark represents a saved reading location or user bookmark.
 type Bookmark struct {
-	ID        string    `json:"id"`
-	BookID    string    `json:"book_id"`
-	ChapterID *string   `json:"chapter_id,omitempty"`
-	Title     string    `json:"title"`
-	Progress  float64   `json:"progress"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string    `json:"id" bun:"id,pk"`
+	BookID    string    `json:"book_id" bun:"book_id,notnull"`
+	ChapterID *string   `json:"chapter_id,omitempty" bun:"chapter_id"`
+	Title     string    `json:"title" bun:"title,notnull"`
+	Progress  float64   `json:"progress" bun:"progress,notnull"`
+	CreatedAt time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // Highlight represents a user-highlighted text passage with optional notes.
 type Highlight struct {
-	ID           string    `json:"id"`
-	BookID       string    `json:"book_id"`
-	ChapterID    *string   `json:"chapter_id,omitempty"`
-	SelectedText string    `json:"selected_text"`
-	Note         *string   `json:"note,omitempty"`
-	Color        string    `json:"color"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           string    `json:"id" bun:"id,pk"`
+	BookID       string    `json:"book_id" bun:"book_id,notnull"`
+	ChapterID    *string   `json:"chapter_id,omitempty" bun:"chapter_id"`
+	SelectedText string    `json:"selected_text" bun:"selected_text,notnull"`
+	Note         *string   `json:"note,omitempty" bun:"note"`
+	Color        string    `json:"color" bun:"color,notnull"`
+	CreatedAt    time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // UploadJob represents an asynchronous book ingestion task.
 type UploadJob struct {
-	ID           string    `json:"id"`
-	Filename     string    `json:"filename"`
-	StagedPath   string    `json:"-"`
-	Status       string    `json:"status"` // queued, processing, completed, failed
-	BookID       *string   `json:"book_id,omitempty"`
-	ErrorMessage *string   `json:"error_message,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           string    `json:"id" bun:"id,pk"`
+	Filename     string    `json:"filename" bun:"filename,notnull"`
+	StagedPath   string    `json:"-" bun:"staged_path,notnull"`
+	Status       string    `json:"status" bun:"status,notnull"` // queued, processing, completed, failed
+	BookID       *string   `json:"book_id,omitempty" bun:"book_id"`
+	ErrorMessage *string   `json:"error_message,omitempty" bun:"error_message"`
+	CreatedAt    time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+	UpdatedAt    time.Time `json:"updated_at" bun:"updated_at,nullzero,default:current_timestamp"`
 }
 
 // QueueStatus represents the aggregate state of background processing jobs.

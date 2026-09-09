@@ -229,7 +229,9 @@ func ApplyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("SHELFD_SQLITE_PATH"); v != "" {
 		cfg.Database.SQLite.Path = v
 	}
-	if v := os.Getenv("SHELFD_POSTGRES_DSN"); v != "" {
+	if v := os.Getenv("SHELFD_DATABASE_POSTGRES_DSN"); v != "" {
+		cfg.Database.Postgres.DSN = v
+	} else if v := os.Getenv("SHELFD_POSTGRES_DSN"); v != "" {
 		cfg.Database.Postgres.DSN = v
 	}
 

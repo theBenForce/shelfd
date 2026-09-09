@@ -18,6 +18,8 @@ database:
   sqlite:
     path: "/data/sqlite.db"
   postgres:
+    # Example for local container or remote NAS (e.g. minidata):
+    # dsn: "postgres://shelfd:shelfd_password@localhost:5432/shelfd?sslmode=disable"
     dsn: ""
 
 storage:
