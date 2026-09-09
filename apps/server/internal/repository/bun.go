@@ -1368,6 +1368,50 @@ func (r *BunStorageEngine) UpdateUploadJobStatus(ctx context.Context, id string,
 	return nil
 }
 
+func (r *BunStorageEngine) UpdateUploadJobCommit(ctx context.Context, id string, status string, metadata *string) error {
+	now := time.Now().UTC()
+	q := r.db.NewUpdate().
+		Model((*UploadJob)(nil)).
+		Set("status = ?", status).
+		Set("updated_at = ?", now).
+		Where("id = ?", id)
+
+	if metadata != nil {
+		q = q.Set("metadata = ?", *metadata)
+	}
+
+	res, err := q.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("updating upload job commit: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) DeleteUploadJob(ctx context.Context, id string) error {
+	res, err := r.db.NewDelete().
+		Model((*UploadJob)(nil)).
+		Where("id = ?", id).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("deleting upload job: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *BunStorageEngine) GetPendingUploadJobs(ctx context.Context, limit int) ([]*UploadJob, error) {
 	if limit <= 0 {
 		limit = 10

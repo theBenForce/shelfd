@@ -10,6 +10,7 @@ import 'package:shelf/data/models/highlight.dart';
 import 'package:shelf/data/models/queue_status.dart';
 import 'package:shelf/data/models/search_result.dart';
 import 'package:shelf/data/models/series.dart';
+import 'package:shelf/data/models/upload_job.dart';
 import 'package:shelf/data/models/user.dart';
 
 void main() {
@@ -305,6 +306,69 @@ void main() {
       expect(book.language, 'en');
       expect(book.fileSizeBytes, 1024000);
       expect(book.toJson()['publisher'], 'Ace Books');
+    });
+
+    test('StagedMetadata and StagedUploadJob fromJson & destinationPathPreview', () {
+      final json = {
+        'job_id': 'job-abc-123',
+        'status': 'staged',
+        'filename': 'dune.epub',
+        'has_cover': true,
+        'warnings': ['No author found in EPUB metadata'],
+        'metadata': {
+          'title': 'Dune',
+          'authors': ['Frank Herbert'],
+          'series': 'Dune Chronicles',
+          'sequence_number': 1.0,
+          'description': 'A desert planet spice story.',
+          'publisher': 'Chilton Books',
+          'language': 'en',
+          'genres': ['Science Fiction', 'Space Opera'],
+        },
+      };
+
+      final job = StagedUploadJob.fromJson(json);
+      expect(job.jobId, 'job-abc-123');
+      expect(job.status, 'staged');
+      expect(job.filename, 'dune.epub');
+      expect(job.hasCover, isTrue);
+      expect(job.warnings, contains('No author found in EPUB metadata'));
+      expect(job.metadata.title, 'Dune');
+      expect(job.metadata.primaryAuthor, 'Frank Herbert');
+      expect(job.metadata.series, 'Dune Chronicles');
+      expect(job.metadata.sequenceNumber, 1.0);
+      expect(job.metadata.description, 'A desert planet spice story.');
+      expect(job.metadata.genres, contains('Science Fiction'));
+
+      // Test destination preview
+      expect(
+        job.metadata.destinationPathPreview,
+        '/library/Frank Herbert/Dune/Dune.epub',
+      );
+
+      // Path sanitization test
+      final dirtyMeta = StagedMetadata(
+        title: 'Book: The Special / Edition?',
+        authors: ['Author / With: Illegal * Chars'],
+      );
+      expect(
+        dirtyMeta.destinationPathPreview,
+        '/library/Author _ With_ Illegal _ Chars/Book_ The Special _ Edition_/Book_ The Special _ Edition_.epub',
+      );
+
+      // Empty fallback test
+      const emptyMeta = StagedMetadata(
+        title: '',
+        authors: [],
+      );
+      expect(emptyMeta.primaryAuthor, 'Unknown');
+      expect(emptyMeta.destinationPathPreview, '/library/Unknown/Untitled/Untitled.epub');
+
+      // Test toJson
+      final serialized = job.toJson();
+      expect(serialized['job_id'], 'job-abc-123');
+      expect(serialized['has_cover'], isTrue);
+      expect((serialized['metadata'] as Map)['title'], 'Dune');
     });
   });
 }

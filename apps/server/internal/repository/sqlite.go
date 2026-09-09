@@ -916,12 +916,12 @@ func (r *SQLiteStorageEngine) CreateUploadJob(ctx context.Context, job *UploadJo
 	}
 
 	query := `
-		INSERT INTO upload_jobs (id, filename, staged_path, status, book_id, error_message, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO upload_jobs (id, filename, staged_path, status, metadata, has_cover, book_id, error_message, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		job.ID, job.Filename, job.StagedPath, job.Status,
-		job.BookID, job.ErrorMessage, job.CreatedAt, job.UpdatedAt,
+		job.Metadata, job.HasCover, job.BookID, job.ErrorMessage, job.CreatedAt, job.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("creating upload job: %w", err)
@@ -931,20 +931,24 @@ func (r *SQLiteStorageEngine) CreateUploadJob(ctx context.Context, job *UploadJo
 
 func (r *SQLiteStorageEngine) GetUploadJob(ctx context.Context, id string) (*UploadJob, error) {
 	query := `
-		SELECT id, filename, staged_path, status, book_id, error_message, created_at, updated_at
+		SELECT id, filename, staged_path, status, metadata, has_cover, book_id, error_message, created_at, updated_at
 		FROM upload_jobs
 		WHERE id = ?
 	`
 	j := &UploadJob{}
+	var meta sql.NullString
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&j.ID, &j.Filename, &j.StagedPath, &j.Status,
-		&j.BookID, &j.ErrorMessage, &j.CreatedAt, &j.UpdatedAt,
+		&meta, &j.HasCover, &j.BookID, &j.ErrorMessage, &j.CreatedAt, &j.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting upload job: %w", err)
+	}
+	if meta.Valid {
+		j.Metadata = &meta.String
 	}
 	return j, nil
 }
@@ -970,12 +974,49 @@ func (r *SQLiteStorageEngine) UpdateUploadJobStatus(ctx context.Context, id stri
 	return nil
 }
 
+func (r *SQLiteStorageEngine) UpdateUploadJobCommit(ctx context.Context, id string, status string, metadata *string) error {
+	now := time.Now().UTC()
+	query := `
+		UPDATE upload_jobs
+		SET status = ?, metadata = COALESCE(?, metadata), updated_at = ?
+		WHERE id = ?
+	`
+	res, err := r.db.ExecContext(ctx, query, status, metadata, now, id)
+	if err != nil {
+		return fmt.Errorf("updating upload job commit: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking update upload job commit result: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) DeleteUploadJob(ctx context.Context, id string) error {
+	query := `DELETE FROM upload_jobs WHERE id = ?`
+	res, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("deleting upload job: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking delete upload job result: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *SQLiteStorageEngine) GetPendingUploadJobs(ctx context.Context, limit int) ([]*UploadJob, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 	query := `
-		SELECT id, filename, staged_path, status, book_id, error_message, created_at, updated_at
+		SELECT id, filename, staged_path, status, metadata, has_cover, book_id, error_message, created_at, updated_at
 		FROM upload_jobs
 		WHERE status IN ('queued', 'processing')
 		ORDER BY created_at ASC
@@ -990,8 +1031,12 @@ func (r *SQLiteStorageEngine) GetPendingUploadJobs(ctx context.Context, limit in
 	var jobs []*UploadJob
 	for rows.Next() {
 		j := &UploadJob{}
-		if err := rows.Scan(&j.ID, &j.Filename, &j.StagedPath, &j.Status, &j.BookID, &j.ErrorMessage, &j.CreatedAt, &j.UpdatedAt); err != nil {
+		var meta sql.NullString
+		if err := rows.Scan(&j.ID, &j.Filename, &j.StagedPath, &j.Status, &meta, &j.HasCover, &j.BookID, &j.ErrorMessage, &j.CreatedAt, &j.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning upload job: %w", err)
+		}
+		if meta.Valid {
+			j.Metadata = &meta.String
 		}
 		jobs = append(jobs, j)
 	}
@@ -1003,7 +1048,7 @@ func (r *SQLiteStorageEngine) ListUploadJobs(ctx context.Context, limit int) ([]
 		limit = 20
 	}
 	query := `
-		SELECT id, filename, staged_path, status, book_id, error_message, created_at, updated_at
+		SELECT id, filename, staged_path, status, metadata, has_cover, book_id, error_message, created_at, updated_at
 		FROM upload_jobs
 		ORDER BY created_at DESC
 		LIMIT ?
@@ -1017,8 +1062,12 @@ func (r *SQLiteStorageEngine) ListUploadJobs(ctx context.Context, limit int) ([]
 	var jobs []*UploadJob
 	for rows.Next() {
 		j := &UploadJob{}
-		if err := rows.Scan(&j.ID, &j.Filename, &j.StagedPath, &j.Status, &j.BookID, &j.ErrorMessage, &j.CreatedAt, &j.UpdatedAt); err != nil {
+		var meta sql.NullString
+		if err := rows.Scan(&j.ID, &j.Filename, &j.StagedPath, &j.Status, &meta, &j.HasCover, &j.BookID, &j.ErrorMessage, &j.CreatedAt, &j.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning upload job: %w", err)
+		}
+		if meta.Valid {
+			j.Metadata = &meta.String
 		}
 		jobs = append(jobs, j)
 	}

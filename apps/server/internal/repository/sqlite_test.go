@@ -829,7 +829,29 @@ func TestUploadJobs(t *testing.T) {
 		t.Fatalf("expected 3 total jobs in list, got %d", len(allJobs))
 	}
 
-	// 8. Test Not Found
+	// 8. Test UpdateUploadJobCommit
+	metaJSON := `{"title":"Updated Title","author":"Updated Author"}`
+	if err := repo.UpdateUploadJobCommit(ctx, "job-3", "queued", &metaJSON); err != nil {
+		t.Fatalf("failed to update upload job commit: %v", err)
+	}
+	fetched3, err := repo.GetUploadJob(ctx, "job-3")
+	if err != nil {
+		t.Fatalf("failed to get job3 after commit: %v", err)
+	}
+	if fetched3.Status != "queued" || fetched3.Metadata == nil || *fetched3.Metadata != metaJSON {
+		t.Fatalf("unexpected committed job state: %+v", fetched3)
+	}
+
+	// 9. Test DeleteUploadJob
+	if err := repo.DeleteUploadJob(ctx, "job-3"); err != nil {
+		t.Fatalf("failed to delete upload job: %v", err)
+	}
+	_, err = repo.GetUploadJob(ctx, "job-3")
+	if err != repository.ErrNotFound {
+		t.Fatalf("expected ErrNotFound for deleted job, got %v", err)
+	}
+
+	// 10. Test Not Found
 	_, err = repo.GetUploadJob(ctx, "nonexistent-job")
 	if err != repository.ErrNotFound {
 		t.Fatalf("expected ErrNotFound for nonexistent job, got %v", err)

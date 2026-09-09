@@ -5,6 +5,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/repositories/auth_repository.dart';
 import 'package:shelf/data/repositories/book_repository.dart';
+import 'package:shelf/data/models/upload_job.dart';
 import 'package:shelf/data/repositories/reader_repository.dart';
 import 'package:shelf/data/services/api_service.dart';
 import 'package:shelf/data/services/storage_service.dart';
@@ -172,6 +173,64 @@ void main() {
       final ch = await readerRepo.loadChapter('b-1', '01M22YCE6D6GZJAXZC8A39AVKE');
       expect(ch.content, 'Legacy cached content');
       expect(ch.title, isEmpty);
+    });
+
+    test('BookRepository stageUpload, commitUpload, deleteUploadJob delegate to ApiService', () async {
+      final mockClient = MockClient((request) async {
+        if (request.method == 'POST' && request.url.path == '/api/v1/books/upload/stage') {
+          return http.Response(
+            jsonEncode({
+              'job_id': 'job-repo-1',
+              'status': 'staged',
+              'filename': 'earthsea.epub',
+              'has_cover': false,
+              'warnings': [],
+              'metadata': {
+                'title': 'A Wizard of Earthsea',
+                'authors': ['Ursula K. Le Guin'],
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'POST' && request.url.path == '/api/v1/books/upload/jobs/job-repo-1/commit') {
+          return http.Response(
+            jsonEncode({
+              'id': 'book-earthsea-1',
+              'title': 'A Wizard of Earthsea',
+              'authors': [{'id': 'a1', 'name': 'Ursula K. Le Guin'}],
+            }),
+            201,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'DELETE' && request.url.path == '/api/v1/books/upload/jobs/job-repo-1') {
+          return http.Response('', 204);
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+      final job = await bookRepo.stageUpload(filename: 'earthsea.epub', bytes: [1, 2, 3]);
+      expect(job.jobId, 'job-repo-1');
+      expect(job.metadata.title, 'A Wizard of Earthsea');
+
+      final coverUrl = bookRepo.getUploadJobCoverUrl('job-repo-1');
+      expect(coverUrl, 'http://localhost:8080/api/v1/books/upload/jobs/job-repo-1/cover');
+
+      final committed = await bookRepo.commitUpload(
+        'job-repo-1',
+        const StagedMetadata(
+          title: 'A Wizard of Earthsea',
+          authors: ['Ursula K. Le Guin'],
+        ),
+      );
+      expect(committed.id, 'book-earthsea-1');
+
+      await expectLater(bookRepo.deleteUploadJob('job-repo-1'), completes);
     });
   });
 }

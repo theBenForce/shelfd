@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shelf/data/models/upload_job.dart';
 import 'package:shelf/data/services/api_service.dart';
 
 void main() {
@@ -362,6 +363,92 @@ void main() {
       expect(res.citations.length, 1);
       expect(res.citations.first.chapterIndex, 1);
       expect(res.citations.first.chapterTitle, 'Loomings');
+    });
+
+    test('stageUploadBook sends multipart request and returns StagedUploadJob', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.method, 'POST');
+        expect(request.url.path, '/api/v1/books/upload/stage');
+        expect(request.headers['authorization'], 'Bearer my-token');
+
+        return http.Response(
+          jsonEncode({
+            'job_id': 'job-xyz-789',
+            'status': 'staged',
+            'filename': 'test_upload.epub',
+            'has_cover': true,
+            'warnings': ['No author found in EPUB metadata'],
+            'metadata': {
+              'title': 'Test Staged Title',
+              'authors': ['Unknown'],
+              'series': null,
+              'sequence_number': null,
+              'description': null,
+              'genres': ['Fiction'],
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', token: 'my-token', client: mockClient);
+      final job = await apiService.stageUploadBook(
+        filename: 'test_upload.epub',
+        bytes: [0x50, 0x4B, 0x03, 0x04],
+      );
+
+      expect(job.jobId, 'job-xyz-789');
+      expect(job.status, 'staged');
+      expect(job.filename, 'test_upload.epub');
+      expect(job.hasCover, isTrue);
+      expect(job.metadata.title, 'Test Staged Title');
+      expect(job.metadata.primaryAuthor, 'Unknown');
+      expect(job.warnings, contains('No author found in EPUB metadata'));
+    });
+
+    test('commitUploadJob sends updated metadata and returns created Book', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.method, 'POST');
+        expect(request.url.path, '/api/v1/books/upload/jobs/job-xyz-789/commit');
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['title'], 'Final Title');
+        expect(body['authors'], ['Final Author']);
+
+        return http.Response(
+          jsonEncode({
+            'id': 'book-committed-1',
+            'title': 'Final Title',
+            'authors': [{'id': 'a1', 'name': 'Final Author'}],
+          }),
+          201,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final book = await apiService.commitUploadJob(
+        'job-xyz-789',
+        const StagedMetadata(
+          title: 'Final Title',
+          authors: ['Final Author'],
+        ),
+      );
+
+      expect(book.id, 'book-committed-1');
+      expect(book.title, 'Final Title');
+      expect(book.authors.first.name, 'Final Author');
+    });
+
+    test('deleteUploadJob sends DELETE request', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.method, 'DELETE');
+        expect(request.url.path, '/api/v1/books/upload/jobs/job-xyz-789');
+        return http.Response('', 204);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      await expectLater(apiService.deleteUploadJob('job-xyz-789'), completes);
     });
   });
 }

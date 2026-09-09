@@ -189,7 +189,9 @@ type UploadJob struct {
 	ID           string    `json:"id" bun:"id,pk"`
 	Filename     string    `json:"filename" bun:"filename,notnull"`
 	StagedPath   string    `json:"-" bun:"staged_path,notnull"`
-	Status       string    `json:"status" bun:"status,notnull"` // queued, processing, completed, failed
+	Status       string    `json:"status" bun:"status,notnull"` // staged, queued, processing, completed, failed
+	Metadata     *string   `json:"metadata,omitempty" bun:"metadata"`
+	HasCover     bool      `json:"has_cover" bun:"has_cover"`
 	BookID       *string   `json:"book_id,omitempty" bun:"book_id"`
 	ErrorMessage *string   `json:"error_message,omitempty" bun:"error_message"`
 	CreatedAt    time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`

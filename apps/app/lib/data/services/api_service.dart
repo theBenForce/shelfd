@@ -11,6 +11,7 @@ import '../models/highlight.dart';
 import '../models/queue_status.dart';
 import '../models/search_result.dart';
 import '../models/series.dart';
+import '../models/upload_job.dart';
 import '../models/user.dart';
 
 class ApiException implements Exception {
@@ -410,5 +411,59 @@ class ApiService {
     }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return BookChatResponse.fromJson(data);
+  }
+
+  String getUploadJobCoverUrl(String jobId) {
+    final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    return '$cleanBase/api/v1/books/upload/jobs/$jobId/cover';
+  }
+
+  Future<StagedUploadJob> stageUploadBook({
+    required String filename,
+    required List<int> bytes,
+  }) async {
+    final uri = _uri('/api/v1/books/upload/stage');
+    final request = http.MultipartRequest('POST', uri);
+    if (token != null && token!.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        'file',
+        bytes,
+        filename: filename,
+      ),
+    );
+
+    final streamedResponse = await client.send(request);
+    final response = await http.Response.fromStream(streamedResponse);
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return StagedUploadJob.fromJson(data);
+  }
+
+  Future<Book> commitUploadJob(String jobId, StagedMetadata metadata) async {
+    final response = await client.post(
+      _uri('/api/v1/books/upload/jobs/$jobId/commit'),
+      headers: _headers(),
+      body: jsonEncode(metadata.toJson()),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return Book.fromJson(data, baseUrl: baseUrl);
+  }
+
+  Future<void> deleteUploadJob(String jobId) async {
+    final response = await client.delete(
+      _uri('/api/v1/books/upload/jobs/$jobId'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400 && response.statusCode != 404) {
+      throw ApiException(response.statusCode, response.body);
+    }
   }
 }

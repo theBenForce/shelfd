@@ -313,6 +313,7 @@ class ShelfdSideNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
   final VoidCallback? onRescan;
+  final VoidCallback? onUpload;
   final bool isRescanning;
 
   const ShelfdSideNav({
@@ -320,6 +321,7 @@ class ShelfdSideNav extends StatelessWidget {
     required this.currentIndex,
     required this.onTap,
     this.onRescan,
+    this.onUpload,
     this.isRescanning = false,
   });
 
@@ -417,6 +419,32 @@ class ShelfdSideNav extends StatelessWidget {
           // Live AI indexing queue progress card
           const _QueueStatusCard(),
           const SizedBox(height: AppTokens.space12),
+
+          // Upload EPUB Button (if callback provided)
+          if (onUpload != null) ...[
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: AppTokens.boneSurface,
+                  foregroundColor: AppTokens.charcoalInk,
+                  side: const BorderSide(color: AppTokens.crispBorder),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
+                ),
+                onPressed: onUpload,
+                icon: const Icon(Icons.upload_file_outlined, size: 18),
+                label: const Text(
+                  'Upload EPUB',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            const SizedBox(height: AppTokens.space8),
+          ],
 
           // Rescan Library Button (if callback provided)
           if (onRescan != null) ...[
@@ -738,6 +766,7 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
   final PreferredSizeWidget? appBar;
   final Widget body;
   final VoidCallback? onRescan;
+  final VoidCallback? onUpload;
   final bool isRescanning;
 
   const ShelfdAdaptiveScaffold({
@@ -747,6 +776,7 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
     this.appBar,
     required this.body,
     this.onRescan,
+    this.onUpload,
     this.isRescanning = false,
   });
 
@@ -762,6 +792,7 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
               currentIndex: currentIndex,
               onTap: onNavTap,
               onRescan: onRescan,
+              onUpload: onUpload,
               isRescanning: isRescanning,
             ),
             Expanded(

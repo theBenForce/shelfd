@@ -7,6 +7,7 @@ import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../../data/models/book.dart';
 import '../../state/providers.dart';
+import '../upload/upload_drop_target.dart';
 
 class LibraryView extends ConsumerStatefulWidget {
   const LibraryView({super.key});
@@ -57,63 +58,91 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
       }
     }
 
-    return ShelfdAdaptiveScaffold(
-      currentIndex: _navIndex,
-      onNavTap: _onNavTapped,
-      onRescan: handleScan,
-      appBar: ShelfdTopBar(
-        title: 'Shelfd',
-        subtitle: 'Connected to Homelab NAS',
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'Rescan Library',
-            onPressed: handleScan,
-          ),
-          IconButton(
-            icon: const Icon(Icons.search_rounded),
-            tooltip: 'Semantic Search',
-            onPressed: () => context.go('/search'),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Desktop Header: "Library" title and book count badge (Stitch spec)
-            if (isDesktop)
-              Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      horizontalPad,
-                      AppTokens.space24,
-                      horizontalPad,
-                      AppTokens.space8,
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: [
-                        Text(
-                          'Library',
-                          style: AppTypography.titleSerif(
-                            fontSize: 32,
-                            fontWeight: FontWeight.w600,
+    return ShelfdDropTarget(
+      child: ShelfdAdaptiveScaffold(
+        currentIndex: _navIndex,
+        onNavTap: _onNavTapped,
+        onRescan: handleScan,
+        onUpload: () => pickAndUploadEpub(context, ref),
+        appBar: ShelfdTopBar(
+          title: 'Shelfd',
+          subtitle: 'Connected to Homelab NAS',
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.upload_file_outlined),
+              tooltip: 'Upload EPUB',
+              onPressed: () => pickAndUploadEpub(context, ref),
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded),
+              tooltip: 'Rescan Library',
+              onPressed: handleScan,
+            ),
+            IconButton(
+              icon: const Icon(Icons.search_rounded),
+              tooltip: 'Semantic Search',
+              onPressed: () => context.go('/search'),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              // Desktop Header: "Library" title and book count badge (Stitch spec)
+              if (isDesktop)
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        horizontalPad,
+                        AppTokens.space24,
+                        horizontalPad,
+                        AppTokens.space8,
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.baseline,
+                        textBaseline: TextBaseline.alphabetic,
+                        children: [
+                          Text(
+                            'Library',
+                            style: AppTypography.titleSerif(
+                              fontSize: 32,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: AppTokens.space12),
-                        StatusBadge(
-                          label: '${libraryState.books.length} Books',
-                          backgroundColor: AppTokens.boneContainer,
-                          textColor: AppTokens.mutedCopy,
-                        ),
-                      ],
+                          const SizedBox(width: AppTokens.space12),
+                          StatusBadge(
+                            label: '${libraryState.books.length} Books',
+                            backgroundColor: AppTokens.boneContainer,
+                            textColor: AppTokens.mutedCopy,
+                          ),
+                          const Spacer(),
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppTokens.charcoalInk,
+                              side: const BorderSide(color: AppTokens.crispBorder),
+                              backgroundColor: AppTokens.boneSurface,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppTokens.space16,
+                                vertical: AppTokens.space12,
+                              ),
+                            ),
+                            onPressed: () => pickAndUploadEpub(context, ref),
+                            icon: const Icon(Icons.upload_file_outlined, size: 18),
+                            label: const Text(
+                              'Upload EPUB',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
 
             // Filter Pills Row (DRY shared component)
             Center(
@@ -206,6 +235,27 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                                   textAlign: TextAlign.center,
                                   style: AppTypography.bodySans(fontSize: 14),
                                 ),
+                                const SizedBox(height: AppTokens.space16),
+                                OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppTokens.charcoalInk,
+                                    side: const BorderSide(color: AppTokens.crispBorder),
+                                    backgroundColor: AppTokens.boneSurface,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AppTokens.space16,
+                                      vertical: AppTokens.space12,
+                                    ),
+                                  ),
+                                  onPressed: () => pickAndUploadEpub(context, ref),
+                                  icon: const Icon(Icons.upload_file_outlined, size: 18),
+                                  label: const Text(
+                                    'Upload EPUB',
+                                    style: TextStyle(fontWeight: FontWeight.w600),
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -241,6 +291,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
           ],
         ),
       ),
+    ),
     );
   }
 }

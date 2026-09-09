@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shelfd/shelfd/internal/ai"
+	"github.com/shelfd/shelfd/internal/epub"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 	"github.com/shelfd/shelfd/internal/ulid"
@@ -415,6 +416,11 @@ func (h *BookHandler) UploadBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Query().Get("stage") == "true" {
+		h.StageUploadBook(w, r)
+		return
+	}
+
 	// Limit upload size to 60MB
 	if err := r.ParseMultipartForm(60 << 20); err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse multipart form: %v", err))
@@ -493,6 +499,362 @@ func (h *BookHandler) UploadBook(w http.ResponseWriter, r *http.Request) {
 		"message":    "Upload enqueued for processing",
 		"created_at": job.CreatedAt,
 	})
+}
+
+// StagedMetadataDTO represents parsed EPUB metadata for user inspection before saving.
+type StagedMetadataDTO struct {
+	Title          string   `json:"title"`
+	Authors        []string `json:"authors"`
+	Series         *string  `json:"series,omitempty"`
+	SequenceNumber *float64 `json:"sequence_number,omitempty"`
+	Description    *string  `json:"description,omitempty"`
+	Publisher      *string  `json:"publisher,omitempty"`
+	Language       *string  `json:"language,omitempty"`
+	Genres         []string `json:"genres,omitempty"`
+}
+
+// CommitUploadRequest represents the user-confirmed or edited metadata to commit to /library.
+type CommitUploadRequest struct {
+	Title          string   `json:"title"`
+	Author         string   `json:"author"`
+	Authors        []string `json:"authors,omitempty"`
+	Series         *string  `json:"series,omitempty"`
+	SequenceNumber *float64 `json:"sequence_number,omitempty"`
+	Description    *string  `json:"description,omitempty"`
+	Publisher      *string  `json:"publisher,omitempty"`
+	Language       *string  `json:"language,omitempty"`
+	Genres         []string `json:"genres,omitempty"`
+}
+
+// StageUploadBook stages an EPUB file and extracts its metadata and cover preview without committing to /library.
+func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if err := r.ParseMultipartForm(60 << 20); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse multipart form: %v", err))
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Missing 'file' field in multipart upload")
+		return
+	}
+	defer file.Close()
+
+	if !strings.HasSuffix(strings.ToLower(header.Filename), ".epub") {
+		writeJSONError(w, http.StatusBadRequest, "Only .epub files are accepted")
+		return
+	}
+
+	jobID := uuid.NewString()
+	uploadsDir := filepath.Join(h.dataDir, "uploads")
+	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to create uploads directory")
+		return
+	}
+
+	stagedPath := filepath.Join(uploadsDir, jobID+".epub")
+	stagedFile, err := os.OpenFile(stagedPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to create staged upload file")
+		return
+	}
+
+	if _, err := io.Copy(stagedFile, file); err != nil {
+		stagedFile.Close()
+		_ = os.Remove(stagedPath)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to write staged upload file")
+		return
+	}
+	stagedFile.Close()
+
+	// Parse EPUB metadata and check for cover
+	epubReader, err := epub.Open(stagedPath)
+	if err != nil {
+		_ = os.Remove(stagedPath)
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid EPUB archive: %v", err))
+		return
+	}
+	parsed, err := epubReader.ParseBook()
+	if err != nil {
+		epubReader.Close()
+		_ = os.Remove(stagedPath)
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse EPUB metadata: %v", err))
+		return
+	}
+
+	coverBytes, _, coverErr := epubReader.ExtractCoverImage()
+	hasCover := false
+	if coverErr == nil && len(coverBytes) > 0 {
+		hasCover = true
+		coverPath := filepath.Join(uploadsDir, jobID+".cover")
+		_ = os.WriteFile(coverPath, coverBytes, 0644)
+	}
+	epubReader.Close()
+
+	authors := make([]string, 0, len(parsed.Authors))
+	for _, a := range parsed.Authors {
+		if strings.TrimSpace(a.Name) != "" {
+			authors = append(authors, strings.TrimSpace(a.Name))
+		}
+	}
+	if len(authors) == 0 {
+		authors = []string{"Unknown"}
+	}
+
+	title := strings.TrimSpace(parsed.Title)
+	if title == "" {
+		title = strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
+	}
+
+	var series *string
+	var seqNum *float64
+	if parsed.Series != nil && strings.TrimSpace(parsed.Series.Name) != "" {
+		s := strings.TrimSpace(parsed.Series.Name)
+		series = &s
+		seqNum = parsed.Series.SequenceNumber
+	}
+
+	var desc *string
+	if strings.TrimSpace(parsed.Description) != "" {
+		d := strings.TrimSpace(parsed.Description)
+		desc = &d
+	}
+
+	var pub *string
+	if strings.TrimSpace(parsed.Publisher) != "" {
+		p := strings.TrimSpace(parsed.Publisher)
+		pub = &p
+	}
+
+	var lang *string
+	if strings.TrimSpace(parsed.Language) != "" {
+		l := strings.TrimSpace(parsed.Language)
+		lang = &l
+	}
+
+	dto := StagedMetadataDTO{
+		Title:          title,
+		Authors:        authors,
+		Series:         series,
+		SequenceNumber: seqNum,
+		Description:    desc,
+		Publisher:      pub,
+		Language:       lang,
+		Genres:         parsed.Genres,
+	}
+
+	metaBytes, _ := json.Marshal(dto)
+	metaStr := string(metaBytes)
+
+	var warnings []string
+	if len(authors) == 1 && authors[0] == "Unknown" {
+		warnings = append(warnings, "No author found in EPUB metadata")
+	}
+	if title == "Untitled" {
+		warnings = append(warnings, "No title found in EPUB metadata")
+	}
+
+	job := &repository.UploadJob{
+		ID:         jobID,
+		Filename:   header.Filename,
+		StagedPath: stagedPath,
+		Status:     "staged",
+		Metadata:   &metaStr,
+		HasCover:   hasCover,
+	}
+	if err := h.repo.CreateUploadJob(r.Context(), job); err != nil {
+		_ = os.Remove(stagedPath)
+		_ = os.Remove(filepath.Join(uploadsDir, jobID+".cover"))
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to record staged upload: %v", err))
+		return
+	}
+
+	h.logger.Info("Staged book upload for review", "job_id", job.ID, "filename", job.Filename, "title", title)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job_id":     job.ID,
+		"status":     job.Status,
+		"filename":   job.Filename,
+		"metadata":   dto,
+		"has_cover":  hasCover,
+		"warnings":   warnings,
+		"created_at": job.CreatedAt,
+	})
+}
+
+// GetUploadJobCover returns the extracted cover image for a staged upload job.
+func (h *BookHandler) GetUploadJobCover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	jobID := r.PathValue("id")
+	if jobID == "" {
+		jobID = extractIDFromPath(r.URL.Path, "jobs")
+	}
+	if jobID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Job ID required")
+		return
+	}
+
+	coverPath := filepath.Join(h.dataDir, "uploads", jobID+".cover")
+	if data, err := os.ReadFile(coverPath); err == nil && len(data) > 0 {
+		w.Header().Set("Content-Type", http.DetectContentType(data))
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+		return
+	}
+
+	// Fallback: extract directly from staged EPUB file
+	job, err := h.repo.GetUploadJob(r.Context(), jobID)
+	if err == nil && job != nil && job.StagedPath != "" {
+		if reader, err := epub.Open(job.StagedPath); err == nil {
+			defer reader.Close()
+			if data, _, err := reader.ExtractCoverImage(); err == nil && len(data) > 0 {
+				_ = os.WriteFile(coverPath, data, 0644)
+				w.Header().Set("Content-Type", http.DetectContentType(data))
+				w.Header().Set("Cache-Control", "public, max-age=3600")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(data)
+				return
+			}
+		}
+	}
+
+	writeJSONError(w, http.StatusNotFound, "Cover image not found for staged upload")
+}
+
+// CommitUploadJob applies any edited metadata to the EPUB on disk and finalizes ingestion into /library.
+func (h *BookHandler) CommitUploadJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	jobID := r.PathValue("id")
+	if jobID == "" {
+		jobID = extractIDFromPath(r.URL.Path, "jobs")
+	}
+	if jobID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Job ID required")
+		return
+	}
+
+	job, err := h.repo.GetUploadJob(r.Context(), jobID)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeJSONError(w, http.StatusNotFound, "Upload job not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get upload job: %v", err))
+		return
+	}
+
+	if job.Status != "staged" {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Upload job is not in 'staged' status (current status: %s)", job.Status))
+		return
+	}
+
+	var req CommitUploadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON request body: %v", err))
+		return
+	}
+
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book title is required")
+		return
+	}
+
+	authors := req.Authors
+	if len(authors) == 0 && strings.TrimSpace(req.Author) != "" {
+		authors = []string{strings.TrimSpace(req.Author)}
+	}
+	if len(authors) == 0 {
+		authors = []string{"Unknown"}
+	}
+	primaryAuthor := authors[0]
+
+	// Update the EPUB file package metadata on disk
+	update := epub.MetadataUpdate{
+		Title:          title,
+		Authors:        authors,
+		Series:         req.Series,
+		SequenceNumber: req.SequenceNumber,
+		Description:    req.Description,
+		Publisher:      req.Publisher,
+		Language:       req.Language,
+		Genres:         req.Genres,
+	}
+	if err := epub.UpdateMetadata(job.StagedPath, update); err != nil {
+		h.logger.Error("Failed to update EPUB metadata", "job_id", job.ID, "error", err)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to update EPUB metadata: %v", err))
+		return
+	}
+
+	// Ingest the updated book into /library/<Author>/<Title>/<Title>.epub
+	stagedFile, err := os.Open(job.StagedPath)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to open staged EPUB: %v", err))
+		return
+	}
+	defer stagedFile.Close()
+
+	book, err := h.ingester.SaveUpload(r.Context(), primaryAuthor, title, stagedFile)
+	stagedFile.Close()
+	if err != nil {
+		h.logger.Error("Failed to ingest book into library", "job_id", job.ID, "error", err)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to ingest book into library: %v", err))
+		return
+	}
+
+	// Clean up staged file and cached cover
+	_ = os.Remove(job.StagedPath)
+	_ = os.Remove(filepath.Join(h.dataDir, "uploads", job.ID+".cover"))
+
+	_ = h.repo.UpdateUploadJobStatus(r.Context(), job.ID, "completed", &book.ID, nil)
+
+	if h.worker != nil {
+		h.worker.Trigger()
+	}
+
+	h.logger.Info("Committed book upload to library", "job_id", job.ID, "book_id", book.ID, "title", book.Title, "author", primaryAuthor)
+
+	writeJSON(w, http.StatusCreated, book)
+}
+
+// DeleteUploadJob discards a staged upload job and removes temporary files.
+func (h *BookHandler) DeleteUploadJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	jobID := r.PathValue("id")
+	if jobID == "" {
+		jobID = extractIDFromPath(r.URL.Path, "jobs")
+	}
+	if jobID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Job ID required")
+		return
+	}
+
+	job, err := h.repo.GetUploadJob(r.Context(), jobID)
+	if err == nil && job != nil {
+		_ = os.Remove(job.StagedPath)
+		_ = os.Remove(filepath.Join(h.dataDir, "uploads", job.ID+".cover"))
+		_ = h.repo.DeleteUploadJob(r.Context(), jobID)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *BookHandler) GetUploadJob(w http.ResponseWriter, r *http.Request) {

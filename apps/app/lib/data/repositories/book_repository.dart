@@ -5,6 +5,7 @@ import '../models/bookmark.dart';
 import '../models/genre.dart';
 import '../models/highlight.dart';
 import '../models/series.dart';
+import '../models/upload_job.dart';
 import '../services/api_service.dart';
 import '../services/storage_service.dart';
 
@@ -105,4 +106,18 @@ class BookRepository {
     List<Map<String, dynamic>>? history,
   }) =>
       apiService.chatWithBook(bookId, message, history: history);
+
+  String getUploadJobCoverUrl(String jobId) => apiService.getUploadJobCoverUrl(jobId);
+
+  Future<StagedUploadJob> stageUpload({
+    required String filename,
+    required List<int> bytes,
+  }) =>
+      apiService.stageUploadBook(filename: filename, bytes: bytes);
+
+  Future<Book> commitUpload(String jobId, StagedMetadata metadata) =>
+      apiService.commitUploadJob(jobId, metadata);
+
+  Future<void> deleteUploadJob(String jobId) =>
+      apiService.deleteUploadJob(jobId);
 }

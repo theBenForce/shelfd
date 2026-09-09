@@ -22,6 +22,7 @@ import (
 	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/api"
 	"github.com/shelfd/shelfd/internal/database"
+	"github.com/shelfd/shelfd/internal/epub"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 	"github.com/shelfd/shelfd/internal/worker"
@@ -1001,6 +1002,239 @@ func TestAPI_UploadBook(t *testing.T) {
 
 	if corruptRec.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 Bad Request for corrupt zip, got %d", corruptRec.Code)
+	}
+}
+
+func TestAPI_StagedUploadAndCommit(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+
+	// Create valid in-memory EPUB with cover
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	m, _ := zw.Create("mimetype")
+	m.Write([]byte("application/epub+zip"))
+	w, _ := zw.Create("META-INF/container.xml")
+	w.Write([]byte(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`))
+
+	opf, _ := zw.Create("OEBPS/content.opf")
+	opf.Write([]byte(`<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Original Untitled</dc:title>
+    <meta name="cover" content="cover-img"/>
+  </metadata>
+  <manifest>
+    <item id="cover-img" href="cover.jpg" media-type="image/jpeg"/>
+    <item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="c1"/></spine>
+</package>`))
+
+	cov, _ := zw.Create("OEBPS/cover.jpg")
+	coverData := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46}
+	cov.Write(coverData)
+
+	ch1, _ := zw.Create("OEBPS/ch1.xhtml")
+	ch1.Write([]byte(`<!DOCTYPE html><html><head><title>Chapter 1</title></head><body><p>The island of Gont, a single mountain...</p></body></html>`))
+	zw.Close()
+
+	// 1. Stage upload via POST /api/v1/books/upload/stage
+	body := &bytes.Buffer{}
+	mpw := multipart.NewWriter(body)
+	part, _ := mpw.CreateFormFile("file", "earthsea.epub")
+	part.Write(buf.Bytes())
+	mpw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/stage", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", mpw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on stage upload, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var stageResp struct {
+		JobID    string `json:"job_id"`
+		Status   string `json:"status"`
+		Filename string `json:"filename"`
+		HasCover bool   `json:"has_cover"`
+		Metadata struct {
+			Title   string   `json:"title"`
+			Authors []string `json:"authors"`
+		} `json:"metadata"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &stageResp); err != nil {
+		t.Fatalf("failed to unmarshal stage response: %v", err)
+	}
+
+	if stageResp.JobID == "" || stageResp.Status != "staged" {
+		t.Fatalf("expected staged job status, got %+v", stageResp)
+	}
+	if !stageResp.HasCover {
+		t.Errorf("expected has_cover to be true")
+	}
+	if len(stageResp.Warnings) == 0 {
+		t.Errorf("expected warnings for missing author")
+	}
+
+	// 2. Fetch cover preview via GET /api/v1/books/upload/jobs/{id}/cover
+	coverReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/"+stageResp.JobID+"/cover", nil)
+	coverReq.Header.Set("Authorization", "Bearer "+token)
+	coverRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(coverRec, coverReq)
+
+	if coverRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on cover preview, got %d: %s", coverRec.Code, coverRec.Body.String())
+	}
+	if coverRec.Body.Len() != len(coverData) {
+		t.Errorf("expected cover length %d, got %d", len(coverData), coverRec.Body.Len())
+	}
+
+	// 3. Commit upload with user-edited metadata via POST /api/v1/books/upload/jobs/{id}/commit
+	series := "Earthsea Cycle"
+	seq := 1.0
+	commitBody, _ := json.Marshal(map[string]any{
+		"title":           "A Wizard of Earthsea",
+		"author":          "Ursula K. Le Guin",
+		"series":          series,
+		"sequence_number": seq,
+		"genres":          []string{"Fantasy", "Speculative Fiction"},
+		"description":     "Ged was the greatest sorcerer in all Earthsea...",
+		"publisher":       "Parnassus Press",
+		"language":        "en",
+	})
+
+	commitReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/jobs/"+stageResp.JobID+"/commit", bytes.NewReader(commitBody))
+	commitReq.Header.Set("Authorization", "Bearer "+token)
+	commitReq.Header.Set("Content-Type", "application/json")
+	commitRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(commitRec, commitReq)
+
+	if commitRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created on commit, got %d: %s", commitRec.Code, commitRec.Body.String())
+	}
+
+	var createdBook repository.Book
+	if err := json.Unmarshal(commitRec.Body.Bytes(), &createdBook); err != nil {
+		t.Fatalf("failed to unmarshal created book: %v", err)
+	}
+
+	if createdBook.Title != "A Wizard of Earthsea" {
+		t.Errorf("expected Title 'A Wizard of Earthsea', got %q", createdBook.Title)
+	}
+	expectedRel := filepath.Join("Ursula K. Le Guin", "A Wizard of Earthsea", "A Wizard of Earthsea.epub")
+	if createdBook.FilePath != expectedRel {
+		t.Errorf("expected FilePath %s, got %s", expectedRel, createdBook.FilePath)
+	}
+
+	// 4. Verify file was saved to /library/<Author>/<Title>/<Title>.epub
+	finalDiskPath := filepath.Join(f.libDir, expectedRel)
+	if _, err := os.Stat(finalDiskPath); err != nil {
+		t.Fatalf("final epub not found on disk at %s: %v", finalDiskPath, err)
+	}
+
+	// 5. Verify the EPUB package OPF inside the final file was updated with the edited metadata!
+	reader, err := epub.Open(finalDiskPath)
+	if err != nil {
+		t.Fatalf("failed to open committed EPUB: %v", err)
+	}
+	defer reader.Close()
+
+	parsed, err := reader.ParseBook()
+	if err != nil {
+		t.Fatalf("failed to parse committed EPUB: %v", err)
+	}
+	if parsed.Title != "A Wizard of Earthsea" {
+		t.Errorf("expected updated title inside EPUB, got %q", parsed.Title)
+	}
+	if len(parsed.Authors) == 0 || parsed.Authors[0].Name != "Ursula K. Le Guin" {
+		t.Errorf("expected updated author inside EPUB, got %+v", parsed.Authors)
+	}
+	if parsed.Series == nil || parsed.Series.Name != "Earthsea Cycle" {
+		t.Errorf("expected updated series inside EPUB, got %+v", parsed.Series)
+	}
+
+	// 6. Verify staged file was removed from dataDir/uploads
+	stagedDiskPath := filepath.Join(f.dataDir, "uploads", stageResp.JobID+".epub")
+	if _, err := os.Stat(stagedDiskPath); !os.IsNotExist(err) {
+		t.Errorf("expected staged file to be cleaned up after commit, but still exists: %s", stagedDiskPath)
+	}
+}
+
+func TestAPI_StagedUploadAndCancel(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	m, _ := zw.Create("mimetype")
+	m.Write([]byte("application/epub+zip"))
+	w, _ := zw.Create("META-INF/container.xml")
+	w.Write([]byte(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`))
+	opf, _ := zw.Create("content.opf")
+	opf.Write([]byte(`<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Discarded Book</dc:title></metadata><manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>`))
+	zw.Close()
+
+	// Stage upload using query param ?stage=true
+	body := &bytes.Buffer{}
+	mpw := multipart.NewWriter(body)
+	part, _ := mpw.CreateFormFile("file", "discard.epub")
+	part.Write(buf.Bytes())
+	mpw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload?stage=true", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", mpw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on stage upload, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var stageResp struct {
+		JobID string `json:"job_id"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &stageResp)
+
+	stagedDiskPath := filepath.Join(f.dataDir, "uploads", stageResp.JobID+".epub")
+	if _, err := os.Stat(stagedDiskPath); err != nil {
+		t.Fatalf("staged file should exist on disk before cancel: %v", err)
+	}
+
+	// Delete/cancel upload via DELETE /api/v1/books/upload/jobs/{id}
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/books/upload/jobs/"+stageResp.JobID, nil)
+	delReq.Header.Set("Authorization", "Bearer "+token)
+	delRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(delRec, delReq)
+
+	if delRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 No Content on delete, got %d", delRec.Code)
+	}
+
+	// Verify disk file removed
+	if _, err := os.Stat(stagedDiskPath); !os.IsNotExist(err) {
+		t.Errorf("staged file should have been removed on cancel")
+	}
+
+	// Verify job no longer exists
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/"+stageResp.JobID, nil)
+	getReq.Header.Set("Authorization", "Bearer "+token)
+	getRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(getRec, getReq)
+
+	if getRec.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for deleted job, got %d", getRec.Code)
 	}
 }
 
