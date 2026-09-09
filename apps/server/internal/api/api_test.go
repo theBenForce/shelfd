@@ -87,6 +87,10 @@ type testFixture struct {
 	password     string
 }
 
+func strPtr(s string) *string {
+	return &s
+}
+
 func setupAPITest(t *testing.T) *testFixture {
 	t.Helper()
 
@@ -645,6 +649,103 @@ func TestAPI_LibraryScan(t *testing.T) {
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 Accepted on scan trigger, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAPI_GetBookCover(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	ctx := context.Background()
+
+	// 1. Book with JPEG cover in libraryDir
+	book1 := &repository.Book{
+		ID:        "book-cov-1",
+		Title:     "Solaris",
+		FilePath:  "Stanislaw Lem/Solaris/Solaris.epub",
+		CoverPath: strPtr("Stanislaw Lem/Solaris/cover.jpg"),
+	}
+	if err := f.repo.CreateBook(ctx, book1); err != nil {
+		t.Fatalf("CreateBook failed: %v", err)
+	}
+
+	book1CoverDir := filepath.Join(f.libDir, "Stanislaw Lem", "Solaris")
+	os.MkdirAll(book1CoverDir, 0755)
+	jpegData := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46}
+	os.WriteFile(filepath.Join(book1CoverDir, "cover.jpg"), jpegData, 0644)
+
+	req1 := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-cov-1/cover", nil)
+	rec1 := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec1, req1)
+
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("expected 200 for library cover, got %d: %s", rec1.Code, rec1.Body.String())
+	}
+	if ct := rec1.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Errorf("expected Content-Type image/jpeg, got %s", ct)
+	}
+	if !bytes.Equal(rec1.Body.Bytes(), jpegData) {
+		t.Errorf("served cover bytes mismatch")
+	}
+
+	// 2. Book with PNG cover in libraryDir
+	book2 := &repository.Book{
+		ID:        "book-cov-2",
+		Title:     "Story of Your Life",
+		FilePath:  "Ted Chiang/Story of Your Life/Story of Your Life.epub",
+		CoverPath: strPtr("Ted Chiang/Story of Your Life/cover.png"),
+	}
+	if err := f.repo.CreateBook(ctx, book2); err != nil {
+		t.Fatalf("CreateBook failed: %v", err)
+	}
+
+	book2CoverDir := filepath.Join(f.libDir, "Ted Chiang", "Story of Your Life")
+	os.MkdirAll(book2CoverDir, 0755)
+	pngData := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	os.WriteFile(filepath.Join(book2CoverDir, "cover.png"), pngData, 0644)
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-cov-2/cover", nil)
+	rec2 := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200 for library PNG cover, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+	if ct := rec2.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("expected Content-Type image/png, got %s", ct)
+	}
+
+	// 3. Book with fallback cover in dataDir
+	book3 := &repository.Book{
+		ID:        "book-cov-3",
+		Title:     "Fallback Book",
+		FilePath:  "Author/Fallback/Fallback.epub",
+		CoverPath: strPtr("covers/book-cov-3.jpg"),
+	}
+	if err := f.repo.CreateBook(ctx, book3); err != nil {
+		t.Fatalf("CreateBook failed: %v", err)
+	}
+
+	dataCoverDir := filepath.Join(f.dataDir, "covers")
+	os.MkdirAll(dataCoverDir, 0755)
+	os.WriteFile(filepath.Join(dataCoverDir, "book-cov-3.jpg"), jpegData, 0644)
+
+	req3 := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-cov-3/cover", nil)
+	rec3 := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec3, req3)
+
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("expected 200 for data fallback cover, got %d", rec3.Code)
+	}
+
+	// 4. Non-existent cover
+	req4 := httptest.NewRequest(http.MethodGet, "/api/v1/books/nonexistent/cover", nil)
+	rec4 := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec4, req4)
+
+	if rec4.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing cover, got %d", rec4.Code)
 	}
 }
 

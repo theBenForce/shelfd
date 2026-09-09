@@ -54,19 +54,9 @@ func (in *Ingester) IngestFile(ctx context.Context, fullPath, relativePath strin
 
 	bookID := uuid.NewString()
 
-	// Extract and cache cover art to /data/covers/{book_id}.{ext}
-	var coverRelPath *string
-	if coverData, ext, err := reader.ExtractCoverImage(); err == nil && len(coverData) > 0 {
-		coversDir := filepath.Join(in.dataDir, "covers")
-		if err := os.MkdirAll(coversDir, 0755); err == nil {
-			coverFilename := bookID + ext
-			coverDiskPath := filepath.Join(coversDir, coverFilename)
-			if err := os.WriteFile(coverDiskPath, coverData, 0644); err == nil {
-				rel := filepath.Join("covers", coverFilename)
-				coverRelPath = &rel
-			}
-		}
-	}
+	bookDirFull := filepath.Dir(fullPath)
+	bookDirRel := filepath.Dir(relativePath)
+	coverRelPath := in.resolveCover(reader, bookDirFull, bookDirRel, bookID)
 
 	book := &repository.Book{
 		ID:            bookID,
@@ -269,6 +259,57 @@ func (in *Ingester) ReparseBookChapters(ctx context.Context, bookID string) erro
 	}
 	if len(allParagraphs) > 0 {
 		_ = in.repo.CreateParagraphs(ctx, allParagraphs)
+	}
+
+	return nil
+}
+
+var coverCandidates = []string{"cover.jpg", "cover.jpeg", "cover.png", "cover.webp"}
+
+// resolveCover finds an existing sibling cover file or extracts from EPUB and saves alongside it in /library.
+// If /library is read-only, it falls back to caching in /data/covers/.
+func (in *Ingester) resolveCover(reader *epub.Reader, bookDirFull, bookDirRel, bookID string) *string {
+	// 1. Check if a sibling cover file already exists in the book folder (Audiobookshelf standard)
+	for _, candidate := range coverCandidates {
+		candidatePath := filepath.Join(bookDirFull, candidate)
+		if fi, err := os.Stat(candidatePath); err == nil && !fi.IsDir() && fi.Size() > 0 {
+			rel := filepath.Join(bookDirRel, candidate)
+			return &rel
+		}
+	}
+
+	// 2. Extract cover image from EPUB
+	coverData, ext, err := reader.ExtractCoverImage()
+	if err != nil || len(coverData) == 0 {
+		return nil
+	}
+
+	if ext == "" {
+		ext = ".jpg"
+	}
+
+	// 3. Attempt writing directly alongside the EPUB in /library
+	targetFilename := "cover" + ext
+	targetPath := filepath.Join(bookDirFull, targetFilename)
+	tmpPath := filepath.Join(bookDirFull, "."+targetFilename+".tmp")
+
+	if err := os.WriteFile(tmpPath, coverData, 0644); err == nil {
+		if err := os.Rename(tmpPath, targetPath); err == nil {
+			rel := filepath.Join(bookDirRel, targetFilename)
+			return &rel
+		}
+		_ = os.Remove(tmpPath)
+	}
+
+	// 4. Fallback if /library is read-only: save to /data/covers/<book_id>.<ext>
+	coversDir := filepath.Join(in.dataDir, "covers")
+	if err := os.MkdirAll(coversDir, 0755); err == nil {
+		fallbackFilename := bookID + ext
+		fallbackDiskPath := filepath.Join(coversDir, fallbackFilename)
+		if err := os.WriteFile(fallbackDiskPath, coverData, 0644); err == nil {
+			rel := filepath.Join("covers", fallbackFilename)
+			return &rel
+		}
 	}
 
 	return nil

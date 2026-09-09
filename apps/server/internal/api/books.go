@@ -253,23 +253,57 @@ func (h *BookHandler) GetBookCover(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	coverFile := filepath.Join(h.dataDir, "covers", bookID+".jpg")
-	if _, err := os.Stat(coverFile); os.IsNotExist(err) {
-		// Fallback check cover_path from book record
-		book, err := h.repo.GetBookByID(r.Context(), bookID)
-		if err == nil && book != nil && book.CoverPath != nil {
-			if _, err := os.Stat(*book.CoverPath); err == nil {
+	var coverFile string
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if err == nil && book != nil && book.CoverPath != nil && *book.CoverPath != "" {
+		// 1. Check relative to libraryDir
+		libPath := filepath.Join(h.libraryDir, *book.CoverPath)
+		if fi, err := os.Stat(libPath); err == nil && !fi.IsDir() {
+			coverFile = libPath
+		}
+		// 2. Check relative to dataDir
+		if coverFile == "" {
+			dataPath := filepath.Join(h.dataDir, *book.CoverPath)
+			if fi, err := os.Stat(dataPath); err == nil && !fi.IsDir() {
+				coverFile = dataPath
+			}
+		}
+		// 3. Absolute path
+		if coverFile == "" {
+			if fi, err := os.Stat(*book.CoverPath); err == nil && !fi.IsDir() {
 				coverFile = *book.CoverPath
 			}
 		}
 	}
 
-	if _, err := os.Stat(coverFile); os.IsNotExist(err) {
+	// 4. Fallback check covers/{bookID}.* in dataDir
+	if coverFile == "" {
+		for _, ext := range []string{".jpg", ".jpeg", ".png", ".webp"} {
+			df := filepath.Join(h.dataDir, "covers", bookID+ext)
+			if fi, err := os.Stat(df); err == nil && !fi.IsDir() {
+				coverFile = df
+				break
+			}
+		}
+	}
+
+	if coverFile == "" {
 		writeJSONError(w, http.StatusNotFound, "Cover image not found")
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/jpeg")
+	contentType := "image/jpeg"
+	switch strings.ToLower(filepath.Ext(coverFile)) {
+	case ".png":
+		contentType = "image/png"
+	case ".webp":
+		contentType = "image/webp"
+	case ".gif":
+		contentType = "image/gif"
+	}
+
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	http.ServeFile(w, r, coverFile)
 }

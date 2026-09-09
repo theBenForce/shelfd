@@ -160,10 +160,14 @@ func TestIngesterAndUpload(t *testing.T) {
 		t.Errorf("expected cached cover path to be set")
 	}
 
-	// Verify cover was written to tempData/covers/{book_id}.jpg
-	expectedCoverPath := filepath.Join(tempData, *book.CoverPath)
+	// Verify cover was written alongside the EPUB in tempLib/Frank Herbert/Dune/cover.jpg
+	expectedCoverPath := filepath.Join(tempLib, *book.CoverPath)
 	if _, err := os.Stat(expectedCoverPath); err != nil {
 		t.Errorf("cover file does not exist at %s: %v", expectedCoverPath, err)
+	}
+	expectedCoverRel := filepath.Join("Frank Herbert", "Dune", "cover.jpg")
+	if *book.CoverPath != expectedCoverRel {
+		t.Errorf("expected cover path %s, got %s", expectedCoverRel, *book.CoverPath)
 	}
 
 	// Verify relational entities
@@ -203,6 +207,15 @@ func TestIngesterAndUpload(t *testing.T) {
 	expectedUploadDiskPath := filepath.Join(tempLib, expectedUploadedRel)
 	if _, err := os.Stat(expectedUploadDiskPath); err != nil {
 		t.Errorf("uploaded file missing on disk: %v", err)
+	}
+
+	// Verify uploaded book has cover.jpg created alongside it
+	if uploadedBook.CoverPath == nil || *uploadedBook.CoverPath == "" {
+		t.Errorf("expected uploaded book cover path to be set")
+	}
+	expectedUploadedCover := filepath.Join(tempLib, "William Gibson", "Neuromancer", "cover.jpg")
+	if _, err := os.Stat(expectedUploadedCover); err != nil {
+		t.Errorf("uploaded cover missing on disk: %v", err)
 	}
 
 	// 3. Test ReparseBookChapters
@@ -251,5 +264,102 @@ func TestIngesterAndUpload(t *testing.T) {
 	}
 	if reingested.ID != book.ID {
 		t.Errorf("expected same book ID %s, got %s", book.ID, reingested.ID)
+	}
+}
+
+func TestIngesterSiblingCoverPreserved(t *testing.T) {
+	ctx := context.Background()
+	tempLib := t.TempDir()
+	tempData := t.TempDir()
+
+	db, err := database.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if err := database.RunMigrations(ctx, db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+	repo := repository.NewSQLiteStorageEngine(db)
+	defer repo.Close()
+
+	ingester := scanner.NewIngester(repo, tempLib, tempData)
+
+	// Pre-create book folder with a custom curated cover.jpg
+	bookDir := filepath.Join(tempLib, "Andy Weir", "Project Hail Mary")
+	os.MkdirAll(bookDir, 0755)
+	customCoverContent := []byte("custom audiobookshelf curated cover")
+	coverPath := filepath.Join(bookDir, "cover.jpg")
+	os.WriteFile(coverPath, customCoverContent, 0644)
+
+	// Create and ingest EPUB
+	epubBytes := createSampleEPUB("Project Hail Mary", "Andy Weir", "Hard Sci-Fi", "", 0)
+	epubPath := filepath.Join(bookDir, "Project Hail Mary.epub")
+	os.WriteFile(epubPath, epubBytes, 0644)
+
+	relPath := filepath.Join("Andy Weir", "Project Hail Mary", "Project Hail Mary.epub")
+	book, err := ingester.IngestFile(ctx, epubPath, relPath)
+	if err != nil {
+		t.Fatalf("IngestFile failed: %v", err)
+	}
+
+	// Invariant 1: CoverPath points to existing sibling cover
+	expectedRel := filepath.Join("Andy Weir", "Project Hail Mary", "cover.jpg")
+	if book.CoverPath == nil || *book.CoverPath != expectedRel {
+		t.Errorf("expected cover path %s, got %v", expectedRel, book.CoverPath)
+	}
+
+	// Invariant 2: Custom cover content was NEVER overwritten
+	data, err := os.ReadFile(coverPath)
+	if err != nil || !bytes.Equal(data, customCoverContent) {
+		t.Errorf("cover.jpg was mutated or unreadable: %v", err)
+	}
+}
+
+func TestIngesterReadOnlyLibraryFallback(t *testing.T) {
+	ctx := context.Background()
+	tempLib := t.TempDir()
+	tempData := t.TempDir()
+
+	db, err := database.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if err := database.RunMigrations(ctx, db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+	repo := repository.NewSQLiteStorageEngine(db)
+	defer repo.Close()
+
+	ingester := scanner.NewIngester(repo, tempLib, tempData)
+
+	bookDir := filepath.Join(tempLib, "Ted Chiang", "Exhalation")
+	os.MkdirAll(bookDir, 0755)
+
+	epubBytes := createSampleEPUB("Exhalation", "Ted Chiang", "Sci-Fi", "", 0)
+	epubPath := filepath.Join(bookDir, "Exhalation.epub")
+	os.WriteFile(epubPath, epubBytes, 0644)
+
+	// Simulate read-only directory
+	if err := os.Chmod(bookDir, 0555); err != nil {
+		t.Skip("chmod not supported in environment")
+	}
+	defer os.Chmod(bookDir, 0755)
+
+	relPath := filepath.Join("Ted Chiang", "Exhalation", "Exhalation.epub")
+	book, err := ingester.IngestFile(ctx, epubPath, relPath)
+	if err != nil {
+		t.Fatalf("IngestFile failed on read-only directory: %v", err)
+	}
+
+	if book.CoverPath == nil {
+		t.Fatalf("expected CoverPath to be set via fallback")
+	}
+
+	// Verify cover was saved to dataDir fallback
+	expectedFallbackPath := filepath.Join(tempData, *book.CoverPath)
+	if _, err := os.Stat(expectedFallbackPath); err != nil {
+		t.Errorf("fallback cover missing at %s: %v", expectedFallbackPath, err)
 	}
 }
