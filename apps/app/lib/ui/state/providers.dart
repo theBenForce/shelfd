@@ -379,35 +379,34 @@ class QueueState {
 }
 
 class QueueNotifier extends Notifier<QueueState> {
-  Timer? _timer;
+  StreamSubscription<QueueStatus>? _subscription;
+  Timer? _reconnectTimer;
+  bool _isDisposed = false;
 
   @override
   QueueState build() {
     ref.onDispose(() {
-      _timer?.cancel();
+      _isDisposed = true;
+      _subscription?.cancel();
+      _reconnectTimer?.cancel();
     });
 
-    Future.microtask(() {
-      refresh();
-    });
+    Future.microtask(() => _connectStream());
 
     return const QueueState(isLoading: true);
   }
 
-  void _schedulePoll(Duration delay) {
-    _timer?.cancel();
-    _timer = Timer(delay, () {
-      refresh();
-    });
-  }
+  void _connectStream() {
+    if (_isDisposed) return;
+    _subscription?.cancel();
+    _reconnectTimer?.cancel();
 
-  Future<void> refresh() async {
     final apiService = ref.read(apiServiceProvider);
     final storage = ref.read(storageServiceProvider);
     final token = apiService.token ?? storage.getAuthToken();
     if (token == null || token.isEmpty) {
       state = const QueueState(isLoading: false);
-      _schedulePoll(const Duration(seconds: 15));
+      _scheduleReconnect(const Duration(seconds: 10));
       return;
     }
 
@@ -416,17 +415,44 @@ class QueueNotifier extends Notifier<QueueState> {
     }
 
     try {
+      _subscription = apiService.streamQueueEvents().listen(
+        (status) {
+          state = QueueState(status: status, isLoading: false);
+        },
+        onError: (err) {
+          debugPrint('Queue SSE stream error: $err');
+          refresh();
+          _scheduleReconnect(const Duration(seconds: 5));
+        },
+        onDone: () {
+          _scheduleReconnect(const Duration(seconds: 3));
+        },
+        cancelOnError: true,
+      );
+    } catch (e) {
+      debugPrint('Error initiating Queue SSE stream: $e');
+      refresh();
+      _scheduleReconnect(const Duration(seconds: 5));
+    }
+  }
+
+  void _scheduleReconnect(Duration delay) {
+    if (_isDisposed) return;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(delay, () {
+      if (!_isDisposed) {
+        _connectStream();
+      }
+    });
+  }
+
+  Future<void> refresh() async {
+    final apiService = ref.read(apiServiceProvider);
+    try {
       final status = await apiService.getQueueStatus();
       state = QueueState(status: status, isLoading: false);
-
-      final nextDelay = (status.isActive || status.pendingChapters > 0 || status.pendingUploads > 0)
-          ? const Duration(seconds: 3)
-          : const Duration(seconds: 15);
-      _schedulePoll(nextDelay);
     } catch (e) {
-      debugPrint('QueueNotifier error: $e');
       state = state.copyWith(isLoading: false, error: e.toString());
-      _schedulePoll(const Duration(seconds: 15));
     }
   }
 }

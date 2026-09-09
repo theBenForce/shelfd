@@ -241,6 +241,40 @@ class ApiService {
     return QueueStatus.fromJson(data);
   }
 
+  Stream<QueueStatus> streamQueueEvents() async* {
+    final request = http.Request('GET', _uri('/api/v1/queue/events'));
+    request.headers.addAll({
+      'Accept': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      if (token != null && token!.isNotEmpty) 'Authorization': 'Bearer $token',
+    });
+
+    final response = await client.send(request);
+    if (response.statusCode >= 400) {
+      final body = await response.stream.bytesToString();
+      throw ApiException(
+        response.statusCode,
+        body.isNotEmpty ? body : 'Failed to connect to queue events stream',
+      );
+    }
+
+    final lines = response.stream.transform(utf8.decoder).transform(const LineSplitter());
+
+    await for (final line in lines) {
+      if (line.startsWith('data: ')) {
+        final dataStr = line.substring(6).trim();
+        if (dataStr.isNotEmpty) {
+          try {
+            final data = jsonDecode(dataStr) as Map<String, dynamic>;
+            yield QueueStatus.fromJson(data);
+          } catch (_) {
+            // Ignore malformed payloads
+          }
+        }
+      }
+    }
+  }
+
   Future<Bookmark> createBookmark(
     String bookId, {
     required String title,

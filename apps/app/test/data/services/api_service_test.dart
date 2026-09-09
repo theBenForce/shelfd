@@ -175,6 +175,44 @@ void main() {
       expect(status.currentChapter, 'The Station');
     });
 
+    test('streamQueueEvents decodes SSE stream into QueueStatus events', () async {
+      final ssePayload = 'event: queue_status\n'
+          'data: {"total_chapters": 10, "indexed_chapters": 5, "pending_chapters": 5, "pending_uploads": 0, "progress_percent": 50.0, "is_active": true, "current_book": "Neuromancer", "current_chapter": "Chiba"}\n\n'
+          'event: queue_status\n'
+          'data: {"total_chapters": 10, "indexed_chapters": 6, "pending_chapters": 4, "pending_uploads": 0, "progress_percent": 60.0, "is_active": true, "current_book": "Neuromancer", "current_chapter": "The Sprawl"}\n\n';
+
+      final mockClient = MockClient.streaming((request, bodyStream) async {
+        expect(request.url.path, '/api/v1/queue/events');
+        expect(request.headers['Accept'], 'text/event-stream');
+        final stream = Stream.value(utf8.encode(ssePayload));
+        return http.StreamedResponse(stream, 200, headers: {'content-type': 'text/event-stream'});
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final events = await apiService.streamQueueEvents().take(2).toList();
+
+      expect(events.length, 2);
+      expect(events[0].totalChapters, 10);
+      expect(events[0].indexedChapters, 5);
+      expect(events[0].progressPercent, 50.0);
+      expect(events[0].currentBook, 'Neuromancer');
+      expect(events[0].currentChapter, 'Chiba');
+
+      expect(events[1].indexedChapters, 6);
+      expect(events[1].progressPercent, 60.0);
+      expect(events[1].currentChapter, 'The Sprawl');
+    });
+
+    test('streamQueueEvents throws ApiException on error status', () async {
+      final mockClient = MockClient.streaming((request, bodyStream) async {
+        final stream = Stream.value(utf8.encode('Unauthorized'));
+        return http.StreamedResponse(stream, 401);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      expect(() => apiService.streamQueueEvents().toList(), throwsA(isA<ApiException>()));
+    });
+
     test('createBookmark, getBookmarks, deleteBookmark', () async {
       final mockClient = MockClient((request) async {
         if (request.method == 'POST' && request.url.path == '/api/v1/books/book-1/bookmarks') {
