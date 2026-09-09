@@ -6,6 +6,7 @@ import 'features/connect/connect_view.dart';
 import 'features/library/library_view.dart';
 import 'features/reader/reader_view.dart';
 import 'features/search/search_view.dart';
+import 'features/settings/settings_view.dart';
 
 GoRouter createRouter({required String initialLocation, StorageService? storageService}) {
   return GoRouter(
@@ -36,6 +37,10 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
       GoRoute(
         path: '/search',
         builder: (context, state) => const SearchView(),
+      ),
+      GoRoute(
+        path: '/settings',
+        builder: (context, state) => const SettingsView(),
       ),
       GoRoute(
         path: '/reader/:bookId/read',

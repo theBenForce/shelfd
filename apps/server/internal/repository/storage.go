@@ -71,6 +71,7 @@ type StorageEngine interface {
 	CreateUser(ctx context.Context, user *User) error
 	GetUserByUsername(ctx context.Context, username string) (*User, error)
 	GetUserByID(ctx context.Context, id string) (*User, error)
+	UpdateUserPassword(ctx context.Context, userID string, passwordHash string) error
 	CreateAPIToken(ctx context.Context, token *APIToken) error
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (*APIToken, error)
 	ListAPITokensByUserID(ctx context.Context, userID string) ([]*APIToken, error)

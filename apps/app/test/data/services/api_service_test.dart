@@ -58,6 +58,31 @@ void main() {
       expect(user.username, 'admin');
     });
 
+    test('changePassword sends correct payload and handles errors', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/v1/auth/change-password') {
+          expect(request.method, 'POST');
+          expect(request.headers['authorization'], 'Bearer valid-token');
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          if (body['current_password'] == 'wrong-pass') {
+            return http.Response(jsonEncode({'error': 'Current password is incorrect'}), 401);
+          }
+          expect(body['current_password'], 'old-secret');
+          expect(body['new_password'], 'new-secret-123');
+          return http.Response(jsonEncode({'message': 'Password updated successfully'}), 200);
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', token: 'valid-token', client: mockClient);
+      await expectLater(apiService.changePassword('old-secret', 'new-secret-123'), completes);
+
+      expect(
+        () => apiService.changePassword('wrong-pass', 'new-secret-123'),
+        throwsA(isA<ApiException>().having((e) => e.message, 'message', 'Current password is incorrect')),
+      );
+    });
+
     test('getBooks parses paginated books list', () async {
       final mockClient = MockClient((request) async {
         expect(request.url.path, '/api/v1/books');

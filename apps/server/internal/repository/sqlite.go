@@ -792,6 +792,26 @@ func (r *SQLiteStorageEngine) GetUserByID(ctx context.Context, id string) (*User
 	return u, nil
 }
 
+func (r *SQLiteStorageEngine) UpdateUserPassword(ctx context.Context, userID string, passwordHash string) error {
+	query := `
+		UPDATE users
+		SET password_hash = ?
+		WHERE id = ?
+	`
+	res, err := r.db.ExecContext(ctx, query, passwordHash, userID)
+	if err != nil {
+		return fmt.Errorf("updating user password: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *SQLiteStorageEngine) CreateAPIToken(ctx context.Context, t *APIToken) error {
 	if t.ID == "" {
 		t.ID = uuid.NewString()

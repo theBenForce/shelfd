@@ -19,10 +19,11 @@ type RouterConfig struct {
 	AIClient     ai.Client
 	DataDir      string
 	LibraryDir   string
-	JWTSecret    string
-	Host         string
-	Port         int
-	Version      string
+	JWTSecret       string
+	Host            string
+	Port            int
+	Version         string
+	DefaultUsername string
 }
 
 // NewRouter constructs and returns the fully configured /api/v1 HTTP handler.
@@ -33,7 +34,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	bookHandler := NewBookHandler(cfg.Repo, cfg.Ingester, cfg.Worker, cfg.UploadWorker, cfg.AIClient, cfg.DataDir, cfg.LibraryDir)
 	taxHandler := NewTaxonomyHandler(cfg.Repo)
 	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, nil)
-	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version)
+	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version, cfg.DefaultUsername)
 	queueHandler := NewQueueHandler(cfg.Repo, cfg.Worker, cfg.UploadWorker)
 
 	auth := AuthMiddleware(cfg.Repo, cfg.JWTSecret)
@@ -45,6 +46,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	// Protected routes
 	mux.Handle("GET /api/v1/auth/me", auth(http.HandlerFunc(authHandler.Me)))
+	mux.Handle("POST /api/v1/auth/change-password", auth(http.HandlerFunc(authHandler.ChangePassword)))
 	mux.Handle("POST /api/v1/auth/tokens", auth(http.HandlerFunc(authHandler.CreateToken)))
 	mux.Handle("GET /api/v1/auth/tokens", auth(http.HandlerFunc(authHandler.ListTokens)))
 	mux.Handle("DELETE /api/v1/auth/tokens/{id}", auth(http.HandlerFunc(authHandler.DeleteToken)))

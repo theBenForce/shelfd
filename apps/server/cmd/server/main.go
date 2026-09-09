@@ -112,7 +112,7 @@ func main() {
 	log.Printf("AI client initialized (Provider: %s, BaseURL: %s)", cfg.AI.Provider, cfg.AI.BaseURL)
 
 	// Ensure seed admin user and MCP token exist if no tokens are configured
-	ensureSeedToken(ctx, repo)
+	ensureSeedToken(ctx, repo, cfg)
 
 	// Start background indexing worker
 	chapterWorker := worker.NewWorker(repo, aiClient, worker.Config{
@@ -167,9 +167,10 @@ func main() {
 		DataDir:      cfg.Storage.DataDir,
 		LibraryDir:   cfg.Storage.LibraryDir,
 		JWTSecret:    cfg.Server.JWTSecret,
-		Host:         cfg.Server.Host,
-		Port:         cfg.Server.Port,
-		Version:      Version,
+		Host:            cfg.Server.Host,
+		Port:            cfg.Server.Port,
+		Version:         Version,
+		DefaultUsername: cfg.Auth.AdminUsername,
 	})
 	mux.Handle("/api/v1/", apiRouter)
 	log.Printf("REST API enabled at /api/v1/")
@@ -230,10 +231,21 @@ func runScan(ctx context.Context, repo repository.StorageEngine, cfg *config.Con
 	log.Printf("Scan and ingestion complete.")
 }
 
-func ensureSeedToken(ctx context.Context, repo repository.StorageEngine) {
-	adminUser, err := repo.GetUserByUsername(ctx, "admin")
+func ensureSeedToken(ctx context.Context, repo repository.StorageEngine, cfg *config.Config) {
+	adminUsername := "admin"
+	if cfg != nil && strings.TrimSpace(cfg.Auth.AdminUsername) != "" {
+		adminUsername = strings.TrimSpace(cfg.Auth.AdminUsername)
+	}
+
+	adminUser, err := repo.GetUserByUsername(ctx, adminUsername)
 	if errors.Is(err, repository.ErrNotFound) {
-		adminPass := os.Getenv("SHELFD_ADMIN_PASSWORD")
+		adminPass := ""
+		if cfg != nil && strings.TrimSpace(cfg.Auth.AdminPassword) != "" {
+			adminPass = strings.TrimSpace(cfg.Auth.AdminPassword)
+		}
+		if adminPass == "" {
+			adminPass = os.Getenv("SHELFD_ADMIN_PASSWORD")
+		}
 		if adminPass == "" {
 			buf := make([]byte, 12)
 			_, _ = rand.Read(buf)
@@ -247,7 +259,7 @@ func ensureSeedToken(ctx context.Context, repo repository.StorageEngine) {
 		}
 
 		adminUser = &repository.User{
-			Username:     "admin",
+			Username:     adminUsername,
 			PasswordHash: string(hash),
 		}
 		if err := repo.CreateUser(ctx, adminUser); err != nil {
@@ -257,9 +269,9 @@ func ensureSeedToken(ctx context.Context, repo repository.StorageEngine) {
 
 		log.Printf("================================================================================")
 		log.Printf(" [INITIAL SETUP] Generated default administrator account:")
-		log.Printf(" Username: admin")
+		log.Printf(" Username: %s", adminUsername)
 		log.Printf(" Password: %s", adminPass)
-		log.Printf(" (Set SHELFD_ADMIN_PASSWORD environment variable to override)")
+		log.Printf(" (Set SHELFD_ADMIN_USERNAME and SHELFD_ADMIN_PASSWORD environment variables to override)")
 		log.Printf("================================================================================")
 	} else if err != nil {
 		return

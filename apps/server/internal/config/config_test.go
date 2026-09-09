@@ -379,5 +379,45 @@ ai:
 	}
 }
 
+func TestAuthConfig(t *testing.T) {
+	// 1. Default config
+	cfg := config.DefaultConfig()
+	if cfg.Auth.AdminUsername != "admin" {
+		t.Errorf("expected default admin_username admin, got %s", cfg.Auth.AdminUsername)
+	}
+
+	// 2. YAML parsing
+	yamlContent := `
+auth:
+  admin_username: "custom_admin"
+  admin_password: "custom_password"
+`
+	parsed, err := config.Parse([]byte(yamlContent))
+	if err != nil {
+		t.Fatalf("unexpected error parsing auth config: %v", err)
+	}
+	if parsed.Auth.AdminUsername != "custom_admin" {
+		t.Errorf("expected admin_username custom_admin, got %s", parsed.Auth.AdminUsername)
+	}
+	if parsed.Auth.AdminPassword != "custom_password" {
+		t.Errorf("expected admin_password custom_password, got %s", parsed.Auth.AdminPassword)
+	}
+
+	// 3. Env overrides
+	os.Setenv("SHELFD_ADMIN_USERNAME", "env_admin")
+	os.Setenv("SHELFD_ADMIN_PASSWORD", "env_password")
+	defer os.Unsetenv("SHELFD_ADMIN_USERNAME")
+	defer os.Unsetenv("SHELFD_ADMIN_PASSWORD")
+
+	cfg2 := config.DefaultConfig()
+	config.ApplyEnvOverrides(cfg2)
+	if cfg2.Auth.AdminUsername != "env_admin" {
+		t.Errorf("expected env override admin_username env_admin, got %s", cfg2.Auth.AdminUsername)
+	}
+	if cfg2.Auth.AdminPassword != "env_password" {
+		t.Errorf("expected env override admin_password env_password, got %s", cfg2.Auth.AdminPassword)
+	}
+}
+
 
 

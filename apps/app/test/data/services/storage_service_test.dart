@@ -17,13 +17,19 @@ void main() {
       expect(storage.getServerUrl(), isNull);
       expect(storage.getAuthToken(), isNull);
 
-      await storage.saveServerConnection('http://192.168.1.50:8080', 'token-1234');
+      await storage.saveServerConnection('http://192.168.1.50:8080', 'token-1234', username: 'bforce');
       expect(storage.getServerUrl(), 'http://192.168.1.50:8080');
       expect(storage.getAuthToken(), 'token-1234');
+      expect(storage.getSavedUsername(), 'bforce');
+
+      await storage.saveSavedUsername('newuser');
+      expect(storage.getSavedUsername(), 'newuser');
 
       await storage.clearServerConnection();
       expect(storage.getServerUrl(), isNull);
       expect(storage.getAuthToken(), isNull);
+      // Saved username is preserved across server disconnects
+      expect(storage.getSavedUsername(), 'newuser');
     });
 
     test('reading settings persistence defaults and updates', () async {

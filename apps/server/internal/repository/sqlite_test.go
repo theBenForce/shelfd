@@ -515,6 +515,24 @@ func TestUsersAndTokens(t *testing.T) {
 	if err := repo.DeleteAPIToken(ctx, "ghost-token"); err != repository.ErrNotFound {
 		t.Errorf("expected ErrNotFound on deleting missing token, got %v", err)
 	}
+
+	// Test updating password
+	newHash := "$2a$12$newMockPasswordHash"
+	if err := repo.UpdateUserPassword(ctx, user.ID, newHash); err != nil {
+		t.Fatalf("failed to update user password: %v", err)
+	}
+
+	updatedUser, err := repo.GetUserByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("failed to get updated user: %v", err)
+	}
+	if updatedUser.PasswordHash != newHash {
+		t.Errorf("expected updated password hash %s, got %s", newHash, updatedUser.PasswordHash)
+	}
+
+	if err := repo.UpdateUserPassword(ctx, "ghost-id", newHash); err != repository.ErrNotFound {
+		t.Errorf("expected ErrNotFound for missing user id, got %v", err)
+	}
 }
 
 func TestChapterSummaryAndVectorSearch(t *testing.T) {

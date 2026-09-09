@@ -18,7 +18,7 @@ class ConnectView extends ConsumerStatefulWidget {
 class _ConnectViewState extends ConsumerState<ConnectView> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _urlController;
-  final _userController = TextEditingController(text: 'admin');
+  late final TextEditingController _userController;
   late final TextEditingController _passwordController;
   bool _obscurePassword = true;
 
@@ -27,6 +27,11 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
     super.initState();
     final initialUrl = kIsWeb ? Uri.base.origin : 'http://localhost:8080';
     _urlController = TextEditingController(text: initialUrl);
+    final storage = ref.read(storageServiceProvider);
+    final savedUser = storage.getSavedUsername();
+    _userController = TextEditingController(
+      text: savedUser != null && savedUser.isNotEmpty ? savedUser : 'admin',
+    );
     _passwordController = TextEditingController();
   }
 
@@ -58,9 +63,15 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
               backgroundColor: AppTokens.charcoalInk,
               foregroundColor: Colors.white,
             ),
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(ctx).pop();
               _urlController.text = 'http://localhost:8080';
+              try {
+                final info = await ref.read(authRepositoryProvider).testConnection('http://localhost:8080');
+                if (info.defaultUsername != null && info.defaultUsername!.isNotEmpty && mounted) {
+                  _userController.text = info.defaultUsername!;
+                }
+              } catch (_) {}
             },
             child: const Text('Use Discovered Server'),
           ),

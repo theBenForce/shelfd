@@ -151,6 +151,34 @@ void main() {
     expect(copyTapped, true);
   });
 
+  testWidgets('KindleSelectionToolbar renders without external Material ancestor and displays delete button', (tester) async {
+    bool deleteTapped = false;
+
+    // Pump directly inside MaterialApp WITHOUT Scaffold or external Material ancestor
+    await tester.pumpWidget(
+      MaterialApp(
+        home: KindleSelectionToolbar(
+          anchors: const TextSelectionToolbarAnchors(primaryAnchor: Offset(150, 150)),
+          selectedColor: KindleHighlightColor.yellow,
+          onColorSelected: (_) {},
+          onAddNote: () {},
+          onCopy: () {},
+          onDelete: () => deleteTapped = true,
+        ),
+      ),
+    );
+
+    // Verify it renders safely without "No Material widget found" error
+    expect(find.byType(KindleSelectionToolbar), findsOneWidget);
+    expect(find.byTooltip('Edit Note'), findsOneWidget);
+    expect(find.byTooltip('Delete Highlight'), findsOneWidget);
+    expect(find.byIcon(Icons.check), findsOneWidget); // checkmark on selected yellow color
+
+    // Tap Delete button
+    await tester.tap(find.byTooltip('Delete Highlight'));
+    expect(deleteTapped, true);
+  });
+
   testWidgets('ReaderView renders highlights from bookDetailProvider and opens detail sheet on tap',
       (tester) async {
     SharedPreferences.setMockInitialValues({});

@@ -38,8 +38,12 @@ class AuthRepository {
   Future<User> login(String serverUrl, String username, String password) async {
     apiService.updateConnection(newBaseUrl: serverUrl);
     final token = await apiService.login(username, password);
-    await storageService.saveServerConnection(serverUrl, token);
+    await storageService.saveServerConnection(serverUrl, token, username: username);
     return await apiService.getMe();
+  }
+
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    await apiService.changePassword(currentPassword, newPassword);
   }
 
   Future<void> logout() async {

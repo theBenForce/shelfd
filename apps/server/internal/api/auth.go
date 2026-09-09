@@ -110,6 +110,66 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	var req ChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if strings.TrimSpace(req.CurrentPassword) == "" || strings.TrimSpace(req.NewPassword) == "" {
+		writeJSONError(w, http.StatusBadRequest, "Current password and new password are required")
+		return
+	}
+
+	if len(req.NewPassword) < 6 {
+		writeJSONError(w, http.StatusBadRequest, "New password must be at least 6 characters")
+		return
+	}
+
+	dbUser, err := h.repo.GetUserByID(r.Context(), user.ID)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "User not found")
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(dbUser.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+		writeJSONError(w, http.StatusUnauthorized, "Current password is incorrect")
+		return
+	}
+
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to hash password")
+		return
+	}
+
+	if err := h.repo.UpdateUserPassword(r.Context(), user.ID, string(newHash)); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to update password")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message": "Password updated successfully",
+	})
+}
+
 type CreateTokenRequest struct {
 	Name string `json:"name"`
 }

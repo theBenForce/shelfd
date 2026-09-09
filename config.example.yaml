@@ -64,3 +64,9 @@ mcp:
   # Model Context Protocol (MCP) server integration for AI agents (Cursor, Claude Desktop)
   enabled: true
   path: "/mcp"
+
+auth:
+  # Initial administrator account configuration (created on first run if missing).
+  # Can also be set via SHELFD_ADMIN_USERNAME and SHELFD_ADMIN_PASSWORD.
+  admin_username: "admin"
+  admin_password: ""

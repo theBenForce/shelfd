@@ -37,6 +37,7 @@ services:
       - TZ=${TZ:-America/Chicago}
 
       # Optional Pre-configured Credentials
+      - SHELFD_ADMIN_USERNAME=${SHELFD_ADMIN_USERNAME:-admin}
       - SHELFD_ADMIN_PASSWORD=${SHELFD_ADMIN_PASSWORD:-}
       - SHELFD_MCP_TOKEN=${SHELFD_MCP_TOKEN:-}
       - SHELFD_DOMAIN=${SHELFD_DOMAIN:-books.yourdomain.com}

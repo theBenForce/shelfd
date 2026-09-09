@@ -3,12 +3,14 @@ class ServerConnectInfo {
   final String version;
   final String baseUrl;
   final List<String> capabilities;
+  final String? defaultUsername;
 
   const ServerConnectInfo({
     required this.serverName,
     required this.version,
     required this.baseUrl,
     required this.capabilities,
+    this.defaultUsername,
   });
 
   factory ServerConnectInfo.fromJson(Map<String, dynamic> json) {
@@ -20,6 +22,7 @@ class ServerConnectInfo {
               ?.map((e) => e.toString())
               .toList() ??
           const [],
+      defaultUsername: json['default_username'] as String?,
     );
   }
 
@@ -29,6 +32,7 @@ class ServerConnectInfo {
       'version': version,
       'base_url': baseUrl,
       'capabilities': capabilities,
+      if (defaultUsername != null) 'default_username': defaultUsername,
     };
   }
 }

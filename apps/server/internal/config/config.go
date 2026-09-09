@@ -18,6 +18,7 @@ type Config struct {
 	Storage  StorageConfig  `yaml:"storage"`
 	AI       AIConfig       `yaml:"ai"`
 	MCP      MCPConfig      `yaml:"mcp"`
+	Auth     AuthConfig     `yaml:"auth"`
 }
 
 type ServerConfig struct {
@@ -61,6 +62,11 @@ type MCPConfig struct {
 	Path    string `yaml:"path"`
 }
 
+type AuthConfig struct {
+	AdminUsername string `yaml:"admin_username"`
+	AdminPassword string `yaml:"admin_password"`
+}
+
 // DefaultConfig returns the production/homelab default configuration.
 func DefaultConfig() *Config {
 	return &Config{
@@ -92,6 +98,10 @@ func DefaultConfig() *Config {
 		MCP: MCPConfig{
 			Enabled: true,
 			Path:    "/mcp",
+		},
+		Auth: AuthConfig{
+			AdminUsername: "admin",
+			AdminPassword: "",
 		},
 	}
 }
@@ -307,6 +317,17 @@ func ApplyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("SHELFD_MCP_PATH"); v != "" {
 		cfg.MCP.Path = v
+	}
+
+	if v := os.Getenv("SHELFD_ADMIN_USERNAME"); v != "" {
+		cfg.Auth.AdminUsername = v
+	} else if v := os.Getenv("SHELFD_AUTH_ADMIN_USERNAME"); v != "" {
+		cfg.Auth.AdminUsername = v
+	}
+	if v := os.Getenv("SHELFD_ADMIN_PASSWORD"); v != "" {
+		cfg.Auth.AdminPassword = v
+	} else if v := os.Getenv("SHELFD_AUTH_ADMIN_PASSWORD"); v != "" {
+		cfg.Auth.AdminPassword = v
 	}
 }
 

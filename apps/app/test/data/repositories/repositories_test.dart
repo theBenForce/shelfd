@@ -43,11 +43,28 @@ void main() {
       expect(user.username, 'admin');
       expect(storageService.getAuthToken(), 'token-abc');
       expect(storageService.getServerUrl(), 'http://localhost:8080');
+      expect(storageService.getSavedUsername(), 'admin');
 
       expect(await authRepo.checkInitialAuth(), isTrue);
 
       await authRepo.logout();
       expect(await authRepo.checkInitialAuth(), isFalse);
+    });
+
+    test('AuthRepository changePassword delegates to ApiService', () async {
+      bool called = false;
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/v1/auth/change-password') {
+          called = true;
+          return http.Response(jsonEncode({'message': 'ok'}), 200);
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final authRepo = AuthRepository(apiService: apiService, storageService: storageService);
+      await authRepo.changePassword('old-p', 'new-p');
+      expect(called, isTrue);
     });
 
     test('BookRepository getBooks hydrates reading progress', () async {

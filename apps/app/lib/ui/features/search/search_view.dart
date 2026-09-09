@@ -31,15 +31,7 @@ class _SearchViewState extends ConsumerState<SearchView> {
     } else if (index == 1) {
       setState(() => _navIndex = 1);
     } else if (index == 2) {
-      showShelfdSettingsModal(
-        context,
-        onLogout: () async {
-          await ref.read(authProvider.notifier).logout();
-          if (mounted) {
-            context.go('/connect');
-          }
-        },
-      );
+      context.go('/settings');
     }
   }
 

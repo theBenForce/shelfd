@@ -30,15 +30,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
     } else if (index == 1) {
       context.go('/search');
     } else if (index == 2) {
-      showShelfdSettingsModal(
-        context,
-        onLogout: () async {
-          await ref.read(authProvider.notifier).logout();
-          if (mounted) {
-            context.go('/connect');
-          }
-        },
-      );
+      context.go('/settings');
     }
   }
 

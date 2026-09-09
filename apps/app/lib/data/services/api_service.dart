@@ -97,6 +97,27 @@ class ApiService {
     return User.fromJson(data);
   }
 
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    final response = await client.post(
+      _uri('/api/v1/auth/change-password'),
+      headers: _headers(),
+      body: jsonEncode({
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      }),
+    );
+    if (response.statusCode >= 400) {
+      String errorMessage = response.body;
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> && decoded.containsKey('error')) {
+          errorMessage = decoded['error'].toString();
+        }
+      } catch (_) {}
+      throw ApiException(response.statusCode, errorMessage);
+    }
+  }
+
   Future<List<Book>> getBooks({
     int page = 1,
     int perPage = 20,

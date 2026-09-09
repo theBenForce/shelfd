@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../data/models/book.dart';
 import '../state/providers.dart';
 import 'responsive.dart';
@@ -917,6 +918,20 @@ void showShelfdSettingsModal(
               },
             ),
             const SizedBox(height: AppTokens.space24),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTokens.charcoalInk,
+                side: const BorderSide(color: AppTokens.crispBorder),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              icon: const Icon(Icons.lock_reset_outlined, size: 18),
+              label: const Text('Change Password & Account Settings'),
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                GoRouter.of(context).go('/settings');
+              },
+            ),
+            const SizedBox(height: AppTokens.space12),
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFFC92A2A),

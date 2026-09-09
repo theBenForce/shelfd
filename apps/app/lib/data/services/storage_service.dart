@@ -8,6 +8,7 @@ class StorageService {
 
   static const _keyServerUrl = 'shelfd_server_url';
   static const _keyAuthToken = 'shelfd_auth_token';
+  static const _keySavedUsername = 'shelfd_saved_username';
   static const _keyThemeMode = 'shelfd_theme_mode';
   static const _keyFontSize = 'shelfd_font_size';
   static const _keyLineHeight = 'shelfd_line_height';
@@ -19,10 +20,18 @@ class StorageService {
   // Server credentials
   String? getServerUrl() => _prefs.getString(_keyServerUrl);
   String? getAuthToken() => _prefs.getString(_keyAuthToken);
+  String? getSavedUsername() => _prefs.getString(_keySavedUsername);
 
-  Future<void> saveServerConnection(String url, String token) async {
+  Future<void> saveSavedUsername(String username) async {
+    await _prefs.setString(_keySavedUsername, username);
+  }
+
+  Future<void> saveServerConnection(String url, String token, {String? username}) async {
     await _prefs.setString(_keyServerUrl, url);
     await _prefs.setString(_keyAuthToken, token);
+    if (username != null && username.isNotEmpty) {
+      await _prefs.setString(_keySavedUsername, username);
+    }
   }
 
   Future<void> clearServerConnection() async {

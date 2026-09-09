@@ -102,8 +102,10 @@ class AuthNotifier extends Notifier<AuthState> {
     try {
       final isAuthed = await authRepo.checkInitialAuth();
       if (isAuthed) {
+        final storage = ref.read(storageServiceProvider);
+        final savedUsername = storage.getSavedUsername() ?? 'Connected';
         state = state.copyWith(
-          user: const User(id: 'current', username: 'Connected', role: 'user'),
+          user: User(id: 'current', username: savedUsername, role: 'user'),
           isLoading: false,
         );
       } else {
@@ -126,6 +128,11 @@ class AuthNotifier extends Notifier<AuthState> {
       state = state.copyWith(clearUser: true, isLoading: false, error: e.toString());
       return false;
     }
+  }
+
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    final authRepo = ref.read(authRepositoryProvider);
+    await authRepo.changePassword(currentPassword, newPassword);
   }
 
   Future<void> logout() async {

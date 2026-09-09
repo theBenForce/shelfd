@@ -117,6 +117,9 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
   void _showAddNoteSheet({
     required String selectedText,
     required List<ReaderBlock> blocks,
+    String? initialNote,
+    KindleHighlightColor? initialColor,
+    String? existingHighlightId,
   }) {
     showModalBottomSheet(
       context: context,
@@ -127,8 +130,13 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
       ),
       builder: (ctx) => _AddNoteSheet(
         selectedText: selectedText,
+        initialNote: initialNote,
+        initialColor: initialColor,
         onSave: (color, note) {
           Navigator.of(ctx).pop();
+          if (existingHighlightId != null) {
+            ref.read(bookDetailProvider(widget.bookId).notifier).removeHighlight(existingHighlightId);
+          }
           _createHighlight(
             selectedText: selectedText,
             color: color,
@@ -478,25 +486,61 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                           if (text == null || text.trim().isEmpty) {
                             return const SizedBox.shrink();
                           }
+
+                          // Check if selection matches or overlaps an existing highlight in this chapter
+                          final trimmed = text.trim();
+                          Highlight? matchedHighlight;
+                          for (final hl in chapterHighlights) {
+                            final hlText = hl.selectedText.trim();
+                            if (hlText.isNotEmpty && (hlText.contains(trimmed) || trimmed.contains(hlText))) {
+                              matchedHighlight = hl;
+                              break;
+                            }
+                          }
+
+                          final targetHl = matchedHighlight;
+
                           return KindleSelectionToolbar(
                             anchors: selectableRegionState.contextMenuAnchors,
+                            selectedColor: targetHl?.highlightColor,
                             onColorSelected: (color) {
                               selectableRegionState.hideToolbar();
-                              _createHighlight(
-                                selectedText: text,
-                                color: color,
-                                blocks: blocks,
-                              );
+                              if (targetHl != null) {
+                                // Update color of existing highlight
+                                ref.read(bookDetailProvider(widget.bookId).notifier).removeHighlight(targetHl.id);
+                                _createHighlight(
+                                  selectedText: targetHl.selectedText,
+                                  color: color,
+                                  blocks: blocks,
+                                  note: targetHl.note,
+                                );
+                              } else {
+                                _createHighlight(
+                                  selectedText: text,
+                                  color: color,
+                                  blocks: blocks,
+                                );
+                              }
                             },
                             onAddNote: () {
                               selectableRegionState.hideToolbar();
-                              _showAddNoteSheet(
-                                selectedText: text,
-                                blocks: blocks,
-                              );
+                              if (targetHl != null) {
+                                _showAddNoteSheet(
+                                  selectedText: targetHl.selectedText,
+                                  blocks: blocks,
+                                  initialNote: targetHl.note,
+                                  initialColor: targetHl.highlightColor,
+                                  existingHighlightId: targetHl.id,
+                                );
+                              } else {
+                                _showAddNoteSheet(
+                                  selectedText: text,
+                                  blocks: blocks,
+                                );
+                              }
                             },
                             onCopy: () {
-                              Clipboard.setData(ClipboardData(text: text));
+                              Clipboard.setData(ClipboardData(text: targetHl?.selectedText ?? text));
                               selectableRegionState.hideToolbar();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
@@ -506,6 +550,19 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                                 ),
                               );
                             },
+                            onDelete: targetHl != null
+                                ? () {
+                                    selectableRegionState.hideToolbar();
+                                    ref.read(bookDetailProvider(widget.bookId).notifier).removeHighlight(targetHl.id);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Highlight deleted'),
+                                        duration: Duration(seconds: 2),
+                                        behavior: SnackBarBehavior.floating,
+                                      ),
+                                    );
+                                  }
+                                : null,
                           );
                         },
                         child: ListView.builder(
@@ -617,6 +674,8 @@ class KindleSelectionToolbar extends StatelessWidget {
   final ValueChanged<KindleHighlightColor> onColorSelected;
   final VoidCallback onAddNote;
   final VoidCallback onCopy;
+  final VoidCallback? onDelete;
+  final KindleHighlightColor? selectedColor;
 
   const KindleSelectionToolbar({
     super.key,
@@ -624,16 +683,37 @@ class KindleSelectionToolbar extends StatelessWidget {
     required this.onColorSelected,
     required this.onAddNote,
     required this.onCopy,
+    this.onDelete,
+    this.selectedColor,
   });
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveTextSelectionToolbar(
-      anchors: anchors,
+    return TextSelectionToolbar(
+      anchorAbove: anchors.primaryAnchor,
+      anchorBelow: anchors.secondaryAnchor ?? anchors.primaryAnchor,
+      toolbarBuilder: (context, child) {
+        return Material(
+          color: AppTokens.boneSurface,
+          elevation: 6,
+          shadowColor: const Color(0x33000000),
+          borderRadius: BorderRadius.circular(24),
+          clipBehavior: Clip.antiAlias,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: AppTokens.crispBorder),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            child: child,
+          ),
+        );
+      },
       children: [
         for (final color in KindleHighlightColor.values)
           _ColorButton(
             color: color,
+            isSelected: color == selectedColor,
             onPressed: () => onColorSelected(color),
           ),
         Container(
@@ -644,7 +724,7 @@ class KindleSelectionToolbar extends StatelessWidget {
         ),
         IconButton(
           icon: const Icon(Icons.edit_note_rounded, size: 20),
-          tooltip: 'Add Note',
+          tooltip: selectedColor != null ? 'Edit Note' : 'Add Note',
           padding: const EdgeInsets.symmetric(horizontal: 8),
           constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           onPressed: onAddNote,
@@ -656,6 +736,21 @@ class KindleSelectionToolbar extends StatelessWidget {
           constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           onPressed: onCopy,
         ),
+        if (onDelete != null) ...[
+          Container(
+            width: 1,
+            height: 20,
+            margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            color: Theme.of(context).dividerColor,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline_rounded, size: 20, color: Color(0xFFC92A2A)),
+            tooltip: 'Delete Highlight',
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            onPressed: onDelete,
+          ),
+        ],
       ],
     );
   }
@@ -664,31 +759,39 @@ class KindleSelectionToolbar extends StatelessWidget {
 class _ColorButton extends StatelessWidget {
   final KindleHighlightColor color;
   final VoidCallback onPressed;
+  final bool isSelected;
 
   const _ColorButton({
     required this.color,
     required this.onPressed,
+    this.isSelected = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
       message: '${color.label} Highlight',
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(
-              color: color.cardColor,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: Colors.black.withValues(alpha: 0.2),
-                width: 1.5,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: color.cardColor,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isSelected ? Colors.black87 : Colors.black.withValues(alpha: 0.25),
+                  width: isSelected ? 2.5 : 1.5,
+                ),
               ),
+              child: isSelected
+                  ? const Icon(Icons.check, size: 14, color: Colors.black87)
+                  : null,
             ),
           ),
         ),
@@ -699,10 +802,14 @@ class _ColorButton extends StatelessWidget {
 
 class _AddNoteSheet extends StatefulWidget {
   final String selectedText;
+  final String? initialNote;
+  final KindleHighlightColor? initialColor;
   final void Function(KindleHighlightColor color, String? note) onSave;
 
   const _AddNoteSheet({
     required this.selectedText,
+    this.initialNote,
+    this.initialColor,
     required this.onSave,
   });
 
@@ -712,12 +819,13 @@ class _AddNoteSheet extends StatefulWidget {
 
 class _AddNoteSheetState extends State<_AddNoteSheet> {
   late final TextEditingController _controller;
-  KindleHighlightColor _selectedColor = KindleHighlightColor.yellow;
+  late KindleHighlightColor _selectedColor;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController();
+    _controller = TextEditingController(text: widget.initialNote ?? '');
+    _selectedColor = widget.initialColor ?? KindleHighlightColor.yellow;
   }
 
   @override
@@ -746,7 +854,7 @@ class _AddNoteSheetState extends State<_AddNoteSheet> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Add Note', style: AppTypography.titleSerif(fontSize: 18)),
+                Text(widget.initialNote != null ? 'Edit Note' : 'Add Note', style: AppTypography.titleSerif(fontSize: 18)),
                 IconButton(
                   icon: const Icon(Icons.close_rounded, size: 20),
                   onPressed: () => Navigator.of(context).pop(),

@@ -1232,6 +1232,25 @@ func (r *BunStorageEngine) GetUserByID(ctx context.Context, id string) (*User, e
 	return user, nil
 }
 
+func (r *BunStorageEngine) UpdateUserPassword(ctx context.Context, userID string, passwordHash string) error {
+	res, err := r.db.NewUpdate().
+		Model((*User)(nil)).
+		Set("password_hash = ?", passwordHash).
+		Where("id = ?", userID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("updating user password: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *BunStorageEngine) CreateAPIToken(ctx context.Context, token *APIToken) error {
 	if token.ID == "" {
 		token.ID = ulid.New()

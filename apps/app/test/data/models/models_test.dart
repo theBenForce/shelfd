@@ -33,11 +33,13 @@ void main() {
         'version': '0.1.0',
         'base_url': 'http://192.168.1.100:8080',
         'capabilities': ['mcp', 'semantic_search'],
+        'default_username': 'admin',
       };
       final info = ServerConnectInfo.fromJson(json);
       expect(info.serverName, 'Shelfd Homelab');
       expect(info.version, '0.1.0');
       expect(info.baseUrl, 'http://192.168.1.100:8080');
+      expect(info.defaultUsername, 'admin');
       expect(info.capabilities, contains('mcp'));
       expect(info.capabilities, contains('semantic_search'));
       expect(info.toJson(), json);

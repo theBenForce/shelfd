@@ -149,9 +149,10 @@ func setupAPITest(t *testing.T) *testFixture {
 		DataDir:      dataDir,
 		LibraryDir:   libDir,
 		JWTSecret:    jwtSecret,
-		Host:         "127.0.0.1",
-		Port:         8080,
-		Version:      "0.1.0-test",
+		Host:            "127.0.0.1",
+		Port:            8080,
+		Version:         "0.1.0-test",
+		DefaultUsername: "admin",
 	})
 
 	return &testFixture{
@@ -241,6 +242,81 @@ func TestAPI_Auth_LoginAndMe(t *testing.T) {
 	f.handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 without token, got %d", rec.Code)
+	}
+}
+
+func TestAPI_Auth_ChangePassword(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+
+	// 1. Without token -> 401
+	payload := `{"current_password":"admin-secret-123","new_password":"brand-new-password-456"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(payload))
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 without token, got %d", rec.Code)
+	}
+
+	// 2. Incorrect current password -> 401
+	wrongOldPass := `{"current_password":"wrong-admin-secret","new_password":"brand-new-password-456"}`
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(wrongOldPass))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for wrong current password, got %d", rec.Code)
+	}
+
+	// 3. Short new password (<6 chars) -> 400
+	shortPass := `{"current_password":"admin-secret-123","new_password":"short"}`
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(shortPass))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for short new password, got %d", rec.Code)
+	}
+
+	// 4. Empty fields -> 400
+	emptyFields := `{"current_password":"","new_password":""}`
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(emptyFields))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty fields, got %d", rec.Code)
+	}
+
+	// 5. Successful password change -> 200
+	successPayload := `{"current_password":"admin-secret-123","new_password":"brand-new-password-456"}`
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", strings.NewReader(successPayload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on successful password change, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 6. Old password login now fails -> 401
+	oldLogin := `{"username":"admin","password":"admin-secret-123"}`
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(oldLogin))
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 using old password, got %d", rec.Code)
+	}
+
+	// 7. New password login succeeds -> 200
+	newLogin := `{"username":"admin","password":"brand-new-password-456"}`
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(newLogin))
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 using new password, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -642,7 +718,7 @@ func TestAPI_ConnectInfo(t *testing.T) {
 
 	var resp api.ConnectInfoResponse
 	json.Unmarshal(rec.Body.Bytes(), &resp)
-	if resp.ServerName != "Shelfd" || resp.PairingPayload == "" {
+	if resp.ServerName != "Shelfd" || resp.PairingPayload == "" || resp.DefaultUsername != "admin" {
 		t.Errorf("unexpected connect-info response: %+v", resp)
 	}
 }
