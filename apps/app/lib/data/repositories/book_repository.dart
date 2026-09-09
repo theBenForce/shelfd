@@ -75,6 +75,11 @@ class BookRepository {
     String color = 'yellow',
     String? note,
     String? chapterId,
+    int? startOffset,
+    int? endOffset,
+    int? startParagraph,
+    int? endParagraph,
+    String? location,
   }) =>
       apiService.createHighlight(
         bookId,
@@ -82,6 +87,11 @@ class BookRepository {
         color: color,
         note: note,
         chapterId: chapterId,
+        startOffset: startOffset,
+        endOffset: endOffset,
+        startParagraph: startParagraph,
+        endParagraph: endParagraph,
+        location: location,
       );
 
   Future<List<Highlight>> getHighlights(String bookId) => apiService.getHighlights(bookId);

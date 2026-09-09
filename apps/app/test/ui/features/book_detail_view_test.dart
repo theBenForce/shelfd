@@ -250,6 +250,36 @@ void main() {
     expect(find.textContaining('### 1. The Intelligence Explosion'), findsNothing);
     expect(find.textContaining('**The Theme:**'), findsNothing);
   });
+
+  testWidgets('BookDetailView does not display manual Add Highlight button on overview', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookDetailProvider('book-42').overrideWith(() => _MockBookDetailNotifier(testBook)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const BookDetailView(bookId: 'book-42'),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Verify Add Highlight button is absent from AppBar
+    expect(find.byIcon(Icons.note_add_outlined), findsNothing);
+    // Bookmark button remains
+    expect(find.byIcon(Icons.bookmark_add_outlined), findsOneWidget);
+  });
 }
 
 class _MockBookDetailNotifier extends BookDetailNotifier {

@@ -120,125 +120,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     );
   }
 
-  void _showAddHighlightDialog(BuildContext context, Book book) {
-    final textController = TextEditingController();
-    final noteController = TextEditingController();
-    String selectedColor = 'yellow';
-
-    showDialog(
-      context: context,
-      builder: (dialogCtx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: AppTokens.boneBackground,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-            side: const BorderSide(color: AppTokens.crispBorder),
-          ),
-          title: Text(
-            'Add Note / Highlight',
-            style: AppTypography.titleSerif(fontSize: 18),
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: textController,
-                  autofocus: true,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: 'Selected Text / Quote',
-                    hintText: 'Enter quoted passage...',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: AppTokens.space12),
-                TextField(
-                  controller: noteController,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Personal Note (optional)',
-                    hintText: 'Your thoughts or reflection...',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: AppTokens.space16),
-                Text(
-                  'Highlight Color',
-                  style: AppTypography.captionSans(fontSize: 12),
-                ),
-                const SizedBox(height: AppTokens.space8),
-                Row(
-                  children: [
-                    for (final color in ['yellow', 'green', 'blue', 'pink'])
-                      GestureDetector(
-                        onTap: () {
-                          setDialogState(() => selectedColor = color);
-                        },
-                        child: Container(
-                          margin: const EdgeInsets.only(right: AppTokens.space12),
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: _highlightColor(color),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: selectedColor == color
-                                  ? AppTokens.charcoalInk
-                                  : AppTokens.crispBorder,
-                              width: selectedColor == color ? 2.5 : 1.0,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTokens.charcoalInk,
-              ),
-              onPressed: () {
-                final quote = textController.text.trim();
-                if (quote.isNotEmpty) {
-                  ref.read(bookDetailProvider(widget.bookId).notifier).addHighlight(
-                        selectedText: quote,
-                        color: selectedColor,
-                        note: noteController.text.trim().isNotEmpty
-                            ? noteController.text.trim()
-                            : null,
-                      );
-                }
-                Navigator.of(dialogCtx).pop();
-              },
-              child: const Text('Save Highlight'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Color _highlightColor(String colorName) {
-    switch (colorName.toLowerCase()) {
-      case 'green':
-        return const Color(0xFFD1E7DD);
-      case 'blue':
-        return const Color(0xFFCFE2FF);
-      case 'pink':
-        return const Color(0xFFF8D7DA);
-      case 'yellow':
-      default:
-        return const Color(0xFFFFF3CD);
-    }
+    return KindleHighlightColor.fromName(colorName).cardColor;
   }
 
   String _formatFileSize(int? bytes) {
@@ -344,11 +227,6 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             icon: const Icon(Icons.bookmark_add_outlined, color: AppTokens.charcoalInk),
             tooltip: 'Add Bookmark',
             onPressed: () => _showAddBookmarkDialog(context, book),
-          ),
-          IconButton(
-            icon: const Icon(Icons.note_add_outlined, color: AppTokens.charcoalInk),
-            tooltip: 'Add Note / Highlight',
-            onPressed: () => _showAddHighlightDialog(context, book),
           ),
           Padding(
             padding: const EdgeInsets.only(right: AppTokens.space16, left: AppTokens.space8),
@@ -832,38 +710,10 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               const SizedBox(width: AppTokens.space8),
               _buildAnnotationFilterChip('bookmarks', 'Bookmarks (${bookmarks.length})'),
               const Spacer(),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.add_circle_outline_rounded, color: AppTokens.charcoalInk),
-                tooltip: 'Add annotation',
-                onSelected: (val) {
-                  if (val == 'bookmark') {
-                    _showAddBookmarkDialog(context, book);
-                  } else {
-                    _showAddHighlightDialog(context, book);
-                  }
-                },
-                itemBuilder: (ctx) => [
-                  const PopupMenuItem(
-                    value: 'bookmark',
-                    child: Row(
-                      children: [
-                        Icon(Icons.bookmark_add_outlined, size: 18),
-                        SizedBox(width: 8),
-                        Text('Add Bookmark'),
-                      ],
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'highlight',
-                    child: Row(
-                      children: [
-                        Icon(Icons.note_add_outlined, size: 18),
-                        SizedBox(width: 8),
-                        Text('Add Note / Highlight'),
-                      ],
-                    ),
-                  ),
-                ],
+              IconButton(
+                icon: const Icon(Icons.bookmark_add_outlined, color: AppTokens.charcoalInk),
+                tooltip: 'Add Bookmark',
+                onPressed: () => _showAddBookmarkDialog(context, book),
               ),
             ],
           ),
@@ -875,21 +725,36 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 padding: const EdgeInsets.symmetric(vertical: AppTokens.space48),
                 child: Column(
                   children: [
-                    const Icon(
-                      Icons.bookmarks_outlined,
+                    Icon(
+                      _annotationFilter == 'highlights'
+                          ? Icons.format_quote_rounded
+                          : Icons.bookmarks_outlined,
                       size: 44,
                       color: AppTokens.mutedCopy,
                     ),
                     const SizedBox(height: AppTokens.space12),
                     Text(
-                      'No annotations found',
+                      _annotationFilter == 'highlights'
+                          ? 'No highlights yet'
+                          : 'No annotations found',
                       style: AppTypography.titleSerif(fontSize: 16),
                     ),
                     const SizedBox(height: AppTokens.space4),
                     Text(
-                      'Save your favorite passages or bookmarks as you read.',
+                      _annotationFilter == 'highlights'
+                          ? 'Select text while reading in the reader view to create highlights and add personal notes.'
+                          : 'Save your favorite passages or bookmarks as you read.',
+                      textAlign: TextAlign.center,
                       style: AppTypography.bodySans(fontSize: 13, color: AppTokens.mutedCopy),
                     ),
+                    if (_annotationFilter == 'highlights') ...[
+                      const SizedBox(height: AppTokens.space16),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.menu_book_rounded, size: 16),
+                        label: const Text('Start Reading'),
+                        onPressed: () => context.push('/reader/${widget.bookId}/read'),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -944,6 +809,13 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
   Widget _buildHighlightCard(Highlight hl) {
     return BentoCard(
       padding: const EdgeInsets.all(AppTokens.space16),
+      onTap: () {
+        if (hl.chapterId != null && hl.chapterId!.isNotEmpty) {
+          context.push('/reader/${widget.bookId}/read/${hl.chapterId}');
+        } else {
+          context.push('/reader/${widget.bookId}/read');
+        }
+      },
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

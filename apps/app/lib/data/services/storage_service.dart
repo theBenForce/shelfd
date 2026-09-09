@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class StorageService {
@@ -13,6 +14,7 @@ class StorageService {
   static const _keyFontFamily = 'shelfd_font_family';
   static const _prefixProgress = 'shelfd_progress_';
   static const _prefixChapter = 'shelfd_chapter_';
+  static const _prefixHighlights = 'shelfd_highlights_';
 
   // Server credentials
   String? getServerUrl() => _prefs.getString(_keyServerUrl);
@@ -57,5 +59,21 @@ class StorageService {
 
   Future<void> cacheChapter(String bookId, dynamic chapterIdentifier, String content) async {
     await _prefs.setString('$_prefixChapter${bookId}_$chapterIdentifier', content);
+  }
+
+  // Offline highlights caching
+  List<Map<String, dynamic>>? getCachedHighlights(String bookId) {
+    final raw = _prefs.getString('$_prefixHighlights$bookId');
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list.whereType<Map<String, dynamic>>().toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> cacheHighlights(String bookId, List<Map<String, dynamic>> highlights) async {
+    await _prefs.setString('$_prefixHighlights$bookId', jsonEncode(highlights));
   }
 }

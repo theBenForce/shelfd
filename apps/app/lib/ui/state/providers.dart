@@ -6,6 +6,7 @@ import '../../data/models/author.dart';
 import '../../data/models/book.dart';
 import '../../data/models/book_chat.dart';
 import '../../data/models/genre.dart';
+import '../../data/models/highlight.dart';
 import '../../data/models/queue_status.dart';
 import '../../data/models/search_result.dart';
 import '../../data/models/series.dart';
@@ -498,9 +499,21 @@ class BookDetailNotifier extends Notifier<BookDetailState> {
     try {
       final repo = ref.read(bookRepositoryProvider);
       final book = await repo.getBookDetail(bookId);
+      final storage = ref.read(storageServiceProvider);
+      await storage.cacheHighlights(bookId, book.highlights.map((h) => h.toJson()).toList());
       state = BookDetailState(book: book, isLoading: false);
     } catch (e) {
-      state = BookDetailState(isLoading: false, error: e.toString());
+      final storage = ref.read(storageServiceProvider);
+      final cachedHls = storage.getCachedHighlights(bookId);
+      if (cachedHls != null && state.book != null) {
+        final restoredHls = cachedHls.map((j) => Highlight.fromJson(j)).toList();
+        state = state.copyWith(
+          isLoading: false,
+          book: state.book!.copyWith(highlights: restoredHls),
+        );
+      } else {
+        state = BookDetailState(isLoading: false, error: e.toString());
+      }
     }
   }
 
@@ -544,6 +557,11 @@ class BookDetailNotifier extends Notifier<BookDetailState> {
     String color = 'yellow',
     String? note,
     String? chapterId,
+    int? startOffset,
+    int? endOffset,
+    int? startParagraph,
+    int? endParagraph,
+    String? location,
   }) async {
     try {
       final repo = ref.read(bookRepositoryProvider);
@@ -553,10 +571,17 @@ class BookDetailNotifier extends Notifier<BookDetailState> {
         color: color,
         note: note,
         chapterId: chapterId,
+        startOffset: startOffset,
+        endOffset: endOffset,
+        startParagraph: startParagraph,
+        endParagraph: endParagraph,
+        location: location,
       );
       if (state.book != null) {
         final updatedHighlights = [hl, ...state.book!.highlights];
         state = state.copyWith(book: state.book!.copyWith(highlights: updatedHighlights));
+        final storage = ref.read(storageServiceProvider);
+        await storage.cacheHighlights(bookId, updatedHighlights.map((h) => h.toJson()).toList());
       }
     } catch (e) {
       debugPrint('addHighlight error: $e');
@@ -570,6 +595,8 @@ class BookDetailNotifier extends Notifier<BookDetailState> {
       if (state.book != null) {
         final updatedHighlights = state.book!.highlights.where((h) => h.id != highlightId).toList();
         state = state.copyWith(book: state.book!.copyWith(highlights: updatedHighlights));
+        final storage = ref.read(storageServiceProvider);
+        await storage.cacheHighlights(bookId, updatedHighlights.map((h) => h.toJson()).toList());
       }
     } catch (e) {
       debugPrint('removeHighlight error: $e');

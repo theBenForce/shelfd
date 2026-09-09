@@ -876,6 +876,14 @@ func (h *BookHandler) CreateHighlight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hl.Color = strings.ToLower(strings.TrimSpace(hl.Color))
+	switch hl.Color {
+	case "yellow", "blue", "pink", "orange":
+		// valid kindle color
+	default:
+		hl.Color = "yellow"
+	}
+
 	if err := h.repo.CreateHighlight(r.Context(), &hl); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to create highlight: %v", err))
 		return

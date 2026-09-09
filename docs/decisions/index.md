@@ -22,4 +22,5 @@ This directory contains the architectural decision records (ADRs) for `shelfd`, 
 | [ADR-0014](0014-per-paragraph-embeddings-and-fts5-retrieval.md) | Per-Paragraph 256-Dimension Vector Embeddings & SQLite FTS5 Retrieval | Accepted | 2026-09-08 |
 | [ADR-0015](0015-dual-backend-orm-and-postgres-bun.md) | Dual Database Backend (SQLite & PostgreSQL) via Bun ORM with pgvector | Accepted | 2026-09-08 |
 | [ADR-0016](0016-google-gemini-ai-provider-and-batch-embeddings.md) | Google Gemini AI Provider & Unified Ingestion Batch Embeddings | Accepted | 2026-09-09 |
+| [ADR-0017](0017-in-reader-text-highlighting-and-location-tracking.md) | In-Reader Text Highlighting & Location Tracking | Accepted | 2026-09-09 |
 

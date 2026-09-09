@@ -1182,7 +1182,7 @@ func TestHighlightsEndpoints(t *testing.T) {
 	}
 
 	// 1. Create Highlight
-	createPayload := `{"selected_text": "Call me Ishmael.", "color": "yellow", "note": "Famous opening line"}`
+	createPayload := `{"selected_text": "Call me Ishmael.", "color": "blue", "note": "Famous opening line", "start_offset": 0, "end_offset": 16, "start_paragraph": 1, "end_paragraph": 1, "location": "ch1:0-16"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/hl-book-1/highlights", strings.NewReader(createPayload))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
@@ -1197,8 +1197,11 @@ func TestHighlightsEndpoints(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &hl); err != nil {
 		t.Fatalf("failed to decode highlight: %v", err)
 	}
-	if hl.ID == "" || hl.BookID != "hl-book-1" || hl.SelectedText != "Call me Ishmael." || hl.Color != "yellow" {
+	if hl.ID == "" || hl.BookID != "hl-book-1" || hl.SelectedText != "Call me Ishmael." || hl.Color != "blue" {
 		t.Fatalf("unexpected highlight values: %+v", hl)
+	}
+	if hl.StartOffset == nil || *hl.StartOffset != 0 || hl.EndOffset == nil || *hl.EndOffset != 16 {
+		t.Fatalf("expected start/end offset to be populated: %+v", hl)
 	}
 
 	// 2. List Highlights

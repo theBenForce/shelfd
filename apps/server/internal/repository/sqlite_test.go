@@ -1004,12 +1004,22 @@ func TestBookmarksAndHighlights(t *testing.T) {
 
 	// 2. Highlights CRUD
 	note := "A powerful philosophical insight."
+	startOff := 120
+	endOff := 195
+	startPara := 1
+	endPara := 2
+	loc := `{"chapter_id":"` + chID + `","start_para":1,"end_para":2}`
 	hl := &repository.Highlight{
-		BookID:       book.ID,
-		ChapterID:    &chID,
-		SelectedText: "The mystery of life isn't a problem to solve, but a reality to experience.",
-		Note:         &note,
-		Color:        "amber",
+		BookID:         book.ID,
+		ChapterID:      &chID,
+		SelectedText:   "The mystery of life isn't a problem to solve, but a reality to experience.",
+		Note:           &note,
+		Color:          "orange",
+		StartOffset:    &startOff,
+		EndOffset:      &endOff,
+		StartParagraph: &startPara,
+		EndParagraph:   &endPara,
+		Location:       &loc,
 	}
 	if err := repo.CreateHighlight(ctx, hl); err != nil {
 		t.Fatalf("create highlight: %v", err)
@@ -1024,6 +1034,9 @@ func TestBookmarksAndHighlights(t *testing.T) {
 	}
 	if len(hls) != 1 || hls[0].SelectedText != hl.SelectedText || *hls[0].Note != note {
 		t.Fatalf("unexpected highlights: %+v", hls)
+	}
+	if hls[0].StartOffset == nil || *hls[0].StartOffset != 120 || hls[0].EndParagraph == nil || *hls[0].EndParagraph != 2 {
+		t.Fatalf("expected location offsets to be populated, got: %+v", hls[0])
 	}
 
 	// Delete highlight

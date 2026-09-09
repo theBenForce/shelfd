@@ -1103,8 +1103,8 @@ func (r *SQLiteStorageEngine) CreateHighlight(ctx context.Context, highlight *Hi
 	}
 
 	query := `
-		INSERT INTO highlights (id, book_id, chapter_id, selected_text, note, color, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO highlights (id, book_id, chapter_id, selected_text, note, color, start_offset, end_offset, start_paragraph, end_paragraph, location, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		highlight.ID,
@@ -1113,6 +1113,11 @@ func (r *SQLiteStorageEngine) CreateHighlight(ctx context.Context, highlight *Hi
 		highlight.SelectedText,
 		highlight.Note,
 		highlight.Color,
+		highlight.StartOffset,
+		highlight.EndOffset,
+		highlight.StartParagraph,
+		highlight.EndParagraph,
+		highlight.Location,
 		highlight.CreatedAt,
 	)
 	if err != nil {
@@ -1123,7 +1128,7 @@ func (r *SQLiteStorageEngine) CreateHighlight(ctx context.Context, highlight *Hi
 
 func (r *SQLiteStorageEngine) ListHighlightsByBookID(ctx context.Context, bookID string) ([]*Highlight, error) {
 	query := `
-		SELECT id, book_id, chapter_id, selected_text, note, color, created_at
+		SELECT id, book_id, chapter_id, selected_text, note, color, start_offset, end_offset, start_paragraph, end_paragraph, location, created_at
 		FROM highlights
 		WHERE book_id = ?
 		ORDER BY created_at DESC
@@ -1137,7 +1142,20 @@ func (r *SQLiteStorageEngine) ListHighlightsByBookID(ctx context.Context, bookID
 	var highlights []*Highlight
 	for rows.Next() {
 		h := &Highlight{}
-		if err := rows.Scan(&h.ID, &h.BookID, &h.ChapterID, &h.SelectedText, &h.Note, &h.Color, &h.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&h.ID,
+			&h.BookID,
+			&h.ChapterID,
+			&h.SelectedText,
+			&h.Note,
+			&h.Color,
+			&h.StartOffset,
+			&h.EndOffset,
+			&h.StartParagraph,
+			&h.EndParagraph,
+			&h.Location,
+			&h.CreatedAt,
+		); err != nil {
 			return nil, fmt.Errorf("scanning highlight: %w", err)
 		}
 		highlights = append(highlights, h)

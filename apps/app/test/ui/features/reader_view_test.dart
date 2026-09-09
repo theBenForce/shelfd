@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/chapter.dart';
+import 'package:shelf/data/models/highlight.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/reader/reader_view.dart';
 import 'package:shelf/ui/state/providers.dart';
@@ -107,4 +109,131 @@ void main() {
     expect(find.textContaining('Red-blooded men know what I mean.”'), findsOneWidget);
     expect(find.textContaining('He won the race.'), findsOneWidget);
   });
+
+  testWidgets('KindleSelectionToolbar renders 4 Kindle colors, note, and copy buttons', (tester) async {
+    KindleHighlightColor? selectedColor;
+    bool noteTapped = false;
+    bool copyTapped = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: KindleSelectionToolbar(
+            anchors: const TextSelectionToolbarAnchors(primaryAnchor: Offset(100, 100)),
+            onColorSelected: (c) => selectedColor = c,
+            onAddNote: () => noteTapped = true,
+            onCopy: () => copyTapped = true,
+          ),
+        ),
+      ),
+    );
+
+    // Verify all 4 Kindle colors are present
+    expect(find.byTooltip('Yellow Highlight'), findsOneWidget);
+    expect(find.byTooltip('Blue Highlight'), findsOneWidget);
+    expect(find.byTooltip('Pink Highlight'), findsOneWidget);
+    expect(find.byTooltip('Orange Highlight'), findsOneWidget);
+
+    // Verify Add Note and Copy buttons
+    expect(find.byTooltip('Add Note'), findsOneWidget);
+    expect(find.byTooltip('Copy'), findsOneWidget);
+
+    // Tap Blue color button
+    await tester.tap(find.byTooltip('Blue Highlight'));
+    expect(selectedColor, KindleHighlightColor.blue);
+
+    // Tap Add Note button
+    await tester.tap(find.byTooltip('Add Note'));
+    expect(noteTapped, true);
+
+    // Tap Copy button
+    await tester.tap(find.byTooltip('Copy'));
+    expect(copyTapped, true);
+  });
+
+  testWidgets('ReaderView renders highlights from bookDetailProvider and opens detail sheet on tap',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final testChapter = const Chapter(
+      id: 'chap-10',
+      bookId: 'book-100',
+      chapterIndex: 1,
+      title: 'Arrival',
+      content: 'Small town winter was unusually bitter.',
+    );
+
+    final highlight = const Highlight(
+      id: 'hl-test-1',
+      bookId: 'book-100',
+      chapterId: 'chap-10',
+      selectedText: 'Small town',
+      note: 'My childhood memory',
+      color: 'pink',
+      startOffset: 0,
+      endOffset: 10,
+      startParagraph: 1,
+      endParagraph: 1,
+      location: 'p.1:0',
+    );
+
+    final mockBook = Book(
+      id: 'book-100',
+      title: 'A Memoir',
+      spine: const [SpineItem(id: 'chap-10', bookId: 'book-100', title: 'Arrival', chapterIndex: 1)],
+      highlights: [highlight],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookDetailProvider('book-100').overrideWith(() => _MockBookDetailNotifier(mockBook)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: ReaderView(
+            bookId: 'book-100',
+            chapterIndex: 1,
+            initialChapter: testChapter,
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    // Verify text renders
+    expect(find.textContaining('Small town'), findsOneWidget);
+
+    // Tap highlighted span at start
+    final textFinder = find.textContaining('Small town');
+    final topLeft = tester.getTopLeft(textFinder);
+    await tester.tapAt(topLeft + const Offset(25, 8));
+    await tester.pumpAndSettle();
+
+    // Verify existing highlight bottom sheet opened with quote and note
+    expect(find.text('Highlight'), findsOneWidget);
+    expect(find.textContaining('Small town'), findsWidgets);
+    expect(find.text('My childhood memory'), findsOneWidget);
+    expect(find.text('Location: p.1:0'), findsOneWidget);
+    expect(find.text('Delete Highlight'), findsOneWidget);
+  });
 }
+
+class _MockBookDetailNotifier extends BookDetailNotifier {
+  final Book mockBook;
+  _MockBookDetailNotifier(this.mockBook) : super('book-100');
+
+  @override
+  BookDetailState build() {
+    return BookDetailState(book: mockBook, isLoading: false);
+  }
+
+  @override
+  Future<void> loadBook() async {
+    // No-op in mock test
+  }
+}
+

@@ -218,7 +218,12 @@ void main() {
         'chapter_id': 'chap-2',
         'selected_text': 'To be or not to be.',
         'note': 'Hamlet soliloquy',
-        'color': 'green',
+        'color': 'blue',
+        'start_offset': 100,
+        'end_offset': 120,
+        'start_paragraph': 2,
+        'end_paragraph': 3,
+        'location': 'chap-2:100-120',
         'created_at': '2026-09-08T12:00:00.000Z',
       };
       final hl = Highlight.fromJson(json);
@@ -226,9 +231,18 @@ void main() {
       expect(hl.bookId, 'book-42');
       expect(hl.selectedText, 'To be or not to be.');
       expect(hl.note, 'Hamlet soliloquy');
-      expect(hl.color, 'green');
+      expect(hl.color, 'blue');
+      expect(hl.startOffset, 100);
+      expect(hl.endOffset, 120);
+      expect(hl.startParagraph, 2);
+      expect(hl.endParagraph, 3);
+      expect(hl.location, 'chap-2:100-120');
+      expect(hl.highlightColor, KindleHighlightColor.blue);
       expect(hl.toJson()['selected_text'], 'To be or not to be.');
-      expect(hl.toJson()['color'], 'green');
+      expect(hl.toJson()['color'], 'blue');
+      expect(hl.toJson()['start_offset'], 100);
+      expect(hl.toJson()['start_paragraph'], 2);
+      expect(hl.toJson()['end_paragraph'], 3);
     });
 
     test('BookCitation, BookChatMessage, BookChatResponse fromJson & toJson', () {

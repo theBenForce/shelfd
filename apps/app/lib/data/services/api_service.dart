@@ -322,6 +322,11 @@ class ApiService {
     String color = 'yellow',
     String? note,
     String? chapterId,
+    int? startOffset,
+    int? endOffset,
+    int? startParagraph,
+    int? endParagraph,
+    String? location,
   }) async {
     final response = await client.post(
       _uri('/api/v1/books/$bookId/highlights'),
@@ -331,6 +336,11 @@ class ApiService {
         'color': color,
         if (note != null && note.isNotEmpty) 'note': note,
         if (chapterId != null && chapterId.isNotEmpty) 'chapter_id': chapterId,
+        'start_offset': ?startOffset,
+        'end_offset': ?endOffset,
+        'start_paragraph': ?startParagraph,
+        'end_paragraph': ?endParagraph,
+        if (location != null && location.isNotEmpty) 'location': location,
       }),
     );
     if (response.statusCode >= 400) {

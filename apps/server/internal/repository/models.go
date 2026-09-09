@@ -169,13 +169,18 @@ type Bookmark struct {
 
 // Highlight represents a user-highlighted text passage with optional notes.
 type Highlight struct {
-	ID           string    `json:"id" bun:"id,pk"`
-	BookID       string    `json:"book_id" bun:"book_id,notnull"`
-	ChapterID    *string   `json:"chapter_id,omitempty" bun:"chapter_id"`
-	SelectedText string    `json:"selected_text" bun:"selected_text,notnull"`
-	Note         *string   `json:"note,omitempty" bun:"note"`
-	Color        string    `json:"color" bun:"color,notnull"`
-	CreatedAt    time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+	ID             string    `json:"id" bun:"id,pk"`
+	BookID         string    `json:"book_id" bun:"book_id,notnull"`
+	ChapterID      *string   `json:"chapter_id,omitempty" bun:"chapter_id"`
+	SelectedText   string    `json:"selected_text" bun:"selected_text,notnull"`
+	Note           *string   `json:"note,omitempty" bun:"note"`
+	Color          string    `json:"color" bun:"color,notnull"`
+	StartOffset    *int      `json:"start_offset,omitempty" bun:"start_offset"`
+	EndOffset      *int      `json:"end_offset,omitempty" bun:"end_offset"`
+	StartParagraph *int      `json:"start_paragraph,omitempty" bun:"start_paragraph"`
+	EndParagraph   *int      `json:"end_paragraph,omitempty" bun:"end_paragraph"`
+	Location       *string   `json:"location,omitempty" bun:"location"`
+	CreatedAt      time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // UploadJob represents an asynchronous book ingestion task.

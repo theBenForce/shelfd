@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shelf/data/models/highlight.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/reader/reader_markdown.dart';
 import 'package:shelf/ui/state/providers.dart';
@@ -97,6 +98,184 @@ void main() {
       expect(find.text('The reign of the Dixiecrats'), findsOneWidget);
       expect(find.textContaining('Red-blooded men know what I mean.”'), findsOneWidget);
       expect(find.text('5'), findsOneWidget);
+    });
+
+    testWidgets('renders highlights with Kindle color and triggers onHighlightTap', (tester) async {
+      const pBlock = ReaderBlock(
+        type: ReaderBlockType.paragraph,
+        text: 'Call me Ishmael. Some years ago never mind how long precisely.',
+      );
+
+      final highlight = Highlight(
+        id: 'hl-123',
+        bookId: 'b-1',
+        selectedText: 'Call me Ishmael.',
+        color: 'yellow',
+      );
+
+      Highlight? tappedHighlight;
+      final settings = const ReaderSettings();
+      final theme = AppTheme.buildTheme(ReadingThemeMode.bone);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: theme,
+          home: Scaffold(
+            body: buildReaderBlockWidget(
+              block: pBlock,
+              settings: settings,
+              theme: theme,
+              highlights: [highlight],
+              onHighlightTap: (hl) => tappedHighlight = hl,
+            ),
+          ),
+        ),
+      );
+
+      // Verify text renders
+      expect(find.textContaining('Call me Ishmael.'), findsOneWidget);
+
+      // Tap the highlighted text at the start of the widget
+      final textFinder = find.textContaining('Call me Ishmael.');
+      final topLeft = tester.getTopLeft(textFinder);
+      await tester.tapAt(topLeft + const Offset(15, 8));
+      await tester.pump();
+
+      expect(tappedHighlight, isNotNull);
+      expect(tappedHighlight!.id, 'hl-123');
+      expect(tappedHighlight!.highlightColor, KindleHighlightColor.yellow);
+    });
+
+    testWidgets('renders multi-paragraph highlight across consecutive blocks', (tester) async {
+      const pBlock1 = ReaderBlock(
+        type: ReaderBlockType.paragraph,
+        text: 'The first paragraph ends here with deep reflection.',
+        startOffset: 0,
+        endOffset: 52,
+        paragraphIndex: 1,
+      );
+      const pBlock2 = ReaderBlock(
+        type: ReaderBlockType.paragraph,
+        text: 'The second paragraph begins with a fresh observation.',
+        startOffset: 54,
+        endOffset: 107,
+        paragraphIndex: 2,
+      );
+
+      final multiParaHighlight = Highlight(
+        id: 'hl-multi',
+        bookId: 'b-1',
+        selectedText: 'deep reflection.\n\nThe second paragraph begins',
+        color: 'blue',
+        startOffset: 36,
+        endOffset: 84,
+        startParagraph: 1,
+        endParagraph: 2,
+      );
+
+      Highlight? tappedHighlight;
+      final settings = const ReaderSettings();
+      final theme = AppTheme.buildTheme(ReadingThemeMode.bone);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: theme,
+          home: Scaffold(
+            body: Column(
+              children: [
+                buildReaderBlockWidget(
+                  block: pBlock1,
+                  settings: settings,
+                  theme: theme,
+                  highlights: [multiParaHighlight],
+                  onHighlightTap: (hl) => tappedHighlight = hl,
+                ),
+                buildReaderBlockWidget(
+                  block: pBlock2,
+                  settings: settings,
+                  theme: theme,
+                  highlights: [multiParaHighlight],
+                  onHighlightTap: (hl) => tappedHighlight = hl,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      // Verify text from both blocks renders
+      expect(find.textContaining('deep reflection.'), findsOneWidget);
+      expect(find.textContaining('The second paragraph begins'), findsOneWidget);
+
+      // Tapping second paragraph highlighted text triggers callback for the unified highlight
+      final p2Finder = find.textContaining('The second paragraph begins');
+      final p2TopLeft = tester.getTopLeft(p2Finder);
+      await tester.tapAt(p2TopLeft + const Offset(20, 8));
+      await tester.pump();
+
+      expect(tappedHighlight, isNotNull);
+      expect(tappedHighlight!.id, 'hl-multi');
+      expect(tappedHighlight!.highlightColor, KindleHighlightColor.blue);
+      expect(tappedHighlight!.startParagraph, 1);
+      expect(tappedHighlight!.endParagraph, 2);
+    });
+  });
+
+  group('findHighlightRange', () {
+    const content =
+        'The first paragraph ends here with deep reflection.\n\nThe second paragraph begins with a fresh observation.';
+    final blocks = parseReaderBlocks(content);
+
+    test('finds range within a single paragraph', () {
+      final range = findHighlightRange(
+        blocks: blocks,
+        fullContent: content,
+        selectedText: 'deep reflection.',
+      );
+
+      expect(range, isNotNull);
+      expect(range!.startOffset, 35);
+      expect(range.endOffset, 51);
+      expect(range.startParagraph, 1);
+      expect(range.endParagraph, 1);
+    });
+
+    test('finds unified range across two paragraphs', () {
+      // User selects end of paragraph 1 and start of paragraph 2
+      final range = findHighlightRange(
+        blocks: blocks,
+        fullContent: content,
+        selectedText: 'deep reflection.\n\nThe second paragraph begins',
+      );
+
+      expect(range, isNotNull);
+      expect(range!.startOffset, 35);
+      expect(range.endOffset, 80);
+      expect(range.startParagraph, 1);
+      expect(range.endParagraph, 2);
+    });
+
+    test('finds unified range when selection separated by single newline', () {
+      final range = findHighlightRange(
+        blocks: blocks,
+        fullContent: content,
+        selectedText: 'deep reflection.\nThe second paragraph begins',
+      );
+
+      expect(range, isNotNull);
+      expect(range!.startOffset, 35);
+      expect(range.endOffset, 80);
+      expect(range.startParagraph, 1);
+      expect(range.endParagraph, 2);
+    });
+
+    test('returns null for empty or whitespace selection', () {
+      final range = findHighlightRange(
+        blocks: blocks,
+        fullContent: content,
+        selectedText: '   \n  ',
+      );
+      expect(range, isNull);
     });
   });
 }
