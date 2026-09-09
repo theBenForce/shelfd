@@ -352,3 +352,92 @@ func TestWorker_ProcessParagraphs(t *testing.T) {
 		t.Errorf("expected 0 unindexed paragraphs, got %d", len(unindexed))
 	}
 }
+
+type callbackAIClient struct {
+	mockAIClient
+	onGenerateEmbedding func()
+}
+
+func (c *callbackAIClient) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
+	if c.onGenerateEmbedding != nil {
+		c.onGenerateEmbedding()
+	}
+	return c.mockAIClient.GenerateEmbedding(ctx, text)
+}
+
+func TestWorker_ProcessParagraphs_SetsCurrentBookTitle(t *testing.T) {
+	ctx := context.Background()
+	db, repo := setupTestDB(t)
+	defer db.Close()
+	defer repo.Close()
+
+	book := &repository.Book{
+		Title:    "Neuromancer",
+		FilePath: "William Gibson/Neuromancer/Neuromancer.epub",
+	}
+	if err := repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("create book: %v", err)
+	}
+
+	ch := &repository.Chapter{
+		BookID:       book.ID,
+		ChapterIndex: 16,
+		ContentPlain: "The sky above the port was the color of television, tuned to a dead channel.",
+	}
+	if err := repo.CreateChapter(ctx, ch); err != nil {
+		t.Fatalf("create chapter: %v", err)
+	}
+
+	para := &repository.Paragraph{
+		BookID:         book.ID,
+		ChapterID:      ch.ID,
+		ChapterIndex:   16,
+		StartParagraph: 94,
+		EndParagraph:   101,
+		Content:        ch.ContentPlain,
+	}
+	if err := repo.CreateParagraphs(ctx, []*repository.Paragraph{para}); err != nil {
+		t.Fatalf("create paragraph: %v", err)
+	}
+
+	var capturedBook string
+	var capturedChapter string
+	var capturedBusy bool
+	var w *worker.Worker
+
+	aiMock := &callbackAIClient{
+		onGenerateEmbedding: func() {
+			status := w.GetRuntimeStatus()
+			capturedBook = status.CurrentBook
+			capturedChapter = status.CurrentChapter
+			capturedBusy = status.IsBusy
+		},
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w = worker.NewWorker(repo, aiMock, worker.Config{
+		BatchSize: 10,
+		Logger:    logger,
+	})
+
+	n, err := w.ProcessBatch(ctx)
+	if err != nil {
+		t.Fatalf("ProcessBatch error: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 processed paragraph, got %d", n)
+	}
+
+	if !capturedBusy {
+		t.Errorf("expected worker to be busy during embedding")
+	}
+	if capturedBook != "Neuromancer" {
+		t.Errorf("expected currentBook to be 'Neuromancer', got %q", capturedBook)
+	}
+	if capturedBook == book.ID {
+		t.Errorf("expected currentBook not to be the book UUID %q", book.ID)
+	}
+	if capturedChapter != "Chapter 16 (p.94-101)" {
+		t.Errorf("expected currentChapter to be 'Chapter 16 (p.94-101)', got %q", capturedChapter)
+	}
+}
+

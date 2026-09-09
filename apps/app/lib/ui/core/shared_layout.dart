@@ -1,9 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../data/models/book.dart';
 import '../state/providers.dart';
 import 'responsive.dart';
 import 'tokens.dart';
 import 'typography.dart';
+
+/// Resolves a book ID to its human-readable title if found in the loaded catalog.
+String? resolveBookTitle(String? bookOrId, List<Book> books) {
+  if (bookOrId == null || bookOrId.isEmpty) return bookOrId;
+  final match = books.where((b) => b.id == bookOrId).firstOrNull;
+  return match != null && match.title.isNotEmpty ? match.title : bookOrId;
+}
 
 class BentoCard extends StatelessWidget {
   final Widget child;
@@ -618,9 +626,11 @@ class _QueueStatusCard extends ConsumerWidget {
       );
     }
 
+    final libraryState = ref.watch(libraryProvider);
+    final resolvedBook = resolveBookTitle(status.currentBook, libraryState.books);
     final progress = (status.progressPercent / 100.0).clamp(0.0, 1.0);
-    final title = (status.currentBook != null && status.currentBook!.isNotEmpty)
-        ? status.currentBook!
+    final title = (resolvedBook != null && resolvedBook.isNotEmpty)
+        ? resolvedBook
         : (status.pendingUploads > 0 ? 'Processing uploads...' : 'Generating chapter summaries...');
 
     final subtext = (status.currentChapter != null && status.currentChapter!.isNotEmpty)
@@ -840,6 +850,8 @@ void showShelfdSettingsModal(
                 final status = queueState.status;
                 if (status == null) return const SizedBox.shrink();
 
+                final libraryState = ref.watch(libraryProvider);
+                final resolvedBook = resolveBookTitle(status.currentBook, libraryState.books);
                 final progress = (status.progressPercent / 100.0).clamp(0.0, 1.0);
 
                 return Container(
@@ -886,10 +898,10 @@ void showShelfdSettingsModal(
                         '${status.indexedChapters} of ${status.totalChapters} chapters processed (${status.pendingChapters} pending)',
                         style: AppTypography.bodySans(fontSize: 12, color: AppTokens.mutedCopy),
                       ),
-                      if (status.currentBook != null && status.currentBook!.isNotEmpty) ...[
+                      if (resolvedBook != null && resolvedBook.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Text(
-                          'Now processing: ${status.currentBook}',
+                          'Now processing: $resolvedBook',
                           style: AppTypography.bodySans(
                             fontSize: 11,
                             fontWeight: FontWeight.w500,

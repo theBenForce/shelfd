@@ -135,15 +135,26 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 			w.broadcast()
 		}()
 
+		bookTitles := make(map[string]string)
 		processed := 0
 		for _, p := range unindexedParas {
 			if err := ctx.Err(); err != nil {
 				return processed, err
 			}
 
+			bookTitle, ok := bookTitles[p.BookID]
+			if !ok {
+				if book, err := w.repo.GetBookByID(ctx, p.BookID); err == nil && book != nil && book.Title != "" {
+					bookTitle = book.Title
+				} else {
+					bookTitle = p.BookID
+				}
+				bookTitles[p.BookID] = bookTitle
+			}
+
 			w.statusMu.Lock()
 			w.isBusy = true
-			w.currentBook = p.BookID
+			w.currentBook = bookTitle
 			w.currentChapter = fmt.Sprintf("Chapter %d (p.%d-%d)", p.ChapterIndex, p.StartParagraph, p.EndParagraph)
 			w.statusMu.Unlock()
 			w.broadcast()
@@ -187,6 +198,7 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 		w.broadcast()
 	}()
 
+	bookTitles := make(map[string]string)
 	processed := 0
 	for _, ch := range chapters {
 		if err := ctx.Err(); err != nil {
@@ -198,9 +210,14 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 			title = *ch.Title
 		}
 
-		bookTitle := ""
-		if book, err := w.repo.GetBookByID(ctx, ch.BookID); err == nil && book != nil {
-			bookTitle = book.Title
+		bookTitle, ok := bookTitles[ch.BookID]
+		if !ok {
+			if book, err := w.repo.GetBookByID(ctx, ch.BookID); err == nil && book != nil && book.Title != "" {
+				bookTitle = book.Title
+			} else {
+				bookTitle = ch.BookID
+			}
+			bookTitles[ch.BookID] = bookTitle
 		}
 
 		w.statusMu.Lock()

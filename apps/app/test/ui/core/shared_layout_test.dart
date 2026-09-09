@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/queue_status.dart';
 import 'package:shelf/ui/core/shared_layout.dart';
 import 'package:shelf/ui/core/theme.dart';
@@ -13,6 +14,14 @@ class FakeQueueNotifier extends QueueNotifier {
 
   @override
   QueueState build() => _initial;
+}
+
+class FakeLibraryNotifier extends LibraryNotifier {
+  final LibraryState _initial;
+  FakeLibraryNotifier([this._initial = const LibraryState()]);
+
+  @override
+  LibraryState build() => _initial;
 }
 
 void main() {
@@ -179,6 +188,64 @@ void main() {
       expect(find.text('33%'), findsOneWidget);
       expect(find.text('Dune Messiah'), findsOneWidget);
       expect(find.text('Chapter 4'), findsOneWidget);
+    });
+
+    test('resolveBookTitle returns matching book title when ID is given', () {
+      final books = [
+        const Book(
+          id: 'c29a4d8b-143e-43c1-aa79-41f879201a11',
+          title: 'Neuromancer',
+        ),
+      ];
+      expect(resolveBookTitle('c29a4d8b-143e-43c1-aa79-41f879201a11', books), 'Neuromancer');
+      expect(resolveBookTitle('Dune', books), 'Dune');
+      expect(resolveBookTitle(null, books), isNull);
+      expect(resolveBookTitle('', books), '');
+    });
+
+    testWidgets('ShelfdSideNav resolves book ID to title in AI Indexing card when library contains the book', (tester) async {
+      const bookId = 'c29a4d8b-143e-43c1-aa79-41f879201a11';
+      final activeStatus = const QueueStatus(
+        totalChapters: 45,
+        indexedChapters: 0,
+        pendingChapters: 45,
+        pendingUploads: 0,
+        progressPercent: 0.0,
+        isActive: true,
+        currentBook: bookId,
+        currentChapter: 'Chapter 16 (p.94-101)',
+      );
+
+      final books = [
+        const Book(
+          id: bookId,
+          title: 'Neuromancer',
+        ),
+      ];
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            queueProvider.overrideWith(() => FakeQueueNotifier(QueueState(status: activeStatus))),
+            libraryProvider.overrideWith(() => FakeLibraryNotifier(LibraryState(books: books))),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              body: ShelfdSideNav(
+                currentIndex: 0,
+                onTap: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('AI Indexing'), findsOneWidget);
+      expect(find.text('0%'), findsOneWidget);
+      expect(find.text('Neuromancer'), findsOneWidget);
+      expect(find.text(bookId), findsNothing);
+      expect(find.text('Chapter 16 (p.94-101)'), findsOneWidget);
     });
 
     testWidgets('ShelfdSideNav renders synced badge when idle', (tester) async {
