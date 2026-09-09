@@ -152,6 +152,10 @@ class LibraryState {
   final List<Series> series;
   final String activeFilter; // 'all', 'series', 'authors', 'unread'
   final bool isLoading;
+  final bool isLoadingMore;
+  final bool hasMore;
+  final int currentPage;
+  final int totalBooks;
   final String? error;
 
   const LibraryState({
@@ -161,6 +165,10 @@ class LibraryState {
     this.series = const [],
     this.activeFilter = 'all',
     this.isLoading = false,
+    this.isLoadingMore = false,
+    this.hasMore = true,
+    this.currentPage = 1,
+    this.totalBooks = 0,
     this.error,
   });
 
@@ -182,6 +190,10 @@ class LibraryState {
     List<Series>? series,
     String? activeFilter,
     bool? isLoading,
+    bool? isLoadingMore,
+    bool? hasMore,
+    int? currentPage,
+    int? totalBooks,
     String? error,
   }) {
     return LibraryState(
@@ -191,34 +203,77 @@ class LibraryState {
       series: series ?? this.series,
       activeFilter: activeFilter ?? this.activeFilter,
       isLoading: isLoading ?? this.isLoading,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+      hasMore: hasMore ?? this.hasMore,
+      currentPage: currentPage ?? this.currentPage,
+      totalBooks: totalBooks ?? this.totalBooks,
       error: error,
     );
   }
 }
 
 class LibraryNotifier extends Notifier<LibraryState> {
+  static const int pageSize = 24;
+
   @override
   LibraryState build() {
     return const LibraryState();
   }
 
-  Future<void> loadLibrary() async {
-    state = state.copyWith(isLoading: true, error: null);
+  Future<void> loadLibrary({bool refresh = false}) async {
+    state = state.copyWith(
+      isLoading: true,
+      error: null,
+      currentPage: 1,
+      hasMore: true,
+      books: refresh ? const [] : state.books,
+    );
     final bookRepo = ref.read(bookRepositoryProvider);
     try {
-      final books = await bookRepo.getBooks(perPage: 500);
+      final pageData = await bookRepo.getBooksPage(page: 1, perPage: pageSize);
       final authors = await bookRepo.getAuthors();
       final genres = await bookRepo.getGenres();
       final series = await bookRepo.getSeries();
+      final hasMore = pageData.books.length < pageData.total;
+
       state = state.copyWith(
-        books: books,
+        books: pageData.books,
         authors: authors,
         genres: genres,
         series: series,
+        totalBooks: pageData.total,
+        currentPage: 1,
+        hasMore: hasMore,
         isLoading: false,
       );
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
+    }
+  }
+
+  Future<void> loadMoreBooks() async {
+    if (state.isLoading || state.isLoadingMore || !state.hasMore) {
+      return;
+    }
+    state = state.copyWith(isLoadingMore: true);
+    final bookRepo = ref.read(bookRepositoryProvider);
+    final nextPage = state.currentPage + 1;
+    try {
+      final pageData = await bookRepo.getBooksPage(page: nextPage, perPage: pageSize);
+      final seen = <String>{for (final b in state.books) b.id};
+      final dedupedNew = pageData.books.where((b) => seen.add(b.id)).toList();
+      final combinedBooks = [...state.books, ...dedupedNew];
+      final hasMore = combinedBooks.length < pageData.total && pageData.books.isNotEmpty;
+
+      state = state.copyWith(
+        books: combinedBooks,
+        totalBooks: pageData.total,
+        currentPage: nextPage,
+        hasMore: hasMore,
+        isLoadingMore: false,
+      );
+    } catch (e) {
+      state = state.copyWith(isLoadingMore: false, error: e.toString());
     }
   }
 

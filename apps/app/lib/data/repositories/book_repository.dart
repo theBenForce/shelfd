@@ -4,6 +4,7 @@ import '../models/book_chat.dart';
 import '../models/bookmark.dart';
 import '../models/genre.dart';
 import '../models/highlight.dart';
+import '../models/paginated_books.dart';
 import '../models/series.dart';
 import '../models/upload_job.dart';
 import '../services/api_service.dart';
@@ -18,15 +19,15 @@ class BookRepository {
     required this.storageService,
   });
 
-  Future<List<Book>> getBooks({
+  Future<PaginatedBooks> getBooksPage({
     int page = 1,
-    int perPage = 20,
+    int perPage = 24,
     String? authorId,
     String? genreId,
     String? seriesId,
     String? search,
   }) async {
-    final books = await apiService.getBooks(
+    final paginated = await apiService.getBooksPage(
       page: page,
       perPage: perPage,
       authorId: authorId,
@@ -35,10 +36,38 @@ class BookRepository {
       search: search,
     );
 
-    return books.map((book) {
+    final hydratedBooks = paginated.books.map((book) {
       final progress = storageService.getReadingProgress(book.id);
       return book.copyWith(readingProgress: progress);
     }).toList();
+
+    return PaginatedBooks(
+      books: hydratedBooks,
+      total: paginated.total,
+      page: paginated.page,
+      perPage: paginated.perPage,
+      limit: paginated.limit,
+      offset: paginated.offset,
+    );
+  }
+
+  Future<List<Book>> getBooks({
+    int page = 1,
+    int perPage = 24,
+    String? authorId,
+    String? genreId,
+    String? seriesId,
+    String? search,
+  }) async {
+    final pageData = await getBooksPage(
+      page: page,
+      perPage: perPage,
+      authorId: authorId,
+      genreId: genreId,
+      seriesId: seriesId,
+      search: search,
+    );
+    return pageData.books;
   }
 
   Future<Book> getBookDetail(String id) async {

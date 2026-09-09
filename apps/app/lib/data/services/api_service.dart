@@ -11,6 +11,7 @@ import '../models/highlight.dart';
 import '../models/queue_status.dart';
 import '../models/search_result.dart';
 import '../models/series.dart';
+import '../models/paginated_books.dart';
 import '../models/upload_job.dart';
 import '../models/user.dart';
 
@@ -119,9 +120,9 @@ class ApiService {
     }
   }
 
-  Future<List<Book>> getBooks({
+  Future<PaginatedBooks> getBooksPage({
     int page = 1,
-    int perPage = 20,
+    int perPage = 24,
     String? authorId,
     String? genreId,
     String? seriesId,
@@ -144,15 +145,51 @@ class ApiService {
     }
     final body = jsonDecode(response.body);
     List<dynamic> data = [];
+    int total = 0;
+    int limit = perPage;
+    int offset = (page - 1) * perPage;
+
     if (body is Map<String, dynamic>) {
       data = (body['books'] ?? body['data']) as List<dynamic>? ?? [];
+      total = (body['total'] as num?)?.toInt() ?? data.length;
+      limit = (body['limit'] as num?)?.toInt() ?? limit;
+      offset = (body['offset'] as num?)?.toInt() ?? offset;
     } else if (body is List<dynamic>) {
       data = body;
+      total = body.length;
     }
-    return data
+    final books = data
         .whereType<Map<String, dynamic>>()
         .map((b) => Book.fromJson(b, baseUrl: baseUrl))
         .toList();
+
+    return PaginatedBooks(
+      books: books,
+      total: total,
+      page: page,
+      perPage: perPage,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  Future<List<Book>> getBooks({
+    int page = 1,
+    int perPage = 24,
+    String? authorId,
+    String? genreId,
+    String? seriesId,
+    String? search,
+  }) async {
+    final pageData = await getBooksPage(
+      page: page,
+      perPage: perPage,
+      authorId: authorId,
+      genreId: genreId,
+      seriesId: seriesId,
+      search: search,
+    );
+    return pageData.books;
   }
 
   Future<Book> getBook(String id) async {

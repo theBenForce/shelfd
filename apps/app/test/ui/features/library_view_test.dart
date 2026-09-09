@@ -114,4 +114,84 @@ void main() {
     expect(find.text('Library'), findsWidgets);
     expect(find.text('1 Books'), findsOneWidget);
   });
+
+  testWidgets('LibraryView renders bottom loading spinner when isLoadingMore is true',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final notifier = FakePagingLibraryNotifier(
+      [const Book(id: 'b1', title: 'Book 1', readingProgress: 0.0)],
+      isLoadingMore: true,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          libraryProvider.overrideWith(() => notifier),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const LibraryView(),
+        ),
+      ),
+    );
+
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+  });
+
+  testWidgets('LibraryView triggers loadMoreBooks when scrolling near bottom',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final testBooks = List.generate(
+      24,
+      (i) => Book(id: 'b$i', title: 'Book $i', readingProgress: 0.0),
+    );
+
+    final notifier = FakePagingLibraryNotifier(testBooks);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          libraryProvider.overrideWith(() => notifier),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const LibraryView(),
+        ),
+      ),
+    );
+
+    await tester.drag(find.byType(GridView), const Offset(0, -2000));
+    await tester.pumpAndSettle();
+
+    expect(notifier.loadMoreCalls, greaterThanOrEqualTo(1));
+  });
 }
+
+class FakePagingLibraryNotifier extends LibraryNotifier {
+  final List<Book> _initialBooks;
+  final bool isLoadingMore;
+  int loadMoreCalls = 0;
+
+  FakePagingLibraryNotifier(this._initialBooks, {this.isLoadingMore = false});
+
+  @override
+  LibraryState build() => LibraryState(
+        books: _initialBooks,
+        isLoading: false,
+        isLoadingMore: isLoadingMore,
+        hasMore: true,
+        totalBooks: 50,
+      );
+
+  @override
+  Future<void> loadMoreBooks() async {
+    loadMoreCalls++;
+  }
+}
+

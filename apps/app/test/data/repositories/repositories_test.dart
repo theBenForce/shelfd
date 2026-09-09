@@ -96,6 +96,38 @@ void main() {
       expect(books.first.readingProgress, 0.62);
     });
 
+    test('BookRepository getBooksPage returns PaginatedBooks with hydrated progress', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'books': [
+              {
+                'id': 'book-1',
+                'title': 'Dune',
+                'authors': [{'id': 'a1', 'name': 'Frank Herbert'}],
+              }
+            ],
+            'total': 42,
+            'limit': 24,
+            'offset': 0,
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      await storageService.saveReadingProgress('book-1', 0.85);
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+      final pageData = await bookRepo.getBooksPage(page: 1, perPage: 24);
+      expect(pageData.books.length, 1);
+      expect(pageData.books.first.readingProgress, 0.85);
+      expect(pageData.total, 42);
+      expect(pageData.hasMore, true);
+    });
+
     test('ReaderRepository caches chapter content and recovers offline', () async {
       int fetchCount = 0;
       final mockClient = MockClient((request) async {

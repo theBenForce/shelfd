@@ -18,11 +18,29 @@ class LibraryView extends ConsumerStatefulWidget {
 
 class _LibraryViewState extends ConsumerState<LibraryView> {
   int _navIndex = 0;
+  late final ScrollController _scrollController;
 
   @override
   void initState() {
     super.initState();
+    _scrollController = ScrollController()..addListener(_onScroll);
     Future.microtask(() => ref.read(libraryProvider.notifier).loadLibrary());
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.position.pixels;
+    if (currentScroll >= maxScroll - 300) {
+      ref.read(libraryProvider.notifier).loadMoreBooks();
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
   }
 
   void _onNavTapped(int index) {
@@ -54,8 +72,20 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
       );
       await ref.read(bookRepositoryProvider).triggerScan();
       if (context.mounted) {
-        ref.read(libraryProvider.notifier).loadLibrary();
+        ref.read(libraryProvider.notifier).loadLibrary(refresh: true);
       }
+    }
+
+    if (libraryState.activeFilter != 'all' &&
+        libraryState.filteredBooks.length < 8 &&
+        libraryState.hasMore &&
+        !libraryState.isLoading &&
+        !libraryState.isLoadingMore) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref.read(libraryProvider.notifier).loadMoreBooks();
+        }
+      });
     }
 
     return ShelfdDropTarget(
@@ -113,7 +143,9 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                           ),
                           const SizedBox(width: AppTokens.space12),
                           StatusBadge(
-                            label: '${libraryState.books.length} Books',
+                            label: libraryState.totalBooks > 0
+                                ? '${libraryState.totalBooks} Books'
+                                : '${libraryState.books.length} Books',
                             backgroundColor: AppTokens.boneContainer,
                             textColor: AppTokens.mutedCopy,
                           ),
@@ -263,27 +295,45 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                       : Center(
                           child: ConstrainedBox(
                             constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
-                            child: GridView.builder(
-                              padding: EdgeInsets.symmetric(
-                                horizontal: horizontalPad,
-                                vertical: AppTokens.space16,
-                              ),
-                              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: 200.0,
-                                childAspectRatio: 0.55,
-                                crossAxisSpacing: AppTokens.space16,
-                                mainAxisSpacing: AppTokens.space24,
-                              ),
-                              itemCount: libraryState.filteredBooks.length,
-                              itemBuilder: (context, index) {
-                                final book = libraryState.filteredBooks[index];
-                                return _BookCard(
-                                  book: book,
-                                  onTap: () {
-                                    context.go('/reader/${book.id}');
-                                  },
-                                );
-                              },
+                            child: Column(
+                              children: [
+                                Expanded(
+                                  child: GridView.builder(
+                                    controller: _scrollController,
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: horizontalPad,
+                                      vertical: AppTokens.space16,
+                                    ),
+                                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                                      maxCrossAxisExtent: 200.0,
+                                      childAspectRatio: 0.55,
+                                      crossAxisSpacing: AppTokens.space16,
+                                      mainAxisSpacing: AppTokens.space24,
+                                    ),
+                                    itemCount: libraryState.filteredBooks.length,
+                                    itemBuilder: (context, index) {
+                                      final book = libraryState.filteredBooks[index];
+                                      return _BookCard(
+                                        book: book,
+                                        onTap: () {
+                                          context.go('/reader/${book.id}');
+                                        },
+                                      );
+                                    },
+                                  ),
+                                ),
+                                if (libraryState.isLoadingMore)
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: AppTokens.space16),
+                                    child: Center(
+                                      child: SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: CircularProgressIndicator(strokeWidth: 2.5),
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         ),

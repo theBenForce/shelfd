@@ -114,6 +114,41 @@ void main() {
       expect(books.first.authorDisplay, 'Frank Herbert');
     });
 
+    test('getBooksPage parses full envelope with total, offset, and limit', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.url.path, '/api/v1/books');
+        expect(request.url.queryParameters['page'], '2');
+        expect(request.url.queryParameters['per_page'], '24');
+        expect(request.url.queryParameters['limit'], '24');
+        expect(request.url.queryParameters['offset'], '24');
+        return http.Response(
+          jsonEncode({
+            'books': [
+              {
+                'id': 'book-2',
+                'title': 'Messiah',
+                'authors': [{'id': 'a1', 'name': 'Frank Herbert'}],
+              }
+            ],
+            'total': 50,
+            'limit': 24,
+            'offset': 24,
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final pageData = await apiService.getBooksPage(page: 2, perPage: 24);
+      expect(pageData.books.length, 1);
+      expect(pageData.books.first.title, 'Messiah');
+      expect(pageData.total, 50);
+      expect(pageData.limit, 24);
+      expect(pageData.offset, 24);
+      expect(pageData.hasMore, true);
+    });
+
     test('getChapter returns chapter content', () async {
       final mockClient = MockClient((request) async {
         expect(request.url.path, '/api/v1/books/book-1/chapters/2');

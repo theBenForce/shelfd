@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/upload_job.dart';
 import 'package:shelf/data/repositories/book_repository.dart';
 import 'package:shelf/data/services/api_service.dart';
