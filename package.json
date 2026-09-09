@@ -8,7 +8,8 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "release": "semantic-release",
-    "clean": "turbo run clean && rm -rf node_modules .turbo"
+    "clean": "turbo run clean && rm -rf node_modules .turbo",
+    "generate:icons": "pnpm --filter @shelfd/app run generate:icons"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",

@@ -3,7 +3,7 @@
     "short_name": "Shelfd",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#FBFBFA",
+    "background_color": "#111111",
     "theme_color": "#111111",
     "description": "Shelfd - Your Digital Vellum",
     "orientation": "portrait-primary",

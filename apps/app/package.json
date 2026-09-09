@@ -10,6 +10,7 @@
     "dev": "if [ -f pubspec.yaml ]; then flutter run; else echo 'App scaffolded in Milestone 6'; fi",
     "test": "if [ -d test ]; then flutter test; else echo 'No tests found in @shelfd/app yet (Milestone 6)'; fi",
     "lint": "if [ -f pubspec.yaml ]; then flutter analyze; else echo 'No pubspec.yaml in @shelfd/app yet (Milestone 6)'; fi",
-    "clean": "if [ -f pubspec.yaml ]; then flutter clean; fi"
+    "clean": "if [ -f pubspec.yaml ]; then flutter clean; fi",
+    "generate:icons": "./scripts/generate_icons.sh"
   }
 }
