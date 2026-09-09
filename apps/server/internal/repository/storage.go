@@ -96,6 +96,13 @@ type StorageEngine interface {
 	ListHighlightsByBookID(ctx context.Context, bookID string) ([]*Highlight, error)
 	DeleteHighlight(ctx context.Context, id string) error
 
+	// OAuth 2.0
+	CreateOAuthClient(ctx context.Context, client *OAuthClient) error
+	GetOAuthClientByID(ctx context.Context, id string) (*OAuthClient, error)
+	CreateOAuthCode(ctx context.Context, code *OAuthCode) error
+	GetOAuthCode(ctx context.Context, code string) (*OAuthCode, error)
+	DeleteOAuthCode(ctx context.Context, code string) error
+
 	// Lifecycle
 	Close() error
 }

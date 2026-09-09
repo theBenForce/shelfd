@@ -1648,4 +1648,82 @@ func (r *SQLiteStorageEngine) BackfillParagraphs(ctx context.Context) (int, erro
 	return totalBackfilled, nil
 }
 
+// --- OAuth 2.0 ---
+
+func (r *SQLiteStorageEngine) CreateOAuthClient(ctx context.Context, client *OAuthClient) error {
+	if client.CreatedAt.IsZero() {
+		client.CreatedAt = time.Now().UTC()
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO oauth_clients (id, client_secret, client_name, redirect_uris, grant_types, response_types, scope, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, client.ID, client.ClientSecret, client.ClientName, client.RedirectURIs, client.GrantTypes, client.ResponseTypes, client.Scope, client.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("creating oauth client: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) GetOAuthClientByID(ctx context.Context, id string) (*OAuthClient, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT id, client_secret, client_name, redirect_uris, grant_types, response_types, scope, created_at
+		FROM oauth_clients WHERE id = ?
+	`, id)
+	client := new(OAuthClient)
+	err := row.Scan(&client.ID, &client.ClientSecret, &client.ClientName, &client.RedirectURIs, &client.GrantTypes, &client.ResponseTypes, &client.Scope, &client.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting oauth client: %w", err)
+	}
+	return client, nil
+}
+
+func (r *SQLiteStorageEngine) CreateOAuthCode(ctx context.Context, code *OAuthCode) error {
+	if code.CreatedAt.IsZero() {
+		code.CreatedAt = time.Now().UTC()
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO oauth_codes (code, client_id, user_id, redirect_uri, code_challenge, code_challenge_method, scope, expires_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, code.Code, code.ClientID, code.UserID, code.RedirectURI, code.CodeChallenge, code.CodeChallengeMethod, code.Scope, code.ExpiresAt, code.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("creating oauth code: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) GetOAuthCode(ctx context.Context, codeStr string) (*OAuthCode, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT code, client_id, user_id, redirect_uri, code_challenge, code_challenge_method, scope, expires_at, created_at
+		FROM oauth_codes WHERE code = ?
+	`, codeStr)
+	code := new(OAuthCode)
+	err := row.Scan(&code.Code, &code.ClientID, &code.UserID, &code.RedirectURI, &code.CodeChallenge, &code.CodeChallengeMethod, &code.Scope, &code.ExpiresAt, &code.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting oauth code: %w", err)
+	}
+	return code, nil
+}
+
+func (r *SQLiteStorageEngine) DeleteOAuthCode(ctx context.Context, codeStr string) error {
+	res, err := r.db.ExecContext(ctx, "DELETE FROM oauth_codes WHERE code = ?", codeStr)
+	if err != nil {
+		return fmt.Errorf("deleting oauth code: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+
 

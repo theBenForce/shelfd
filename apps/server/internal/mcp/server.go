@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/repository"
@@ -86,10 +88,16 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 	// Emit endpoint event declaring message destination
 	endpointURL := fmt.Sprintf("%s/messages?sessionId=%s", s.basePath, session.ID)
+	if token := r.URL.Query().Get("token"); token != "" {
+		endpointURL += "&token=" + url.QueryEscape(token)
+	}
 	fmt.Fprintf(w, "event: endpoint\ndata: %s\n\n", endpointURL)
 	flusher.Flush()
 
 	s.logger.Info("mcp sse client connected", "session_id", session.ID)
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -98,6 +106,10 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-session.doneCh:
 			return
+		case <-ticker.C:
+			// Heartbeat comment line to prevent reverse proxies (Traefik) and NAT from dropping the connection
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
 		case msg := <-session.sendCh:
 			fmt.Fprintf(w, "event: message\ndata: %s\n\n", string(msg))
 			flusher.Flush()

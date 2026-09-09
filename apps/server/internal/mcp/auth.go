@@ -28,6 +28,12 @@ func HashToken(rawToken string) string {
 func AuthMiddleware(repo repository.StorageEngine) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Bypass auth check for CORS preflight OPTIONS requests
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			rawToken := ""
 
 			// 1. Try Authorization header

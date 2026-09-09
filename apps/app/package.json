@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "if [ -f pubspec.yaml ]; then flutter build web --release --no-web-resources-cdn && flutter build macos --debug; else echo 'App scaffolded in Milestone 6'; fi",
+    "build": "pnpm run build:web",
+    "build:macos": "if [ -f pubspec.yaml ]; then flutter build macos --debug; else echo 'App scaffolded in Milestone 6'; fi",
     "build:apk": "if [ -f pubspec.yaml ]; then flutter build apk; else echo 'App scaffolded in Milestone 6'; fi",
     "build:web": "if [ -f pubspec.yaml ]; then flutter build web --release --no-web-resources-cdn; else echo 'App scaffolded in Milestone 6'; fi",
     "dev": "if [ -f pubspec.yaml ]; then flutter run; else echo 'App scaffolded in Milestone 6'; fi",

@@ -207,3 +207,29 @@ type QueueStatus struct {
 	CurrentChapter  string  `json:"current_chapter,omitempty"`
 }
 
+// OAuthClient represents a dynamically registered OAuth 2.0 client (RFC 7591).
+type OAuthClient struct {
+	ID            string    `json:"client_id" bun:"id,pk"`
+	ClientSecret  *string   `json:"client_secret,omitempty" bun:"client_secret"`
+	ClientName    string    `json:"client_name" bun:"client_name,notnull"`
+	RedirectURIs  string    `json:"redirect_uris" bun:"redirect_uris,notnull"`
+	GrantTypes    string    `json:"grant_types" bun:"grant_types,notnull"`
+	ResponseTypes string    `json:"response_types" bun:"response_types,notnull"`
+	Scope         *string   `json:"scope,omitempty" bun:"scope"`
+	CreatedAt     time.Time `json:"client_id_issued_at" bun:"created_at,nullzero,default:current_timestamp"`
+}
+
+// OAuthCode represents an authorization code awaiting token exchange (RFC 6749 / RFC 7636).
+type OAuthCode struct {
+	Code                string    `json:"code" bun:"code,pk"`
+	ClientID            string    `json:"client_id" bun:"client_id,notnull"`
+	UserID              string    `json:"user_id" bun:"user_id,notnull"`
+	RedirectURI         string    `json:"redirect_uri" bun:"redirect_uri,notnull"`
+	CodeChallenge       *string   `json:"code_challenge,omitempty" bun:"code_challenge"`
+	CodeChallengeMethod *string   `json:"code_challenge_method,omitempty" bun:"code_challenge_method"`
+	Scope               *string   `json:"scope,omitempty" bun:"scope"`
+	ExpiresAt           time.Time `json:"expires_at" bun:"expires_at,notnull"`
+	CreatedAt           time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+}
+
+

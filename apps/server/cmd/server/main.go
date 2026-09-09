@@ -147,9 +147,14 @@ func main() {
 		mcpServer := mcp.NewServer(repo, aiClient, mcp.Config{
 			BasePath: cfg.MCP.Path,
 		})
-		mux.Handle(cfg.MCP.Path+"/", mcpServer.Routes())
+		mux.Handle(cfg.MCP.Path+"/", api.CORSMiddleware(mcpServer.Routes()))
 		log.Printf("MCP Server enabled at %s/sse and %s/messages", cfg.MCP.Path, cfg.MCP.Path)
 	}
+
+	// OAuth 2.0 & RFC 7591 Dynamic Client Registration
+	oauthHandler := api.NewOAuthHandler(repo)
+	oauthHandler.RegisterRoutes(mux)
+	log.Printf("OAuth 2.0 & RFC 7591 Dynamic Registration enabled")
 
 	// REST API Router
 	apiRouter := api.NewRouter(api.RouterConfig{
@@ -261,11 +266,16 @@ func ensureSeedToken(ctx context.Context, repo repository.StorageEngine) {
 	}
 
 	// Check if any API token exists for admin
-	buf := make([]byte, 24)
-	if _, err := rand.Read(buf); err != nil {
-		return
+	var rawToken string
+	if envTok := os.Getenv("SHELFD_MCP_TOKEN"); envTok != "" {
+		rawToken = envTok
+	} else {
+		buf := make([]byte, 24)
+		if _, err := rand.Read(buf); err != nil {
+			return
+		}
+		rawToken = "shelfd_" + hex.EncodeToString(buf)
 	}
-	rawToken := "shelfd_" + hex.EncodeToString(buf)
 	tokenHash := mcp.HashToken(rawToken)
 
 	// Attempt lookup by hash - if missing, seed token

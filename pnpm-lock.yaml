@@ -14,7 +14,11 @@ importers:
 
   apps/app: {}
 
-  apps/server: {}
+  apps/server:
+    dependencies:
+      '@shelfd/app':
+        specifier: workspace:*
+        version: link:../app
 
 packages:
 

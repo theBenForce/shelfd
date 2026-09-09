@@ -1517,3 +1517,67 @@ func (r *BunStorageEngine) DeleteHighlight(ctx context.Context, id string) error
 	}
 	return nil
 }
+
+// --- OAuth 2.0 ---
+
+func (r *BunStorageEngine) CreateOAuthClient(ctx context.Context, client *OAuthClient) error {
+	if client.CreatedAt.IsZero() {
+		client.CreatedAt = time.Now().UTC()
+	}
+	_, err := r.db.NewInsert().Model(client).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating oauth client: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) GetOAuthClientByID(ctx context.Context, id string) (*OAuthClient, error) {
+	client := new(OAuthClient)
+	err := r.db.NewSelect().Model(client).Where("id = ?", id).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting oauth client: %w", err)
+	}
+	return client, nil
+}
+
+func (r *BunStorageEngine) CreateOAuthCode(ctx context.Context, code *OAuthCode) error {
+	if code.CreatedAt.IsZero() {
+		code.CreatedAt = time.Now().UTC()
+	}
+	_, err := r.db.NewInsert().Model(code).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating oauth code: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) GetOAuthCode(ctx context.Context, codeStr string) (*OAuthCode, error) {
+	code := new(OAuthCode)
+	err := r.db.NewSelect().Model(code).Where("code = ?", codeStr).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting oauth code: %w", err)
+	}
+	return code, nil
+}
+
+func (r *BunStorageEngine) DeleteOAuthCode(ctx context.Context, codeStr string) error {
+	res, err := r.db.NewDelete().Model((*OAuthCode)(nil)).Where("code = ?", codeStr).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("deleting oauth code: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+

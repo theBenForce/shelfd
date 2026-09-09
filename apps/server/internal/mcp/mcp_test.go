@@ -17,6 +17,7 @@ import (
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"github.com/shelfd/shelfd/internal/ai"
+	"github.com/shelfd/shelfd/internal/api"
 	"github.com/shelfd/shelfd/internal/database"
 	"github.com/shelfd/shelfd/internal/mcp"
 	"github.com/shelfd/shelfd/internal/repository"
@@ -595,5 +596,67 @@ func TestMCPServer_SSEFlow(t *testing.T) {
 	}
 	if jsonResp.ID != float64(100) {
 		t.Errorf("expected id 100, got %v", jsonResp.ID)
+	}
+}
+
+func TestMCPCORSPreflight(t *testing.T) {
+	_, _, _, server := setupTestEnvironment(t)
+
+	// Wrap server routes in CORSMiddleware as in main.go
+	handler := api.CORSMiddleware(server.Routes())
+
+	// Test OPTIONS /mcp/sse
+	req := httptest.NewRequest(http.MethodOptions, "/mcp/sse", nil)
+	req.Header.Set("Origin", "https://stitch.example.com")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204 No Content on OPTIONS /mcp/sse, got %d", rec.Code)
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Errorf("expected Access-Control-Allow-Origin: *, got '%s'", rec.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
+
+func TestMCPSSEQueryTokenPreservation(t *testing.T) {
+	_, _, token, server := setupTestEnvironment(t)
+	ts := httptest.NewServer(server.Routes())
+	defer ts.Close()
+
+	// Connect to /mcp/sse with ?token=...
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/mcp/sse?token="+token, nil)
+	if err != nil {
+		t.Fatalf("create req: %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do req: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	var endpointLine string
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("reading sse: %v", err)
+		}
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "data: ") {
+			endpointLine = strings.TrimPrefix(line, "data: ")
+			break
+		}
+	}
+
+	if !strings.Contains(endpointLine, "&token="+token) {
+		t.Errorf("expected endpoint to preserve query token, got: %s", endpointLine)
 	}
 }

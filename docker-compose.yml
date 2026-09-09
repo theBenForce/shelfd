@@ -4,7 +4,8 @@ services:
     container_name: shelfd-postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      # Bind only to host loopback to prevent external LAN/WAN access
+      - "127.0.0.1:5432:5432"
     environment:
       - POSTGRES_DB=shelfd
       - POSTGRES_USER=shelfd
@@ -30,30 +31,54 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - PUID=501
-      - PGID=20
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
       - UMASK=002
-      - TZ=America/Chicago
+      - TZ=${TZ:-America/Chicago}
+
+      # Optional Pre-configured Credentials
+      - SHELFD_ADMIN_PASSWORD=${SHELFD_ADMIN_PASSWORD:-}
+      - SHELFD_MCP_TOKEN=${SHELFD_MCP_TOKEN:-}
+      - SHELFD_DOMAIN=${SHELFD_DOMAIN:-books.yourdomain.com}
 
       # Database Configuration (PostgreSQL with pgvector)
       - SHELFD_DATABASE_TYPE=postgres
       - SHELFD_DATABASE_POSTGRES_DSN=postgres://shelfd:shelfd_password@postgres:5432/shelfd?sslmode=disable
 
-      # LM Studio Local Instance Configuration
+      # AI Provider Configuration (Ollama, LM Studio, or OpenAI)
       - SHELFD_AI_PROVIDER=openai
       - SHELFD_AI_BASE_URL=http://host.docker.internal:1234
       - SHELFD_AI_API_KEY=lm-studio
       - SHELFD_AI_EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5@q8_0
       - SHELFD_AI_EMBEDDING_DIMENSIONS=256
       - SHELFD_AI_SUMMARY_MODEL=google/gemma-4-e4b
-      - SHELFD_JWT_SECRET=shelfd-homelab-jwt-secret-key-32bytes
+      - SHELFD_JWT_SECRET=${SHELFD_JWT_SECRET:-shelfd-homelab-jwt-secret-key-32bytes}
     volumes:
-      # Shelfd state: extracted covers and temporary files
+      # Shelfd state: extracted covers, search cache, and temporary uploads
       - ./data:/data
       # Shared Audiobookshelf library (read-write for EPUB upload)
-      - /Users/bforce/books:/library:rw
+      - ${LIBRARY_PATH:-/mnt/storage/ebooks}:/library:rw
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.shelfd.rule=Host(`${SHELFD_DOMAIN:-books.yourdomain.com}`)"
+      - "traefik.http.routers.shelfd.entrypoints=websecure"
+      - "traefik.http.routers.shelfd.tls=true"
+      - "traefik.http.routers.shelfd.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-route53}"
+      - "traefik.http.services.shelfd.loadbalancer.server.port=8080"
+      - "traefik.http.middlewares.shelfd-ratelimit.ratelimit.average=50"
+      - "traefik.http.middlewares.shelfd-ratelimit.ratelimit.burst=100"
+      - "traefik.http.routers.shelfd.middlewares=shelfd-ratelimit"
+    networks:
+      - default
+      # Uncomment to attach to your homelab's external Traefik network:
+      # - traefik_network
 
 volumes:
   postgres_data:
+
+# networks:
+#   traefik_network:
+#     external: true
+

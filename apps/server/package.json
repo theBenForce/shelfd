@@ -8,5 +8,8 @@
     "test": "go test -tags sqlite_fts5 -ldflags=\"-linkmode=external\" -v ./...",
     "lint": "go vet -tags sqlite_fts5 ./...",
     "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@shelfd/app": "workspace:*"
   }
 }

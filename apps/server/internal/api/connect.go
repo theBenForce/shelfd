@@ -37,15 +37,19 @@ func (h *ConnectHandler) GetConnectInfo(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	host := h.host
-	if host == "0.0.0.0" || host == "" {
+	host := ""
+	if xfh := r.Header.Get("X-Forwarded-Host"); xfh != "" {
+		host = xfh
+	} else if h.host == "0.0.0.0" || h.host == "" {
 		host = r.Host
 	} else {
-		host = fmt.Sprintf("%s:%d", host, h.port)
+		host = fmt.Sprintf("%s:%d", h.host, h.port)
 	}
 
 	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+	if xfp := r.Header.Get("X-Forwarded-Proto"); xfp != "" {
+		scheme = xfp
+	} else if r.TLS != nil {
 		scheme = "https"
 	}
 

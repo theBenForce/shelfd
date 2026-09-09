@@ -14,6 +14,21 @@ func init() {
 	_ = mime.AddExtensionType(".json", "application/json")
 	_ = mime.AddExtensionType(".html", "text/html; charset=utf-8")
 	_ = mime.AddExtensionType(".css", "text/css; charset=utf-8")
+	_ = mime.AddExtensionType(".svg", "image/svg+xml")
+	_ = mime.AddExtensionType(".woff2", "font/woff2")
+	_ = mime.AddExtensionType(".webp", "image/webp")
+}
+
+func setCacheHeaders(w http.ResponseWriter, filename string) {
+	ext := strings.ToLower(filepath.Ext(filename))
+	if ext == ".html" || ext == "" {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+	} else {
+		// Hashed and static assets: cache for 1 year
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
 }
 
 // SPAHandler returns an http.HandlerFunc that serves static assets from webDir,
@@ -42,6 +57,7 @@ func SPAHandler(webDir string) http.HandlerFunc {
 		fi, err := os.Stat(targetPath)
 		if err == nil && !fi.IsDir() {
 			// Specific file exists
+			setCacheHeaders(w, targetPath)
 			http.ServeFile(w, r, targetPath)
 			return
 		}
@@ -50,6 +66,7 @@ func SPAHandler(webDir string) http.HandlerFunc {
 			// Directory: check for index.html inside
 			indexPath := filepath.Join(targetPath, "index.html")
 			if ifi, ierr := os.Stat(indexPath); ierr == nil && !ifi.IsDir() {
+				setCacheHeaders(w, indexPath)
 				http.ServeFile(w, r, indexPath)
 				return
 			}
@@ -64,6 +81,7 @@ func SPAHandler(webDir string) http.HandlerFunc {
 		// Fallback to root index.html for SPA client-side routing (e.g. /library, /connect)
 		indexPath := filepath.Join(absWebDir, "index.html")
 		if _, err := os.Stat(indexPath); err == nil {
+			setCacheHeaders(w, indexPath)
 			http.ServeFile(w, r, indexPath)
 			return
 		}
