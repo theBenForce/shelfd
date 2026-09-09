@@ -14,10 +14,11 @@ COPY apps/server/go.mod apps/server/go.sum ./
 RUN go mod download
 
 # Copy server source code and compile with Cgo
+ARG VERSION=0.1.0
 COPY apps/server ./
 RUN CGO_ENABLED=1 GOOS=linux go build \
     -tags sqlite_fts5 \
-    -ldflags="-s -w -X main.Version=0.1.0" \
+    -ldflags="-s -w -X main.Version=${VERSION}" \
     -o /out/shelfd \
     ./cmd/server
 
