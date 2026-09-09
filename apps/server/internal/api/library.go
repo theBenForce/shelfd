@@ -67,6 +67,12 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 		h.logger.Info("starting background library scan")
 		ctx := context.Background()
+
+		// Backfill any database chapters that haven't been chunked into paragraphs yet
+		if backfilled, err := h.repo.BackfillParagraphs(ctx); err == nil && backfilled > 0 {
+			h.logger.Info("backfilled paragraphs from existing chapters", "count", backfilled)
+		}
+
 		discovered, err := h.scanner.Scan()
 		if err != nil {
 			h.logger.Error("background scan failed", "error", err)

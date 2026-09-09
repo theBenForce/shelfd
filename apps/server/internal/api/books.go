@@ -537,6 +537,10 @@ func (h *BookHandler) ReparseBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.worker != nil {
+		h.worker.Trigger()
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "success",
 		"message": "Book chapters reparsed successfully",

@@ -97,6 +97,11 @@ func main() {
 	defer repo.Close()
 	log.Printf("Storage engine initialized successfully.")
 
+	// Backfill paragraphs for any existing chapters lacking passage chunks
+	if backfilled, err := repo.BackfillParagraphs(ctx); err == nil && backfilled > 0 {
+		log.Printf("Backfilled %d paragraphs for existing chapters.", backfilled)
+	}
+
 	// One-off scan mode
 	if *scanFlag {
 		runScan(ctx, repo, cfg)
