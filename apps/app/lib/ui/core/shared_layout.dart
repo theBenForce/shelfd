@@ -149,6 +149,60 @@ class StatusBadge extends StatelessWidget {
   }
 }
 
+class AuthorAvatar extends StatelessWidget {
+  final String name;
+  final String? photoUrl;
+  final double size;
+
+  const AuthorAvatar({
+    super.key,
+    required this.name,
+    this.photoUrl,
+    this.size = 56,
+  });
+
+  String get initials {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts[0].isEmpty) return '?';
+    if (parts.length == 1) return parts[0][0].toUpperCase();
+    return (parts[0][0] + parts.last[0]).toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: AppTokens.boneContainer,
+        shape: BoxShape.circle,
+        border: Border.all(color: AppTokens.crispBorder),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: photoUrl != null && photoUrl!.isNotEmpty
+          ? Image.network(
+              photoUrl!,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => _buildInitials(),
+            )
+          : _buildInitials(),
+    );
+  }
+
+  Widget _buildInitials() {
+    return Center(
+      child: Text(
+        initials,
+        style: AppTypography.titleSerif(
+          fontSize: size * 0.38,
+          fontWeight: FontWeight.w700,
+          color: AppTokens.charcoalInk,
+        ),
+      ),
+    );
+  }
+}
+
 class PrimaryButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;

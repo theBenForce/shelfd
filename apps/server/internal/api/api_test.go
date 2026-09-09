@@ -1753,4 +1753,68 @@ func TestRequestLoggerMiddleware(t *testing.T) {
 	}
 }
 
+func TestAuthorPhotoServingAndUpload(t *testing.T) {
+	f := setupAPITest(t)
+	ctx := context.Background()
+
+	// 1. Create an author and book
+	author, err := f.repo.UpsertAuthor(ctx, "Neil Gaiman")
+	if err != nil {
+		t.Fatalf("failed to upsert author: %v", err)
+	}
+
+	authorDir := filepath.Join(f.libDir, "Neil Gaiman")
+	if err := os.MkdirAll(authorDir, 0755); err != nil {
+		t.Fatalf("failed to create author dir: %v", err)
+	}
+
+	// 2. Write mock author.jpg into author's directory
+	dummyImage := []byte("\xff\xd8\xff\xe0\x00\x10JFIFdummy-author-image-content-long-enough-for-test-check-12345678901234567890")
+	photoPath := filepath.Join(authorDir, "author.jpg")
+	if err := os.WriteFile(photoPath, dummyImage, 0644); err != nil {
+		t.Fatalf("failed to write author.jpg: %v", err)
+	}
+
+	// 3. Test GET /api/v1/authors/{id}/photo (public endpoint)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/authors/"+author.ID+"/photo", nil)
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on author photo, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Content-Type") != "image/jpeg" {
+		t.Errorf("expected image/jpeg, got %s", rec.Header().Get("Content-Type"))
+	}
+	if !bytes.Equal(rec.Body.Bytes(), dummyImage) {
+		t.Errorf("expected returned image bytes to match saved author photo")
+	}
+
+	// 4. Test GET /api/v1/authors lists author with photo_url
+	token := f.loginAndGetToken(t)
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/authors", nil)
+	listReq.Header.Set("Authorization", "Bearer "+token)
+	listRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(listRec, listReq)
+
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on list authors, got %d", listRec.Code)
+	}
+	var authorsResp struct {
+		Authors []struct {
+			ID       string  `json:"id"`
+			Name     string  `json:"name"`
+			PhotoURL *string `json:"photo_url"`
+		} `json:"authors"`
+	}
+	json.Unmarshal(listRec.Body.Bytes(), &authorsResp)
+	if len(authorsResp.Authors) == 0 {
+		t.Fatalf("expected at least 1 author")
+	}
+	if authorsResp.Authors[0].PhotoURL == nil || *authorsResp.Authors[0].PhotoURL != "/api/v1/authors/"+author.ID+"/photo" {
+		t.Errorf("expected photo_url to match /api/v1/authors/%s/photo, got %v", author.ID, authorsResp.Authors[0].PhotoURL)
+	}
+}
+
+
 

@@ -146,7 +146,12 @@ func (r *SQLiteStorageEngine) DeleteBook(ctx context.Context, id string) error {
 func (r *SQLiteStorageEngine) ListBooks(ctx context.Context, filter BookFilter) ([]*Book, error) {
 	var conditions []string
 	var args []interface{}
+	var joins string
 
+	if filter.SeriesID != nil {
+		joins = " JOIN book_series bs ON bs.book_id = b.id AND bs.series_id = ?"
+		args = append(args, *filter.SeriesID)
+	}
 	if filter.AuthorID != nil {
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?)")
 		args = append(args, *filter.AuthorID)
@@ -155,23 +160,27 @@ func (r *SQLiteStorageEngine) ListBooks(ctx context.Context, filter BookFilter) 
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?)")
 		args = append(args, *filter.GenreID)
 	}
-	if filter.SeriesID != nil {
-		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_series WHERE series_id = ?)")
-		args = append(args, *filter.SeriesID)
-	}
 	if filter.Search != nil && strings.TrimSpace(*filter.Search) != "" {
-		conditions = append(conditions, "b.title LIKE ?")
-		args = append(args, "%"+strings.TrimSpace(*filter.Search)+"%")
+		conditions = append(conditions, "(LOWER(b.title) LIKE ? OR LOWER(b.description) LIKE ?)")
+		term := "%" + strings.ToLower(strings.TrimSpace(*filter.Search)) + "%"
+		args = append(args, term, term)
 	}
 
 	query := `
 		SELECT b.id, b.title, b.description, b.language, b.publisher, b.identifier, b.file_path, b.cover_path, b.file_size_bytes, b.file_modified_at, b.published_date, b.created_at
 		FROM books b
-	`
+	` + joins
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY b.created_at DESC"
+
+	if filter.SeriesID != nil {
+		query += " ORDER BY CASE WHEN bs.sequence_number IS NULL THEN 1 ELSE 0 END ASC, bs.sequence_number ASC, LOWER(b.title) ASC"
+	} else if filter.SortBy == "created_at" && strings.ToLower(filter.SortOrder) == "desc" {
+		query += " ORDER BY b.created_at DESC"
+	} else {
+		query += " ORDER BY LOWER(b.title) ASC, b.created_at DESC"
+	}
 
 	limit := filter.Limit
 	if limit <= 0 {
@@ -237,30 +246,45 @@ func (r *SQLiteStorageEngine) UpsertAuthor(ctx context.Context, name string) (*A
 
 func (r *SQLiteStorageEngine) GetAuthorByID(ctx context.Context, id string) (*Author, error) {
 	a := &Author{}
-	err := r.db.QueryRowContext(ctx, "SELECT id, name, created_at FROM authors WHERE id = ?", id).Scan(&a.ID, &a.Name, &a.CreatedAt)
+	var photoURL sql.NullString
+	err := r.db.QueryRowContext(ctx, "SELECT id, name, photo_url, created_at FROM authors WHERE id = ?", id).Scan(&a.ID, &a.Name, &photoURL, &a.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying author by id: %w", err)
 	}
+	if photoURL.Valid {
+		a.PhotoURL = &photoURL.String
+	}
 	return a, nil
 }
 
 func (r *SQLiteStorageEngine) GetAuthorByName(ctx context.Context, name string) (*Author, error) {
 	a := &Author{}
-	err := r.db.QueryRowContext(ctx, "SELECT id, name, created_at FROM authors WHERE name = ? COLLATE NOCASE", strings.TrimSpace(name)).Scan(&a.ID, &a.Name, &a.CreatedAt)
+	var photoURL sql.NullString
+	err := r.db.QueryRowContext(ctx, "SELECT id, name, photo_url, created_at FROM authors WHERE name = ? COLLATE NOCASE", strings.TrimSpace(name)).Scan(&a.ID, &a.Name, &photoURL, &a.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying author by name: %w", err)
 	}
+	if photoURL.Valid {
+		a.PhotoURL = &photoURL.String
+	}
 	return a, nil
 }
 
 func (r *SQLiteStorageEngine) ListAuthors(ctx context.Context) ([]*Author, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT id, name, created_at FROM authors ORDER BY name COLLATE NOCASE ASC")
+	query := `
+		SELECT a.id, a.name, a.photo_url, a.created_at, COUNT(ba.book_id) AS book_count
+		FROM authors a
+		LEFT JOIN book_authors ba ON ba.author_id = a.id
+		GROUP BY a.id, a.name, a.photo_url, a.created_at
+		ORDER BY a.name COLLATE NOCASE ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("listing authors: %w", err)
 	}
@@ -269,8 +293,12 @@ func (r *SQLiteStorageEngine) ListAuthors(ctx context.Context) ([]*Author, error
 	var authors []*Author
 	for rows.Next() {
 		a := &Author{}
-		if err := rows.Scan(&a.ID, &a.Name, &a.CreatedAt); err != nil {
+		var photoURL sql.NullString
+		if err := rows.Scan(&a.ID, &a.Name, &photoURL, &a.CreatedAt, &a.BookCount); err != nil {
 			return nil, fmt.Errorf("scanning author: %w", err)
+		}
+		if photoURL.Valid {
+			a.PhotoURL = &photoURL.String
 		}
 		authors = append(authors, a)
 	}
@@ -388,7 +416,14 @@ func (r *SQLiteStorageEngine) GetSeriesByName(ctx context.Context, name string) 
 }
 
 func (r *SQLiteStorageEngine) ListSeries(ctx context.Context) ([]*Series, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT id, name, description, created_at FROM series ORDER BY name COLLATE NOCASE ASC")
+	query := `
+		SELECT s.id, s.name, s.description, s.created_at, COUNT(bs.book_id) AS book_count, MIN(bs.book_id) AS cover_book_id
+		FROM series s
+		LEFT JOIN book_series bs ON bs.series_id = s.id
+		GROUP BY s.id, s.name, s.description, s.created_at
+		ORDER BY s.name COLLATE NOCASE ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("listing series: %w", err)
 	}
@@ -397,8 +432,16 @@ func (r *SQLiteStorageEngine) ListSeries(ctx context.Context) ([]*Series, error)
 	var seriesList []*Series
 	for rows.Next() {
 		s := &Series{}
-		if err := rows.Scan(&s.ID, &s.Name, &s.Description, &s.CreatedAt); err != nil {
+		var desc sql.NullString
+		var coverBookID sql.NullString
+		if err := rows.Scan(&s.ID, &s.Name, &desc, &s.CreatedAt, &s.BookCount, &coverBookID); err != nil {
 			return nil, fmt.Errorf("scanning series: %w", err)
+		}
+		if desc.Valid {
+			s.Description = &desc.String
+		}
+		if coverBookID.Valid {
+			s.CoverBookID = &coverBookID.String
 		}
 		seriesList = append(seriesList, s)
 	}

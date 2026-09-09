@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
+import 'package:shelf/data/models/series.dart';
 import 'package:shelf/ui/core/shared_layout.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/library/library_view.dart';
@@ -11,10 +12,25 @@ import 'package:shelf/ui/state/providers.dart';
 
 class FakeLibraryNotifier extends LibraryNotifier {
   final List<Book> _initialBooks;
-  FakeLibraryNotifier(this._initialBooks);
+  final List<Series> _initialSeries;
+  final List<Author> _initialAuthors;
+  final String _filter;
+
+  FakeLibraryNotifier(
+    this._initialBooks, {
+    this._initialSeries = const [],
+    this._initialAuthors = const [],
+    this._filter = 'all',
+  });
 
   @override
-  LibraryState build() => LibraryState(books: _initialBooks, isLoading: false);
+  LibraryState build() => LibraryState(
+        books: _initialBooks,
+        series: _initialSeries,
+        authors: _initialAuthors,
+        activeFilter: _filter,
+        isLoading: false,
+      );
 }
 
 void main() {
@@ -170,6 +186,72 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(notifier.loadMoreCalls, greaterThanOrEqualTo(1));
+  });
+
+  testWidgets('LibraryView renders series cards when series filter is active',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final testSeries = [
+      const Series(id: 's1', name: 'Clifford', bookCount: 5),
+      const Series(id: 's2', name: 'Percy Jackson', bookCount: 3),
+    ];
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          libraryProvider.overrideWith(() => FakeLibraryNotifier(
+                const [],
+                initialSeries: testSeries,
+                filter: 'series',
+              )),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const LibraryView(),
+        ),
+      ),
+    );
+
+    expect(find.text('Clifford'), findsWidgets);
+    expect(find.text('5 Books'), findsOneWidget);
+    expect(find.text('Percy Jackson'), findsWidgets);
+    expect(find.text('3 Books'), findsOneWidget);
+  });
+
+  testWidgets('LibraryView renders author cards when authors filter is active',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final testAuthors = [
+      const Author(id: 'a1', name: 'Norman Bridwell', bookCount: 8),
+      const Author(id: 'a2', name: 'Rick Riordan', bookCount: 4),
+    ];
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          libraryProvider.overrideWith(() => FakeLibraryNotifier(
+                const [],
+                initialAuthors: testAuthors,
+                filter: 'authors',
+              )),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const LibraryView(),
+        ),
+      ),
+    );
+
+    expect(find.text('Norman Bridwell'), findsOneWidget);
+    expect(find.text('8 Books'), findsOneWidget);
+    expect(find.text('Rick Riordan'), findsOneWidget);
+    expect(find.text('4 Books'), findsOneWidget);
   });
 }
 

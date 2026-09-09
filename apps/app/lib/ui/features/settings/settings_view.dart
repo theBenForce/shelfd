@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/app_shell.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
 import '../../core/tokens.dart';
@@ -126,19 +127,19 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     final isDesktop = Responsive.isDesktop(context);
     final currentUsername = authState.user?.username ?? 'Connected User';
 
-    return ShelfdAdaptiveScaffold(
-      currentIndex: 2,
-      onNavTap: _onNavTapped,
-      appBar: isDesktop
-          ? null
-          : ShelfdTopBar(
-              title: 'Settings',
-              subtitle: 'Homelab Daemon Configuration',
-            ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: AppTokens.maxReadingWidth),
-          child: ListView(
+    final hasAppShell = context.findAncestorWidgetOfExactType<AppShell>() != null;
+
+    final topBar = isDesktop
+        ? null
+        : ShelfdTopBar(
+            title: 'Settings',
+            subtitle: 'Homelab Daemon Configuration',
+          );
+
+    final bodyContent = Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppTokens.maxReadingWidth),
+        child: ListView(
             padding: EdgeInsets.symmetric(
               horizontal: horizontalPad,
               vertical: AppTokens.space24,
@@ -495,7 +496,21 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
             ],
           ),
         ),
-      ),
+      );
+
+    if (hasAppShell) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: topBar,
+        body: bodyContent,
+      );
+    }
+
+    return ShelfdAdaptiveScaffold(
+      currentIndex: 2,
+      onNavTap: _onNavTapped,
+      appBar: topBar,
+      body: bodyContent,
     );
   }
 }

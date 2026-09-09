@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../data/models/author.dart';
+import '../../../data/models/book.dart';
+import '../../../data/models/series.dart';
+import '../../core/app_shell.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
-import '../../../data/models/book.dart';
 import '../../state/providers.dart';
 import '../upload/upload_drop_target.dart';
 
@@ -77,6 +80,8 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
     }
 
     if (libraryState.activeFilter != 'all' &&
+        libraryState.activeFilter != 'series' &&
+        libraryState.activeFilter != 'authors' &&
         libraryState.filteredBooks.length < 8 &&
         libraryState.hasMore &&
         !libraryState.isLoading &&
@@ -88,36 +93,33 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
       });
     }
 
-    return ShelfdDropTarget(
-      child: ShelfdAdaptiveScaffold(
-        currentIndex: _navIndex,
-        onNavTap: _onNavTapped,
-        onRescan: handleScan,
-        onUpload: () => pickAndUploadEpub(context, ref),
-        appBar: ShelfdTopBar(
-          title: 'Shelfd',
-          subtitle: 'Connected to Homelab NAS',
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.upload_file_outlined),
-              tooltip: 'Upload EPUB',
-              onPressed: () => pickAndUploadEpub(context, ref),
-            ),
-            IconButton(
-              icon: const Icon(Icons.refresh_rounded),
-              tooltip: 'Rescan Library',
-              onPressed: handleScan,
-            ),
-            IconButton(
-              icon: const Icon(Icons.search_rounded),
-              tooltip: 'Semantic Search',
-              onPressed: () => context.go('/search'),
-            ),
-          ],
+    final hasAppShell = context.findAncestorWidgetOfExactType<AppShell>() != null;
+
+    final topBar = ShelfdTopBar(
+      title: 'Shelfd',
+      subtitle: 'Connected to Homelab NAS',
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.upload_file_outlined),
+          tooltip: 'Upload EPUB',
+          onPressed: () => pickAndUploadEpub(context, ref),
         ),
-        body: SafeArea(
-          child: Column(
-            children: [
+        IconButton(
+          icon: const Icon(Icons.refresh_rounded),
+          tooltip: 'Rescan Library',
+          onPressed: handleScan,
+        ),
+        IconButton(
+          icon: const Icon(Icons.search_rounded),
+          tooltip: 'Semantic Search',
+          onPressed: () => context.go('/search'),
+        ),
+      ],
+    );
+
+    final bodyContent = SafeArea(
+      child: Column(
+        children: [
               // Desktop Header: "Library" title and book count badge (Stitch spec)
               if (isDesktop)
                 Center(
@@ -143,9 +145,13 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                           ),
                           const SizedBox(width: AppTokens.space12),
                           StatusBadge(
-                            label: libraryState.totalBooks > 0
-                                ? '${libraryState.totalBooks} Books'
-                                : '${libraryState.books.length} Books',
+                            label: libraryState.activeFilter == 'series'
+                                ? '${libraryState.filteredSeries.length} Series'
+                                : libraryState.activeFilter == 'authors'
+                                    ? '${libraryState.filteredAuthors.length} Authors'
+                                    : (libraryState.totalBooks > 0
+                                        ? '${libraryState.totalBooks} Books'
+                                        : '${libraryState.books.length} Books'),
                             backgroundColor: AppTokens.boneContainer,
                             textColor: AppTokens.mutedCopy,
                           ),
@@ -244,104 +250,256 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                             ),
                           ),
                         )
-                      : libraryState.filteredBooks.isEmpty
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(AppTokens.space32),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(
-                                  Icons.menu_book_outlined,
-                                  size: 48,
-                                  color: AppTokens.mutedCopy,
-                                ),
-                                const SizedBox(height: AppTokens.space16),
-                                Text(
-                                  'Your shelf is quiet',
-                                  style: AppTypography.titleSerif(fontSize: 20),
-                                ),
-                                const SizedBox(height: AppTokens.space8),
-                                Text(
-                                  'Place EPUBs into your /library directory or tap refresh to scan.',
-                                  textAlign: TextAlign.center,
-                                  style: AppTypography.bodySans(fontSize: 14),
-                                ),
-                                const SizedBox(height: AppTokens.space16),
-                                OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: AppTokens.charcoalInk,
-                                    side: const BorderSide(color: AppTokens.crispBorder),
-                                    backgroundColor: AppTokens.boneSurface,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                                    ),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: AppTokens.space16,
-                                      vertical: AppTokens.space12,
-                                    ),
-                                  ),
-                                  onPressed: () => pickAndUploadEpub(context, ref),
-                                  icon: const Icon(Icons.upload_file_outlined, size: 18),
-                                  label: const Text(
-                                    'Upload EPUB',
-                                    style: TextStyle(fontWeight: FontWeight.w600),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      : Center(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
-                            child: Column(
-                              children: [
-                                Expanded(
-                                  child: GridView.builder(
-                                    controller: _scrollController,
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: horizontalPad,
-                                      vertical: AppTokens.space16,
-                                    ),
-                                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                                      maxCrossAxisExtent: 200.0,
-                                      childAspectRatio: 0.55,
-                                      crossAxisSpacing: AppTokens.space16,
-                                      mainAxisSpacing: AppTokens.space24,
-                                    ),
-                                    itemCount: libraryState.filteredBooks.length,
-                                    itemBuilder: (context, index) {
-                                      final book = libraryState.filteredBooks[index];
-                                      return _BookCard(
-                                        book: book,
-                                        onTap: () {
-                                          context.go('/reader/${book.id}');
-                                        },
-                                      );
-                                    },
-                                  ),
-                                ),
-                                if (libraryState.isLoadingMore)
-                                  const Padding(
-                                    padding: EdgeInsets.symmetric(vertical: AppTokens.space16),
-                                    child: Center(
-                                      child: SizedBox(
-                                        width: 24,
-                                        height: 24,
-                                        child: CircularProgressIndicator(strokeWidth: 2.5),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
+                      : _buildBodyContent(context, libraryState, horizontalPad),
             ),
           ],
         ),
+      );
+    if (hasAppShell) {
+      return ShelfdDropTarget(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: isDesktop ? null : topBar,
+          body: bodyContent,
+        ),
+      );
+    }
+
+    return ShelfdDropTarget(
+      child: ShelfdAdaptiveScaffold(
+        currentIndex: _navIndex,
+        onNavTap: _onNavTapped,
+        onRescan: handleScan,
+        onUpload: () => pickAndUploadEpub(context, ref),
+        appBar: topBar,
+        body: bodyContent,
       ),
-    ),
+    );
+  }
+
+  Widget _buildBodyContent(BuildContext context, LibraryState libraryState, double horizontalPad) {
+    if (libraryState.activeFilter == 'series') {
+      return _buildSeriesContent(context, libraryState, horizontalPad);
+    } else if (libraryState.activeFilter == 'authors') {
+      return _buildAuthorsContent(context, libraryState, horizontalPad);
+    } else {
+      return _buildBooksContent(context, libraryState, horizontalPad);
+    }
+  }
+
+  Widget _buildSeriesContent(BuildContext context, LibraryState state, double horizontalPad) {
+    if (state.filteredSeries.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppTokens.space32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.collections_bookmark_outlined,
+                size: 48,
+                color: AppTokens.mutedCopy,
+              ),
+              const SizedBox(height: AppTokens.space16),
+              Text(
+                'No series found',
+                style: AppTypography.titleSerif(fontSize: 20),
+              ),
+              const SizedBox(height: AppTokens.space8),
+              Text(
+                'Books with series metadata will be grouped together here.',
+                textAlign: TextAlign.center,
+                style: AppTypography.bodySans(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
+        child: GridView.builder(
+          padding: EdgeInsets.symmetric(
+            horizontal: horizontalPad,
+            vertical: AppTokens.space16,
+          ),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 200.0,
+            childAspectRatio: 0.55,
+            crossAxisSpacing: AppTokens.space16,
+            mainAxisSpacing: AppTokens.space24,
+          ),
+          itemCount: state.filteredSeries.length,
+          itemBuilder: (context, index) {
+            final series = state.filteredSeries[index];
+            return _SeriesCard(
+              series: series,
+              onTap: () {
+                context.go('/series/${series.id}');
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAuthorsContent(BuildContext context, LibraryState state, double horizontalPad) {
+    if (state.filteredAuthors.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppTokens.space32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.person_outline_rounded,
+                size: 48,
+                color: AppTokens.mutedCopy,
+              ),
+              const SizedBox(height: AppTokens.space16),
+              Text(
+                'No authors found',
+                style: AppTypography.titleSerif(fontSize: 20),
+              ),
+              const SizedBox(height: AppTokens.space8),
+              Text(
+                'Books in your library will be organized by author here.',
+                textAlign: TextAlign.center,
+                style: AppTypography.bodySans(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
+        child: GridView.builder(
+          padding: EdgeInsets.symmetric(
+            horizontal: horizontalPad,
+            vertical: AppTokens.space16,
+          ),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 220.0,
+            childAspectRatio: 0.85,
+            crossAxisSpacing: AppTokens.space16,
+            mainAxisSpacing: AppTokens.space16,
+          ),
+          itemCount: state.filteredAuthors.length,
+          itemBuilder: (context, index) {
+            final author = state.filteredAuthors[index];
+            return _AuthorCard(
+              author: author,
+              onTap: () {
+                context.go('/author/${author.id}');
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBooksContent(BuildContext context, LibraryState state, double horizontalPad) {
+    if (state.filteredBooks.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppTokens.space32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.menu_book_outlined,
+                size: 48,
+                color: AppTokens.mutedCopy,
+              ),
+              const SizedBox(height: AppTokens.space16),
+              Text(
+                'Your shelf is quiet',
+                style: AppTypography.titleSerif(fontSize: 20),
+              ),
+              const SizedBox(height: AppTokens.space8),
+              Text(
+                'Place EPUBs into your /library directory or tap refresh to scan.',
+                textAlign: TextAlign.center,
+                style: AppTypography.bodySans(fontSize: 14),
+              ),
+              const SizedBox(height: AppTokens.space16),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTokens.charcoalInk,
+                  side: const BorderSide(color: AppTokens.crispBorder),
+                  backgroundColor: AppTokens.boneSurface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTokens.space16,
+                    vertical: AppTokens.space12,
+                  ),
+                ),
+                onPressed: () => pickAndUploadEpub(context, ref),
+                icon: const Icon(Icons.upload_file_outlined, size: 18),
+                label: const Text(
+                  'Upload EPUB',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
+        child: Column(
+          children: [
+            Expanded(
+              child: GridView.builder(
+                controller: _scrollController,
+                padding: EdgeInsets.symmetric(
+                  horizontal: horizontalPad,
+                  vertical: AppTokens.space16,
+                ),
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 200.0,
+                  childAspectRatio: 0.55,
+                  crossAxisSpacing: AppTokens.space16,
+                  mainAxisSpacing: AppTokens.space24,
+                ),
+                itemCount: state.filteredBooks.length,
+                itemBuilder: (context, index) {
+                  final book = state.filteredBooks[index];
+                  return _BookCard(
+                    book: book,
+                    onTap: () {
+                      context.go('/book/${book.id}');
+                    },
+                  );
+                },
+              ),
+            ),
+            if (state.isLoadingMore)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: AppTokens.space16),
+                child: Center(
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -448,6 +606,178 @@ class _CoverFallback extends StatelessWidget {
             textAlign: TextAlign.center,
             overflow: TextOverflow.ellipsis,
             style: AppTypography.titleSerif(fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SeriesCard extends StatelessWidget {
+  final Series series;
+  final VoidCallback onTap;
+
+  const _SeriesCard({required this.series, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final bookCountLabel = series.bookCount == 1 ? '1 Book' : '${series.bookCount} Books';
+
+    return BentoCard(
+      onTap: onTap,
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppTokens.boneContainer,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppTokens.radiusMd),
+                ),
+                border: const Border(
+                  bottom: BorderSide(color: AppTokens.crispBorder),
+                ),
+              ),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(AppTokens.radiusMd),
+                    ),
+                    child: series.coverUrl != null && series.coverUrl!.isNotEmpty
+                        ? Image.network(
+                            series.coverUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) =>
+                                _SeriesFallback(name: series.name),
+                          )
+                        : _SeriesFallback(name: series.name),
+                  ),
+                  Positioned(
+                    top: AppTokens.space8,
+                    right: AppTokens.space8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTokens.charcoalInk.withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(AppTokens.radiusPill),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.collections_bookmark_outlined, size: 12, color: Colors.white),
+                          const SizedBox(width: 4),
+                          Text(
+                            bookCountLabel,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(AppTokens.space12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  series.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: AppTokens.space4),
+                Text(
+                  'Series',
+                  style: AppTypography.captionSans(
+                    fontSize: 11,
+                    color: AppTokens.mutedCopy,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SeriesFallback extends StatelessWidget {
+  final String name;
+
+  const _SeriesFallback({required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppTokens.boneContainer,
+      padding: const EdgeInsets.all(AppTokens.space16),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.collections_bookmark_rounded, size: 36, color: AppTokens.mutedCopy),
+          const SizedBox(height: AppTokens.space8),
+          Text(
+            name,
+            maxLines: 3,
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            style: AppTypography.titleSerif(fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AuthorCard extends StatelessWidget {
+  final Author author;
+  final VoidCallback onTap;
+
+  const _AuthorCard({required this.author, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final bookCountLabel = author.bookCount == 1 ? '1 Book' : '${author.bookCount} Books';
+
+    return BentoCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(AppTokens.space16),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          AuthorAvatar(
+            name: author.name,
+            photoUrl: author.photoUrl,
+            size: 72,
+          ),
+          const SizedBox(height: AppTokens.space12),
+          Text(
+            author.name,
+            maxLines: 2,
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            style: AppTypography.titleSerif(fontSize: 15, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: AppTokens.space8),
+          StatusBadge(
+            label: bookCountLabel,
+            backgroundColor: AppTokens.boneContainer,
+            textColor: AppTokens.mutedCopy,
           ),
         ],
       ),

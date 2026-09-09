@@ -39,7 +39,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	authHandler := NewAuthHandler(cfg.Repo, cfg.JWTSecret, logger)
 	bookHandler := NewBookHandler(cfg.Repo, cfg.Ingester, cfg.Worker, cfg.UploadWorker, cfg.AIClient, cfg.DataDir, cfg.LibraryDir, logger)
-	taxHandler := NewTaxonomyHandler(cfg.Repo)
+	taxHandler := NewTaxonomyHandler(cfg.Repo, cfg.LibraryDir, cfg.DataDir, logger)
 	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, logger)
 	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version, cfg.DefaultUsername)
 	queueHandler := NewQueueHandler(cfg.Repo, cfg.Worker, cfg.UploadWorker)
@@ -50,6 +50,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
 	mux.HandleFunc("GET /api/v1/server/connect-info", connHandler.GetConnectInfo)
 	mux.HandleFunc("GET /api/v1/books/{id}/cover", bookHandler.GetBookCover)
+	mux.HandleFunc("GET /api/v1/authors/{id}/photo", taxHandler.GetAuthorPhoto)
 
 	// Protected routes
 	mux.Handle("GET /api/v1/auth/me", auth(http.HandlerFunc(authHandler.Me)))
@@ -85,6 +86,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/search", auth(http.HandlerFunc(bookHandler.SearchLibrary)))
 
 	mux.Handle("GET /api/v1/authors", auth(http.HandlerFunc(taxHandler.ListAuthors)))
+	mux.Handle("POST /api/v1/authors/{id}/photo", auth(http.HandlerFunc(taxHandler.UploadAuthorPhoto)))
 	mux.Handle("GET /api/v1/genres", auth(http.HandlerFunc(taxHandler.ListGenres)))
 	mux.Handle("GET /api/v1/series", auth(http.HandlerFunc(taxHandler.ListSeries)))
 

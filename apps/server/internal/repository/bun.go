@@ -131,8 +131,17 @@ func (r *BunStorageEngine) applyBookFilter(q *bun.SelectQuery, filter BookFilter
 
 func (r *BunStorageEngine) ListBooks(ctx context.Context, filter BookFilter) ([]*Book, error) {
 	var books []*Book
-	q := r.db.NewSelect().Model(&books).Order("created_at DESC")
+	q := r.db.NewSelect().Model(&books)
 	q = r.applyBookFilter(q, filter)
+
+	if filter.SeriesID != nil {
+		q = q.Join("JOIN book_series AS bs ON bs.book_id = book.id AND bs.series_id = ?", *filter.SeriesID)
+		q = q.OrderExpr("CASE WHEN bs.sequence_number IS NULL THEN 1 ELSE 0 END ASC, bs.sequence_number ASC, LOWER(book.title) ASC")
+	} else if filter.SortBy == "created_at" && strings.ToLower(filter.SortOrder) == "desc" {
+		q = q.Order("created_at DESC")
+	} else {
+		q = q.OrderExpr("LOWER(book.title) ASC, book.created_at DESC")
+	}
 
 	limit := filter.Limit
 	if limit <= 0 {
@@ -223,7 +232,14 @@ func (r *BunStorageEngine) GetAuthorByName(ctx context.Context, name string) (*A
 
 func (r *BunStorageEngine) ListAuthors(ctx context.Context) ([]*Author, error) {
 	var authors []*Author
-	err := r.db.NewSelect().Model(&authors).Order("name ASC").Scan(ctx)
+	err := r.db.NewSelect().
+		TableExpr("authors AS a").
+		ColumnExpr("a.id, a.name, a.photo_url, a.created_at").
+		ColumnExpr("COUNT(ba.book_id) AS book_count").
+		Join("LEFT JOIN book_authors AS ba ON ba.author_id = a.id").
+		GroupExpr("a.id, a.name, a.photo_url, a.created_at").
+		OrderExpr("LOWER(a.name) ASC").
+		Scan(ctx, &authors)
 	if err != nil {
 		return nil, fmt.Errorf("listing authors: %w", err)
 	}
@@ -368,7 +384,15 @@ func (r *BunStorageEngine) GetSeriesByName(ctx context.Context, name string) (*S
 
 func (r *BunStorageEngine) ListSeries(ctx context.Context) ([]*Series, error) {
 	var seriesList []*Series
-	err := r.db.NewSelect().Model(&seriesList).Order("name ASC").Scan(ctx)
+	err := r.db.NewSelect().
+		TableExpr("series AS s").
+		ColumnExpr("s.id, s.name, s.description, s.created_at").
+		ColumnExpr("COUNT(bs.book_id) AS book_count").
+		ColumnExpr("MIN(bs.book_id) AS cover_book_id").
+		Join("LEFT JOIN book_series AS bs ON bs.series_id = s.id").
+		GroupExpr("s.id, s.name, s.description, s.created_at").
+		OrderExpr("LOWER(s.name) ASC").
+		Scan(ctx, &seriesList)
 	if err != nil {
 		return nil, fmt.Errorf("listing series: %w", err)
 	}

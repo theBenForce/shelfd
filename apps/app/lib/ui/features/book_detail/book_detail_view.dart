@@ -238,7 +238,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               ),
               icon: const Icon(Icons.menu_book_rounded, size: 18),
               label: Text(book.readingProgress > 0 ? 'Resume' : 'Read'),
-              onPressed: () => context.go('/reader/${book.id}/read'),
+              onPressed: () => context.go('/book/${book.id}/read'),
             ),
           ),
         ],
@@ -351,32 +351,57 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                       ),
                     ),
                     const SizedBox(height: AppTokens.space4),
-                    Text(
-                      book.authorDisplay,
-                      style: AppTypography.bodySans(
-                        fontSize: 14,
-                        color: AppTokens.mutedCopy,
+                    if (book.authors.isNotEmpty)
+                      InkWell(
+                        onTap: () {
+                          final author = book.authors.first;
+                          context.go('/author/${author.id}?name=${Uri.encodeComponent(author.name)}');
+                        },
+                        borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Text(
+                            book.authorDisplay,
+                            style: AppTypography.bodySans(
+                              fontSize: 14,
+                              color: AppTokens.mutedCopy,
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      Text(
+                        book.authorDisplay,
+                        style: AppTypography.bodySans(
+                          fontSize: 14,
+                          color: AppTokens.mutedCopy,
+                        ),
                       ),
-                    ),
                     if (book.series != null) ...[
                       const SizedBox(height: AppTokens.space8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppTokens.space8,
-                          vertical: AppTokens.space4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTokens.matchBadgeBg,
-                          borderRadius: BorderRadius.circular(AppTokens.radiusPill),
-                          border: Border.all(color: AppTokens.crispBorder),
-                        ),
-                        child: Text(
-                          book.seriesSequence != null
-                              ? '${book.series!.name} #${book.seriesSequence!.toStringAsFixed(book.seriesSequence!.truncateToDouble() == book.seriesSequence! ? 0 : 1)}'
-                              : book.series!.name,
-                          style: AppTypography.captionSans(
-                            fontSize: 11,
-                            color: AppTokens.matchBadgeText,
+                      InkWell(
+                        onTap: () {
+                          context.go('/series/${book.series!.id}?name=${Uri.encodeComponent(book.series!.name)}');
+                        },
+                        borderRadius: BorderRadius.circular(AppTokens.radiusPill),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppTokens.space8,
+                            vertical: AppTokens.space4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTokens.matchBadgeBg,
+                            borderRadius: BorderRadius.circular(AppTokens.radiusPill),
+                            border: Border.all(color: AppTokens.crispBorder),
+                          ),
+                          child: Text(
+                            book.seriesSequence != null
+                                ? '${book.series!.name} #${book.seriesSequence!.toStringAsFixed(book.seriesSequence!.truncateToDouble() == book.seriesSequence! ? 0 : 1)}'
+                                : book.series!.name,
+                            style: AppTypography.captionSans(
+                              fontSize: 11,
+                              color: AppTokens.matchBadgeText,
+                            ),
                           ),
                         ),
                       ),
@@ -439,7 +464,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 book.readingProgress > 0 ? 'Resume Reading' : 'Start Reading',
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
-              onPressed: () => context.go('/reader/${book.id}/read'),
+              onPressed: () => context.go('/book/${book.id}/read'),
             ),
           ),
           const SizedBox(height: AppTokens.space20),
@@ -673,7 +698,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                     color: AppTokens.mutedCopy,
                   ),
                   onTap: () {
-                    context.go('/reader/${book.id}/read/${item.chapterIndex}');
+                    context.go('/book/${book.id}/read/${item.chapterIndex}');
                   },
                 );
               },
@@ -1274,7 +1299,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                             backgroundColor: AppTokens.boneBackground,
                             side: const BorderSide(color: AppTokens.crispBorder),
                             onPressed: () {
-                              context.go('/reader/${widget.bookId}/read/${cit.chapterIndex}');
+                              context.go('/book/${widget.bookId}/read/${cit.chapterIndex}');
                             },
                           ),
                       ],

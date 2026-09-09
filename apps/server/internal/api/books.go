@@ -126,6 +126,12 @@ func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
 	if search := strings.TrimSpace(q.Get("search")); search != "" {
 		filter.Search = &search
 	}
+	if sortBy := strings.TrimSpace(q.Get("sort_by")); sortBy != "" {
+		filter.SortBy = sortBy
+	}
+	if sortOrder := strings.TrimSpace(q.Get("sort_order")); sortOrder != "" {
+		filter.SortOrder = sortOrder
+	}
 
 	limit := 50
 	if rawLimit := q.Get("limit"); rawLimit != "" {

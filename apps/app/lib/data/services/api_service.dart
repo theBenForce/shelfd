@@ -227,7 +227,7 @@ class ApiService {
     }
     return data
         .whereType<Map<String, dynamic>>()
-        .map((a) => Author.fromJson(a))
+        .map((a) => Author.fromJson(a, baseUrl: baseUrl))
         .toList();
   }
 
@@ -263,7 +263,7 @@ class ApiService {
     }
     return data
         .whereType<Map<String, dynamic>>()
-        .map((s) => Series.fromJson(s))
+        .map((s) => Series.fromJson(s, baseUrl: baseUrl))
         .toList();
   }
 

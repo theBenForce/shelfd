@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../data/models/search_result.dart';
+import '../../core/app_shell.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
 import '../../core/tokens.dart';
@@ -45,29 +46,29 @@ class _SearchViewState extends ConsumerState<SearchView> {
     final horizontalPad = Responsive.horizontalPadding(context);
     final isDesktop = Responsive.isDesktop(context);
 
-    return ShelfdAdaptiveScaffold(
-      currentIndex: _navIndex,
-      onNavTap: _onNavTapped,
-      appBar: isDesktop
-          ? null
-          : AppBar(
-              title: Text('Semantic Search', style: AppTypography.titleSerif(fontSize: 20)),
-              leading: IconButton(
-                icon: const Icon(Icons.arrow_back_rounded),
-                onPressed: () {
-                  if (context.canPop()) {
-                    context.pop();
-                  } else {
-                    context.go('/library');
-                  }
-                },
-              ),
-              bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(1),
-                child: Container(color: AppTokens.crispBorder, height: 1),
-              ),
+    final hasAppShell = context.findAncestorWidgetOfExactType<AppShell>() != null;
+
+    final appBarWidget = isDesktop
+        ? null
+        : AppBar(
+            title: Text('Semantic Search', style: AppTypography.titleSerif(fontSize: 20)),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_rounded),
+              onPressed: () {
+                if (context.canPop()) {
+                  context.pop();
+                } else {
+                  context.go('/library');
+                }
+              },
             ),
-      body: SafeArea(
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(1),
+              child: Container(color: AppTokens.crispBorder, height: 1),
+            ),
+          );
+
+    final bodyContent = SafeArea(
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: AppTokens.maxSearchWidth),
@@ -174,7 +175,7 @@ class _SearchViewState extends ConsumerState<SearchView> {
                                   hit: hit,
                                   onTap: () {
                                     final target = (hit.chapterId != null && hit.chapterId!.isNotEmpty) ? hit.chapterId! : hit.chapterIndex;
-                                    context.go('/reader/${hit.bookId}/$target');
+                                    context.go('/book/${hit.bookId}/$target');
                                   },
                                 );
                               },
@@ -184,8 +185,22 @@ class _SearchViewState extends ConsumerState<SearchView> {
         ),
       ),
     ),
-  ),
-);
+  );
+
+    if (hasAppShell) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: appBarWidget,
+        body: bodyContent,
+      );
+    }
+
+    return ShelfdAdaptiveScaffold(
+      currentIndex: _navIndex,
+      onNavTap: _onNavTapped,
+      appBar: appBarWidget,
+      body: bodyContent,
+    );
   }
 }
 

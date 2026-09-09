@@ -173,14 +173,34 @@ class LibraryState {
   });
 
   List<Book> get filteredBooks {
+    List<Book> list;
     switch (activeFilter) {
       case 'unread':
-        return books.where((b) => b.readingProgress < 1.0).toList();
+        list = books.where((b) => b.readingProgress < 1.0).toList();
+        break;
       case 'series':
-        return books.where((b) => b.series != null).toList();
+        list = books.where((b) => b.series != null).toList();
+        break;
       default:
-        return books;
+        list = books.toList();
+        break;
     }
+    list.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    return list;
+  }
+
+  List<Series> get filteredSeries {
+    final withBooks = series.where((s) => s.bookCount > 0).toList();
+    final list = withBooks.isNotEmpty ? withBooks : series.toList();
+    list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return list;
+  }
+
+  List<Author> get filteredAuthors {
+    final withBooks = authors.where((a) => a.bookCount > 0).toList();
+    final list = withBooks.isNotEmpty ? withBooks : authors.toList();
+    list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return list;
   }
 
   LibraryState copyWith({

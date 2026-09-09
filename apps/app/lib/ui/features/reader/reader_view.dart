@@ -56,7 +56,7 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
     } else {
       _activeIdentifier = widget.chapterIdentifier ?? widget.chapterIndex ?? 1;
     }
-    _initBookAndChapter();
+    Future.microtask(() => _initBookAndChapter());
   }
 
   Future<void> _initBookAndChapter() async {

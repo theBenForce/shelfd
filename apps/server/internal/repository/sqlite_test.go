@@ -312,6 +312,97 @@ func TestBookCRUDAndFiltering(t *testing.T) {
 	}
 }
 
+func TestAlphabeticalAndSeriesOrdering(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupTestDB(t)
+	defer repo.Close()
+
+	// 1. Verify Alphabetical Sorting by default
+	books := []*repository.Book{
+		{Title: "Zeta Book", FilePath: "test/zeta.epub"},
+		{Title: "Alpha Book", FilePath: "test/alpha.epub"},
+		{Title: "Beta Book", FilePath: "test/beta.epub"},
+	}
+	for _, b := range books {
+		if err := repo.CreateBook(ctx, b); err != nil {
+			t.Fatalf("failed to create book %s: %v", b.Title, err)
+		}
+	}
+
+	alphaList, err := repo.ListBooks(ctx, repository.BookFilter{})
+	if err != nil {
+		t.Fatalf("failed to list books: %v", err)
+	}
+	if len(alphaList) != 3 {
+		t.Fatalf("expected 3 books, got %d", len(alphaList))
+	}
+	if alphaList[0].Title != "Alpha Book" || alphaList[1].Title != "Beta Book" || alphaList[2].Title != "Zeta Book" {
+		t.Fatalf("expected alphabetical order [Alpha, Beta, Zeta], got [%s, %s, %s]",
+			alphaList[0].Title, alphaList[1].Title, alphaList[2].Title)
+	}
+
+	// 2. Verify Series Ordering (Numbered first in sequence, then unnumbered alphabetically)
+	series, err := repo.UpsertSeries(ctx, "Test Series", nil)
+	if err != nil {
+		t.Fatalf("failed to upsert series: %v", err)
+	}
+
+	sBooks := []*repository.Book{
+		{Title: "Unnumbered Zulu", FilePath: "test/s_zulu.epub"},
+		{Title: "Book Two", FilePath: "test/s_two.epub"},
+		{Title: "Unnumbered Alpha", FilePath: "test/s_alpha.epub"},
+		{Title: "Book One", FilePath: "test/s_one.epub"},
+	}
+	for _, b := range sBooks {
+		if err := repo.CreateBook(ctx, b); err != nil {
+			t.Fatalf("create series book: %v", err)
+		}
+	}
+
+	seq2 := 2.0
+	seq1 := 1.0
+	repo.LinkBookSeries(ctx, sBooks[0].ID, series.ID, nil)   // Zulu (nil)
+	repo.LinkBookSeries(ctx, sBooks[1].ID, series.ID, &seq2)  // Two (2.0)
+	repo.LinkBookSeries(ctx, sBooks[2].ID, series.ID, nil)   // Alpha (nil)
+	repo.LinkBookSeries(ctx, sBooks[3].ID, series.ID, &seq1)  // One (1.0)
+
+	seriesResults, err := repo.ListBooks(ctx, repository.BookFilter{SeriesID: &series.ID})
+	if err != nil {
+		t.Fatalf("failed to list series books: %v", err)
+	}
+	if len(seriesResults) != 4 {
+		t.Fatalf("expected 4 series books, got %d", len(seriesResults))
+	}
+
+	expectedOrder := []string{"Book One", "Book Two", "Unnumbered Alpha", "Unnumbered Zulu"}
+	for i, exp := range expectedOrder {
+		if seriesResults[i].Title != exp {
+			t.Errorf("series book [%d]: expected %q, got %q", i, exp, seriesResults[i].Title)
+		}
+	}
+
+	// 3. Verify Series book_count and cover_book_id
+	seriesList, err := repo.ListSeries(ctx)
+	if err != nil {
+		t.Fatalf("failed to list series: %v", err)
+	}
+	foundSeries := false
+	for _, s := range seriesList {
+		if s.ID == series.ID {
+			foundSeries = true
+			if s.BookCount != 4 {
+				t.Errorf("expected series book count 4, got %d", s.BookCount)
+			}
+			if s.CoverBookID == nil || *s.CoverBookID == "" {
+				t.Errorf("expected non-empty cover_book_id for series")
+			}
+		}
+	}
+	if !foundSeries {
+		t.Errorf("expected to find test series in ListSeries")
+	}
+}
+
 func TestAuthorGenreSeriesUpserts(t *testing.T) {
 	ctx := context.Background()
 	_, repo := setupTestDB(t)
