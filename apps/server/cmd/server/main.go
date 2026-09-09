@@ -7,7 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -47,81 +47,118 @@ func main() {
 	var cfg *config.Config
 	var err error
 	if configPath != "" {
-		log.Printf("Loading configuration from %s...", configPath)
 		cfg, err = config.Load(configPath)
 		if err != nil {
-			log.Fatalf("Failed to load configuration: %v", err)
+			fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
+			os.Exit(1)
 		}
 	} else {
-		log.Printf("No config file found, using defaults...")
 		cfg = config.DefaultConfig()
 	}
 
 	// Apply any SHELFD_* environment variable overrides
 	config.ApplyEnvOverrides(cfg)
 
+	// Set up structured slog logger based on configuration
+	var logLevel slog.Level
+	switch strings.ToLower(cfg.Logging.Level) {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "warn", "warning":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		logLevel = slog.LevelInfo
+	}
+
+	opts := &slog.HandlerOptions{
+		Level: logLevel,
+	}
+
+	var handler slog.Handler
+	if strings.ToLower(cfg.Logging.Format) == "json" {
+		handler = slog.NewJSONHandler(os.Stdout, opts)
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, opts)
+	}
+
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+
+	if configPath != "" {
+		logger.Info("Loaded configuration", "path", configPath)
+	} else {
+		logger.Info("No config file found, using defaults")
+	}
+
 	if cfg.Server.JWTSecret == "" {
 		secretBytes := make([]byte, 32)
 		_, _ = rand.Read(secretBytes)
 		cfg.Server.JWTSecret = hex.EncodeToString(secretBytes)
-		log.Printf("Notice: server.jwt_secret not configured; generated ephemeral JWT secret.")
+		logger.Warn("server.jwt_secret not configured; generated ephemeral JWT secret")
 	}
 
-	log.Printf("shelfd %s starting on %s:%d", Version, cfg.Server.Host, cfg.Server.Port)
-	log.Printf("Library directory: %s | Data directory: %s", cfg.Storage.LibraryDir, cfg.Storage.DataDir)
+	logger.Info("shelfd starting", "version", Version, "host", cfg.Server.Host, "port", cfg.Server.Port)
+	logger.Info("Storage directories initialized", "library_dir", cfg.Storage.LibraryDir, "data_dir", cfg.Storage.DataDir)
 
-	log.Printf("Opening %s database...", cfg.Database.Type)
+	logger.Info("Opening database", "type", cfg.Database.Type)
 	bunDB, err := database.OpenDB(cfg)
 	if err != nil {
-		log.Fatalf("Failed to open %s database: %v", cfg.Database.Type, err)
+		logger.Error("Failed to open database", "type", cfg.Database.Type, "error", err)
+		os.Exit(1)
 	}
 	defer bunDB.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	log.Printf("Executing database schema migrations...")
+	logger.Info("Executing database schema migrations")
 	if err := database.RunBunMigrations(ctx, bunDB); err != nil {
-		log.Fatalf("Failed to execute migrations: %v", err)
+		logger.Error("Failed to execute migrations", "error", err)
+		os.Exit(1)
 	}
 
 	if err := database.EnsureVectorDimensions(ctx, bunDB, cfg.AI.EmbeddingDimensions); err != nil {
-		log.Fatalf("Failed to configure vector dimensions: %v", err)
+		logger.Error("Failed to configure vector dimensions", "error", err)
+		os.Exit(1)
 	}
 
 	repo := repository.NewBunStorageEngine(bunDB)
 	defer repo.Close()
-	log.Printf("Storage engine (%s via Bun) initialized successfully.", cfg.Database.Type)
+	logger.Info("Storage engine initialized successfully", "type", cfg.Database.Type)
 
 	// Backfill paragraphs for any existing chapters lacking passage chunks
 	if backfilled, err := repo.BackfillParagraphs(ctx); err == nil && backfilled > 0 {
-		log.Printf("Backfilled %d paragraphs for existing chapters.", backfilled)
+		logger.Info("Backfilled paragraphs for existing chapters", "count", backfilled)
 	}
 
 	// One-off scan mode
 	if *scanFlag {
-		runScan(ctx, repo, cfg)
+		runScan(ctx, repo, cfg, logger)
 		return
 	}
 
 	// Initialize AI client
 	aiClient, err := ai.NewClient(&cfg.AI)
 	if err != nil {
-		log.Fatalf("Failed to initialize AI client: %v", err)
+		logger.Error("Failed to initialize AI client", "error", err)
+		os.Exit(1)
 	}
-	log.Printf("AI client initialized (Provider: %s, BaseURL: %s)", cfg.AI.Provider, cfg.AI.BaseURL)
+	logger.Info("AI client initialized", "provider", cfg.AI.Provider, "base_url", cfg.AI.BaseURL)
 
 	// Ensure seed admin user and MCP token exist if no tokens are configured
-	ensureSeedToken(ctx, repo, cfg)
+	ensureSeedToken(ctx, repo, cfg, logger)
 
 	// Start background indexing worker
 	chapterWorker := worker.NewWorker(repo, aiClient, worker.Config{
 		BatchSize:    50,
 		PollInterval: 5 * time.Second,
+		Logger:       logger,
 	})
 	chapterWorker.Start(ctx)
 	defer chapterWorker.Stop()
-	log.Printf("Semantic indexing background worker started.")
+	logger.Info("Semantic indexing background worker started")
 
 	// Scanner and ingester
 	scannerInst := scanner.NewScanner(cfg.Storage.LibraryDir)
@@ -130,10 +167,11 @@ func main() {
 	// Start background upload worker
 	uploadWorker := worker.NewUploadWorker(repo, ingester, chapterWorker, worker.UploadWorkerConfig{
 		PollInterval: 3 * time.Second,
+		Logger:       logger,
 	})
 	uploadWorker.Start(ctx)
 	defer uploadWorker.Stop()
-	log.Printf("Asynchronous book upload queue worker started.")
+	logger.Info("Asynchronous book upload queue worker started")
 
 	// Register HTTP routes
 	mux := http.NewServeMux()
@@ -146,46 +184,49 @@ func main() {
 	if cfg.MCP.Enabled {
 		mcpServer := mcp.NewServer(repo, aiClient, mcp.Config{
 			BasePath: cfg.MCP.Path,
+			Logger:   logger,
 		})
 		mux.Handle(cfg.MCP.Path+"/", api.CORSMiddleware(mcpServer.Routes()))
-		log.Printf("MCP Server enabled at %s/sse and %s/messages", cfg.MCP.Path, cfg.MCP.Path)
+		logger.Info("MCP Server enabled", "path", cfg.MCP.Path)
 	}
 
 	// OAuth 2.0 & RFC 7591 Dynamic Client Registration
 	oauthHandler := api.NewOAuthHandler(repo)
 	oauthHandler.RegisterRoutes(mux)
-	log.Printf("OAuth 2.0 & RFC 7591 Dynamic Registration enabled")
+	logger.Info("OAuth 2.0 & RFC 7591 Dynamic Registration enabled")
 
 	// REST API Router
 	apiRouter := api.NewRouter(api.RouterConfig{
-		Repo:         repo,
-		Ingester:     ingester,
-		Scanner:      scannerInst,
-		Worker:       chapterWorker,
-		UploadWorker: uploadWorker,
-		AIClient:     aiClient,
-		DataDir:      cfg.Storage.DataDir,
-		LibraryDir:   cfg.Storage.LibraryDir,
-		JWTSecret:    cfg.Server.JWTSecret,
+		Repo:            repo,
+		Ingester:        ingester,
+		Scanner:         scannerInst,
+		Worker:          chapterWorker,
+		UploadWorker:    uploadWorker,
+		AIClient:        aiClient,
+		DataDir:         cfg.Storage.DataDir,
+		LibraryDir:      cfg.Storage.LibraryDir,
+		JWTSecret:       cfg.Server.JWTSecret,
 		Host:            cfg.Server.Host,
 		Port:            cfg.Server.Port,
 		Version:         Version,
 		DefaultUsername: cfg.Auth.AdminUsername,
+		Logger:          logger,
 	})
 	mux.Handle("/api/v1/", apiRouter)
-	log.Printf("REST API enabled at /api/v1/")
+	logger.Info("REST API enabled at /api/v1/")
 
 	// Static Flutter web application
 	webDir := resolveWebDir(cfg.Server.WebDir)
 	if webDir != "" {
 		mux.HandleFunc("/", api.SPAHandler(webDir))
-		log.Printf("Serving Flutter web application from %s at /", webDir)
+		logger.Info("Serving Flutter web application", "path", webDir)
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	rootHandler := api.RequestLoggerMiddleware(logger)(mux)
 	server := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: rootHandler,
 	}
 
 	// Graceful shutdown handling
@@ -193,31 +234,36 @@ func main() {
 	signal.Notify(stopSig, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("Shelfd daemon listening on http://%s", addr)
+		logger.Info("Shelfd daemon listening", "addr", "http://"+addr)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("HTTP server error: %v", err)
+			logger.Error("HTTP server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-stopSig
-	log.Printf("Shutting down Shelfd daemon gracefully...")
+	logger.Info("Shutting down Shelfd daemon gracefully...")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("HTTP server shutdown error: %v", err)
+		logger.Error("HTTP server shutdown error", "error", err)
 	}
-	log.Printf("Shelfd daemon stopped.")
+	logger.Info("Shelfd daemon stopped")
 }
 
-func runScan(ctx context.Context, repo repository.StorageEngine, cfg *config.Config) {
-	log.Printf("Starting library scan in %s...", cfg.Storage.LibraryDir)
+func runScan(ctx context.Context, repo repository.StorageEngine, cfg *config.Config, logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Info("Starting library scan", "dir", cfg.Storage.LibraryDir)
 	s := scanner.NewScanner(cfg.Storage.LibraryDir)
 	discovered, err := s.Scan()
 	if err != nil {
-		log.Fatalf("Library scan failed: %v", err)
+		logger.Error("Library scan failed", "error", err)
+		os.Exit(1)
 	}
-	log.Printf("Discovered %d EPUB files.", len(discovered))
+	logger.Info("Discovered EPUB files", "count", len(discovered))
 
 	ingester := scanner.NewIngester(repo, cfg.Storage.LibraryDir, cfg.Storage.DataDir)
 	newCount := 0
@@ -226,24 +272,27 @@ func runScan(ctx context.Context, repo repository.StorageEngine, cfg *config.Con
 	for _, f := range discovered {
 		book, status, err := ingester.SyncFile(ctx, f.FullPath, f.RelativePath)
 		if err != nil {
-			log.Printf("Failed to ingest %s: %v", f.RelativePath, err)
+			logger.Error("Failed to ingest file", "path", f.RelativePath, "error", err)
 			continue
 		}
 		switch status {
 		case scanner.SyncStatusNew:
 			newCount++
-			log.Printf("Successfully cataloged new book: %s (ID: %s)", book.Title, book.ID)
+			logger.Info("Successfully cataloged new book", "title", book.Title, "id", book.ID)
 		case scanner.SyncStatusModified:
 			modifiedCount++
-			log.Printf("Updated modified book: %s (ID: %s)", book.Title, book.ID)
+			logger.Info("Updated modified book", "title", book.Title, "id", book.ID)
 		case scanner.SyncStatusUnchanged:
 			unchangedCount++
 		}
 	}
-	log.Printf("Scan and ingestion complete: %d new, %d modified, %d unchanged.", newCount, modifiedCount, unchangedCount)
+	logger.Info("Scan and ingestion complete", "new", newCount, "modified", modifiedCount, "unchanged", unchangedCount)
 }
 
-func ensureSeedToken(ctx context.Context, repo repository.StorageEngine, cfg *config.Config) {
+func ensureSeedToken(ctx context.Context, repo repository.StorageEngine, cfg *config.Config, logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	adminUsername := "admin"
 	if cfg != nil && strings.TrimSpace(cfg.Auth.AdminUsername) != "" {
 		adminUsername = strings.TrimSpace(cfg.Auth.AdminUsername)
@@ -266,7 +315,7 @@ func ensureSeedToken(ctx context.Context, repo repository.StorageEngine, cfg *co
 
 		hash, err := bcrypt.GenerateFromPassword([]byte(adminPass), bcrypt.DefaultCost)
 		if err != nil {
-			log.Printf("Warning: failed to hash admin password: %v", err)
+			logger.Warn("Failed to hash admin password", "error", err)
 			return
 		}
 
@@ -275,16 +324,16 @@ func ensureSeedToken(ctx context.Context, repo repository.StorageEngine, cfg *co
 			PasswordHash: string(hash),
 		}
 		if err := repo.CreateUser(ctx, adminUser); err != nil {
-			log.Printf("Warning: failed to create admin user: %v", err)
+			logger.Warn("Failed to create admin user", "error", err)
 			return
 		}
 
-		log.Printf("================================================================================")
-		log.Printf(" [INITIAL SETUP] Generated default administrator account:")
-		log.Printf(" Username: %s", adminUsername)
-		log.Printf(" Password: %s", adminPass)
-		log.Printf(" (Set SHELFD_ADMIN_USERNAME and SHELFD_ADMIN_PASSWORD environment variables to override)")
-		log.Printf("================================================================================")
+		logger.Info("================================================================================")
+		logger.Info(" [INITIAL SETUP] Generated default administrator account:")
+		logger.Info(fmt.Sprintf(" Username: %s", adminUsername))
+		logger.Info(fmt.Sprintf(" Password: %s", adminPass))
+		logger.Info(" (Set SHELFD_ADMIN_USERNAME and SHELFD_ADMIN_PASSWORD environment variables to override)")
+		logger.Info("================================================================================")
 	} else if err != nil {
 		return
 	}
@@ -310,11 +359,11 @@ func ensureSeedToken(ctx context.Context, repo repository.StorageEngine, cfg *co
 			Name:      "Initial Setup Token",
 		}
 		if err := repo.CreateAPIToken(ctx, token); err == nil {
-			log.Printf("================================================================================")
-			log.Printf(" [INITIAL SETUP] Generated default MCP API token:")
-			log.Printf(" Token: %s", rawToken)
-			log.Printf(" Use in Claude Desktop / Cursor: 'Authorization: Bearer %s'", rawToken)
-			log.Printf("================================================================================")
+			logger.Info("================================================================================")
+			logger.Info(" [INITIAL SETUP] Generated default MCP API token:")
+			logger.Info(fmt.Sprintf(" Token: %s", rawToken))
+			logger.Info(fmt.Sprintf(" Use in Claude Desktop / Cursor: 'Authorization: Bearer %s'", rawToken))
+			logger.Info("================================================================================")
 		}
 	}
 }

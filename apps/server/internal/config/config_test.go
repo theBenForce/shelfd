@@ -419,5 +419,64 @@ auth:
 	}
 }
 
+func TestLoggingConfig(t *testing.T) {
+	// 1. Defaults
+	cfg := config.DefaultConfig()
+	if cfg.Logging.Level != "info" {
+		t.Errorf("expected default log level info, got %s", cfg.Logging.Level)
+	}
+	if cfg.Logging.Format != "text" {
+		t.Errorf("expected default log format text, got %s", cfg.Logging.Format)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("default config validation failed: %v", err)
+	}
+
+	// 2. YAML parsing
+	yamlContent := `
+logging:
+  level: "debug"
+  format: "json"
+`
+	parsed, err := config.Parse([]byte(yamlContent))
+	if err != nil {
+		t.Fatalf("unexpected error parsing logging config: %v", err)
+	}
+	if parsed.Logging.Level != "debug" {
+		t.Errorf("expected debug, got %s", parsed.Logging.Level)
+	}
+	if parsed.Logging.Format != "json" {
+		t.Errorf("expected json, got %s", parsed.Logging.Format)
+	}
+
+	// 3. Validation of invalid values
+	invalidLevelCfg := config.DefaultConfig()
+	invalidLevelCfg.Logging.Level = "invalid_level"
+	if err := invalidLevelCfg.Validate(); err == nil {
+		t.Errorf("expected error for invalid logging.level, got nil")
+	}
+
+	invalidFormatCfg := config.DefaultConfig()
+	invalidFormatCfg.Logging.Format = "xml"
+	if err := invalidFormatCfg.Validate(); err == nil {
+		t.Errorf("expected error for invalid logging.format, got nil")
+	}
+
+	// 4. Env overrides
+	os.Setenv("SHELFD_LOG_LEVEL", "warn")
+	os.Setenv("SHELFD_LOG_FORMAT", "json")
+	defer os.Unsetenv("SHELFD_LOG_LEVEL")
+	defer os.Unsetenv("SHELFD_LOG_FORMAT")
+
+	cfg2 := config.DefaultConfig()
+	config.ApplyEnvOverrides(cfg2)
+	if cfg2.Logging.Level != "warn" {
+		t.Errorf("expected env override warn, got %s", cfg2.Logging.Level)
+	}
+	if cfg2.Logging.Format != "json" {
+		t.Errorf("expected env override json, got %s", cfg2.Logging.Format)
+	}
+}
+
 
 

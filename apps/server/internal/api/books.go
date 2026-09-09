@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -29,6 +30,7 @@ type BookHandler struct {
 	aiClient     ai.Client
 	dataDir      string
 	libraryDir   string
+	logger       *slog.Logger
 }
 
 func NewBookHandler(
@@ -39,7 +41,11 @@ func NewBookHandler(
 	aiClient ai.Client,
 	dataDir string,
 	libraryDir string,
+	logger *slog.Logger,
 ) *BookHandler {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &BookHandler{
 		repo:         repo,
 		ingester:     ingester,
@@ -48,6 +54,7 @@ func NewBookHandler(
 		aiClient:     aiClient,
 		dataDir:      dataDir,
 		libraryDir:   libraryDir,
+		logger:       logger,
 	}
 }
 
@@ -181,6 +188,8 @@ func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
 			Series:        seriesList,
 		})
 	}
+
+	h.logger.Debug("Listed books", "count", len(items), "total", total, "limit", limit, "offset", offset)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"books":  items,
@@ -473,6 +482,8 @@ func (h *BookHandler) UploadBook(w http.ResponseWriter, r *http.Request) {
 	if h.uploadWorker != nil {
 		h.uploadWorker.Trigger()
 	}
+
+	h.logger.Info("Enqueued book upload job", "job_id", job.ID, "filename", job.Filename, "size_bytes", header.Size)
 
 	// 5. Return 202 Accepted
 	writeJSON(w, http.StatusAccepted, map[string]any{

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -1451,6 +1452,70 @@ func TestSearchLibraryEndpoint(t *testing.T) {
 	f.handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200 OK for empty query, got %d", rec.Code)
+	}
+}
+
+func TestRequestLoggerMiddleware(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	middleware := api.RequestLoggerMiddleware(logger)
+
+	// 1. Regular 200 OK request with custom bytes and user in context
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("hello world"))
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
+	req.RemoteAddr = "192.168.1.50:12345"
+	user := &repository.User{ID: "usr-123", Username: "alice"}
+	req = req.WithContext(context.WithValue(req.Context(), api.UserContextKey, user))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, `"status":200`) {
+		t.Errorf("expected status 200 in log, got %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"path":"/api/v1/test"`) {
+		t.Errorf("expected path in log, got %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"method":"GET"`) {
+		t.Errorf("expected method GET in log, got %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"user_id":"usr-123"`) {
+		t.Errorf("expected user_id in log, got %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"bytes":11`) {
+		t.Errorf("expected bytes 11 in log, got %s", logOutput)
+	}
+
+	// 2. Health check request should be logged at DEBUG level
+	buf.Reset()
+	healthHandler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	healthReq := httptest.NewRequest(http.MethodGet, "/health", nil)
+	healthRec := httptest.NewRecorder()
+	healthHandler.ServeHTTP(healthRec, healthReq)
+
+	if !strings.Contains(buf.String(), `"level":"DEBUG"`) {
+		t.Errorf("expected health check to be logged at DEBUG level, got: %s", buf.String())
+	}
+
+	// 3. Error status code 500 should be logged at ERROR level
+	buf.Reset()
+	errHandler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	errReq := httptest.NewRequest(http.MethodPost, "/api/v1/fail", nil)
+	errRec := httptest.NewRecorder()
+	errHandler.ServeHTTP(errRec, errReq)
+
+	if !strings.Contains(buf.String(), `"level":"ERROR"`) {
+		t.Errorf("expected status 500 to be logged at ERROR level, got: %s", buf.String())
 	}
 }
 

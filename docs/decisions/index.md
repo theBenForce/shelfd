@@ -25,4 +25,5 @@ This directory contains the architectural decision records (ADRs) for `shelfd`, 
 | [ADR-0017](0017-in-reader-text-highlighting-and-location-tracking.md) | In-Reader Text Highlighting & Location Tracking | Accepted | 2026-09-09 |
 | [ADR-0018](0018-oauth-dynamic-client-registration-and-traefik-homelab.md) | OAuth 2.0 Dynamic Client Registration, MCP SSE Keepalives, and Traefik Homelab Deployment | Accepted | 2026-09-09 |
 | [ADR-0019](0019-incremental-library-scanning-and-change-detection.md) | Incremental Library Scanning and Change Detection | Accepted | 2026-09-09 |
+| [ADR-0020](0020-structured-server-logging-with-slog.md) | Structured Server Logging with log/slog | Accepted | 2026-09-09 |
 

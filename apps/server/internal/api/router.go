@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/shelfd/shelfd/internal/ai"
@@ -24,16 +25,22 @@ type RouterConfig struct {
 	Port            int
 	Version         string
 	DefaultUsername string
+	Logger          *slog.Logger
 }
 
 // NewRouter constructs and returns the fully configured /api/v1 HTTP handler.
 func NewRouter(cfg RouterConfig) http.Handler {
 	mux := http.NewServeMux()
 
-	authHandler := NewAuthHandler(cfg.Repo, cfg.JWTSecret)
-	bookHandler := NewBookHandler(cfg.Repo, cfg.Ingester, cfg.Worker, cfg.UploadWorker, cfg.AIClient, cfg.DataDir, cfg.LibraryDir)
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	authHandler := NewAuthHandler(cfg.Repo, cfg.JWTSecret, logger)
+	bookHandler := NewBookHandler(cfg.Repo, cfg.Ingester, cfg.Worker, cfg.UploadWorker, cfg.AIClient, cfg.DataDir, cfg.LibraryDir, logger)
 	taxHandler := NewTaxonomyHandler(cfg.Repo)
-	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, nil)
+	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, logger)
 	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version, cfg.DefaultUsername)
 	queueHandler := NewQueueHandler(cfg.Repo, cfg.Worker, cfg.UploadWorker)
 

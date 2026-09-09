@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -17,12 +18,17 @@ import (
 type AuthHandler struct {
 	repo      repository.StorageEngine
 	jwtSecret string
+	logger    *slog.Logger
 }
 
-func NewAuthHandler(repo repository.StorageEngine, jwtSecret string) *AuthHandler {
+func NewAuthHandler(repo repository.StorageEngine, jwtSecret string, logger *slog.Logger) *AuthHandler {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &AuthHandler{
 		repo:      repo,
 		jwtSecret: jwtSecret,
+		logger:    logger,
 	}
 }
 
@@ -63,20 +69,25 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.repo.GetUserByUsername(r.Context(), req.Username)
 	if err != nil {
+		h.logger.Warn("Failed login attempt (unknown user)", "username", req.Username, "remote_ip", clientIP(r))
 		writeJSONError(w, http.StatusUnauthorized, "Invalid username or password")
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		h.logger.Warn("Failed login attempt (invalid password)", "username", req.Username, "remote_ip", clientIP(r))
 		writeJSONError(w, http.StatusUnauthorized, "Invalid username or password")
 		return
 	}
 
 	token, expiresAt, err := GenerateJWT(user.ID, user.Username, h.jwtSecret, 7*24*time.Hour)
 	if err != nil {
+		h.logger.Error("Failed to issue JWT token", "user_id", user.ID, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "Failed to issue token")
 		return
 	}
+
+	h.logger.Info("User logged in successfully", "user_id", user.ID, "username", user.Username, "remote_ip", clientIP(r))
 
 	writeJSON(w, http.StatusOK, LoginResponse{
 		Token:     token,

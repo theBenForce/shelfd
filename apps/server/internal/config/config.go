@@ -19,6 +19,7 @@ type Config struct {
 	AI       AIConfig       `yaml:"ai"`
 	MCP      MCPConfig      `yaml:"mcp"`
 	Auth     AuthConfig     `yaml:"auth"`
+	Logging  LoggingConfig  `yaml:"logging"`
 }
 
 type ServerConfig struct {
@@ -67,6 +68,11 @@ type AuthConfig struct {
 	AdminPassword string `yaml:"admin_password"`
 }
 
+type LoggingConfig struct {
+	Level  string `yaml:"level"`  // "debug", "info", "warn", "error" (default "info")
+	Format string `yaml:"format"` // "text", "json" (default "text")
+}
+
 // DefaultConfig returns the production/homelab default configuration.
 func DefaultConfig() *Config {
 	return &Config{
@@ -102,6 +108,10 @@ func DefaultConfig() *Config {
 		Auth: AuthConfig{
 			AdminUsername: "admin",
 			AdminPassword: "",
+		},
+		Logging: LoggingConfig{
+			Level:  "info",
+			Format: "text",
 		},
 	}
 }
@@ -229,6 +239,29 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.Logging.Level == "" {
+		c.Logging.Level = "info"
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Logging.Level)) {
+	case "debug", "info", "warn", "warning", "error":
+		c.Logging.Level = strings.ToLower(strings.TrimSpace(c.Logging.Level))
+		if c.Logging.Level == "warning" {
+			c.Logging.Level = "warn"
+		}
+	default:
+		return fmt.Errorf("logging.level must be 'debug', 'info', 'warn', or 'error', got '%s'", c.Logging.Level)
+	}
+
+	if c.Logging.Format == "" {
+		c.Logging.Format = "text"
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Logging.Format)) {
+	case "text", "json":
+		c.Logging.Format = strings.ToLower(strings.TrimSpace(c.Logging.Format))
+	default:
+		return fmt.Errorf("logging.format must be 'text' or 'json', got '%s'", c.Logging.Format)
+	}
+
 	return nil
 }
 
@@ -328,6 +361,17 @@ func ApplyEnvOverrides(cfg *Config) {
 		cfg.Auth.AdminPassword = v
 	} else if v := os.Getenv("SHELFD_AUTH_ADMIN_PASSWORD"); v != "" {
 		cfg.Auth.AdminPassword = v
+	}
+
+	if v := os.Getenv("SHELFD_LOG_LEVEL"); v != "" {
+		cfg.Logging.Level = strings.ToLower(strings.TrimSpace(v))
+	} else if v := os.Getenv("LOG_LEVEL"); v != "" {
+		cfg.Logging.Level = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("SHELFD_LOG_FORMAT"); v != "" {
+		cfg.Logging.Format = strings.ToLower(strings.TrimSpace(v))
+	} else if v := os.Getenv("LOG_FORMAT"); v != "" {
+		cfg.Logging.Format = strings.ToLower(strings.TrimSpace(v))
 	}
 }
 

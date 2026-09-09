@@ -70,3 +70,9 @@ auth:
   # Can also be set via SHELFD_ADMIN_USERNAME and SHELFD_ADMIN_PASSWORD.
   admin_username: "admin"
   admin_password: ""
+
+logging:
+  # Log level: "debug", "info", "warn", or "error" (default: "info")
+  level: "info"
+  # Log format: "text" (human-readable console) or "json" (structured JSON for Loki/Docker)
+  format: "text"
