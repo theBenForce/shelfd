@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../data/models/book.dart';
@@ -1258,6 +1259,97 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
 
   Widget _buildChatMessageBubble(BookChatMessage msg) {
     final isUser = msg.role == 'user';
+    final textColor = isUser ? Colors.white : AppTokens.charcoalInk;
+    final secondaryTextColor = isUser ? Colors.white70 : AppTokens.mutedCopy;
+    final codeBgColor = isUser
+        ? Colors.white.withValues(alpha: 0.15)
+        : AppTokens.charcoalInk.withValues(alpha: 0.08);
+
+    final markdownStyleSheet = MarkdownStyleSheet(
+      p: TextStyle(
+        fontSize: 14,
+        height: 1.5,
+        color: textColor,
+      ),
+      pPadding: EdgeInsets.zero,
+      h1: TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.bold,
+        height: 1.3,
+        color: textColor,
+      ),
+      h1Padding: const EdgeInsets.only(top: AppTokens.space8),
+      h2: TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.bold,
+        height: 1.35,
+        color: textColor,
+      ),
+      h2Padding: const EdgeInsets.only(top: AppTokens.space8),
+      h3: TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w600,
+        height: 1.4,
+        color: textColor,
+      ),
+      h3Padding: const EdgeInsets.only(top: AppTokens.space4),
+      h4: TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
+        height: 1.4,
+        color: textColor,
+      ),
+      h4Padding: const EdgeInsets.only(top: AppTokens.space4),
+      strong: TextStyle(
+        fontWeight: FontWeight.bold,
+        color: textColor,
+      ),
+      em: TextStyle(
+        fontStyle: FontStyle.italic,
+        color: textColor,
+      ),
+      code: TextStyle(
+        fontFamily: 'monospace',
+        fontSize: 13,
+        color: textColor,
+        backgroundColor: codeBgColor,
+      ),
+      codeblockPadding: const EdgeInsets.all(AppTokens.space8),
+      codeblockDecoration: BoxDecoration(
+        color: isUser ? Colors.white.withValues(alpha: 0.1) : AppTokens.boneBackground,
+        borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+        border: Border.all(color: isUser ? Colors.white24 : AppTokens.crispBorder),
+      ),
+      blockquote: TextStyle(
+        fontSize: 14,
+        fontStyle: FontStyle.italic,
+        color: secondaryTextColor,
+      ),
+      blockquotePadding: const EdgeInsets.symmetric(
+        horizontal: AppTokens.space12,
+        vertical: AppTokens.space4,
+      ),
+      blockquoteDecoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(
+            color: isUser ? Colors.white38 : AppTokens.crispBorder,
+            width: 3,
+          ),
+        ),
+      ),
+      listBullet: TextStyle(
+        fontSize: 14,
+        height: 1.5,
+        color: textColor,
+      ),
+      listBulletPadding: const EdgeInsets.only(right: 6),
+      listIndent: 20.0,
+      blockSpacing: AppTokens.space8,
+      a: TextStyle(
+        color: isUser ? Colors.white : Colors.blue.shade700,
+        decoration: TextDecoration.underline,
+      ),
+    );
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppTokens.space8),
@@ -1287,13 +1379,10 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    msg.content,
-                    style: TextStyle(
-                      fontSize: 14,
-                      height: 1.5,
-                      color: isUser ? Colors.white : AppTokens.charcoalInk,
-                    ),
+                  MarkdownBody(
+                    data: msg.content.trim(),
+                    styleSheet: markdownStyleSheet,
+                    shrinkWrap: true,
                   ),
                   if (!isUser && msg.citations.isNotEmpty) ...[
                     const SizedBox(height: AppTokens.space12),

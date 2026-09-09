@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -202,6 +203,53 @@ void main() {
     expect(find.textContaining('<i>'), findsNothing);
     expect(find.textContaining('<br>'), findsNothing);
   });
+
+  testWidgets('BookDetailView Chat tab renders rich markdown in chat messages', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final markdownMsgNotifier = _MockMarkdownChatNotifier('book-42');
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookDetailProvider('book-42').overrideWith(() => _MockBookDetailNotifier(testBook)),
+          bookChatProvider('book-42').overrideWith(() => markdownMsgNotifier),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const BookDetailView(bookId: 'book-42'),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Open Chat Tab
+    await tester.tap(find.text('Chat with Book'));
+    await tester.pumpAndSettle();
+
+    // Tap prompt chip to trigger markdown response
+    await tester.tap(find.text('Summarize the major themes'));
+    await tester.pumpAndSettle();
+
+    // Verify MarkdownBody is rendered
+    expect(find.byType(MarkdownBody), findsWidgets);
+
+    // Verify parsed markdown contents render
+    expect(find.text('The Intelligence Explosion'), findsOneWidget);
+    expect(find.textContaining('The transition from human-level AI'), findsOneWidget);
+
+    // Verify raw markdown tags are not present in rendered text
+    expect(find.textContaining('### 1. The Intelligence Explosion'), findsNothing);
+    expect(find.textContaining('**The Theme:**'), findsNothing);
+  });
 }
 
 class _MockBookDetailNotifier extends BookDetailNotifier {
@@ -240,3 +288,28 @@ class _MockBookChatNotifier extends BookChatNotifier {
     state = state.copyWith(messages: [userMsg, assistantMsg]);
   }
 }
+
+class _MockMarkdownChatNotifier extends BookChatNotifier {
+  _MockMarkdownChatNotifier(super.bookId);
+
+  @override
+  BookChatState build() {
+    return const BookChatState();
+  }
+
+  @override
+  Future<void> sendMessage(String text) async {
+    final userMsg = BookChatMessage(role: 'user', content: text);
+    final assistantMsg = BookChatMessage(
+      role: 'assistant',
+      content: '''
+The book *Superintelligence* addresses critical challenges:
+
+### The Intelligence Explosion
+* **The Theme:** The transition from human-level AI to superhuman AI could be rapid.
+''',
+    );
+    state = state.copyWith(messages: [userMsg, assistantMsg]);
+  }
+}
+
