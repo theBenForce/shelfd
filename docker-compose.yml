@@ -44,7 +44,7 @@ services:
       - SHELFD_AI_BASE_URL=http://host.docker.internal:1234
       - SHELFD_AI_API_KEY=lm-studio
       - SHELFD_AI_EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5@q8_0
-      - SHELFD_AI_EMBEDDING_DIMENSIONS=768
+      - SHELFD_AI_EMBEDDING_DIMENSIONS=256
       - SHELFD_AI_SUMMARY_MODEL=google/gemma-4-e4b
       - SHELFD_JWT_SECRET=shelfd-homelab-jwt-secret-key-32bytes
     volumes:

@@ -1,7 +1,7 @@
 # ==============================================================================
 # Stage 1: Build daemon binary with Cgo and sqlite-vec
 # ==============================================================================
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libsqlite3-dev \
