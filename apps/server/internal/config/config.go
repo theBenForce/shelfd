@@ -47,12 +47,13 @@ type StorageConfig struct {
 }
 
 type AIConfig struct {
-	Provider            string `yaml:"provider"` // "ollama" or "openai"
+	Provider            string `yaml:"provider"` // "ollama", "openai", or "google" ("gemini")
 	BaseURL             string `yaml:"base_url"`
 	APIKey              string `yaml:"api_key"`
 	EmbeddingModel      string `yaml:"embedding_model"`
 	EmbeddingDimensions int    `yaml:"embedding_dimensions"`
-	SummaryModel        string `yaml:"summary_model"`
+	ChatModel           string `yaml:"chat_model"`
+	SummaryModel        string `yaml:"summary_model"` // Deprecated alias for ChatModel
 }
 
 type MCPConfig struct {
@@ -85,6 +86,7 @@ func DefaultConfig() *Config {
 			APIKey:              "",
 			EmbeddingModel:      "nomic-embed-text",
 			EmbeddingDimensions: 256,
+			ChatModel:           "llama3.2:3b",
 			SummaryModel:        "llama3.2:3b",
 		},
 		MCP: MCPConfig{
@@ -107,9 +109,25 @@ func Load(path string) (*Config, error) {
 func Parse(data []byte) (*Config, error) {
 	expanded := ExpandEnv(string(data))
 
+	var raw struct {
+		AI struct {
+			ChatModel    *string `yaml:"chat_model"`
+			SummaryModel *string `yaml:"summary_model"`
+		} `yaml:"ai"`
+	}
+	_ = yaml.Unmarshal([]byte(expanded), &raw)
+
 	cfg := DefaultConfig()
 	if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
 		return nil, fmt.Errorf("unmarshaling config yaml: %w", err)
+	}
+
+	if raw.AI.ChatModel != nil && raw.AI.SummaryModel == nil {
+		cfg.AI.SummaryModel = *raw.AI.ChatModel
+	} else if raw.AI.SummaryModel != nil && raw.AI.ChatModel == nil {
+		cfg.AI.ChatModel = *raw.AI.SummaryModel
+	} else if raw.AI.ChatModel != nil && raw.AI.SummaryModel != nil {
+		cfg.AI.SummaryModel = *raw.AI.ChatModel
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -173,10 +191,16 @@ func (c *Config) Validate() error {
 
 	if c.AI.Provider != "" {
 		provider := strings.ToLower(strings.TrimSpace(c.AI.Provider))
-		if provider != "ollama" && provider != "openai" {
-			return fmt.Errorf("ai.provider must be 'ollama' or 'openai', got '%s'", c.AI.Provider)
+		if provider != "ollama" && provider != "openai" && provider != "google" && provider != "gemini" {
+			return fmt.Errorf("ai.provider must be 'ollama', 'openai', or 'google', got '%s'", c.AI.Provider)
 		}
 		c.AI.Provider = provider
+	}
+
+	if c.AI.ChatModel == "" && c.AI.SummaryModel != "" {
+		c.AI.ChatModel = c.AI.SummaryModel
+	} else if c.AI.SummaryModel == "" && c.AI.ChatModel != "" {
+		c.AI.SummaryModel = c.AI.ChatModel
 	}
 
 	if c.AI.EmbeddingDimensions <= 0 {
@@ -263,8 +287,17 @@ func ApplyEnvOverrides(cfg *Config) {
 			cfg.AI.EmbeddingDimensions = dims
 		}
 	}
+	if v := os.Getenv("SHELFD_AI_CHAT_MODEL"); v != "" {
+		cfg.AI.ChatModel = v
+		if cfg.AI.SummaryModel == "" {
+			cfg.AI.SummaryModel = v
+		}
+	}
 	if v := os.Getenv("SHELFD_AI_SUMMARY_MODEL"); v != "" {
 		cfg.AI.SummaryModel = v
+		if cfg.AI.ChatModel == "" {
+			cfg.AI.ChatModel = v
+		}
 	}
 
 	if v := os.Getenv("SHELFD_MCP_ENABLED"); v != "" {

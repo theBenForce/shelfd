@@ -144,18 +144,33 @@ func TestOpenAIClient(t *testing.T) {
 			})
 
 		case "/v1/embeddings":
-			var req map[string]interface{}
+			var req struct {
+				Model string      `json:"model"`
+				Input interface{} `json:"input"`
+			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			if req["model"] != "text-embedding-3-small" {
-				t.Errorf("expected model text-embedding-3-small, got %v", req["model"])
+			if req.Model != "text-embedding-3-small" {
+				t.Errorf("expected model text-embedding-3-small, got %v", req.Model)
+			}
+			if list, ok := req.Input.([]interface{}); ok {
+				data := make([]map[string]interface{}, len(list))
+				for i := range list {
+					data[i] = map[string]interface{}{
+						"embedding": []float32{0.5, 0.6, 0.7, 0.8},
+						"index":     i,
+					}
+				}
+				json.NewEncoder(w).Encode(map[string]interface{}{"data": data})
+				return
 			}
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"data": []map[string]interface{}{
 					{
 						"embedding": []float32{0.5, 0.6, 0.7, 0.8},
+						"index":     0,
 					},
 				},
 			})
@@ -201,6 +216,14 @@ func TestOpenAIClient(t *testing.T) {
 	}
 	if normSq < 0.99 || normSq > 1.01 {
 		t.Errorf("expected unit L2 norm ~1.0, got %f", normSq)
+	}
+
+	batchEmbs, err := client.GenerateBatchEmbeddings(ctx, []string{"Passage A", "Passage B"})
+	if err != nil {
+		t.Fatalf("GenerateBatchEmbeddings error: %v", err)
+	}
+	if len(batchEmbs) != 2 {
+		t.Errorf("expected 2 batch embeddings, got %d", len(batchEmbs))
 	}
 
 	reply, err := client.Chat(ctx, []ai.ChatMessage{{Role: "user", Content: "Who hired Case?"}})
@@ -254,3 +277,149 @@ func TestNormalizeAndTruncateMRL(t *testing.T) {
 		t.Errorf("expected length 3, got %d", len(zeroRes))
 	}
 }
+
+func TestGoogleClient(t *testing.T) {
+	ctx := context.Background()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiKey := r.Header.Get("x-goog-api-key")
+		if apiKey != "ai-secret-key" {
+			t.Errorf("expected x-goog-api-key: ai-secret-key, got %s", apiKey)
+		}
+
+		switch {
+		case strings.Contains(r.URL.Path, ":batchEmbedContents"):
+			var req struct {
+				Requests []struct {
+					Model                string `json:"model"`
+					OutputDimensionality int    `json:"outputDimensionality"`
+					Content              struct {
+						Parts []struct {
+							Text string `json:"text"`
+						} `json:"parts"`
+					} `json:"content"`
+				} `json:"requests"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(req.Requests) == 0 {
+				t.Errorf("expected requests in batch, got 0")
+			}
+			if req.Requests[0].OutputDimensionality != 4 {
+				t.Errorf("expected outputDimensionality 4, got %d", req.Requests[0].OutputDimensionality)
+			}
+
+			embeddings := make([]map[string]interface{}, len(req.Requests))
+			for i := range req.Requests {
+				embeddings[i] = map[string]interface{}{
+					"values": []float32{0.2, 0.4, 0.6, 0.8},
+				}
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"embeddings": embeddings,
+			})
+
+		case strings.Contains(r.URL.Path, ":generateContent"):
+			var req struct {
+				SystemInstruction struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"systemInstruction"`
+				Contents []struct {
+					Role  string `json:"role"`
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"contents"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(req.Contents) == 0 {
+				t.Errorf("expected contents in generateContent, got 0")
+			}
+
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"candidates": []map[string]interface{}{
+					{
+						"content": map[string]interface{}{
+							"role": "model",
+							"parts": []map[string]string{
+								{"text": "The Spice Melange extends life and expands consciousness."},
+							},
+						},
+					},
+				},
+			})
+
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := &config.AIConfig{
+		Provider:            "google",
+		BaseURL:             server.URL,
+		APIKey:              "ai-secret-key",
+		ChatModel:           "gemini-1.5-flash",
+		EmbeddingModel:      "text-embedding-004",
+		EmbeddingDimensions: 4,
+	}
+
+	client, err := ai.NewClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create google client: %v", err)
+	}
+
+	// 1. Test single GenerateEmbedding
+	emb, err := client.GenerateEmbedding(ctx, "The Spice Melange")
+	if err != nil {
+		t.Fatalf("GenerateEmbedding failed: %v", err)
+	}
+	if len(emb) != 4 {
+		t.Fatalf("expected 4 dimensions, got %d", len(emb))
+	}
+	var sumSq float32
+	for _, v := range emb {
+		sumSq += v * v
+	}
+	if sumSq < 0.99 || sumSq > 1.01 {
+		t.Errorf("expected unit L2 norm ~1.0, got %f", sumSq)
+	}
+
+	// 2. Test GenerateBatchEmbeddings
+	batchEmbs, err := client.GenerateBatchEmbeddings(ctx, []string{"Passage 1", "Passage 2"})
+	if err != nil {
+		t.Fatalf("GenerateBatchEmbeddings failed: %v", err)
+	}
+	if len(batchEmbs) != 2 {
+		t.Fatalf("expected 2 embeddings, got %d", len(batchEmbs))
+	}
+
+	// 3. Test Chat
+	reply, err := client.Chat(ctx, []ai.ChatMessage{
+		{Role: "system", Content: "You are a literary assistant."},
+		{Role: "user", Content: "What is the Spice?"},
+	})
+	if err != nil {
+		t.Fatalf("Chat failed: %v", err)
+	}
+	if !strings.Contains(reply, "Spice Melange") {
+		t.Errorf("unexpected chat reply: %s", reply)
+	}
+
+	// 4. Test SummarizeChapter
+	summary, err := client.SummarizeChapter(ctx, "Chapter 1", "Arrakis Dune Desert Planet")
+	if err != nil {
+		t.Fatalf("SummarizeChapter failed: %v", err)
+	}
+	if !strings.Contains(summary, "Spice Melange") {
+		t.Errorf("unexpected summary: %s", summary)
+	}
+}
+

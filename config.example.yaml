@@ -32,7 +32,9 @@ storage:
   data_dir: "/data"
 
 ai:
-  # AI Provider for chapter summaries and semantic embeddings: "ollama" or "openai"
+  # AI Provider for semantic embeddings and reader chat: "ollama", "openai", or "google" ("gemini")
+  # Library ingestion strictly uses the embedding model with per-paragraph batching.
+  # The chat model is only invoked for interactive reader chat in the book details page.
   provider: "ollama"
 
   # Ollama Configuration:
@@ -40,16 +42,23 @@ ai:
   base_url: "http://host.docker.internal:11434"
   api_key: ""
   embedding_model: "nomic-embed-text"
-  embedding_dimensions: 1536
-  summary_model: "llama3.2:3b"
+  embedding_dimensions: 256
+  chat_model: "llama3.2:3b"
+
+  # Google Gemini Configuration Example:
+  # provider: "google"
+  # api_key: "AIzaSy..."
+  # embedding_model: "text-embedding-004"
+  # embedding_dimensions: 256
+  # chat_model: "gemini-1.5-flash"
 
   # OpenAI Configuration Example:
   # provider: "openai"
   # base_url: "https://api.openai.com/v1"
   # api_key: "sk-your-openai-api-key"
   # embedding_model: "text-embedding-3-small"
-  # embedding_dimensions: 1536
-  # summary_model: "gpt-4o-mini"
+  # embedding_dimensions: 256
+  # chat_model: "gpt-4o-mini"
 
 mcp:
   # Model Context Protocol (MCP) server integration for AI agents (Cursor, Claude Desktop)

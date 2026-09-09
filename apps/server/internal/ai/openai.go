@@ -29,9 +29,12 @@ func NewOpenAIClient(cfg *config.AIConfig) *OpenAIClient {
 	if baseURL == "" {
 		baseURL = "https://api.openai.com"
 	}
-	summaryModel := cfg.SummaryModel
-	if summaryModel == "" {
-		summaryModel = "gpt-4o-mini"
+	chatModel := cfg.ChatModel
+	if chatModel == "" {
+		chatModel = cfg.SummaryModel
+	}
+	if chatModel == "" {
+		chatModel = "gpt-4o-mini"
 	}
 	embeddingModel := cfg.EmbeddingModel
 	if embeddingModel == "" {
@@ -45,7 +48,7 @@ func NewOpenAIClient(cfg *config.AIConfig) *OpenAIClient {
 	return &OpenAIClient{
 		baseURL:             baseURL,
 		apiKey:              cfg.APIKey,
-		summaryModel:        summaryModel,
+		summaryModel:        chatModel,
 		embeddingModel:      embeddingModel,
 		embeddingDimensions: embeddingDimensions,
 		httpClient:          &http.Client{Timeout: defaultTimeout},
@@ -113,53 +116,82 @@ func (c *OpenAIClient) SummarizeChapter(ctx context.Context, title, content stri
 }
 
 func (c *OpenAIClient) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
-	payload := map[string]interface{}{
-		"model": c.embeddingModel,
-		"input": text,
-	}
-	if c.embeddingDimensions > 0 {
-		payload["dimensions"] = c.embeddingDimensions
-	}
-
-	bodyBytes, err := json.Marshal(payload)
+	results, err := c.GenerateBatchEmbeddings(ctx, []string{text})
 	if err != nil {
-		return nil, fmt.Errorf("marshaling openai embedding request: %w", err)
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no embedding returned by openai")
+	}
+	return results[0], nil
+}
+
+func (c *OpenAIClient) GenerateBatchEmbeddings(ctx context.Context, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return nil, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/embeddings", bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	chunks := ChunkTexts(texts, 100)
+	var allEmbeddings [][]float32
+
+	for _, chunk := range chunks {
+		payload := map[string]interface{}{
+			"model": c.embeddingModel,
+			"input": chunk,
+		}
+		if c.embeddingDimensions > 0 {
+			payload["dimensions"] = c.embeddingDimensions
+		}
+
+		bodyBytes, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling openai batch embedding request: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/embeddings", bytes.NewReader(bodyBytes))
+		if err != nil {
+			return nil, fmt.Errorf("creating request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if c.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("sending openai batch embedding request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			respBody, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("openai batch embedding returned status %d: %s", resp.StatusCode, string(respBody))
+		}
+
+		var res struct {
+			Data []struct {
+				Embedding []float32 `json:"embedding"`
+				Index     int       `json:"index"`
+			} `json:"data"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+			return nil, fmt.Errorf("decoding openai batch embedding response: %w", err)
+		}
+
+		if len(res.Data) != len(chunk) {
+			return nil, fmt.Errorf("expected %d embeddings from openai, got %d", len(chunk), len(res.Data))
+		}
+
+		ordered := make([][]float32, len(chunk))
+		for _, d := range res.Data {
+			if d.Index >= 0 && d.Index < len(chunk) {
+				ordered[d.Index] = NormalizeAndTruncateMRL(d.Embedding, c.embeddingDimensions)
+			}
+		}
+		allEmbeddings = append(allEmbeddings, ordered...)
 	}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("sending openai embedding request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("openai embedding returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var res struct {
-		Data []struct {
-			Embedding []float32 `json:"embedding"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, fmt.Errorf("decoding openai embedding response: %w", err)
-	}
-
-	if len(res.Data) == 0 {
-		return nil, fmt.Errorf("no embedding data returned by openai")
-	}
-
-	return NormalizeAndTruncateMRL(res.Data[0].Embedding, c.embeddingDimensions), nil
+	return allEmbeddings, nil
 }
 
 func (c *OpenAIClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {

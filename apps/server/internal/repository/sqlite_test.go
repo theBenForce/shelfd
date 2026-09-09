@@ -1245,3 +1245,81 @@ func TestBackfillParagraphs(t *testing.T) {
 		t.Errorf("expected 0 backfilled paragraphs second time, got %d", count2)
 	}
 }
+
+func TestInsertParagraphVectorsBatch(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupTestDB(t)
+	defer repo.Close()
+
+	book := &repository.Book{
+		ID:       "book-batch-vec",
+		Title:    "Batch Vector Test",
+		FilePath: "batch.epub",
+	}
+	if err := repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("create book: %v", err)
+	}
+
+	ch := &repository.Chapter{
+		ID:           "ch-batch-vec",
+		BookID:       book.ID,
+		ChapterIndex: 1,
+		ContentPlain: "Batch chapter text.",
+	}
+	if err := repo.CreateChapter(ctx, ch); err != nil {
+		t.Fatalf("create chapter: %v", err)
+	}
+
+	paras := []*repository.Paragraph{
+		{
+			ID:             "p-batch-1",
+			BookID:         book.ID,
+			ChapterID:      ch.ID,
+			ChapterIndex:   1,
+			StartParagraph: 1,
+			EndParagraph:   1,
+			Content:        "Paragraph 1 text",
+		},
+		{
+			ID:             "p-batch-2",
+			BookID:         book.ID,
+			ChapterID:      ch.ID,
+			ChapterIndex:   1,
+			StartParagraph: 2,
+			EndParagraph:   2,
+			Content:        "Paragraph 2 text",
+		},
+	}
+	if err := repo.CreateParagraphs(ctx, paras); err != nil {
+		t.Fatalf("create paragraphs: %v", err)
+	}
+
+	unindexed, err := repo.GetUnindexedParagraphs(ctx, 10)
+	if err != nil {
+		t.Fatalf("get unindexed: %v", err)
+	}
+	if len(unindexed) != 2 {
+		t.Fatalf("expected 2 unindexed, got %d", len(unindexed))
+	}
+
+	// Insert batch vectors
+	vec1 := make([]float32, 256)
+	vec1[0] = 0.5
+	vec2 := make([]float32, 256)
+	vec2[1] = 0.8
+	batch := []repository.ParagraphVector{
+		{ParagraphID: paras[0].ID, Embedding: vec1},
+		{ParagraphID: paras[1].ID, Embedding: vec2},
+	}
+	if err := repo.InsertParagraphVectors(ctx, batch); err != nil {
+		t.Fatalf("insert paragraph vectors batch: %v", err)
+	}
+
+	unindexedAfter, err := repo.GetUnindexedParagraphs(ctx, 10)
+	if err != nil {
+		t.Fatalf("get unindexed after batch: %v", err)
+	}
+	if len(unindexedAfter) != 0 {
+		t.Errorf("expected 0 unindexed paragraphs after batch insert, got %d", len(unindexedAfter))
+	}
+}

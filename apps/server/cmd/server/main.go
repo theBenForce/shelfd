@@ -116,7 +116,7 @@ func main() {
 
 	// Start background indexing worker
 	chapterWorker := worker.NewWorker(repo, aiClient, worker.Config{
-		BatchSize:    10,
+		BatchSize:    50,
 		PollInterval: 5 * time.Second,
 	})
 	chapterWorker.Start(ctx)

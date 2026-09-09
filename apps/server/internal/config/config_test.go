@@ -179,7 +179,7 @@ func TestValidationErrors(t *testing.T) {
 		{
 			name:    "invalid ai provider",
 			yaml:    `ai: { provider: "invalid-provider" }`,
-			wantErr: "ai.provider must be 'ollama' or 'openai'",
+			wantErr: "ai.provider must be 'ollama', 'openai', or 'google'",
 		},
 		{
 			name:    "ssrf metadata ip blocked",
@@ -340,5 +340,44 @@ func TestConfigExampleYAMLValid(t *testing.T) {
 		t.Errorf("expected library dir /library, got %s", cfg.Storage.LibraryDir)
 	}
 }
+
+func TestGoogleAIConfig(t *testing.T) {
+	yamlContent := `
+ai:
+  provider: "google"
+  api_key: "ai-test-key"
+  embedding_model: "text-embedding-004"
+  embedding_dimensions: 256
+  chat_model: "gemini-1.5-flash"
+`
+	cfg, err := config.Parse([]byte(yamlContent))
+	if err != nil {
+		t.Fatalf("unexpected error parsing google ai config: %v", err)
+	}
+	if cfg.AI.Provider != "google" {
+		t.Errorf("expected provider google, got %s", cfg.AI.Provider)
+	}
+	if cfg.AI.ChatModel != "gemini-1.5-flash" {
+		t.Errorf("expected chat_model gemini-1.5-flash, got %s", cfg.AI.ChatModel)
+	}
+	if cfg.AI.SummaryModel != "gemini-1.5-flash" {
+		t.Errorf("expected summary_model alias gemini-1.5-flash, got %s", cfg.AI.SummaryModel)
+	}
+
+	// Test gemini alias
+	geminiYaml := `
+ai:
+  provider: "gemini"
+  api_key: "ai-test-key"
+`
+	cfg2, err := config.Parse([]byte(geminiYaml))
+	if err != nil {
+		t.Fatalf("unexpected error parsing gemini alias config: %v", err)
+	}
+	if cfg2.AI.Provider != "gemini" {
+		t.Errorf("expected provider gemini, got %s", cfg2.AI.Provider)
+	}
+}
+
 
 

@@ -51,6 +51,22 @@ func (m *mockAIClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 	return vec, nil
 }
 
+func (m *mockAIClient) GenerateBatchEmbeddings(ctx context.Context, texts []string) ([][]float32, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.embedCalled += len(texts)
+	if m.embeddingErr != nil {
+		return nil, m.embeddingErr
+	}
+	res := make([][]float32, len(texts))
+	for i := range texts {
+		vec := make([]float32, 256)
+		vec[0] = 1.0
+		res[i] = vec
+	}
+	return res, nil
+}
+
 func (m *mockAIClient) Chat(ctx context.Context, messages []ai.ChatMessage) (string, error) {
 	return "Mock chat response", nil
 }
@@ -82,6 +98,7 @@ func TestWorker_ProcessBatch_Success(t *testing.T) {
 		t.Fatalf("create book: %v", err)
 	}
 
+	var paras []*repository.Paragraph
 	for i := 1; i <= 3; i++ {
 		ch := &repository.Chapter{
 			BookID:       book.ID,
@@ -91,6 +108,17 @@ func TestWorker_ProcessBatch_Success(t *testing.T) {
 		if err := repo.CreateChapter(ctx, ch); err != nil {
 			t.Fatalf("create chapter %d: %v", i, err)
 		}
+		paras = append(paras, &repository.Paragraph{
+			BookID:         book.ID,
+			ChapterID:      ch.ID,
+			ChapterIndex:   i,
+			StartParagraph: 1,
+			EndParagraph:   1,
+			Content:        ch.ContentPlain,
+		})
+	}
+	if err := repo.CreateParagraphs(ctx, paras); err != nil {
+		t.Fatalf("create paragraphs: %v", err)
 	}
 
 	aiMock := &mockAIClient{}
@@ -105,15 +133,15 @@ func TestWorker_ProcessBatch_Success(t *testing.T) {
 		t.Fatalf("process batch: %v", err)
 	}
 	if count != 3 {
-		t.Fatalf("expected 3 chapters processed, got %d", count)
+		t.Fatalf("expected 3 paragraphs processed, got %d", count)
 	}
 
-	unindexed, err := repo.GetUnindexedChapters(ctx, 10)
+	unindexed, err := repo.GetUnindexedParagraphs(ctx, 10)
 	if err != nil {
 		t.Fatalf("get unindexed: %v", err)
 	}
 	if len(unindexed) != 0 {
-		t.Fatalf("expected 0 unindexed chapters, got %d", len(unindexed))
+		t.Fatalf("expected 0 unindexed paragraphs, got %d", len(unindexed))
 	}
 
 	// Verify second run processes 0
@@ -122,7 +150,7 @@ func TestWorker_ProcessBatch_Success(t *testing.T) {
 		t.Fatalf("process batch 2: %v", err)
 	}
 	if count2 != 0 {
-		t.Fatalf("expected 0 chapters processed on second run, got %d", count2)
+		t.Fatalf("expected 0 paragraphs processed on second run, got %d", count2)
 	}
 }
 
@@ -131,25 +159,6 @@ func TestWorker_ProcessBatch_EmptyContent(t *testing.T) {
 	db, repo := setupTestDB(t)
 	defer db.Close()
 	defer repo.Close()
-
-	book := &repository.Book{
-		Title:    "Empty Notes",
-		FilePath: "Author/Book/Book.epub",
-	}
-	if err := repo.CreateBook(ctx, book); err != nil {
-		t.Fatalf("create book: %v", err)
-	}
-
-	title := "Frontispiece"
-	ch := &repository.Chapter{
-		BookID:       book.ID,
-		ChapterIndex: 1,
-		Title:        &title,
-		ContentPlain: "   \n\t  ",
-	}
-	if err := repo.CreateChapter(ctx, ch); err != nil {
-		t.Fatalf("create chapter: %v", err)
-	}
 
 	aiMock := &mockAIClient{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -160,18 +169,10 @@ func TestWorker_ProcessBatch_EmptyContent(t *testing.T) {
 
 	count, err := w.ProcessBatch(ctx)
 	if err != nil {
-		t.Fatalf("process batch with empty content: %v", err)
+		t.Fatalf("process batch with empty db: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("expected 1 chapter processed, got %d", count)
-	}
-
-	fetched, err := repo.GetChapterByID(ctx, ch.ID)
-	if err != nil {
-		t.Fatalf("get chapter: %v", err)
-	}
-	if fetched.Summary == "" {
-		t.Errorf("expected non-empty summary for empty content chapter")
+	if count != 0 {
+		t.Fatalf("expected 0 processed, got %d", count)
 	}
 }
 
@@ -198,23 +199,6 @@ func TestWorker_ProcessBatch_AiErrors(t *testing.T) {
 		t.Fatalf("create chapter: %v", err)
 	}
 
-	// 1. Summarization error
-	aiMock := &mockAIClient{summaryErr: errors.New("upstream LLM timeout")}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	w := worker.NewWorker(repo, aiMock, worker.Config{
-		BatchSize: 10,
-		Logger:    logger,
-	})
-
-	count, err := w.ProcessBatch(ctx)
-	if err != nil {
-		t.Fatalf("expected no fatal error on summarization failure, got %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("expected 0 processed due to error, got %d", count)
-	}
-
-	// 2. Embedding error on paragraph
 	para := &repository.Paragraph{
 		BookID:         book.ID,
 		ChapterID:      ch.ID,
@@ -227,11 +211,16 @@ func TestWorker_ProcessBatch_AiErrors(t *testing.T) {
 		t.Fatalf("create paragraph: %v", err)
 	}
 
-	aiMock.summaryErr = nil
-	aiMock.embeddingErr = errors.New("upstream embedding failed")
-	count, err = w.ProcessBatch(ctx)
-	if err != nil {
-		t.Fatalf("expected no fatal error on embedding failure, got %v", err)
+	aiMock := &mockAIClient{embeddingErr: errors.New("upstream embedding failed")}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w := worker.NewWorker(repo, aiMock, worker.Config{
+		BatchSize: 10,
+		Logger:    logger,
+	})
+
+	count, err := w.ProcessBatch(ctx)
+	if err == nil {
+		t.Fatalf("expected error on embedding failure, got nil")
 	}
 	if count != 0 {
 		t.Fatalf("expected 0 processed due to embedding error, got %d", count)
@@ -263,11 +252,23 @@ func TestWorker_BackgroundTriggerAndStop(t *testing.T) {
 		t.Fatalf("create chapter: %v", err)
 	}
 
+	para := &repository.Paragraph{
+		BookID:         book.ID,
+		ChapterID:      ch.ID,
+		ChapterIndex:   1,
+		StartParagraph: 1,
+		EndParagraph:   1,
+		Content:        ch.ContentPlain,
+	}
+	if err := repo.CreateParagraphs(ctx, []*repository.Paragraph{para}); err != nil {
+		t.Fatalf("create paragraph: %v", err)
+	}
+
 	aiMock := &mockAIClient{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	w := worker.NewWorker(repo, aiMock, worker.Config{
 		BatchSize:    10,
-		PollInterval: 500 * time.Millisecond,
+		PollInterval: 50 * time.Millisecond,
 		Logger:       logger,
 	})
 
@@ -278,16 +279,16 @@ func TestWorker_BackgroundTriggerAndStop(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	success := false
 	for time.Now().Before(deadline) {
-		unindexed, err := repo.GetUnindexedChapters(ctx, 10)
+		unindexed, err := repo.GetUnindexedParagraphs(ctx, 10)
 		if err == nil && len(unindexed) == 0 {
 			success = true
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	if !success {
-		t.Fatalf("expected chapter to be processed by background worker via trigger")
+		t.Fatalf("expected paragraph to be processed by background worker via trigger")
 	}
 
 	w.Stop()
@@ -363,6 +364,13 @@ func (c *callbackAIClient) GenerateEmbedding(ctx context.Context, text string) (
 		c.onGenerateEmbedding()
 	}
 	return c.mockAIClient.GenerateEmbedding(ctx, text)
+}
+
+func (c *callbackAIClient) GenerateBatchEmbeddings(ctx context.Context, texts []string) ([][]float32, error) {
+	if c.onGenerateEmbedding != nil {
+		c.onGenerateEmbedding()
+	}
+	return c.mockAIClient.GenerateBatchEmbeddings(ctx, texts)
 }
 
 func TestWorker_ProcessParagraphs_SetsCurrentBookTitle(t *testing.T) {

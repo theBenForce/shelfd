@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -119,73 +118,13 @@ func (w *Worker) broadcast() {
 	}
 }
 
-// ProcessBatch fetches a batch of unindexed items and persists embeddings or summaries.
-// It prioritizes embedding unindexed paragraphs (for fast vector search),
-// and secondarily generates chapter summaries when paragraphs are indexed.
+// ProcessBatch fetches a batch of unindexed paragraphs and persists their vector embeddings.
 func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
-	// 1. Process unindexed paragraphs first (fast vector embedding)
 	unindexedParas, err := w.repo.GetUnindexedParagraphs(ctx, w.batchSize)
-	if err == nil && len(unindexedParas) > 0 {
-		defer func() {
-			w.statusMu.Lock()
-			w.isBusy = false
-			w.currentBook = ""
-			w.currentChapter = ""
-			w.statusMu.Unlock()
-			w.broadcast()
-		}()
-
-		bookTitles := make(map[string]string)
-		processed := 0
-		for _, p := range unindexedParas {
-			if err := ctx.Err(); err != nil {
-				return processed, err
-			}
-
-			bookTitle, ok := bookTitles[p.BookID]
-			if !ok {
-				if book, err := w.repo.GetBookByID(ctx, p.BookID); err == nil && book != nil && book.Title != "" {
-					bookTitle = book.Title
-				} else {
-					bookTitle = p.BookID
-				}
-				bookTitles[p.BookID] = bookTitle
-			}
-
-			w.statusMu.Lock()
-			w.isBusy = true
-			w.currentBook = bookTitle
-			w.currentChapter = fmt.Sprintf("Chapter %d (p.%d-%d)", p.ChapterIndex, p.StartParagraph, p.EndParagraph)
-			w.statusMu.Unlock()
-			w.broadcast()
-
-			embedding, err := w.aiClient.GenerateEmbedding(ctx, p.Content)
-			if err != nil {
-				w.logger.Error("failed to generate embedding for paragraph", "paragraph_id", p.ID, "error", err)
-				continue
-			}
-
-			if err := w.repo.InsertParagraphVector(ctx, p.ID, embedding); err != nil {
-				w.logger.Error("failed to insert paragraph vector", "paragraph_id", p.ID, "error", err)
-				continue
-			}
-
-			w.statusMu.Lock()
-			w.lastProcessed = time.Now()
-			w.statusMu.Unlock()
-			w.broadcast()
-
-			processed++
-		}
-		return processed, nil
-	}
-
-	// 2. Process unindexed chapters (generative summarization)
-	chapters, err := w.repo.GetUnindexedChapters(ctx, w.batchSize)
 	if err != nil {
-		return 0, fmt.Errorf("getting unindexed chapters: %w", err)
+		return 0, fmt.Errorf("getting unindexed paragraphs: %w", err)
 	}
-	if len(chapters) == 0 {
+	if len(unindexedParas) == 0 {
 		return 0, nil
 	}
 
@@ -198,68 +137,57 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 		w.broadcast()
 	}()
 
-	bookTitles := make(map[string]string)
-	processed := 0
-	for _, ch := range chapters {
-		if err := ctx.Err(); err != nil {
-			return processed, err
-		}
-
-		title := ""
-		if ch.Title != nil {
-			title = *ch.Title
-		}
-
-		bookTitle, ok := bookTitles[ch.BookID]
-		if !ok {
-			if book, err := w.repo.GetBookByID(ctx, ch.BookID); err == nil && book != nil && book.Title != "" {
-				bookTitle = book.Title
-			} else {
-				bookTitle = ch.BookID
-			}
-			bookTitles[ch.BookID] = bookTitle
-		}
-
-		w.statusMu.Lock()
-		w.isBusy = true
-		w.currentBook = bookTitle
-		w.currentChapter = title
-		w.statusMu.Unlock()
-		w.broadcast()
-
-		content := strings.TrimSpace(ch.ContentPlain)
-		if content == "" {
-			if title != "" {
-				content = title
-			} else {
-				content = "Untitled section"
-			}
-		}
-
-		summary, err := w.aiClient.SummarizeChapter(ctx, title, content)
-		if err != nil {
-			w.logger.Error("failed to summarize chapter", "chapter_id", ch.ID, "error", err)
-			continue
-		}
-		summary = strings.TrimSpace(summary)
-		if summary == "" {
-			summary = "No summary available."
-		}
-
-		if err := w.repo.UpdateChapterSummary(ctx, ch.ID, summary); err != nil {
-			w.logger.Error("failed to update chapter summary", "chapter_id", ch.ID, "error", err)
-			continue
-		}
-
-		w.statusMu.Lock()
-		w.lastProcessed = time.Now()
-		w.statusMu.Unlock()
-		w.broadcast()
-
-		processed++
+	pFirst := unindexedParas[0]
+	bookTitle := pFirst.BookID
+	if book, err := w.repo.GetBookByID(ctx, pFirst.BookID); err == nil && book != nil && book.Title != "" {
+		bookTitle = book.Title
 	}
 
-	return processed, nil
+	w.statusMu.Lock()
+	w.isBusy = true
+	w.currentBook = bookTitle
+	if len(unindexedParas) == 1 {
+		w.currentChapter = fmt.Sprintf("Chapter %d (p.%d-%d)", pFirst.ChapterIndex, pFirst.StartParagraph, pFirst.EndParagraph)
+	} else {
+		w.currentChapter = fmt.Sprintf("Chapter %d (%d paragraphs)", pFirst.ChapterIndex, len(unindexedParas))
+	}
+	w.statusMu.Unlock()
+	w.broadcast()
+
+	texts := make([]string, len(unindexedParas))
+	for i, p := range unindexedParas {
+		texts[i] = p.Content
+	}
+
+	embeddings, err := w.aiClient.GenerateBatchEmbeddings(ctx, texts)
+	if err != nil {
+		w.logger.Error("failed to generate batch embeddings for paragraphs", "count", len(texts), "error", err)
+		return 0, err
+	}
+
+	if len(embeddings) != len(unindexedParas) {
+		return 0, fmt.Errorf("expected %d embeddings, got %d", len(unindexedParas), len(embeddings))
+	}
+
+	vectorBatch := make([]repository.ParagraphVector, len(unindexedParas))
+	for i, p := range unindexedParas {
+		vectorBatch[i] = repository.ParagraphVector{
+			ParagraphID: p.ID,
+			Embedding:   embeddings[i],
+		}
+	}
+
+	if err := w.repo.InsertParagraphVectors(ctx, vectorBatch); err != nil {
+		w.logger.Error("failed to insert paragraph vectors", "count", len(vectorBatch), "error", err)
+		return 0, err
+	}
+
+	w.statusMu.Lock()
+	w.lastProcessed = time.Now()
+	w.statusMu.Unlock()
+	w.broadcast()
+
+	return len(unindexedParas), nil
 }
 
 // Trigger signals the worker to immediately process pending chapters.

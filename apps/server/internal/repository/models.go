@@ -124,6 +124,12 @@ type Paragraph struct {
 	CreatedAt      time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
+// ParagraphVector maps a paragraph identifier to its computed embedding vector.
+type ParagraphVector struct {
+	ParagraphID string
+	Embedding   []float32
+}
+
 // SearchHit represents a vector or full-text search result across paragraphs.
 type SearchHit struct {
 	BookID         string   `json:"book_id"`

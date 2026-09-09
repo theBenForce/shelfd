@@ -1314,23 +1314,52 @@ func (r *SQLiteStorageEngine) DeleteParagraphsByBookID(ctx context.Context, book
 	return nil
 }
 
-func (r *SQLiteStorageEngine) InsertParagraphVector(ctx context.Context, paragraphID string, embedding []float32) error {
-	blob, err := sqlite_vec.SerializeFloat32(embedding)
-	if err != nil {
-		return fmt.Errorf("serializing embedding: %w", err)
+func (r *SQLiteStorageEngine) InsertParagraphVectors(ctx context.Context, items []ParagraphVector) error {
+	if len(items) == 0 {
+		return nil
 	}
 
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM vec_paragraphs WHERE paragraph_id = ?", paragraphID)
-
-	query := `
-		INSERT INTO vec_paragraphs (paragraph_id, embedding)
-		VALUES (?, ?)
-	`
-	_, err = r.db.ExecContext(ctx, query, paragraphID, blob)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("inserting paragraph vector: %w", err)
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	delStmt, err := tx.PrepareContext(ctx, "DELETE FROM vec_paragraphs WHERE paragraph_id = ?")
+	if err != nil {
+		return fmt.Errorf("preparing delete stmt: %w", err)
+	}
+	defer delStmt.Close()
+
+	insStmt, err := tx.PrepareContext(ctx, "INSERT INTO vec_paragraphs (paragraph_id, embedding) VALUES (?, ?)")
+	if err != nil {
+		return fmt.Errorf("preparing insert stmt: %w", err)
+	}
+	defer insStmt.Close()
+
+	for _, item := range items {
+		blob, err := sqlite_vec.SerializeFloat32(item.Embedding)
+		if err != nil {
+			return fmt.Errorf("serializing embedding: %w", err)
+		}
+
+		if _, err := delStmt.ExecContext(ctx, item.ParagraphID); err != nil {
+			return fmt.Errorf("deleting existing paragraph vector: %w", err)
+		}
+
+		if _, err := insStmt.ExecContext(ctx, item.ParagraphID, blob); err != nil {
+			return fmt.Errorf("inserting paragraph vector: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing batch paragraph vectors: %w", err)
 	}
 	return nil
+}
+
+func (r *SQLiteStorageEngine) InsertParagraphVector(ctx context.Context, paragraphID string, embedding []float32) error {
+	return r.InsertParagraphVectors(ctx, []ParagraphVector{{ParagraphID: paragraphID, Embedding: embedding}})
 }
 
 func (r *SQLiteStorageEngine) SearchVectorParagraphs(ctx context.Context, queryEmbedding []float32, filter SearchFilter) ([]*SearchHit, error) {

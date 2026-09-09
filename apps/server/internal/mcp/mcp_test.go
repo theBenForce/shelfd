@@ -52,6 +52,18 @@ func (m *mockAIClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 	return vec, nil
 }
 
+func (m *mockAIClient) GenerateBatchEmbeddings(ctx context.Context, texts []string) ([][]float32, error) {
+	res := make([][]float32, len(texts))
+	for i, t := range texts {
+		emb, err := m.GenerateEmbedding(ctx, t)
+		if err != nil {
+			return nil, err
+		}
+		res[i] = emb
+	}
+	return res, nil
+}
+
 func (m *mockAIClient) Chat(ctx context.Context, messages []ai.ChatMessage) (string, error) {
 	return "Standard MCP AI response", nil
 }

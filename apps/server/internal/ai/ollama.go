@@ -27,9 +27,12 @@ func NewOllamaClient(cfg *config.AIConfig) *OllamaClient {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
-	summaryModel := cfg.SummaryModel
-	if summaryModel == "" {
-		summaryModel = "llama3.2:3b"
+	chatModel := cfg.ChatModel
+	if chatModel == "" {
+		chatModel = cfg.SummaryModel
+	}
+	if chatModel == "" {
+		chatModel = "llama3.2:3b"
 	}
 	embeddingModel := cfg.EmbeddingModel
 	if embeddingModel == "" {
@@ -42,7 +45,7 @@ func NewOllamaClient(cfg *config.AIConfig) *OllamaClient {
 
 	return &OllamaClient{
 		baseURL:             baseURL,
-		summaryModel:        summaryModel,
+		summaryModel:        chatModel,
 		embeddingModel:      embeddingModel,
 		embeddingDimensions: embeddingDimensions,
 		httpClient:          &http.Client{Timeout: defaultTimeout},
@@ -126,6 +129,65 @@ func (c *OllamaClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 	}
 
 	return NormalizeAndTruncateMRL(res.Embedding, c.embeddingDimensions), nil
+}
+
+func (c *OllamaClient) GenerateBatchEmbeddings(ctx context.Context, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+
+	chunks := ChunkTexts(texts, 50)
+	var allEmbeddings [][]float32
+
+	for _, chunk := range chunks {
+		payload := map[string]interface{}{
+			"model": c.embeddingModel,
+			"input": chunk,
+		}
+
+		bodyBytes, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling ollama batch embedding request: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/embed", bytes.NewReader(bodyBytes))
+		if err != nil {
+			return nil, fmt.Errorf("creating request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("sending ollama batch embedding request: %w", err)
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			var res struct {
+				Embeddings [][]float32 `json:"embeddings"`
+			}
+			err := json.NewDecoder(resp.Body).Decode(&res)
+			resp.Body.Close()
+			if err == nil && len(res.Embeddings) == len(chunk) {
+				for _, emb := range res.Embeddings {
+					allEmbeddings = append(allEmbeddings, NormalizeAndTruncateMRL(emb, c.embeddingDimensions))
+				}
+				continue
+			}
+		} else {
+			resp.Body.Close()
+		}
+
+		// Fallback for older Ollama daemon without /api/embed endpoint
+		for _, t := range chunk {
+			emb, err := c.GenerateEmbedding(ctx, t)
+			if err != nil {
+				return nil, err
+			}
+			allEmbeddings = append(allEmbeddings, emb)
+		}
+	}
+
+	return allEmbeddings, nil
 }
 
 func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {

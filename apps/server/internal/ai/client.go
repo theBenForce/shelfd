@@ -42,11 +42,31 @@ type ChatMessage struct {
 	Content string `json:"content"`
 }
 
-// Client defines the universal interface for LLM summarization, vector embedding generation, and chat.
+// Client defines the universal interface for LLM chat, chapter summarization, and batch vector embedding generation.
 type Client interface {
 	SummarizeChapter(ctx context.Context, title, content string) (string, error)
 	GenerateEmbedding(ctx context.Context, text string) ([]float32, error)
+	GenerateBatchEmbeddings(ctx context.Context, texts []string) ([][]float32, error)
 	Chat(ctx context.Context, messages []ChatMessage) (string, error)
+}
+
+// ChunkTexts partitions a slice of strings into chunks of at most maxBatchSize.
+func ChunkTexts(texts []string, maxBatchSize int) [][]string {
+	if len(texts) == 0 {
+		return nil
+	}
+	if maxBatchSize <= 0 || len(texts) <= maxBatchSize {
+		return [][]string{texts}
+	}
+	var chunks [][]string
+	for i := 0; i < len(texts); i += maxBatchSize {
+		end := i + maxBatchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		chunks = append(chunks, texts[i:end])
+	}
+	return chunks
 }
 
 // SystemSummarizePrompt defines the prompt constraints for chapter summarization.
@@ -98,6 +118,8 @@ func NewClient(cfg *config.AIConfig) (Client, error) {
 		return NewOllamaClient(cfg), nil
 	case "openai":
 		return NewOpenAIClient(cfg), nil
+	case "google", "gemini":
+		return NewGoogleClient(cfg), nil
 	default:
 		return nil, fmt.Errorf("unsupported ai provider: %s", cfg.Provider)
 	}

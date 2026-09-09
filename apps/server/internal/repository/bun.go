@@ -795,33 +795,53 @@ func (r *BunStorageEngine) SearchVectorChapters(ctx context.Context, queryEmbedd
 	return r.SearchVectorParagraphs(ctx, queryEmbedding, filter)
 }
 
-func (r *BunStorageEngine) InsertParagraphVector(ctx context.Context, paragraphID string, embedding []float32) error {
-	if r.isPG() {
-		vec := pgvector.NewVector(embedding)
-		_, err := r.db.ExecContext(ctx, `
-			INSERT INTO vec_paragraphs (paragraph_id, embedding)
-			VALUES (?, ?)
-			ON CONFLICT (paragraph_id) DO UPDATE SET embedding = EXCLUDED.embedding
-		`, paragraphID, vec)
-		if err != nil {
-			return fmt.Errorf("inserting postgres paragraph vector: %w", err)
-		}
+func (r *BunStorageEngine) InsertParagraphVectors(ctx context.Context, items []ParagraphVector) error {
+	if len(items) == 0 {
 		return nil
 	}
 
-	// SQLite
-	blob, err := sqlite_vec.SerializeFloat32(embedding)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("serializing embedding: %w", err)
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if r.isPG() {
+		query := `
+			INSERT INTO vec_paragraphs (paragraph_id, embedding)
+			VALUES (?, ?)
+			ON CONFLICT (paragraph_id) DO UPDATE SET embedding = EXCLUDED.embedding
+		`
+		for _, item := range items {
+			vec := pgvector.NewVector(item.Embedding)
+			if _, err := tx.ExecContext(ctx, query, item.ParagraphID, vec); err != nil {
+				return fmt.Errorf("inserting postgres paragraph vector %s: %w", item.ParagraphID, err)
+			}
+		}
+		return tx.Commit()
 	}
 
-	_, _ = r.db.ExecContext(ctx, "DELETE FROM vec_paragraphs WHERE paragraph_id = ?", paragraphID)
-	query := `INSERT INTO vec_paragraphs (paragraph_id, embedding) VALUES (?, ?)`
-	_, err = r.db.ExecContext(ctx, query, paragraphID, blob)
-	if err != nil {
-		return fmt.Errorf("inserting sqlite paragraph vector: %w", err)
+	// SQLite
+	delQuery := "DELETE FROM vec_paragraphs WHERE paragraph_id = ?"
+	insQuery := "INSERT INTO vec_paragraphs (paragraph_id, embedding) VALUES (?, ?)"
+	for _, item := range items {
+		blob, err := sqlite_vec.SerializeFloat32(item.Embedding)
+		if err != nil {
+			return fmt.Errorf("serializing embedding for %s: %w", item.ParagraphID, err)
+		}
+		if _, err := tx.ExecContext(ctx, delQuery, item.ParagraphID); err != nil {
+			return fmt.Errorf("deleting sqlite paragraph vector %s: %w", item.ParagraphID, err)
+		}
+		if _, err := tx.ExecContext(ctx, insQuery, item.ParagraphID, blob); err != nil {
+			return fmt.Errorf("inserting sqlite paragraph vector %s: %w", item.ParagraphID, err)
+		}
 	}
-	return nil
+
+	return tx.Commit()
+}
+
+func (r *BunStorageEngine) InsertParagraphVector(ctx context.Context, paragraphID string, embedding []float32) error {
+	return r.InsertParagraphVectors(ctx, []ParagraphVector{{ParagraphID: paragraphID, Embedding: embedding}})
 }
 
 func (r *BunStorageEngine) SearchVectorParagraphs(ctx context.Context, queryEmbedding []float32, filter SearchFilter) ([]*SearchHit, error) {

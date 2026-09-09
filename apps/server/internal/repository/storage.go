@@ -63,6 +63,7 @@ type StorageEngine interface {
 	InsertChapterVector(ctx context.Context, chapterID string, embedding []float32) error
 	SearchVectorChapters(ctx context.Context, queryEmbedding []float32, filter SearchFilter) ([]*SearchHit, error)
 	InsertParagraphVector(ctx context.Context, paragraphID string, embedding []float32) error
+	InsertParagraphVectors(ctx context.Context, items []ParagraphVector) error
 	SearchVectorParagraphs(ctx context.Context, queryEmbedding []float32, filter SearchFilter) ([]*SearchHit, error)
 	SearchFTSParagraphs(ctx context.Context, query string, filter SearchFilter) ([]*SearchHit, error)
 
