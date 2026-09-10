@@ -8,6 +8,7 @@ node_modules/
 # Go
 dist/
 bin/
+tmp/
 *.exe
 *.test
 *.out

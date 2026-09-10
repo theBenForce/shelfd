@@ -21,7 +21,8 @@ func init() {
 
 func setCacheHeaders(w http.ResponseWriter, filename string) {
 	ext := strings.ToLower(filepath.Ext(filename))
-	if ext == ".html" || ext == "" {
+	base := strings.ToLower(filepath.Base(filename))
+	if ext == ".html" || ext == "" || base == "main.dart.js" || base == "flutter.js" || base == "flutter_bootstrap.js" || base == "flutter_service_worker.js" || base == "manifest.json" {
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")

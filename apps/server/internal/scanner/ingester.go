@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -144,7 +145,7 @@ func (in *Ingester) importNewBook(ctx context.Context, fullPath, relativePath st
 	}
 
 	// Link Authors
-	for _, a := range parsed.Authors {
+	for _, a := range resolveAuthors(parsed.Authors, relativePath) {
 		author, err := in.repo.UpsertAuthor(ctx, a.Name)
 		if err != nil {
 			continue
@@ -163,7 +164,8 @@ func (in *Ingester) importNewBook(ctx context.Context, fullPath, relativePath st
 
 	// Link Series
 	if parsed.Series != nil && parsed.Series.Name != "" {
-		series, err := in.repo.UpsertSeries(ctx, parsed.Series.Name, nil)
+		seriesName := CleanSeriesName(parsed.Series.Name)
+		series, err := in.repo.UpsertSeries(ctx, seriesName, nil)
 		if err == nil {
 			_ = in.repo.LinkBookSeries(ctx, book.ID, series.ID, parsed.Series.SequenceNumber)
 		}
@@ -223,7 +225,7 @@ func (in *Ingester) updateModifiedBook(ctx context.Context, book *repository.Boo
 	}
 
 	// Link Authors
-	for _, a := range parsed.Authors {
+	for _, a := range resolveAuthors(parsed.Authors, relativePath) {
 		author, err := in.repo.UpsertAuthor(ctx, a.Name)
 		if err != nil {
 			continue
@@ -242,7 +244,8 @@ func (in *Ingester) updateModifiedBook(ctx context.Context, book *repository.Boo
 
 	// Link Series
 	if parsed.Series != nil && parsed.Series.Name != "" {
-		series, err := in.repo.UpsertSeries(ctx, parsed.Series.Name, nil)
+		seriesName := CleanSeriesName(parsed.Series.Name)
+		series, err := in.repo.UpsertSeries(ctx, seriesName, nil)
 		if err == nil {
 			_ = in.repo.LinkBookSeries(ctx, book.ID, series.ID, parsed.Series.SequenceNumber)
 		}
@@ -434,5 +437,28 @@ func (in *Ingester) resolveCover(reader *epub.Reader, bookDirFull, bookDirRel, b
 		}
 	}
 
+	return nil
+}
+
+// CleanSeriesName normalizes series names, e.g. mapping "Percy Jackson and the Olympians" to "Percy Jackson".
+func CleanSeriesName(name string) string {
+	clean := strings.TrimSpace(name)
+	if strings.EqualFold(clean, "Percy Jackson and the Olympians") || strings.EqualFold(clean, "Percy Jackson & the Olympians") {
+		return "Percy Jackson"
+	}
+	return clean
+}
+
+func resolveAuthors(parsedAuthors []epub.ParsedAuthor, relativePath string) []epub.ParsedAuthor {
+	if len(parsedAuthors) > 0 {
+		return parsedAuthors
+	}
+	parts := strings.Split(filepath.ToSlash(relativePath), "/")
+	if len(parts) >= 2 {
+		dirAuthor := strings.TrimSpace(parts[0])
+		if dirAuthor != "" && !strings.EqualFold(dirAuthor, "Unknown") {
+			return []epub.ParsedAuthor{{Name: dirAuthor}}
+		}
+	}
 	return nil
 }

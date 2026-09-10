@@ -513,3 +513,75 @@ func TestIncrementalScanPreservesVectors(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanSeriesName(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"Percy Jackson and the Olympians", "Percy Jackson"},
+		{"Percy Jackson & the Olympians", "Percy Jackson"},
+		{"  Percy Jackson and the Olympians  ", "Percy Jackson"},
+		{"Harry Potter", "Harry Potter"},
+		{"Clifford the Big Red Dog", "Clifford the Big Red Dog"},
+	}
+
+	for _, tt := range tests {
+		got := scanner.CleanSeriesName(tt.input)
+		if got != tt.expected {
+			t.Errorf("CleanSeriesName(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestIngesterAuthorDirectoryFallback(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "shelfd-test-author-fallback-*")
+	if err != nil {
+		t.Fatalf("creating temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	db, err := database.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	if err := database.RunMigrations(context.Background(), db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	repo := repository.NewSQLiteStorageEngine(db)
+	defer repo.Close()
+
+	libraryDir := filepath.Join(tmpDir, "library")
+	dataDir := filepath.Join(tmpDir, "data")
+	bookDir := filepath.Join(libraryDir, "Ezra Klein", "Why We're Polarized")
+	if err := os.MkdirAll(bookDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Create EPUB without author
+	epubBytes := createSampleEPUB("Why We're Polarized", "", "Politics", "", 0)
+	bookPath := filepath.Join(bookDir, "Why We're Polarized.epub")
+	if err := os.WriteFile(bookPath, epubBytes, 0644); err != nil {
+		t.Fatalf("write epub: %v", err)
+	}
+
+	ingester := scanner.NewIngester(repo, libraryDir, dataDir)
+	relPath := filepath.Join("Ezra Klein", "Why We're Polarized", "Why We're Polarized.epub")
+	book, err := ingester.IngestFile(context.Background(), bookPath, relPath)
+	if err != nil {
+		t.Fatalf("IngestFile failed: %v", err)
+	}
+
+	authors, err := repo.GetBookAuthors(context.Background(), book.ID)
+	if err != nil {
+		t.Fatalf("GetBookAuthors failed: %v", err)
+	}
+
+	if len(authors) != 1 || authors[0].Name != "Ezra Klein" {
+		t.Fatalf("expected fallback author 'Ezra Klein', got: %+v", authors)
+	}
+}
