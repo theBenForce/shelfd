@@ -197,89 +197,94 @@ void main() {
       expect(find.byType(SettingsView), findsOneWidget);
     });
 
-    testWidgets('renders SeriesDetailView on /series/:seriesId subroute', (tester) async {
+    testWidgets('renders SeriesDetailView on /series/:seriesId subroute with AppShell', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/series/s-1?name=Test+Series'));
       await tester.pumpAndSettle();
 
       expect(find.byType(SeriesDetailView), findsOneWidget);
-      expect(find.byType(AppShell), findsNothing);
+      expect(find.byType(AppShell), findsOneWidget);
     });
 
-    testWidgets('renders AuthorDetailView on /author/:authorId subroute', (tester) async {
+    testWidgets('renders AuthorDetailView on /author/:authorId subroute with AppShell', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/author/a-1?name=Test+Author'));
       await tester.pumpAndSettle();
 
       expect(find.byType(AuthorDetailView), findsOneWidget);
-      expect(find.byType(AppShell), findsNothing);
+      expect(find.byType(AppShell), findsOneWidget);
     });
 
-    testWidgets('renders AuthorDetailView on /authors/:authorId subroute', (tester) async {
+    testWidgets('renders AuthorDetailView on /authors/:authorId subroute with AppShell', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/authors/a-1?name=Test+Author'));
       await tester.pumpAndSettle();
 
       expect(find.byType(AuthorDetailView), findsOneWidget);
-      expect(find.byType(AppShell), findsNothing);
+      expect(find.byType(AppShell), findsOneWidget);
     });
 
-    testWidgets('redirects /authors/:authorId to AuthorDetailView', (tester) async {
+    testWidgets('redirects /authors/:authorId to AuthorDetailView with AppShell', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/authors/a-1'));
       await tester.pumpAndSettle();
 
       expect(find.byType(AuthorDetailView), findsOneWidget);
+      expect(find.byType(AppShell), findsOneWidget);
     });
 
-    testWidgets('renders BookDetailView on /books/:bookId', (tester) async {
+    testWidgets('renders BookDetailView on /books/:bookId with AppShell', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/books/book-1'));
       await tester.pumpAndSettle();
 
       expect(find.byType(BookDetailView), findsOneWidget);
-      expect(find.byType(AppShell), findsNothing);
+      expect(find.byType(AppShell), findsOneWidget);
     });
 
-    testWidgets('renders ReaderView on /books/:bookId/read subroute', (tester) async {
+    testWidgets('renders ReaderView on /books/:bookId/read subroute (fullscreen without AppShell)', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/books/book-1/read'));
       await tester.pumpAndSettle();
 
       expect(find.byType(ReaderView), findsOneWidget);
+      expect(find.byType(AppShell), findsNothing);
     });
 
-    testWidgets('renders ReaderView on /books/:bookId/read/:chapterIdentifier subroute', (tester) async {
+    testWidgets('renders ReaderView on /books/:bookId/read/:chapterIdentifier subroute (fullscreen without AppShell)', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/books/book-1/read/ch-2'));
       await tester.pumpAndSettle();
 
       expect(find.byType(ReaderView), findsOneWidget);
+      expect(find.byType(AppShell), findsNothing);
     });
 
-    testWidgets('redirects /book/:bookId to /books/:bookId', (tester) async {
+    testWidgets('redirects /book/:bookId to /books/:bookId with AppShell', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/book/book-1'));
       await tester.pumpAndSettle();
 
       expect(find.byType(BookDetailView), findsOneWidget);
-      expect(find.byType(AppShell), findsNothing);
+      expect(find.byType(AppShell), findsOneWidget);
     });
 
-    testWidgets('redirects /reader/:bookId to /book/:bookId', (tester) async {
+    testWidgets('redirects /reader/:bookId to /book/:bookId with AppShell', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/reader/book-1'));
       await tester.pumpAndSettle();
 
       expect(find.byType(BookDetailView), findsOneWidget);
+      expect(find.byType(AppShell), findsOneWidget);
     });
 
-    testWidgets('redirects /reader/:bookId/read to /book/:bookId/read', (tester) async {
+    testWidgets('redirects /reader/:bookId/read to /book/:bookId/read (fullscreen without AppShell)', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/reader/book-1/read'));
       await tester.pumpAndSettle();
 
       expect(find.byType(ReaderView), findsOneWidget);
+      expect(find.byType(AppShell), findsNothing);
     });
   });
 }

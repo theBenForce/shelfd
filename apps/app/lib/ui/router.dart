@@ -41,7 +41,7 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
         },
       ),
 
-      // ShellRoute: wraps primary tabs (/books, /series, /authors, /search, /settings) in persistent AppShell
+      // ShellRoute: wraps primary tabs and detail pages in persistent AppShell
       ShellRoute(
         builder: (context, state, child) => AppShell(child: child),
         routes: [
@@ -54,18 +54,55 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
                 initialFilter: filter,
               );
             },
+            routes: [
+              GoRoute(
+                path: ':bookId',
+                builder: (context, state) {
+                  final bookId = state.pathParameters['bookId'] ?? '';
+                  return BookDetailView(
+                    bookId: bookId,
+                  );
+                },
+              ),
+            ],
           ),
           GoRoute(
             path: '/series',
             builder: (context, state) => const LibraryView(
               mode: LibraryViewMode.series,
             ),
+            routes: [
+              GoRoute(
+                path: ':seriesId',
+                builder: (context, state) {
+                  final seriesId = state.pathParameters['seriesId'] ?? '';
+                  final seriesName = state.uri.queryParameters['name'];
+                  return SeriesDetailView(
+                    seriesId: seriesId,
+                    seriesName: seriesName,
+                  );
+                },
+              ),
+            ],
           ),
           GoRoute(
             path: '/authors',
             builder: (context, state) => const LibraryView(
               mode: LibraryViewMode.authors,
             ),
+            routes: [
+              GoRoute(
+                path: ':authorId',
+                builder: (context, state) {
+                  final authorId = state.pathParameters['authorId'] ?? '';
+                  final authorName = state.uri.queryParameters['name'];
+                  return AuthorDetailView(
+                    authorId: authorId,
+                    authorName: authorName,
+                  );
+                },
+              ),
+            ],
           ),
           GoRoute(
             path: '/search',
@@ -78,15 +115,40 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
         ],
       ),
 
-      // Series detail route
+      // Reader fullscreen routes (outside ShellRoute for distraction-free reading)
       GoRoute(
-        path: '/series/:seriesId',
+        path: '/books/:bookId/read',
         builder: (context, state) {
-          final seriesId = state.pathParameters['seriesId'] ?? '';
-          final seriesName = state.uri.queryParameters['name'];
-          return SeriesDetailView(
-            seriesId: seriesId,
-            seriesName: seriesName,
+          final bookId = state.pathParameters['bookId'] ?? '';
+          return ReaderView(
+            bookId: bookId,
+          );
+        },
+        routes: [
+          GoRoute(
+            path: ':chapterIdentifier',
+            builder: (context, state) {
+              final bookId = state.pathParameters['bookId'] ?? '';
+              final chapterIdentifier = state.pathParameters['chapterIdentifier'];
+              return ReaderView(
+                bookId: bookId,
+                chapterIdentifier: chapterIdentifier,
+              );
+            },
+          ),
+        ],
+      ),
+      GoRoute(
+        path: '/books/:bookId/:chapterIdentifier',
+        builder: (context, state) {
+          final bookId = state.pathParameters['bookId'] ?? '';
+          final chapterIdentifier = state.pathParameters['chapterIdentifier'];
+          if (chapterIdentifier == 'read') {
+            return ReaderView(bookId: bookId);
+          }
+          return ReaderView(
+            bookId: bookId,
+            chapterIdentifier: chapterIdentifier,
           );
         },
       ),
@@ -102,66 +164,6 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
           final query = state.uri.hasQuery ? '?${state.uri.query}' : '';
           return '/authors/${state.pathParameters['authorId']}$query';
         },
-      ),
-      GoRoute(
-        path: '/authors/:authorId',
-        builder: (context, state) {
-          final authorId = state.pathParameters['authorId'] ?? '';
-          final authorName = state.uri.queryParameters['name'];
-          return AuthorDetailView(
-            authorId: authorId,
-            authorName: authorName,
-          );
-        },
-      ),
-
-      // Book hierarchy with nested subroutes for reading and chapters
-      GoRoute(
-        path: '/books/:bookId',
-        builder: (context, state) {
-          final bookId = state.pathParameters['bookId'] ?? '';
-          return BookDetailView(
-            bookId: bookId,
-          );
-        },
-        routes: [
-          GoRoute(
-            path: 'read',
-            builder: (context, state) {
-              final bookId = state.pathParameters['bookId'] ?? '';
-              return ReaderView(
-                bookId: bookId,
-              );
-            },
-            routes: [
-              GoRoute(
-                path: ':chapterIdentifier',
-                builder: (context, state) {
-                  final bookId = state.pathParameters['bookId'] ?? '';
-                  final chapterIdentifier = state.pathParameters['chapterIdentifier'];
-                  return ReaderView(
-                    bookId: bookId,
-                    chapterIdentifier: chapterIdentifier,
-                  );
-                },
-              ),
-            ],
-          ),
-          GoRoute(
-            path: ':chapterIdentifier',
-            builder: (context, state) {
-              final bookId = state.pathParameters['bookId'] ?? '';
-              final chapterIdentifier = state.pathParameters['chapterIdentifier'];
-              if (chapterIdentifier == 'read') {
-                return ReaderView(bookId: bookId);
-              }
-              return ReaderView(
-                bookId: bookId,
-                chapterIdentifier: chapterIdentifier,
-              );
-            },
-          ),
-        ],
       ),
 
       // Backwards compatibility redirects for legacy /book routes
