@@ -42,6 +42,8 @@ func main() {
 	scanFlag := flag.Bool("scan", false, "Scan library directory for books and exit")
 	flag.Parse()
 
+	envPath := config.LoadDotEnv()
+
 	configPath := config.ResolveConfigPath(*configFlag)
 
 	var cfg *config.Config
@@ -85,6 +87,10 @@ func main() {
 
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
+
+	if envPath != "" {
+		logger.Info("Loaded environment variables from file", "path", envPath)
+	}
 
 	if configPath != "" {
 		logger.Info("Loaded configuration", "path", configPath)

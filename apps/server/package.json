@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "mkdir -p dist && go build -tags sqlite_fts5 -v -o dist/shelfd ./cmd/server",
-    "dev": "air",
+    "dev": "./scripts/dev.sh",
     "test": "go test -tags sqlite_fts5 -ldflags=\"-linkmode=external\" -v ./...",
     "lint": "go vet -tags sqlite_fts5 ./...",
     "clean": "rm -rf dist"

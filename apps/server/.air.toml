@@ -5,8 +5,8 @@ tmp_dir = "tmp"
 [build]
   cmd = "go build -tags sqlite_fts5 -o ./tmp/main ./cmd/server"
   bin = "./tmp/main"
-  full_bin = ""
-  include_ext = ["go", "tpl", "tmpl", "html", "yaml", "yml", "json"]
+  include_ext = ["go", "tpl", "tmpl", "html", "yaml", "yml", "json", "env"]
+  env_files = [".env", "../../.env"]
   exclude_dir = ["assets", "tmp", "vendor", "testdata", "bin", "dist"]
   include_dir = []
   exclude_file = []
