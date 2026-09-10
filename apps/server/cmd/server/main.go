@@ -197,7 +197,9 @@ func main() {
 			BasePath: cfg.MCP.Path,
 			Logger:   logger,
 		})
-		mux.Handle(cfg.MCP.Path+"/", api.CORSMiddleware(mcpServer.Routes()))
+		mcpHandler := api.CORSMiddleware(mcpServer.Routes())
+		mux.Handle(cfg.MCP.Path, mcpHandler)
+		mux.Handle(cfg.MCP.Path+"/", mcpHandler)
 		logger.Info("MCP Server enabled", "path", cfg.MCP.Path)
 	}
 

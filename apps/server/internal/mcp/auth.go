@@ -51,6 +51,7 @@ func AuthMiddleware(repo repository.StorageEngine) func(http.Handler) http.Handl
 			}
 
 			if rawToken == "" {
+				w.Header().Set("WWW-Authenticate", `Bearer error="missing_token"`)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
 				w.Write([]byte(`{"error":"missing authorization token"}`))
@@ -59,18 +60,11 @@ func AuthMiddleware(repo repository.StorageEngine) func(http.Handler) http.Handl
 
 			tokenHash := HashToken(rawToken)
 			storedToken, err := repo.GetAPITokenByHash(r.Context(), tokenHash)
-			if err != nil || storedToken == nil {
+			if err != nil || storedToken == nil || subtle.ConstantTimeCompare([]byte(storedToken.TokenHash), []byte(tokenHash)) != 1 {
+				w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
 				w.Write([]byte(`{"error":"invalid or expired token"}`))
-				return
-			}
-
-			// Perform constant-time comparison to prevent timing attacks
-			if subtle.ConstantTimeCompare([]byte(storedToken.TokenHash), []byte(tokenHash)) != 1 {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte(`{"error":"invalid token"}`))
 				return
 			}
 
