@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shelfd/shelfd/internal/epub"
+	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 )
@@ -18,6 +19,7 @@ import (
 // UploadWorkerConfig defines configuration parameters for the upload background worker.
 type UploadWorkerConfig struct {
 	PollInterval time.Duration
+	Hub          *events.Hub
 	Logger       *slog.Logger
 }
 
@@ -26,6 +28,7 @@ type UploadWorker struct {
 	repo          repository.StorageEngine
 	ingester      *scanner.Ingester
 	chapterWorker *Worker
+	hub           *events.Hub
 	pollInterval  time.Duration
 	logger        *slog.Logger
 	notifyCh      chan struct{}
@@ -54,6 +57,7 @@ func NewUploadWorker(
 		repo:          repo,
 		ingester:      ingester,
 		chapterWorker: chapterWorker,
+		hub:           cfg.Hub,
 		pollInterval:  pollInterval,
 		logger:        logger,
 		notifyCh:      make(chan struct{}, 1),
@@ -148,6 +152,13 @@ func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
 	}
 
 	w.logger.Info("upload job completed successfully", "job_id", job.ID, "book_id", book.ID, "title", book.Title)
+
+	if w.hub != nil && book != nil {
+		w.hub.Broadcast(events.Event{
+			Type: events.EventBookAdded,
+			Data: book,
+		})
+	}
 
 	if w.chapterWorker != nil {
 		w.chapterWorker.Trigger()

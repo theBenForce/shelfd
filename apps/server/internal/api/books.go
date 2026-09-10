@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/epub"
+	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 	"github.com/shelfd/shelfd/internal/ulid"
@@ -31,6 +33,7 @@ type BookHandler struct {
 	aiClient     ai.Client
 	dataDir      string
 	libraryDir   string
+	hub          *events.Hub
 	logger       *slog.Logger
 }
 
@@ -42,6 +45,7 @@ func NewBookHandler(
 	aiClient ai.Client,
 	dataDir string,
 	libraryDir string,
+	hub *events.Hub,
 	logger *slog.Logger,
 ) *BookHandler {
 	if logger == nil {
@@ -55,6 +59,7 @@ func NewBookHandler(
 		aiClient:     aiClient,
 		dataDir:      dataDir,
 		libraryDir:   libraryDir,
+		hub:          hub,
 		logger:       logger,
 	}
 }
@@ -86,6 +91,34 @@ type BookDetailResponse struct {
 	Chapters   []*repository.Chapter     `json:"chapters"`
 	Bookmarks  []*repository.Bookmark    `json:"bookmarks"`
 	Highlights []*repository.Highlight   `json:"highlights"`
+}
+
+// BuildBookListItem loads relational metadata for a book and constructs a BookListItem DTO.
+func BuildBookListItem(ctx context.Context, repo repository.StorageEngine, b *repository.Book) BookListItem {
+	authors, _ := repo.GetBookAuthors(ctx, b.ID)
+	genres, _ := repo.GetBookGenres(ctx, b.ID)
+	seriesList, _ := repo.GetBookSeries(ctx, b.ID)
+
+	return BookListItem{
+		ID:                       b.ID,
+		Title:                    b.Title,
+		Description:              b.Description,
+		Language:                 b.Language,
+		Publisher:                b.Publisher,
+		Identifier:               b.Identifier,
+		FilePath:                 b.FilePath,
+		CoverPath:                b.CoverPath,
+		FileSizeBytes:            b.FileSizeBytes,
+		FileModifiedAt:           b.FileModifiedAt,
+		PublishedDate:            b.PublishedDate,
+		Layout:                   b.Layout,
+		RenditionSpread:          b.RenditionSpread,
+		RenditionOrientation:     b.RenditionOrientation,
+		PageProgressionDirection: b.PageProgressionDirection,
+		Authors:                  authors,
+		Genres:                   genres,
+		Series:                   seriesList,
+	}
 }
 
 type BookCitation struct {
@@ -178,30 +211,7 @@ func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
 
 	var items []BookListItem
 	for _, b := range books {
-		authors, _ := h.repo.GetBookAuthors(r.Context(), b.ID)
-		genres, _ := h.repo.GetBookGenres(r.Context(), b.ID)
-		seriesList, _ := h.repo.GetBookSeries(r.Context(), b.ID)
-
-		items = append(items, BookListItem{
-			ID:                       b.ID,
-			Title:                    b.Title,
-			Description:              b.Description,
-			Language:                 b.Language,
-			Publisher:                b.Publisher,
-			Identifier:               b.Identifier,
-			FilePath:                 b.FilePath,
-			CoverPath:                b.CoverPath,
-			FileSizeBytes:            b.FileSizeBytes,
-			FileModifiedAt:           b.FileModifiedAt,
-			PublishedDate:            b.PublishedDate,
-			Layout:                   b.Layout,
-			RenditionSpread:          b.RenditionSpread,
-			RenditionOrientation:     b.RenditionOrientation,
-			PageProgressionDirection: b.PageProgressionDirection,
-			Authors:                  authors,
-			Genres:                   genres,
-			Series:                   seriesList,
-		})
+		items = append(items, BuildBookListItem(r.Context(), h.repo, b))
 	}
 
 	h.logger.Debug("Listed books", "count", len(items), "total", total, "limit", limit, "offset", offset)
@@ -1033,6 +1043,13 @@ func (h *BookHandler) CommitUploadJob(w http.ResponseWriter, r *http.Request) {
 
 	if h.worker != nil {
 		h.worker.Trigger()
+	}
+
+	if h.hub != nil && book != nil {
+		h.hub.Broadcast(events.Event{
+			Type: events.EventBookAdded,
+			Data: BuildBookListItem(r.Context(), h.repo, book),
+		})
 	}
 
 	h.logger.Info("Committed book upload to library", "job_id", job.ID, "book_id", book.ID, "title", book.Title, "author", primaryAuthor)

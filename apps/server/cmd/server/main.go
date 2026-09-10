@@ -22,6 +22,7 @@ import (
 	"github.com/shelfd/shelfd/internal/api"
 	"github.com/shelfd/shelfd/internal/config"
 	"github.com/shelfd/shelfd/internal/database"
+	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/mcp"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
@@ -170,9 +171,13 @@ func main() {
 	scannerInst := scanner.NewScanner(cfg.Storage.LibraryDir)
 	ingester := scanner.NewIngester(repo, cfg.Storage.LibraryDir, cfg.Storage.DataDir)
 
+	// Event Hub for real-time SSE broadcasts
+	eventHub := events.NewHub()
+
 	// Start background upload worker
 	uploadWorker := worker.NewUploadWorker(repo, ingester, chapterWorker, worker.UploadWorkerConfig{
 		PollInterval: 3 * time.Second,
+		Hub:          eventHub,
 		Logger:       logger,
 	})
 	uploadWorker.Start(ctx)
@@ -209,6 +214,7 @@ func main() {
 		Worker:          chapterWorker,
 		UploadWorker:    uploadWorker,
 		AIClient:        aiClient,
+		Hub:             eventHub,
 		DataDir:         cfg.Storage.DataDir,
 		LibraryDir:      cfg.Storage.LibraryDir,
 		JWTSecret:       cfg.Server.JWTSecret,

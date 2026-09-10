@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/worker"
 )
@@ -15,14 +16,16 @@ type QueueHandler struct {
 	repo         repository.StorageEngine
 	worker       *worker.Worker
 	uploadWorker *worker.UploadWorker
+	hub          *events.Hub
 }
 
 // NewQueueHandler creates a new QueueHandler instance.
-func NewQueueHandler(repo repository.StorageEngine, w *worker.Worker, uw *worker.UploadWorker) *QueueHandler {
+func NewQueueHandler(repo repository.StorageEngine, w *worker.Worker, uw *worker.UploadWorker, hub *events.Hub) *QueueHandler {
 	return &QueueHandler{
 		repo:         repo,
 		worker:       w,
 		uploadWorker: uw,
+		hub:          hub,
 	}
 }
 
@@ -46,7 +49,7 @@ func (h *QueueHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
-// StreamEvents provides a Server-Sent Events (SSE) feed of real-time queue status changes.
+// StreamEvents provides a Server-Sent Events (SSE) feed of real-time queue status changes and catalog events.
 func (h *QueueHandler) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -95,6 +98,13 @@ func (h *QueueHandler) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		defer h.worker.Unsubscribe(subCh)
 	}
 
+	var hubCh chan events.Event
+	if h.hub != nil {
+		ch, unsub := h.hub.Subscribe()
+		defer unsub()
+		hubCh = ch
+	}
+
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
@@ -110,6 +120,18 @@ func (h *QueueHandler) StreamEvents(w http.ResponseWriter, r *http.Request) {
 			if err := sendStatus(); err != nil {
 				return
 			}
+		case evt, ok := <-hubCh:
+			if !ok {
+				return
+			}
+			data, err := json.Marshal(evt.Data)
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data); err != nil {
+				return
+			}
+			flusher.Flush()
 		}
 	}
 }

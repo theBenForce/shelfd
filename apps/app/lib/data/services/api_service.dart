@@ -25,6 +25,30 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $message';
 }
 
+sealed class ShelfdEvent {
+  const ShelfdEvent();
+}
+
+class QueueStatusEvent extends ShelfdEvent {
+  final QueueStatus status;
+  const QueueStatusEvent(this.status);
+}
+
+class BookAddedEvent extends ShelfdEvent {
+  final Book book;
+  const BookAddedEvent(this.book);
+}
+
+class BookUpdatedEvent extends ShelfdEvent {
+  final Book book;
+  const BookUpdatedEvent(this.book);
+}
+
+class ScanStatusEvent extends ShelfdEvent {
+  final Map<String, dynamic> data;
+  const ScanStatusEvent(this.data);
+}
+
 class ApiService {
   String baseUrl;
   String? token;
@@ -317,7 +341,7 @@ class ApiService {
     return QueueStatus.fromJson(data);
   }
 
-  Stream<QueueStatus> streamQueueEvents() async* {
+  Stream<ShelfdEvent> streamEvents() async* {
     final request = http.Request('GET', _uri('/api/v1/queue/events'));
     request.headers.addAll({
       'Accept': 'text/event-stream',
@@ -335,18 +359,48 @@ class ApiService {
     }
 
     final lines = response.stream.transform(utf8.decoder).transform(const LineSplitter());
+    String currentEvent = 'queue_status';
 
     await for (final line in lines) {
-      if (line.startsWith('data: ')) {
-        final dataStr = line.substring(6).trim();
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) {
+        currentEvent = 'queue_status';
+        continue;
+      }
+
+      if (trimmed.startsWith('event:')) {
+        currentEvent = trimmed.substring(6).trim();
+      } else if (trimmed.startsWith('data:')) {
+        final dataStr = trimmed.substring(5).trim();
         if (dataStr.isNotEmpty) {
           try {
             final data = jsonDecode(dataStr) as Map<String, dynamic>;
-            yield QueueStatus.fromJson(data);
+            switch (currentEvent) {
+              case 'queue_status':
+                yield QueueStatusEvent(QueueStatus.fromJson(data));
+                break;
+              case 'book_added':
+                yield BookAddedEvent(Book.fromJson(data, baseUrl: baseUrl));
+                break;
+              case 'book_updated':
+                yield BookUpdatedEvent(Book.fromJson(data, baseUrl: baseUrl));
+                break;
+              case 'scan_status':
+                yield ScanStatusEvent(data);
+                break;
+            }
           } catch (_) {
             // Ignore malformed payloads
           }
         }
+      }
+    }
+  }
+
+  Stream<QueueStatus> streamQueueEvents() async* {
+    await for (final event in streamEvents()) {
+      if (event is QueueStatusEvent) {
+        yield event.status;
       }
     }
   }

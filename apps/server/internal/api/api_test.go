@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	"golang.org/x/crypto/bcrypt"
@@ -23,6 +24,7 @@ import (
 	"github.com/shelfd/shelfd/internal/api"
 	"github.com/shelfd/shelfd/internal/database"
 	"github.com/shelfd/shelfd/internal/epub"
+	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 	"github.com/shelfd/shelfd/internal/worker"
@@ -93,6 +95,7 @@ type testFixture struct {
 	worker       *worker.Worker
 	uploadWorker *worker.UploadWorker
 	aiClient     *mockAIClient
+	hub          *events.Hub
 	handler      http.Handler
 	jwtSecret    string
 	dataDir      string
@@ -137,20 +140,24 @@ func setupAPITest(t *testing.T) *testFixture {
 	ingester := scanner.NewIngester(repo, libDir, dataDir)
 	s := scanner.NewScanner(libDir)
 	jwtSecret := "super-secure-jwt-test-secret-key-123"
+	hub := events.NewHub()
 
-	uploadWorker := worker.NewUploadWorker(repo, ingester, nil, worker.UploadWorkerConfig{})
+	uploadWorker := worker.NewUploadWorker(repo, ingester, nil, worker.UploadWorkerConfig{
+		Hub: hub,
+	})
 	aiClient := &mockAIClient{}
 
 	handler := api.NewRouter(api.RouterConfig{
-		Repo:         repo,
-		Ingester:     ingester,
-		Scanner:      s,
-		Worker:       nil,
-		UploadWorker: uploadWorker,
-		AIClient:     aiClient,
-		DataDir:      dataDir,
-		LibraryDir:   libDir,
-		JWTSecret:    jwtSecret,
+		Repo:            repo,
+		Ingester:        ingester,
+		Scanner:         s,
+		Worker:          nil,
+		UploadWorker:    uploadWorker,
+		AIClient:        aiClient,
+		Hub:             hub,
+		DataDir:         dataDir,
+		LibraryDir:      libDir,
+		JWTSecret:       jwtSecret,
 		Host:            "127.0.0.1",
 		Port:            8080,
 		Version:         "0.1.0-test",
@@ -165,6 +172,7 @@ func setupAPITest(t *testing.T) *testFixture {
 		worker:       nil,
 		uploadWorker: uploadWorker,
 		aiClient:     aiClient,
+		hub:          hub,
 		handler:      handler,
 		jwtSecret:    jwtSecret,
 		dataDir:      dataDir,
@@ -1962,6 +1970,147 @@ func TestFixedLayoutAssetAndChapterHTMLServing(t *testing.T) {
 		t.Errorf("expected 400, 404, or 301 on path traversal attempt, got %d", badRec.Code)
 	}
 }
+
+func TestLibraryScan_PipelinedAndRealtimeEvents(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+
+	// Subscribe to event hub before scan starts
+	eventCh, unsub := f.hub.Subscribe()
+	defer unsub()
+
+	// Create a minimal EPUB in f.libDir
+	bookDir := filepath.Join(f.libDir, "Frank Herbert", "Dune")
+	if err := os.MkdirAll(bookDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	epubPath := filepath.Join(bookDir, "Dune.epub")
+
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	m, _ := zw.Create("mimetype")
+	m.Write([]byte("application/epub+zip"))
+	w, _ := zw.Create("META-INF/container.xml")
+	w.Write([]byte(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`))
+	opf, _ := zw.Create("content.opf")
+	opf.Write([]byte(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Dune</dc:title><dc:creator>Frank Herbert</dc:creator></metadata><manifest><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>`))
+	ch1, _ := zw.Create("ch1.xhtml")
+	ch1.Write([]byte(`<html><body><h1>Arrakis</h1><p>A beginning is the time for taking the most delicate care that the balances are correct.</p></body></html>`))
+	zw.Close()
+	if err := os.WriteFile(epubPath, buf.Bytes(), 0644); err != nil {
+		t.Fatalf("write epub: %v", err)
+	}
+
+	// Trigger scan
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/library/scan", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted on scan trigger, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Wait for events to arrive
+	receivedScanStarted := false
+	receivedBookAdded := false
+	receivedScanCompleted := false
+
+	timeout := time.After(3 * time.Second)
+	for !receivedScanCompleted {
+		select {
+		case <-timeout:
+			t.Fatalf("timed out waiting for scan events. receivedStarted=%v, receivedBookAdded=%v, receivedCompleted=%v",
+				receivedScanStarted, receivedBookAdded, receivedScanCompleted)
+		case evt := <-eventCh:
+			switch evt.Type {
+			case events.EventScanStatus:
+				if data, ok := evt.Data.(map[string]any); ok {
+					if data["status"] == "started" {
+						receivedScanStarted = true
+					} else if data["status"] == "completed" {
+						receivedScanCompleted = true
+					}
+				}
+			case events.EventBookAdded:
+				if bookItem, ok := evt.Data.(api.BookListItem); ok {
+					if bookItem.Title == "Dune" {
+						receivedBookAdded = true
+					}
+				}
+			}
+		}
+	}
+
+	if !receivedScanStarted {
+		t.Errorf("expected EventScanStatus started event")
+	}
+	if !receivedBookAdded {
+		t.Errorf("expected EventBookAdded event with title Dune")
+	}
+
+	// Verify the book is in DB and paragraphs are queued
+	qStatus, err := f.repo.GetQueueStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetQueueStatus error: %v", err)
+	}
+	if qStatus.TotalChapters == 0 {
+		t.Errorf("expected paragraphs/chapters in database, got 0")
+	}
+}
+
+func TestQueueHandler_StreamEvents_Realtime(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+
+	// Create cancellable context for SSE stream
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/queue/events", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "text/event-stream")
+
+	rec := httptest.NewRecorder()
+
+	done := make(chan bool)
+	go func() {
+		f.handler.ServeHTTP(rec, req)
+		done <- true
+	}()
+
+	// Allow connection setup and initial queue_status
+	time.Sleep(50 * time.Millisecond)
+
+	// Broadcast an event
+	f.hub.Broadcast(events.Event{
+		Type: events.EventBookAdded,
+		Data: map[string]string{"title": "Neuromancer"},
+	})
+
+	// Wait briefly for write and flush
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: queue_status") {
+		t.Errorf("expected initial event: queue_status, got:\n%s", body)
+	}
+	if !strings.Contains(body, "event: book_added") {
+		t.Errorf("expected event: book_added in SSE feed, got:\n%s", body)
+	}
+	if !strings.Contains(body, "Neuromancer") {
+		t.Errorf("expected Neuromancer payload in SSE feed, got:\n%s", body)
+	}
+}
+
 
 
 
