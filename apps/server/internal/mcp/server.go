@@ -54,15 +54,38 @@ func NewServer(repo repository.StorageEngine, aiClient ai.Client, cfg Config) *S
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 
-	ssePath := s.basePath + "/sse"
-	messagesPath := s.basePath + "/messages"
-
 	auth := AuthMiddleware(s.repo)
+	endpointHandler := auth(http.HandlerFunc(s.handleEndpoint))
 
-	mux.Handle(ssePath, auth(http.HandlerFunc(s.handleSSE)))
-	mux.Handle(messagesPath, auth(http.HandlerFunc(s.handleMessages)))
+	// Modern unified Streamable HTTP + SSE routes
+	mux.Handle(s.basePath, endpointHandler)
+	mux.Handle(s.basePath+"/", endpointHandler)
+	mux.Handle(s.basePath+"/sse", endpointHandler)
+
+	// Legacy message-posting route for older SSE clients
+	mux.Handle(s.basePath+"/messages", auth(http.HandlerFunc(s.handleMessages)))
 
 	return mux
+}
+
+// handleEndpoint unifies Streamable HTTP and SSE transports on a single endpoint:
+// - GET: Establishes a Server-Sent Events (SSE) stream.
+// - POST: Processes JSON-RPC 2.0 requests/notifications.
+// - HEAD: Probes server availability.
+func (s *Server) handleEndpoint(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleSSE(w, r)
+	case http.MethodPost:
+		s.handleMessages(w, r)
+	case http.MethodHead:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+	case http.MethodOptions:
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // handleSSE handles incoming GET requests establishing Server-Sent Events streams.
@@ -145,6 +168,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	// Check if associated with an active SSE session
 	sessionID := r.URL.Query().Get("sessionId")
+	if sessionID == "" {
+		sessionID = r.Header.Get("Mcp-Session-Id")
+	}
 	var session *Session
 	if sessionID != "" {
 		session, _ = s.sessions.Get(sessionID)
@@ -168,6 +194,11 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Deliver response directly in HTTP response body if without active SSE session
 		w.Header().Set("Content-Type", "application/json")
+		protoVer := r.Header.Get("MCP-Protocol-Version")
+		if protoVer == "" {
+			protoVer = ProtocolVersion
+		}
+		w.Header().Set("MCP-Protocol-Version", protoVer)
 		w.WriteHeader(http.StatusOK)
 		w.Write(respBytes)
 	}
@@ -177,11 +208,20 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 func (s *Server) dispatch(ctx context.Context, req JSONRPCRequest) *JSONRPCResponse {
 	switch req.Method {
 	case "initialize":
+		protoVer := ProtocolVersion
+		if len(req.Params) > 0 {
+			var initParams struct {
+				ProtocolVersion string `json:"protocolVersion"`
+			}
+			if err := json.Unmarshal(req.Params, &initParams); err == nil && initParams.ProtocolVersion != "" {
+				protoVer = initParams.ProtocolVersion
+			}
+		}
 		return &JSONRPCResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
 			Result: InitializeResult{
-				ProtocolVersion: ProtocolVersion,
+				ProtocolVersion: protoVer,
 				Capabilities: ServerCapabilities{
 					Tools: map[string]any{},
 				},
@@ -209,6 +249,20 @@ func (s *Server) dispatch(ctx context.Context, req JSONRPCRequest) *JSONRPCRespo
 			Result: ListToolsResult{
 				Tools: AvailableTools(),
 			},
+		}
+
+	case "resources/list":
+		return &JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  map[string]any{"resources": []any{}},
+		}
+
+	case "prompts/list":
+		return &JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  map[string]any{"prompts": []any{}},
 		}
 
 	case "tools/call":

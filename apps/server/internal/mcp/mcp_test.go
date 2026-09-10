@@ -660,3 +660,121 @@ func TestMCPSSEQueryTokenPreservation(t *testing.T) {
 		t.Errorf("expected endpoint to preserve query token, got: %s", endpointLine)
 	}
 }
+
+func TestMCPServer_StreamableHTTP(t *testing.T) {
+	db, repo, token, server := setupTestEnvironment(t)
+	defer db.Close()
+	defer repo.Close()
+
+	handler := server.Routes()
+
+	// 1. POST /mcp/sse with initialize (Gemini Spark pattern)
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"gemini","version":"1.0"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp/sse", strings.NewReader(initBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("MCP-Protocol-Version", "2025-03-26")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on POST /mcp/sse initialize, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var initResp struct {
+		JSONRPC string               `json:"jsonrpc"`
+		ID      any                  `json:"id"`
+		Result  mcp.InitializeResult `json:"result"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &initResp); err != nil {
+		t.Fatalf("decode initialize response: %v", err)
+	}
+	if initResp.Result.ServerInfo.Name != "shelfd" {
+		t.Errorf("expected server name shelfd, got %s", initResp.Result.ServerInfo.Name)
+	}
+	if initResp.Result.ProtocolVersion != "2025-03-26" {
+		t.Errorf("expected negotiated protocol version 2025-03-26, got %s", initResp.Result.ProtocolVersion)
+	}
+	if rec.Header().Get("MCP-Protocol-Version") != "2025-03-26" {
+		t.Errorf("expected MCP-Protocol-Version header 2025-03-26, got '%s'", rec.Header().Get("MCP-Protocol-Version"))
+	}
+
+	// 2. POST /mcp/sse with notification (notifications/initialized)
+	notifBody := `{"jsonrpc":"2.0","method":"notifications/initialized"}`
+	req = httptest.NewRequest(http.MethodPost, "/mcp/sse", strings.NewReader(notifBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted on notification, got %d", rec.Code)
+	}
+
+	// 3. POST /mcp directly with tools/list (canonical Streamable HTTP)
+	toolsBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+	req = httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(toolsBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on POST /mcp tools/list, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var toolsResp struct {
+		JSONRPC string              `json:"jsonrpc"`
+		ID      any                 `json:"id"`
+		Result  mcp.ListToolsResult `json:"result"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &toolsResp); err != nil {
+		t.Fatalf("decode tools/list response: %v", err)
+	}
+	if len(toolsResp.Result.Tools) == 0 {
+		t.Fatalf("expected tools in result, got none")
+	}
+
+	// 4. POST /mcp/ directly with ping
+	pingBody := `{"jsonrpc":"2.0","id":3,"method":"ping"}`
+	req = httptest.NewRequest(http.MethodPost, "/mcp/", strings.NewReader(pingBody))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on POST /mcp/ ping, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 5. Querying optional capability endpoints (resources/list, prompts/list)
+	for _, method := range []string{"resources/list", "prompts/list"} {
+		reqBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"%s"}`, method)
+		req = httptest.NewRequest(http.MethodPost, "/mcp/sse", strings.NewReader(reqBody))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200 on %s, got %d", method, rec.Code)
+		}
+		var r struct {
+			Error *mcp.JSONRPCError `json:"error"`
+		}
+		json.Unmarshal(rec.Body.Bytes(), &r)
+		if r.Error != nil {
+			t.Errorf("unexpected error on %s: %v", method, r.Error)
+		}
+	}
+
+	// 6. HEAD /mcp/sse and HEAD /mcp
+	for _, path := range []string{"/mcp/sse", "/mcp"} {
+		req = httptest.NewRequest(http.MethodHead, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200 on HEAD %s, got %d", path, rec.Code)
+		}
+	}
+}
+

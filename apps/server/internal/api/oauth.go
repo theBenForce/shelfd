@@ -43,6 +43,12 @@ func (h *OAuthHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /oauth/authorize", h.HandleAuthorize)
 	mux.HandleFunc("POST /oauth/token", h.HandleToken)
 
+	// RFC 9728 OAuth 2.0 Protected Resource Metadata
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", h.HandleProtectedResourceDiscovery)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/", h.HandleProtectedResourceDiscovery)
+	mux.HandleFunc("GET /mcp/.well-known/oauth-protected-resource", h.HandleProtectedResourceDiscovery)
+	mux.HandleFunc("GET /mcp/.well-known/oauth-protected-resource/", h.HandleProtectedResourceDiscovery)
+
 	// Also support under /mcp/
 	mux.HandleFunc("GET /mcp/.well-known/oauth-authorization-server", h.HandleDiscovery)
 	mux.HandleFunc("GET /mcp/.well-known/openid-configuration", h.HandleDiscovery)
@@ -58,6 +64,32 @@ func (h *OAuthHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/oauth/authorize", h.HandleAuthorize)
 	mux.HandleFunc("POST /api/v1/oauth/authorize", h.HandleAuthorize)
 	mux.HandleFunc("POST /api/v1/oauth/token", h.HandleToken)
+}
+
+// HandleProtectedResourceDiscovery implements RFC 9728 OAuth 2.0 Protected Resource Metadata.
+func (h *OAuthHandler) HandleProtectedResourceDiscovery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	base := resolveBaseURL(r)
+
+	meta := map[string]any{
+		"resource":                 base,
+		"authorization_servers":    []string{base},
+		"scopes_supported":         []string{"mcp", "library", "read", "write"},
+		"bearer_methods_supported": []string{"header"},
+		"resource_documentation":   base,
+	}
+
+	writeJSON(w, http.StatusOK, meta)
 }
 
 // resolveBaseURL dynamically derives the server's public base URL honoring reverse proxy headers.

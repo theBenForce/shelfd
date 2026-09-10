@@ -108,8 +108,9 @@ func CORSMiddleware(next http.Handler) http.Handler {
 		if reqHeaders != "" {
 			w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
 		} else {
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Cache-Control, X-Requested-With")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Cache-Control, X-Requested-With, MCP-Protocol-Version, Mcp-Session-Id, Mcp-Method, Mcp-Name")
 		}
+		w.Header().Set("Access-Control-Expose-Headers", "MCP-Protocol-Version, Mcp-Session-Id, Content-Type, Authorization")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 
 		if r.Method == http.MethodOptions {

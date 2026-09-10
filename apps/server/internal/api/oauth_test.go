@@ -320,3 +320,55 @@ func TestOAuthCORSPreflight(t *testing.T) {
 	}
 }
 
+func TestOAuthProtectedResourceDiscovery(t *testing.T) {
+	fix := setupAPITest(t)
+	mux := http.NewServeMux()
+	oauthHandler := api.NewOAuthHandler(fix.repo)
+	oauthHandler.RegisterRoutes(mux)
+
+	endpoints := []string{
+		"/.well-known/oauth-protected-resource",
+		"/.well-known/oauth-protected-resource/mcp/sse",
+		"/.well-known/oauth-protected-resource/mcp",
+		"/mcp/.well-known/oauth-protected-resource",
+	}
+
+	for _, ep := range endpoints {
+		req := httptest.NewRequest(http.MethodGet, ep, nil)
+		req.Header.Set("X-Forwarded-Host", "shelfd.homelab.me")
+		req.Header.Set("X-Forwarded-Proto", "https")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 on %s, got %d: %s", ep, rec.Code, rec.Body.String())
+		}
+
+		var meta map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &meta); err != nil {
+			t.Fatalf("failed to decode JSON from %s: %v", ep, err)
+		}
+
+		authServers, ok := meta["authorization_servers"].([]any)
+		if !ok || len(authServers) == 0 || authServers[0] != "https://shelfd.homelab.me" {
+			t.Errorf("expected authorization_servers ['https://shelfd.homelab.me'], got: %v", meta["authorization_servers"])
+		}
+
+		if meta["resource"] != "https://shelfd.homelab.me" && !strings.HasPrefix(meta["resource"].(string), "https://shelfd.homelab.me") {
+			t.Errorf("unexpected resource identifier: %v", meta["resource"])
+		}
+
+		// Verify HEAD returns 200 OK without body
+		headReq := httptest.NewRequest(http.MethodHead, ep, nil)
+		headRec := httptest.NewRecorder()
+		mux.ServeHTTP(headRec, headReq)
+		if headRec.Code != http.StatusOK {
+			t.Errorf("expected 200 on HEAD %s, got %d", ep, headRec.Code)
+		}
+		if headRec.Body.Len() != 0 {
+			t.Errorf("expected empty body on HEAD %s, got %d bytes", ep, headRec.Body.Len())
+		}
+	}
+}
+
+
