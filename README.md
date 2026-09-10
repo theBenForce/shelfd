@@ -32,7 +32,7 @@ Container Mounts:
 ```yaml
 services:
   shelfd:
-    image: ghcr.io/thebenforce/shelved:latest
+    image: ghcr.io/thebenforce/shelfd:latest
     container_name: shelfd
     restart: unless-stopped
     ports:
