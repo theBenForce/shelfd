@@ -235,3 +235,88 @@ func TestOAuthAuthorizeAndTokenExchangeWithPKCE(t *testing.T) {
 		t.Errorf("expected replay to fail with 400, got %d", recReplay.Code)
 	}
 }
+
+func TestOAuthDiscovery_HEAD(t *testing.T) {
+	fix := setupAPITest(t)
+	mux := http.NewServeMux()
+	oauthHandler := api.NewOAuthHandler(fix.repo)
+	oauthHandler.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodHead, "/.well-known/oauth-authorization-server", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if rec.Header().Get("Content-Type") != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got '%s'", rec.Header().Get("Content-Type"))
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("expected empty body for HEAD, got %d bytes", rec.Body.Len())
+	}
+}
+
+func TestOAuthDiscovery_Aliases(t *testing.T) {
+	fix := setupAPITest(t)
+	mux := http.NewServeMux()
+	oauthHandler := api.NewOAuthHandler(fix.repo)
+	oauthHandler.RegisterRoutes(mux)
+
+	endpoints := []string{
+		"/.well-known/oauth-authorization-server/mcp",
+		"/.well-known/openid-configuration/mcp",
+		"/mcp/.well-known/oauth-authorization-server",
+		"/mcp/.well-known/openid-configuration",
+	}
+
+	for _, ep := range endpoints {
+		req := httptest.NewRequest(http.MethodGet, ep, nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected status 200 for %s, got %d", ep, rec.Code)
+		}
+	}
+}
+
+func TestOAuthCORSPreflight(t *testing.T) {
+	fix := setupAPITest(t)
+	mux := http.NewServeMux()
+	oauthHandler := api.NewOAuthHandler(fix.repo)
+	oauthHandler.RegisterRoutes(mux)
+
+	handler := api.CORSMiddleware(mux)
+
+	endpoints := []string{
+		"/.well-known/oauth-authorization-server",
+		"/oauth/register",
+		"/oauth/token",
+		"/oauth/authorize",
+		"/mcp/oauth/register",
+	}
+
+	for _, ep := range endpoints {
+		req := httptest.NewRequest(http.MethodOptions, ep, nil)
+		req.Header.Set("Origin", "https://gemini.google.com")
+		req.Header.Set("Access-Control-Request-Method", "POST")
+		req.Header.Set("Access-Control-Request-Headers", "Content-Type, Authorization")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("expected status 204 for OPTIONS %s, got %d", ep, rec.Code)
+		}
+		if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+			t.Errorf("expected Access-Control-Allow-Origin '*', got '%s'", rec.Header().Get("Access-Control-Allow-Origin"))
+		}
+		if !strings.Contains(rec.Header().Get("Access-Control-Allow-Methods"), "OPTIONS") {
+			t.Errorf("expected Access-Control-Allow-Methods to contain OPTIONS, got '%s'", rec.Header().Get("Access-Control-Allow-Methods"))
+		}
+		if rec.Header().Get("Access-Control-Allow-Headers") != "Content-Type, Authorization" {
+			t.Errorf("expected Access-Control-Allow-Headers to echo request headers, got '%s'", rec.Header().Get("Access-Control-Allow-Headers"))
+		}
+	}
+}
+

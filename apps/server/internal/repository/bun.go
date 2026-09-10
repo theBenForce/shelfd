@@ -1642,7 +1642,7 @@ func (r *BunStorageEngine) CreateOAuthClient(ctx context.Context, client *OAuthC
 	if client.CreatedAt.IsZero() {
 		client.CreatedAt = time.Now().UTC()
 	}
-	_, err := r.db.NewInsert().Model(client).Exec(ctx)
+	_, err := r.db.NewInsert().Model(client).ModelTableExpr("oauth_clients").Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("creating oauth client: %w", err)
 	}
@@ -1651,7 +1651,7 @@ func (r *BunStorageEngine) CreateOAuthClient(ctx context.Context, client *OAuthC
 
 func (r *BunStorageEngine) GetOAuthClientByID(ctx context.Context, id string) (*OAuthClient, error) {
 	client := new(OAuthClient)
-	err := r.db.NewSelect().Model(client).Where("id = ?", id).Scan(ctx)
+	err := r.db.NewSelect().Model(client).ModelTableExpr("oauth_clients").Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1665,7 +1665,7 @@ func (r *BunStorageEngine) CreateOAuthCode(ctx context.Context, code *OAuthCode)
 	if code.CreatedAt.IsZero() {
 		code.CreatedAt = time.Now().UTC()
 	}
-	_, err := r.db.NewInsert().Model(code).Exec(ctx)
+	_, err := r.db.NewInsert().Model(code).ModelTableExpr("oauth_codes").Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("creating oauth code: %w", err)
 	}
@@ -1674,7 +1674,7 @@ func (r *BunStorageEngine) CreateOAuthCode(ctx context.Context, code *OAuthCode)
 
 func (r *BunStorageEngine) GetOAuthCode(ctx context.Context, codeStr string) (*OAuthCode, error) {
 	code := new(OAuthCode)
-	err := r.db.NewSelect().Model(code).Where("code = ?", codeStr).Scan(ctx)
+	err := r.db.NewSelect().Model(code).ModelTableExpr("oauth_codes").Where("code = ?", codeStr).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1685,7 +1685,7 @@ func (r *BunStorageEngine) GetOAuthCode(ctx context.Context, codeStr string) (*O
 }
 
 func (r *BunStorageEngine) DeleteOAuthCode(ctx context.Context, codeStr string) error {
-	res, err := r.db.NewDelete().Model((*OAuthCode)(nil)).Where("code = ?", codeStr).Exec(ctx)
+	res, err := r.db.NewDelete().Model((*OAuthCode)(nil)).ModelTableExpr("oauth_codes").Where("code = ?", codeStr).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("deleting oauth code: %w", err)
 	}

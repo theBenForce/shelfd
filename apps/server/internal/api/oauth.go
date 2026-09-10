@@ -35,10 +35,20 @@ func NewOAuthHandler(repo repository.StorageEngine) *OAuthHandler {
 func (h *OAuthHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", h.HandleDiscovery)
 	mux.HandleFunc("GET /.well-known/openid-configuration", h.HandleDiscovery)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server/mcp", h.HandleDiscovery)
+	mux.HandleFunc("GET /.well-known/openid-configuration/mcp", h.HandleDiscovery)
 	mux.HandleFunc("POST /oauth/register", h.HandleRegister)
 	mux.HandleFunc("GET /oauth/authorize", h.HandleAuthorize)
 	mux.HandleFunc("POST /oauth/authorize", h.HandleAuthorize)
 	mux.HandleFunc("POST /oauth/token", h.HandleToken)
+
+	// Also support under /mcp/
+	mux.HandleFunc("GET /mcp/.well-known/oauth-authorization-server", h.HandleDiscovery)
+	mux.HandleFunc("GET /mcp/.well-known/openid-configuration", h.HandleDiscovery)
+	mux.HandleFunc("POST /mcp/oauth/register", h.HandleRegister)
+	mux.HandleFunc("GET /mcp/oauth/authorize", h.HandleAuthorize)
+	mux.HandleFunc("POST /mcp/oauth/authorize", h.HandleAuthorize)
+	mux.HandleFunc("POST /mcp/oauth/token", h.HandleToken)
 
 	// Also support under /api/v1/oauth/
 	mux.HandleFunc("GET /api/v1/.well-known/oauth-authorization-server", h.HandleDiscovery)
@@ -69,8 +79,14 @@ func resolveBaseURL(r *http.Request) string {
 // HandleDiscovery implements RFC 8414 OAuth 2.0 Authorization Server Metadata
 // and OpenID Connect Discovery.
 func (h *OAuthHandler) HandleDiscovery(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
