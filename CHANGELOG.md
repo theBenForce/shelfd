@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/theBenForce/shelfd/compare/v1.2.2...v1.3.0) (2026-09-10)
+
+
+### Features
+
+* **mcp:** support streamable http transport and rfc 9728 protected resource metadata ([#4](https://github.com/theBenForce/shelfd/issues/4)) ([3a41a4e](https://github.com/theBenForce/shelfd/commit/3a41a4ee9f8c0430573b5e9d969844042404e326))
+
 ## [1.2.2](https://github.com/theBenForce/shelfd/compare/v1.2.1...v1.2.2) (2026-09-10)
 
 
