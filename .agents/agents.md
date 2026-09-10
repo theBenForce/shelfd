@@ -137,23 +137,19 @@ All toolchain commands (`go`, `flutter`, `pnpm`, `node`) MUST be executed throug
 * Monorepo Test: `mise exec -- pnpm test`
 
 ### Live Development & Verification Stack
-1. **Go Server (Watch Mode with Air)**:
+1. **Go Server (Watch Mode with Air & .env)**:
    ```bash
-   cd apps/server
-   SHELFD_DATABASE_TYPE=postgres \
-   SHELFD_DATABASE_POSTGRES_DSN="postgres://shelfd:shelfd_password@127.0.0.1:5432/shelfd?sslmode=disable" \
-   SHELFD_STORAGE_LIBRARY_DIR=/Users/bforce/books \
-   SHELFD_STORAGE_DATA_DIR=/Users/bforce/repos/shelved/data \
-   SHELFD_SERVER_PORT=8080 \
-   SHELFD_JWT_SECRET=shelfd-homelab-jwt-secret-key-32bytes \
-   mise exec -- air
+   pnpm turbo --filter=@shelfd/server dev
+   # (or: pnpm dev:server)
    ```
+   *Loads configuration from `.env` and runs `air` in watch mode on port 8080.*
+
 2. **Flutter Web Server (Hot Reload)**:
    ```bash
-   cd apps/app
-   mise exec -- flutter run -d web-server --web-port 3000
+   pnpm turbo --filter=@shelfd/app dev
+   # (or: pnpm dev:app)
    ```
-   *Never serve Flutter Web statically from the Go server (`/dist`) during active frontend development because static serving loses hot reload and hot restart.*
+   *Runs Flutter Web on `http://localhost:3000`. Never serve Flutter Web statically from the Go server (`/dist`) during active frontend development because static serving loses hot reload and hot restart.*
 3. **Chrome DevTools MCP Automation**:
    * Inspect page targets: `list_pages`
    * Navigate to URLs: `navigate_page(pageId, type="url", url="http://localhost:3000/...")`

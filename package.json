@@ -5,7 +5,9 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "dev:server": "pnpm --filter @shelfd/server run dev",
+    "dev:server": "pnpm turbo --filter=@shelfd/server dev",
+    "dev:app": "pnpm turbo --filter=@shelfd/app dev",
+    "dev:web": "pnpm turbo --filter=@shelfd/app dev",
     "test": "turbo run test",
     "lint": "turbo run lint",
     "release": "semantic-release",
