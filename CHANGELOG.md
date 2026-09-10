@@ -1,3 +1,11 @@
+# [1.2.0](https://github.com/theBenForce/shelved/compare/v1.1.1...v1.2.0) (2026-09-10)
+
+
+### Features
+
+* pipeline library scanning and stream real-time book ingestion events ([309b345](https://github.com/theBenForce/shelved/commit/309b3452a2e7c17245ec82f9be606ecb96cbcda2))
+* realtime library scanning ([9bfaac1](https://github.com/theBenForce/shelved/commit/9bfaac18dfc926a697ad9b2d6e3e8b035ff6cdfa))
+
 ## [1.1.1](https://github.com/theBenForce/shelved/compare/v1.1.0...v1.1.1) (2026-09-10)
 
 
