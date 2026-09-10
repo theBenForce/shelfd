@@ -1,3 +1,10 @@
+## [1.2.2](https://github.com/theBenForce/shelfd/compare/v1.2.1...v1.2.2) (2026-09-10)
+
+
+### Bug Fixes
+
+* **oauth:** fix client lookup query alias and update docker image name ([#3](https://github.com/theBenForce/shelfd/issues/3)) ([913f3fa](https://github.com/theBenForce/shelfd/commit/913f3fadcc27be244464e7aaf6e555ddff86ece3))
+
 ## [1.2.1](https://github.com/theBenForce/shelfd/compare/v1.2.0...v1.2.1) (2026-09-10)
 
 
