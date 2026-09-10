@@ -1,3 +1,28 @@
+# [1.1.0](https://github.com/theBenForce/shelved/compare/v1.0.0...v1.1.0) (2026-09-10)
+
+
+### Bug Fixes
+
+* **queue:** track indexing progress from paragraph vectors instead of chapter summaries ([df53f3b](https://github.com/theBenForce/shelved/commit/df53f3b62e80026f18d41a883fffcab29482e0e1))
+* support per_page/page pagination and load complete catalog on shelf ([95af430](https://github.com/theBenForce/shelved/commit/95af430b93cf74648053a269d19915ee10d5dcae))
+
+
+### Features
+
+* add epub drag-and-drop upload with metadata editor and opf package rewriter ([53c8515](https://github.com/theBenForce/shelved/commit/53c8515f0c13b7d06f494eed94169d2f9ba75ee9))
+* adopt log/slog structured logging and http request logger middleware ([b81fd6d](https://github.com/theBenForce/shelved/commit/b81fd6d8a12687dce0873900a6f31647db95ff46))
+* **app:** add homelab settings view, user password management, and reader selection improvements ([7ff3cd5](https://github.com/theBenForce/shelved/commit/7ff3cd584658dda8ff32d8792511f1ce98aac48d))
+* **app:** implement infinite scroll pagination in library view ([525d738](https://github.com/theBenForce/shelved/commit/525d738f22051b6164cd3b5d5f25ab77c567ca53))
+* **app:** retain desktop sidebar navigation on series, author, and book detail pages ([3359e0c](https://github.com/theBenForce/shelved/commit/3359e0c3dbb4490c2afee1abec08885634977a42))
+* **app:** standardize plural routes, collapse series in library, and add library accordion nav ([bd4daf0](https://github.com/theBenForce/shelved/commit/bd4daf0107ec52f1c676595e9f3e5cd0c2984ae7))
+* **monorepo:** add turbo dev scripts for @shelfd/server and @shelfd/app ([ea63fba](https://github.com/theBenForce/shelved/commit/ea63fbaa76adbc43953de38e38b2f2118d042f61))
+* **reader:** add multi-paragraph highlight support and offline cross-device sync ([9216c45](https://github.com/theBenForce/shelved/commit/9216c45b12fdbff64c4837aa6a1d3f795f64db0e))
+* **reader:** support fixed-layout EPUBs with responsive two-page spreads and auto-fit scaling ([d429d85](https://github.com/theBenForce/shelved/commit/d429d856d4e15eb23e1d909a18270d0468c33e08))
+* **router:** use ShellRoute and nested subroutes for book, series, and author ([637494d](https://github.com/theBenForce/shelved/commit/637494d3fff216a5d4438021e13a46088c0d6103))
+* **scanner:** add incremental library scanning and preserve vector embeddings ([e50b72b](https://github.com/theBenForce/shelved/commit/e50b72be59501a1a28496828b6649c14f3857fd9))
+* **server:** add air live reload config, series normalization, and author directory fallback ([0b9113c](https://github.com/theBenForce/shelved/commit/0b9113c48f1842d1e2a04e688a81889a3a99ddf9))
+* **server:** add dev script with watch mode and .env configuration ([f3dfc1e](https://github.com/theBenForce/shelved/commit/f3dfc1ec1d832aac5f4f0326510d7dd3a2fa9b9a))
+
 # 1.0.0 (2026-09-09)
 
 
