@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../data/models/author.dart';
 import '../../data/models/book.dart';
+import '../../data/models/series.dart';
 import '../state/providers.dart';
 import 'responsive.dart';
 import 'tokens.dart';
@@ -321,22 +323,62 @@ class ShelfdTopBar extends StatelessWidget implements PreferredSizeWidget {
 class ShelfdBottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
+  final String? currentPath;
+  final ValueChanged<String>? onNavigate;
 
   const ShelfdBottomNav({
     super.key,
     required this.currentIndex,
     required this.onTap,
+    this.currentPath,
+    this.onNavigate,
   });
+
+  int _calculateIndex() {
+    if (currentPath != null) {
+      final p = currentPath!;
+      if (p.startsWith('/series')) return 1;
+      if (p.startsWith('/authors') || p.startsWith('/author')) return 2;
+      if (p.startsWith('/search')) return 3;
+      if (p.startsWith('/settings')) return 4;
+      return 0; // /books, /library, default
+    }
+    return currentIndex.clamp(0, 4);
+  }
+
+  void _handleTap(int index) {
+    if (onNavigate != null) {
+      switch (index) {
+        case 0:
+          onNavigate!('/books');
+          return;
+        case 1:
+          onNavigate!('/series');
+          return;
+        case 2:
+          onNavigate!('/authors');
+          return;
+        case 3:
+          onNavigate!('/search');
+          return;
+        case 4:
+          onNavigate!('/settings');
+          return;
+      }
+    }
+    onTap(index);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final idx = _calculateIndex();
     return Container(
       decoration: const BoxDecoration(
         border: Border(top: BorderSide(color: AppTokens.crispBorder, width: 1)),
       ),
       child: NavigationBar(
-        selectedIndex: currentIndex,
-        onDestinationSelected: onTap,
+        selectedIndex: idx,
+        onDestinationSelected: _handleTap,
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
         height: 64,
@@ -345,7 +387,17 @@ class ShelfdBottomNav extends StatelessWidget {
           NavigationDestination(
             icon: Icon(Icons.menu_book_outlined),
             selectedIcon: Icon(Icons.menu_book_rounded, color: AppTokens.charcoalInk),
-            label: 'Library',
+            label: 'Books',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.collections_bookmark_outlined),
+            selectedIcon: Icon(Icons.collections_bookmark_rounded, color: AppTokens.charcoalInk),
+            label: 'Series',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.people_outline_rounded),
+            selectedIcon: Icon(Icons.people_rounded, color: AppTokens.charcoalInk),
+            label: 'Authors',
           ),
           NavigationDestination(
             icon: Icon(Icons.saved_search_outlined),
@@ -363,9 +415,11 @@ class ShelfdBottomNav extends StatelessWidget {
   }
 }
 
-class ShelfdSideNav extends StatelessWidget {
+class ShelfdSideNav extends StatefulWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
+  final String? currentPath;
+  final ValueChanged<String>? onNavigate;
   final VoidCallback? onRescan;
   final VoidCallback? onUpload;
   final bool isRescanning;
@@ -374,14 +428,38 @@ class ShelfdSideNav extends StatelessWidget {
     super.key,
     required this.currentIndex,
     required this.onTap,
+    this.currentPath,
+    this.onNavigate,
     this.onRescan,
     this.onUpload,
     this.isRescanning = false,
   });
 
   @override
+  State<ShelfdSideNav> createState() => _ShelfdSideNavState();
+}
+
+class _ShelfdSideNavState extends State<ShelfdSideNav> {
+  bool _isLibraryExpanded = true;
+
+  void _navigate(String path, int fallbackIndex) {
+    if (widget.onNavigate != null) {
+      widget.onNavigate!(path);
+    } else {
+      widget.onTap(fallbackIndex);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final p = widget.currentPath ?? '';
+    final isBooks = p.startsWith('/books') || p == '/library' || p.startsWith('/book/');
+    final isSeries = p.startsWith('/series');
+    final isAuthors = p.startsWith('/authors') || p.startsWith('/author');
+    final isSearch = p.startsWith('/search') || (widget.currentPath == null && widget.currentIndex == 1);
+    final isSettings = p.startsWith('/settings') || (widget.currentPath == null && widget.currentIndex == 2);
+    final isLibraryActive = isBooks || isSeries || isAuthors || (widget.currentPath == null && widget.currentIndex == 0);
 
     return Container(
       width: AppTokens.sidebarWidth,
@@ -443,29 +521,76 @@ class ShelfdSideNav extends StatelessWidget {
           ),
           const SizedBox(height: AppTokens.space32),
 
-          // Navigation Links
+          // Collapsible Library Header Item
           _SideNavItem(
-            icon: Icons.menu_book_outlined,
-            selectedIcon: Icons.menu_book_rounded,
+            icon: Icons.local_library_outlined,
+            selectedIcon: Icons.local_library_rounded,
             label: 'Library',
-            isSelected: currentIndex == 0,
-            onTap: () => onTap(0),
+            isSelected: isLibraryActive && !_isLibraryExpanded,
+            trailing: IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: Icon(
+                _isLibraryExpanded ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_right_rounded,
+                size: 20,
+                color: AppTokens.mutedCopy,
+              ),
+              onPressed: () {
+                setState(() {
+                  _isLibraryExpanded = !_isLibraryExpanded;
+                });
+              },
+            ),
+            onTap: () {
+              setState(() {
+                _isLibraryExpanded = !_isLibraryExpanded;
+              });
+              if (_isLibraryExpanded) {
+                _navigate('/books', 0);
+              }
+            },
           ),
+
+          // Indented Sub-items under Library
+          if (_isLibraryExpanded) ...[
+            _SideNavSubItem(
+              icon: Icons.menu_book_outlined,
+              selectedIcon: Icons.menu_book_rounded,
+              label: 'Books',
+              isSelected: isBooks || (isLibraryActive && !isSeries && !isAuthors),
+              onTap: () => _navigate('/books', 0),
+            ),
+            _SideNavSubItem(
+              icon: Icons.collections_bookmark_outlined,
+              selectedIcon: Icons.collections_bookmark_rounded,
+              label: 'Series',
+              isSelected: isSeries,
+              onTap: () => _navigate('/series', 0),
+            ),
+            _SideNavSubItem(
+              icon: Icons.people_outline_rounded,
+              selectedIcon: Icons.people_rounded,
+              label: 'Authors',
+              isSelected: isAuthors,
+              onTap: () => _navigate('/authors', 0),
+            ),
+          ],
           const SizedBox(height: AppTokens.space8),
+
+          // Top-level Navigation Links
           _SideNavItem(
             icon: Icons.saved_search_outlined,
             selectedIcon: Icons.saved_search_rounded,
             label: 'Semantic Search',
-            isSelected: currentIndex == 1,
-            onTap: () => onTap(1),
+            isSelected: isSearch,
+            onTap: () => _navigate('/search', 1),
           ),
           const SizedBox(height: AppTokens.space8),
           _SideNavItem(
             icon: Icons.settings_outlined,
             selectedIcon: Icons.settings_rounded,
             label: 'Settings',
-            isSelected: currentIndex == 2,
-            onTap: () => onTap(2),
+            isSelected: isSettings,
+            onTap: () => _navigate('/settings', 2),
           ),
 
           const Spacer(),
@@ -475,7 +600,7 @@ class ShelfdSideNav extends StatelessWidget {
           const SizedBox(height: AppTokens.space12),
 
           // Upload EPUB Button (if callback provided)
-          if (onUpload != null) ...[
+          if (widget.onUpload != null) ...[
             SizedBox(
               width: double.infinity,
               height: 40,
@@ -489,7 +614,7 @@ class ShelfdSideNav extends StatelessWidget {
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
                 ),
-                onPressed: onUpload,
+                onPressed: widget.onUpload,
                 icon: const Icon(Icons.upload_file_outlined, size: 18),
                 label: const Text(
                   'Upload EPUB',
@@ -501,7 +626,7 @@ class ShelfdSideNav extends StatelessWidget {
           ],
 
           // Rescan Library Button (if callback provided)
-          if (onRescan != null) ...[
+          if (widget.onRescan != null) ...[
             SizedBox(
               width: double.infinity,
               height: 40,
@@ -515,8 +640,8 @@ class ShelfdSideNav extends StatelessWidget {
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
                 ),
-                onPressed: isRescanning ? null : onRescan,
-                icon: isRescanning
+                onPressed: widget.isRescanning ? null : widget.onRescan,
+                icon: widget.isRescanning
                     ? const SizedBox(
                         width: 16,
                         height: 16,
@@ -524,7 +649,7 @@ class ShelfdSideNav extends StatelessWidget {
                       )
                     : const Icon(Icons.sync_rounded, size: 18),
                 label: Text(
-                  isRescanning ? 'Scanning...' : 'Rescan Library',
+                  widget.isRescanning ? 'Scanning...' : 'Rescan Library',
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 ),
               ),
@@ -577,6 +702,7 @@ class _SideNavItem extends StatelessWidget {
   final String label;
   final bool isSelected;
   final VoidCallback onTap;
+  final Widget? trailing;
 
   const _SideNavItem({
     required this.icon,
@@ -584,6 +710,7 @@ class _SideNavItem extends StatelessWidget {
     required this.label,
     required this.isSelected,
     required this.onTap,
+    this.trailing,
   });
 
   @override
@@ -620,7 +747,8 @@ class _SideNavItem extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (isSelected)
+              ?trailing,
+              if (isSelected && trailing == null)
                 Container(
                   width: 4,
                   height: 16,
@@ -630,6 +758,75 @@ class _SideNavItem extends StatelessWidget {
                   ),
                 ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SideNavSubItem extends StatelessWidget {
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _SideNavSubItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: AppTokens.space16, top: 2, bottom: 2),
+      child: Material(
+        color: isSelected ? AppTokens.boneContainer : Colors.transparent,
+        borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+          child: Container(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+              border: isSelected ? Border.all(color: AppTokens.crispBorder) : null,
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isSelected ? selectedIcon : icon,
+                  color: isSelected ? AppTokens.charcoalInk : AppTokens.mutedCopy,
+                  size: 18,
+                ),
+                const SizedBox(width: AppTokens.space8),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: AppTypography.bodySans(
+                      fontSize: 13,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                      color: isSelected ? AppTokens.charcoalInk : AppTokens.mutedCopy,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (isSelected)
+                  Container(
+                    width: 4,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: AppTokens.charcoalInk,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -817,6 +1014,8 @@ class _QueueStatusCard extends ConsumerWidget {
 class ShelfdAdaptiveScaffold extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onNavTap;
+  final String? currentPath;
+  final ValueChanged<String>? onNavigate;
   final PreferredSizeWidget? appBar;
   final Widget body;
   final VoidCallback? onRescan;
@@ -827,6 +1026,8 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
     super.key,
     required this.currentIndex,
     required this.onNavTap,
+    this.currentPath,
+    this.onNavigate,
     this.appBar,
     required this.body,
     this.onRescan,
@@ -845,6 +1046,8 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
             ShelfdSideNav(
               currentIndex: currentIndex,
               onTap: onNavTap,
+              currentPath: currentPath,
+              onNavigate: onNavigate,
               onRescan: onRescan,
               onUpload: onUpload,
               isRescanning: isRescanning,
@@ -863,6 +1066,286 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
       bottomNavigationBar: ShelfdBottomNav(
         currentIndex: currentIndex,
         onTap: onNavTap,
+        currentPath: currentPath,
+        onNavigate: onNavigate,
+      ),
+    );
+  }
+}
+
+/// Unified, polymorphic grid card component for [LibraryGridItem].
+class ShelfdGridCard extends StatelessWidget {
+  final LibraryGridItem item;
+  final VoidCallback onTap;
+
+  const ShelfdGridCard({
+    super.key,
+    required this.item,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    switch (item) {
+      case BookGridItem(:final book):
+        return _buildBookCard(book);
+      case SeriesGridItem(:final series):
+        return _buildSeriesCard(series);
+      case AuthorGridItem(:final author):
+        return _buildAuthorCard(author);
+    }
+  }
+
+  Widget _buildBookCard(Book book) {
+    final progressPercent = (book.readingProgress * 100).round();
+
+    return BentoCard(
+      onTap: onTap,
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppTokens.boneContainer,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppTokens.radiusMd),
+                ),
+                border: const Border(
+                  bottom: BorderSide(color: AppTokens.crispBorder),
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppTokens.radiusMd),
+                ),
+                child: book.coverUrl != null && book.coverUrl!.isNotEmpty
+                    ? Image.network(
+                        book.coverUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) =>
+                            _CoverFallback(title: book.title),
+                      )
+                    : _CoverFallback(title: book.title),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(AppTokens.space12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  book.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: AppTokens.space4),
+                Text(
+                  book.authorDisplay,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.bodySans(fontSize: 12),
+                ),
+                if (progressPercent > 0) ...[
+                  const SizedBox(height: AppTokens.space8),
+                  StatusBadge(
+                    label: '$progressPercent% read',
+                    backgroundColor: AppTokens.matchBadgeBg,
+                    textColor: AppTokens.matchBadgeText,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSeriesCard(Series series) {
+    final bookCountLabel = series.bookCount == 1 ? '1 Book' : '${series.bookCount} Books';
+
+    return BentoCard(
+      onTap: onTap,
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppTokens.boneContainer,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppTokens.radiusMd),
+                ),
+                border: const Border(
+                  bottom: BorderSide(color: AppTokens.crispBorder),
+                ),
+              ),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(AppTokens.radiusMd),
+                    ),
+                    child: series.coverUrl != null && series.coverUrl!.isNotEmpty
+                        ? Image.network(
+                            series.coverUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) =>
+                                _SeriesFallback(name: series.name),
+                          )
+                        : _SeriesFallback(name: series.name),
+                  ),
+                  Positioned(
+                    top: AppTokens.space8,
+                    right: AppTokens.space8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTokens.charcoalInk.withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(AppTokens.radiusPill),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.collections_bookmark_outlined, size: 12, color: Colors.white),
+                          const SizedBox(width: 4),
+                          Text(
+                            bookCountLabel,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(AppTokens.space12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  series.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: AppTokens.space4),
+                Text(
+                  'Series',
+                  style: AppTypography.captionSans(
+                    fontSize: 11,
+                    color: AppTokens.mutedCopy,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAuthorCard(Author author) {
+    final bookCountLabel = author.bookCount == 1 ? '1 Book' : '${author.bookCount} Books';
+
+    return BentoCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(AppTokens.space16),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          AuthorAvatar(
+            name: author.name,
+            photoUrl: author.photoUrl,
+            size: 72,
+          ),
+          const SizedBox(height: AppTokens.space12),
+          Text(
+            author.name,
+            maxLines: 2,
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: AppTokens.space8),
+          StatusBadge(
+            label: bookCountLabel,
+            backgroundColor: AppTokens.boneContainer,
+            textColor: AppTokens.mutedCopy,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoverFallback extends StatelessWidget {
+  final String title;
+
+  const _CoverFallback({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppTokens.boneContainer,
+      padding: const EdgeInsets.all(AppTokens.space16),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.book_rounded, size: 36, color: AppTokens.mutedCopy),
+          const SizedBox(height: AppTokens.space8),
+          Text(
+            title,
+            maxLines: 3,
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            style: AppTypography.titleSerif(fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SeriesFallback extends StatelessWidget {
+  final String name;
+
+  const _SeriesFallback({required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppTokens.boneContainer,
+      padding: const EdgeInsets.all(AppTokens.space16),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.collections_bookmark_rounded, size: 36, color: AppTokens.mutedCopy),
+          const SizedBox(height: AppTokens.space8),
+          Text(
+            name,
+            maxLines: 3,
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            style: AppTypography.titleSerif(fontSize: 12),
+          ),
+        ],
       ),
     );
   }

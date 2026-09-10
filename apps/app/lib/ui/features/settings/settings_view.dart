@@ -50,9 +50,15 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
   void _onNavTapped(int index) {
     if (index == 0) {
-      context.go('/library');
+      context.go('/books');
     } else if (index == 1) {
+      context.go('/series');
+    } else if (index == 2) {
+      context.go('/authors');
+    } else if (index == 3) {
       context.go('/search');
+    } else if (index == 4) {
+      context.go('/settings');
     }
   }
 
@@ -507,8 +513,10 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     }
 
     return ShelfdAdaptiveScaffold(
-      currentIndex: 2,
+      currentIndex: 4,
       onNavTap: _onNavTapped,
+      currentPath: '/settings',
+      onNavigate: (path) => context.go(path),
       appBar: topBar,
       body: bodyContent,
     );

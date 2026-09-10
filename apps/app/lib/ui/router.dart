@@ -24,7 +24,7 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
         return '/connect';
       }
       if (hasToken && isConnect) {
-        return '/library';
+        return '/books';
       }
       return null;
     },
@@ -33,14 +33,39 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
         path: '/connect',
         builder: (context, state) => const ConnectView(),
       ),
+      GoRoute(
+        path: '/library',
+        redirect: (context, state) {
+          final query = state.uri.hasQuery ? '?${state.uri.query}' : '';
+          return '/books$query';
+        },
+      ),
 
-      // ShellRoute: wraps primary tabs (/library, /search, /settings) in persistent AppShell
+      // ShellRoute: wraps primary tabs (/books, /series, /authors, /search, /settings) in persistent AppShell
       ShellRoute(
         builder: (context, state, child) => AppShell(child: child),
         routes: [
           GoRoute(
-            path: '/library',
-            builder: (context, state) => const LibraryView(),
+            path: '/books',
+            builder: (context, state) {
+              final filter = state.uri.queryParameters['filter'];
+              return LibraryView(
+                mode: LibraryViewMode.books,
+                initialFilter: filter,
+              );
+            },
+          ),
+          GoRoute(
+            path: '/series',
+            builder: (context, state) => const LibraryView(
+              mode: LibraryViewMode.series,
+            ),
+          ),
+          GoRoute(
+            path: '/authors',
+            builder: (context, state) => const LibraryView(
+              mode: LibraryViewMode.authors,
+            ),
           ),
           GoRoute(
             path: '/search',
@@ -53,53 +78,46 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
         ],
       ),
 
-      // Series hierarchy with subroutes
+      // Series detail route
       GoRoute(
-        path: '/series',
-        redirect: (context, state) =>
-            state.uri.path == '/series' ? '/library?filter=series' : null,
-        routes: [
-          GoRoute(
-            path: ':seriesId',
-            builder: (context, state) {
-              final seriesId = state.pathParameters['seriesId'] ?? '';
-              final seriesName = state.uri.queryParameters['name'];
-              return SeriesDetailView(
-                seriesId: seriesId,
-                seriesName: seriesName,
-              );
-            },
-          ),
-        ],
+        path: '/series/:seriesId',
+        builder: (context, state) {
+          final seriesId = state.pathParameters['seriesId'] ?? '';
+          final seriesName = state.uri.queryParameters['name'];
+          return SeriesDetailView(
+            seriesId: seriesId,
+            seriesName: seriesName,
+          );
+        },
       ),
 
-      // Author hierarchy with subroutes
+      // Author hierarchy with subroutes and redirects
       GoRoute(
         path: '/author',
-        redirect: (context, state) =>
-            state.uri.path == '/author' ? '/library?filter=authors' : null,
-        routes: [
-          GoRoute(
-            path: ':authorId',
-            builder: (context, state) {
-              final authorId = state.pathParameters['authorId'] ?? '';
-              final authorName = state.uri.queryParameters['name'];
-              return AuthorDetailView(
-                authorId: authorId,
-                authorName: authorName,
-              );
-            },
-          ),
-        ],
+        redirect: (context, state) => '/authors',
+      ),
+      GoRoute(
+        path: '/author/:authorId',
+        redirect: (context, state) {
+          final query = state.uri.hasQuery ? '?${state.uri.query}' : '';
+          return '/authors/${state.pathParameters['authorId']}$query';
+        },
       ),
       GoRoute(
         path: '/authors/:authorId',
-        redirect: (context, state) => '/author/${state.pathParameters['authorId']}',
+        builder: (context, state) {
+          final authorId = state.pathParameters['authorId'] ?? '';
+          final authorName = state.uri.queryParameters['name'];
+          return AuthorDetailView(
+            authorId: authorId,
+            authorName: authorName,
+          );
+        },
       ),
 
       // Book hierarchy with nested subroutes for reading and chapters
       GoRoute(
-        path: '/book/:bookId',
+        path: '/books/:bookId',
         builder: (context, state) {
           final bookId = state.pathParameters['bookId'] ?? '';
           return BookDetailView(
@@ -146,24 +164,44 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
         ],
       ),
 
+      // Backwards compatibility redirects for legacy /book routes
+      GoRoute(
+        path: '/book/:bookId',
+        redirect: (context, state) => '/books/${state.pathParameters['bookId']}',
+      ),
+      GoRoute(
+        path: '/book/:bookId/read',
+        redirect: (context, state) => '/books/${state.pathParameters['bookId']}/read',
+      ),
+      GoRoute(
+        path: '/book/:bookId/read/:chapterIdentifier',
+        redirect: (context, state) =>
+            '/books/${state.pathParameters['bookId']}/read/${state.pathParameters['chapterIdentifier']}',
+      ),
+      GoRoute(
+        path: '/book/:bookId/:chapterIdentifier',
+        redirect: (context, state) =>
+            '/books/${state.pathParameters['bookId']}/${state.pathParameters['chapterIdentifier']}',
+      ),
+
       // Backwards compatibility redirects for legacy /reader routes
       GoRoute(
         path: '/reader/:bookId',
-        redirect: (context, state) => '/book/${state.pathParameters['bookId']}',
+        redirect: (context, state) => '/books/${state.pathParameters['bookId']}',
       ),
       GoRoute(
         path: '/reader/:bookId/read',
-        redirect: (context, state) => '/book/${state.pathParameters['bookId']}/read',
+        redirect: (context, state) => '/books/${state.pathParameters['bookId']}/read',
       ),
       GoRoute(
         path: '/reader/:bookId/read/:chapterIdentifier',
         redirect: (context, state) =>
-            '/book/${state.pathParameters['bookId']}/read/${state.pathParameters['chapterIdentifier']}',
+            '/books/${state.pathParameters['bookId']}/read/${state.pathParameters['chapterIdentifier']}',
       ),
       GoRoute(
         path: '/reader/:bookId/:chapterIdentifier',
         redirect: (context, state) =>
-            '/book/${state.pathParameters['bookId']}/${state.pathParameters['chapterIdentifier']}',
+            '/books/${state.pathParameters['bookId']}/${state.pathParameters['chapterIdentifier']}',
       ),
     ],
     errorBuilder: (context, state) => Scaffold(

@@ -111,7 +111,7 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
             if (context.canPop()) {
               context.pop();
             } else {
-              context.go('/library');
+              context.go('/series');
             }
           },
         ),
@@ -195,7 +195,7 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
                                       final book = _books[index];
                                       return _SeriesBookCard(
                                         book: book,
-                                        onTap: () => context.go('/book/${book.id}'),
+                                        onTap: () => context.go('/books/${book.id}'),
                                       );
                                     },
                                   ),

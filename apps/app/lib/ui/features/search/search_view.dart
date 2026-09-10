@@ -18,7 +18,6 @@ class SearchView extends ConsumerStatefulWidget {
 
 class _SearchViewState extends ConsumerState<SearchView> {
   final _searchController = TextEditingController();
-  int _navIndex = 1;
 
   @override
   void dispose() {
@@ -28,10 +27,14 @@ class _SearchViewState extends ConsumerState<SearchView> {
 
   void _onNavTapped(int index) {
     if (index == 0) {
-      context.go('/library');
+      context.go('/books');
     } else if (index == 1) {
-      setState(() => _navIndex = 1);
+      context.go('/series');
     } else if (index == 2) {
+      context.go('/authors');
+    } else if (index == 3) {
+      // already on search
+    } else if (index == 4) {
       context.go('/settings');
     }
   }
@@ -58,7 +61,7 @@ class _SearchViewState extends ConsumerState<SearchView> {
                 if (context.canPop()) {
                   context.pop();
                 } else {
-                  context.go('/library');
+                  context.go('/books');
                 }
               },
             ),
@@ -175,7 +178,7 @@ class _SearchViewState extends ConsumerState<SearchView> {
                                   hit: hit,
                                   onTap: () {
                                     final target = (hit.chapterId != null && hit.chapterId!.isNotEmpty) ? hit.chapterId! : hit.chapterIndex;
-                                    context.go('/book/${hit.bookId}/$target');
+                                    context.go('/books/${hit.bookId}/$target');
                                   },
                                 );
                               },
@@ -196,8 +199,10 @@ class _SearchViewState extends ConsumerState<SearchView> {
     }
 
     return ShelfdAdaptiveScaffold(
-      currentIndex: _navIndex,
+      currentIndex: 3,
       onNavTap: _onNavTapped,
+      currentPath: '/search',
+      onNavigate: (path) => context.go(path),
       appBar: appBarWidget,
       body: bodyContent,
     );

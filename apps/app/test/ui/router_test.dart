@@ -143,7 +143,34 @@ void main() {
   }
 
   group('Router ShellRoute & Subroutes Tests', () {
-    testWidgets('renders AppShell around /library route', (tester) async {
+    testWidgets('renders AppShell around /books route', (tester) async {
+      setViewport(tester);
+      await tester.pumpWidget(buildApp('/books'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AppShell), findsOneWidget);
+      expect(find.byType(LibraryView), findsOneWidget);
+    });
+
+    testWidgets('renders AppShell around /series route', (tester) async {
+      setViewport(tester);
+      await tester.pumpWidget(buildApp('/series'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AppShell), findsOneWidget);
+      expect(find.byType(LibraryView), findsOneWidget);
+    });
+
+    testWidgets('renders AppShell around /authors route', (tester) async {
+      setViewport(tester);
+      await tester.pumpWidget(buildApp('/authors'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AppShell), findsOneWidget);
+      expect(find.byType(LibraryView), findsOneWidget);
+    });
+
+    testWidgets('renders AppShell around /library route (redirects to /books)', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/library'));
       await tester.pumpAndSettle();
@@ -188,7 +215,16 @@ void main() {
       expect(find.byType(AppShell), findsNothing);
     });
 
-    testWidgets('redirects /authors/:authorId to /author/:authorId', (tester) async {
+    testWidgets('renders AuthorDetailView on /authors/:authorId subroute', (tester) async {
+      setViewport(tester);
+      await tester.pumpWidget(buildApp('/authors/a-1?name=Test+Author'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AuthorDetailView), findsOneWidget);
+      expect(find.byType(AppShell), findsNothing);
+    });
+
+    testWidgets('redirects /authors/:authorId to AuthorDetailView', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/authors/a-1'));
       await tester.pumpAndSettle();
@@ -196,29 +232,38 @@ void main() {
       expect(find.byType(AuthorDetailView), findsOneWidget);
     });
 
-    testWidgets('renders BookDetailView on /book/:bookId', (tester) async {
+    testWidgets('renders BookDetailView on /books/:bookId', (tester) async {
       setViewport(tester);
-      await tester.pumpWidget(buildApp('/book/book-1'));
+      await tester.pumpWidget(buildApp('/books/book-1'));
       await tester.pumpAndSettle();
 
       expect(find.byType(BookDetailView), findsOneWidget);
       expect(find.byType(AppShell), findsNothing);
     });
 
-    testWidgets('renders ReaderView on /book/:bookId/read subroute', (tester) async {
+    testWidgets('renders ReaderView on /books/:bookId/read subroute', (tester) async {
       setViewport(tester);
-      await tester.pumpWidget(buildApp('/book/book-1/read'));
+      await tester.pumpWidget(buildApp('/books/book-1/read'));
       await tester.pumpAndSettle();
 
       expect(find.byType(ReaderView), findsOneWidget);
     });
 
-    testWidgets('renders ReaderView on /book/:bookId/read/:chapterIdentifier subroute', (tester) async {
+    testWidgets('renders ReaderView on /books/:bookId/read/:chapterIdentifier subroute', (tester) async {
       setViewport(tester);
-      await tester.pumpWidget(buildApp('/book/book-1/read/ch-2'));
+      await tester.pumpWidget(buildApp('/books/book-1/read/ch-2'));
       await tester.pumpAndSettle();
 
       expect(find.byType(ReaderView), findsOneWidget);
+    });
+
+    testWidgets('redirects /book/:bookId to /books/:bookId', (tester) async {
+      setViewport(tester);
+      await tester.pumpWidget(buildApp('/book/book-1'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BookDetailView), findsOneWidget);
+      expect(find.byType(AppShell), findsNothing);
     });
 
     testWidgets('redirects /reader/:bookId to /book/:bookId', (tester) async {

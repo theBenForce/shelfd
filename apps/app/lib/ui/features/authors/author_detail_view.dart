@@ -86,7 +86,7 @@ class _AuthorDetailViewState extends ConsumerState<AuthorDetailView> {
             if (context.canPop()) {
               context.pop();
             } else {
-              context.go('/library');
+              context.go('/authors');
             }
           },
         ),
@@ -181,7 +181,7 @@ class _AuthorDetailViewState extends ConsumerState<AuthorDetailView> {
                                       final book = _books[index];
                                       return _AuthorBookCard(
                                         book: book,
-                                        onTap: () => context.go('/book/${book.id}'),
+                                        onTap: () => context.go('/books/${book.id}'),
                                       );
                                     },
                                   ),

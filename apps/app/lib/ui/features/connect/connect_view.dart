@@ -25,7 +25,7 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
   @override
   void initState() {
     super.initState();
-    final initialUrl = kIsWeb ? Uri.base.origin : 'http://localhost:8080';
+    final initialUrl = (kIsWeb && Uri.base.port == 8080) ? Uri.base.origin : 'http://localhost:8080';
     _urlController = TextEditingController(text: initialUrl);
     final storage = ref.read(storageServiceProvider);
     final savedUser = storage.getSavedUsername();
@@ -83,13 +83,13 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
   Future<void> _handleConnect() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final url = kIsWeb ? Uri.base.origin : _urlController.text.trim();
+    final url = (kIsWeb && Uri.base.port == 8080) ? Uri.base.origin : _urlController.text.trim();
     final user = _userController.text.trim();
     final pass = _passwordController.text;
 
     final success = await ref.read(authProvider.notifier).login(url, user, pass);
     if (success && mounted) {
-      context.go('/library');
+      context.go('/books');
     }
   }
 

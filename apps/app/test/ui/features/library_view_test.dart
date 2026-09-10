@@ -75,7 +75,7 @@ void main() {
 
     // Verify filter pills
     expect(find.text('All Books'), findsOneWidget);
-    expect(find.text('Series'), findsOneWidget);
+    expect(find.widgetWithText(ChoiceChip, 'Series'), findsOneWidget);
 
     // Verify book cards
     expect(find.text('The Left Hand of Darkness'), findsWidgets);

@@ -159,7 +159,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               if (context.canPop()) {
                 context.pop();
               } else {
-                context.go('/library');
+                context.go('/books');
               }
             },
           ),
@@ -212,7 +212,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             if (context.canPop()) {
               context.pop();
             } else {
-              context.go('/library');
+              context.go('/books');
             }
           },
         ),
@@ -238,7 +238,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               ),
               icon: const Icon(Icons.menu_book_rounded, size: 18),
               label: Text(book.readingProgress > 0 ? 'Resume' : 'Read'),
-              onPressed: () => context.go('/book/${book.id}/read'),
+              onPressed: () => context.go('/books/${book.id}/read'),
             ),
           ),
         ],
@@ -355,7 +355,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                       InkWell(
                         onTap: () {
                           final author = book.authors.first;
-                          context.go('/author/${author.id}?name=${Uri.encodeComponent(author.name)}');
+                          context.go('/authors/${author.id}?name=${Uri.encodeComponent(author.name)}');
                         },
                         borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                         child: Padding(
@@ -464,7 +464,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 book.readingProgress > 0 ? 'Resume Reading' : 'Start Reading',
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
-              onPressed: () => context.go('/book/${book.id}/read'),
+              onPressed: () => context.go('/books/${book.id}/read'),
             ),
           ),
           const SizedBox(height: AppTokens.space20),
@@ -698,7 +698,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                     color: AppTokens.mutedCopy,
                   ),
                   onTap: () {
-                    context.go('/book/${book.id}/read/${item.chapterIndex}');
+                    context.go('/books/${book.id}/read/${item.chapterIndex}');
                   },
                 );
               },
@@ -1299,7 +1299,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                             backgroundColor: AppTokens.boneBackground,
                             side: const BorderSide(color: AppTokens.crispBorder),
                             onPressed: () {
-                              context.go('/book/${widget.bookId}/read/${cit.chapterIndex}');
+                              context.go('/books/${widget.bookId}/read/${cit.chapterIndex}');
                             },
                           ),
                       ],

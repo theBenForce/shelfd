@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/queue_status.dart';
+import 'package:shelf/data/models/series.dart';
 import 'package:shelf/ui/core/shared_layout.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/core/tokens.dart';
@@ -324,6 +326,128 @@ void main() {
 
       expect(find.byType(ShelfdSideNav), findsOneWidget);
       expect(find.byType(ShelfdBottomNav), findsNothing);
+    });
+
+    testWidgets('ShelfdSideNav collapsible Library accordion toggles sub-items', (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            queueProvider.overrideWith(() => FakeQueueNotifier()),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              body: ShelfdSideNav(
+                currentIndex: 0,
+                onTap: (_) {},
+                currentPath: '/books',
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // Accordion is open by default: Books, Series, Authors visible
+      expect(find.text('Library'), findsOneWidget);
+      expect(find.text('Books'), findsOneWidget);
+      expect(find.text('Series'), findsOneWidget);
+      expect(find.text('Authors'), findsOneWidget);
+
+      // Tap Library accordion header to collapse
+      await tester.tap(find.text('Library'));
+      await tester.pumpAndSettle();
+
+      // Sub-items collapsed
+      expect(find.text('Books'), findsNothing);
+      expect(find.text('Series'), findsNothing);
+      expect(find.text('Authors'), findsNothing);
+
+      // Tap Library accordion header again to expand
+      await tester.tap(find.text('Library'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Books'), findsOneWidget);
+      expect(find.text('Series'), findsOneWidget);
+      expect(find.text('Authors'), findsOneWidget);
+    });
+
+    testWidgets('ShelfdGridCard renders BookGridItem, SeriesGridItem, and AuthorGridItem correctly', (tester) async {
+      final bookItem = BookGridItem(
+        const Book(id: 'b1', title: 'Test Book Title', authors: [Author(id: 'a1', name: 'Author One')]),
+      );
+      final seriesItem = SeriesGridItem(
+        const Series(id: 's1', name: 'Percy Jackson', bookCount: 3),
+      );
+      final authorItem = AuthorGridItem(
+        const Author(id: 'a1', name: 'Rick Riordan', bookCount: 4),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: Scaffold(
+            body: GridView.count(
+              crossAxisCount: 3,
+              children: [
+                ShelfdGridCard(item: bookItem, onTap: () {}),
+                ShelfdGridCard(item: seriesItem, onTap: () {}),
+                ShelfdGridCard(item: authorItem, onTap: () {}),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Test Book Title'), findsWidgets);
+      expect(find.text('Author One'), findsOneWidget);
+
+      expect(find.text('Percy Jackson'), findsWidgets);
+      expect(find.text('3 Books'), findsOneWidget);
+
+      expect(find.text('Rick Riordan'), findsOneWidget);
+      expect(find.text('4 Books'), findsOneWidget);
+    });
+
+    test('LibraryState groupedBookItems groups books by series into single SeriesGridItem', () {
+      final books = [
+        const Book(
+          id: 'b1',
+          title: 'The Lightning Thief',
+          series: Series(id: 's1', name: 'Percy Jackson'),
+        ),
+        const Book(
+          id: 'b2',
+          title: 'The Sea of Monsters',
+          series: Series(id: 's1', name: 'Percy Jackson'),
+        ),
+        const Book(
+          id: 'b3',
+          title: 'The Titan\'s Curse',
+          series: Series(id: 's1', name: 'Percy Jackson'),
+        ),
+        const Book(
+          id: 'b4',
+          title: 'Standalone Novel',
+        ),
+      ];
+
+      final state = LibraryState(
+        books: books,
+        series: const [Series(id: 's1', name: 'Percy Jackson', bookCount: 3)],
+      );
+
+      final grouped = state.groupedBookItems;
+      expect(grouped.length, 2);
+
+      final seriesEntries = grouped.whereType<SeriesGridItem>().toList();
+      final bookEntries = grouped.whereType<BookGridItem>().toList();
+
+      expect(seriesEntries.length, 1);
+      expect(seriesEntries.first.displayName, 'Percy Jackson');
+      expect(seriesEntries.first.bookCount, 3);
+
+      expect(bookEntries.length, 1);
+      expect(bookEntries.first.displayName, 'Standalone Novel');
     });
   });
 }

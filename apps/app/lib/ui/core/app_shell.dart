@@ -13,21 +13,31 @@ class AppShell extends ConsumerWidget {
 
   int _calculateSelectedIndex(BuildContext context) {
     final location = GoRouterState.of(context).uri.path;
-    if (location.startsWith('/search')) {
+    if (location.startsWith('/series')) {
       return 1;
     }
-    if (location.startsWith('/settings')) {
+    if (location.startsWith('/authors') || location.startsWith('/author')) {
       return 2;
+    }
+    if (location.startsWith('/search')) {
+      return 3;
+    }
+    if (location.startsWith('/settings')) {
+      return 4;
     }
     return 0;
   }
 
   void _onNavTap(BuildContext context, int index) {
     if (index == 0) {
-      context.go('/library');
+      context.go('/books');
     } else if (index == 1) {
-      context.go('/search');
+      context.go('/series');
     } else if (index == 2) {
+      context.go('/authors');
+    } else if (index == 3) {
+      context.go('/search');
+    } else if (index == 4) {
       context.go('/settings');
     }
   }
@@ -35,6 +45,7 @@ class AppShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final queueState = ref.watch(queueProvider);
+    final currentPath = GoRouterState.of(context).uri.path;
     final currentIndex = _calculateSelectedIndex(context);
 
     Future<void> handleScan() async {
@@ -50,6 +61,8 @@ class AppShell extends ConsumerWidget {
     return ShelfdAdaptiveScaffold(
       currentIndex: currentIndex,
       onNavTap: (index) => _onNavTap(context, index),
+      currentPath: currentPath,
+      onNavigate: (path) => context.go(path),
       onRescan: handleScan,
       onUpload: () => pickAndUploadEpub(context, ref),
       isRescanning: queueState.isLoading,

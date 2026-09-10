@@ -30,7 +30,10 @@ final storageServiceProvider = Provider<StorageService>((ref) {
 
 final apiServiceProvider = Provider<ApiService>((ref) {
   final storage = ref.watch(storageServiceProvider);
-  final serverUrl = kIsWeb ? Uri.base.origin : (storage.getServerUrl() ?? 'http://localhost:8080');
+  final serverUrl = storage.getServerUrl() ??
+      (kIsWeb
+          ? (Uri.base.port == 8080 ? Uri.base.origin : 'http://localhost:8080')
+          : 'http://localhost:8080');
   final token = storage.getAuthToken();
   return ApiService(baseUrl: serverUrl, token: token);
 });
@@ -92,7 +95,10 @@ class AuthNotifier extends Notifier<AuthState> {
   @override
   AuthState build() {
     final storage = ref.watch(storageServiceProvider);
-    final url = kIsWeb ? Uri.base.origin : storage.getServerUrl();
+    final url = storage.getServerUrl() ??
+        (kIsWeb
+            ? (Uri.base.port == 8080 ? Uri.base.origin : 'http://localhost:8080')
+            : 'http://localhost:8080');
     return AuthState(serverUrl: url);
   }
 
@@ -117,7 +123,14 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   Future<bool> login(String serverUrl, String username, String password) async {
-    final effectiveUrl = kIsWeb ? Uri.base.origin : serverUrl;
+    final storage = ref.read(storageServiceProvider);
+    final fallbackUrl = storage.getServerUrl() ??
+        (kIsWeb
+            ? (Uri.base.port == 8080 ? Uri.base.origin : 'http://localhost:8080')
+            : 'http://localhost:8080');
+    final effectiveUrl = (kIsWeb && Uri.base.port == 8080)
+        ? Uri.base.origin
+        : (serverUrl.trim().isNotEmpty ? serverUrl.trim() : fallbackUrl);
     state = state.copyWith(isLoading: true, error: null, serverUrl: effectiveUrl);
     final authRepo = ref.read(authRepositoryProvider);
     try {
@@ -143,6 +156,78 @@ class AuthNotifier extends Notifier<AuthState> {
 }
 
 final authProvider = NotifierProvider<AuthNotifier, AuthState>(AuthNotifier.new);
+
+// Polymorphic Library Grid Item Hierarchy
+sealed class LibraryGridItem {
+  String get id;
+  String get displayName;
+  String? get subtitle;
+  String? get imageUrl;
+  int? get bookCount;
+}
+
+class BookGridItem extends LibraryGridItem {
+  final Book book;
+
+  BookGridItem(this.book);
+
+  @override
+  String get id => book.id;
+
+  @override
+  String get displayName => book.title;
+
+  @override
+  String? get subtitle => book.authorDisplay;
+
+  @override
+  String? get imageUrl => book.coverUrl;
+
+  @override
+  int? get bookCount => null;
+}
+
+class SeriesGridItem extends LibraryGridItem {
+  final Series series;
+
+  SeriesGridItem(this.series);
+
+  @override
+  String get id => series.id;
+
+  @override
+  String get displayName => series.name;
+
+  @override
+  String? get subtitle => 'Series';
+
+  @override
+  String? get imageUrl => series.coverUrl;
+
+  @override
+  int? get bookCount => series.bookCount;
+}
+
+class AuthorGridItem extends LibraryGridItem {
+  final Author author;
+
+  AuthorGridItem(this.author);
+
+  @override
+  String get id => author.id;
+
+  @override
+  String get displayName => author.name;
+
+  @override
+  String? get subtitle => 'Author';
+
+  @override
+  String? get imageUrl => author.photoUrl;
+
+  @override
+  int? get bookCount => author.bookCount;
+}
 
 // Library State
 class LibraryState {
@@ -171,6 +256,53 @@ class LibraryState {
     this.totalBooks = 0,
     this.error,
   });
+
+  List<LibraryGridItem> get groupedBookItems {
+    final List<LibraryGridItem> items = [];
+    final Map<String, List<Book>> seriesBooksMap = {};
+    final List<Book> standaloneBooks = [];
+
+    for (final book in filteredBooks) {
+      if (book.series != null && book.series!.id.isNotEmpty) {
+        seriesBooksMap.putIfAbsent(book.series!.id, () => []).add(book);
+      } else {
+        standaloneBooks.add(book);
+      }
+    }
+
+    for (final book in standaloneBooks) {
+      items.add(BookGridItem(book));
+    }
+
+    final seriesById = {for (final s in series) s.id: s};
+
+    for (final entry in seriesBooksMap.entries) {
+      final sId = entry.key;
+      final bList = entry.value;
+      final existingSeries = seriesById[sId];
+      final firstCover = bList.where((b) => b.coverUrl != null && b.coverUrl!.isNotEmpty).firstOrNull?.coverUrl;
+      final seriesObj = Series(
+        id: sId,
+        name: existingSeries?.name ?? bList.first.series!.name,
+        coverUrl: (existingSeries?.coverUrl != null && existingSeries!.coverUrl!.isNotEmpty)
+            ? existingSeries.coverUrl
+            : firstCover,
+        bookCount: existingSeries != null && existingSeries.bookCount > 0 ? existingSeries.bookCount : bList.length,
+      );
+      items.add(SeriesGridItem(seriesObj));
+    }
+
+    items.sort((a, b) => a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
+    return items;
+  }
+
+  List<SeriesGridItem> get seriesGridItems {
+    return filteredSeries.map((s) => SeriesGridItem(s)).toList();
+  }
+
+  List<AuthorGridItem> get authorGridItems {
+    return filteredAuthors.map((a) => AuthorGridItem(a)).toList();
+  }
 
   List<Book> get filteredBooks {
     List<Book> list;
