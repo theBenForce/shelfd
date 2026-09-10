@@ -62,6 +62,16 @@ This file centralizes the specialized AI team personas and implementation workfl
   * **Permissions & PUID/PGID**: Manages file creation masks and user/group ID mappings so shared mounts with Audiobookshelf do not suffer Linux permission locks.
   * **Backup Ergonomics**: Guarantees that copying `/data/sqlite.db` constitutes a complete, valid system backup.
 
+### 8. `@qa` — The Test Automation & Live Verification Specialist
+* **Core Focus**: Live stack orchestration, end-to-end testing, watch mode operations, and Chrome DevTools MCP verification.
+* **Responsibilities**:
+  * **Backend Watch Mode**: Runs the Go daemon in watch mode via `air` (`mise exec -- air`) with environment overrides (`SHELFD_DATABASE_TYPE=postgres`, `SHELFD_DATABASE_POSTGRES_DSN=...`, `SHELFD_SERVER_PORT=8080`, `SHELFD_JWT_SECRET=...`).
+  * **Hot-Reloading Flutter Web**: Runs Flutter Web directly (`mise exec -- flutter run -d web-server --web-port 3000`) in `apps/app/`. Strictly forbids serving Flutter Web statically from the Go backend during UI development to preserve hot reload and hot restart.
+  * **Browser Automation via Chrome DevTools MCP**: Drives browser sessions via `chrome-devtools-mcp` tools (`navigate_page`, `take_snapshot`, `list_console_messages`, `take_screenshot`, `evaluate_script`) against `http://localhost:3000`.
+  * **Automated Auth Session Seeding**: Injects local storage authentication tokens (`flutter.shelfd_server_url`, `flutter.shelfd_saved_username`, `flutter.shelfd_auth_token`) so that browser automation bypasses login without manual human intervention.
+  * **Visual Proof & Walkthrough Artifacts**: Captures high-fidelity screenshots using `take_screenshot`, offloads them to the conversation brain directory, and embeds them directly into `walkthrough.md`.
+  * **Layout & Shell Invariant Checks**: Verifies that desktop sidebar navigation (`AppShell`) persists across catalog and detail views (`/books`, `/series`, `/authors`, `/books/:id`, `/series/:id`, `/authors/:id`), while reader routes (`/books/:id/read`) remain fullscreen.
+
 ---
 
 ## Feature Implementation Workflow
@@ -101,6 +111,12 @@ graph TD
 * **Leads**: `@qa`, `@security`, `@homelab`
 * **Actions**:
   * Run workspace checks: `pnpm build`, `pnpm test`, `pnpm lint`.
+  * Run unit and analyzer suites: `mise exec -- flutter analyze`, `mise exec -- flutter test`, `mise exec -- go test ./...`.
+  * **Live End-to-End Verification**:
+    1. Start the Go server in watch mode with `air` on `http://localhost:8080`.
+    2. Start Flutter Web on `http://localhost:3000` via `flutter run -d web-server --web-port 3000` (maintaining hot reload/restart).
+    3. Use Chrome DevTools MCP to navigate pages, inspect console logs for errors/CORS issues, and verify DOM rendering.
+    4. Capture screenshots of verified screens and embed them into the `walkthrough.md` artifact.
   * Test MCP endpoints via `@modelcontextprotocol/inspector` or curl.
   * Verify Docker build and volume mount permissions.
 
@@ -115,7 +131,33 @@ graph TD
 ## Toolchain & Environment Execution
 
 All toolchain commands (`go`, `flutter`, `pnpm`, `node`) MUST be executed through `mise exec -- <command>`:
-* Go: `mise exec -- go test ./...`
-* Flutter: `mise exec -- flutter test`
-* Pnpm: `mise exec -- pnpm test`
+* Go Tests: `mise exec -- go test ./...`
+* Flutter Tests: `mise exec -- flutter test`
+* Flutter Analyze: `mise exec -- flutter analyze`
+* Monorepo Test: `mise exec -- pnpm test`
+
+### Live Development & Verification Stack
+1. **Go Server (Watch Mode with Air)**:
+   ```bash
+   cd apps/server
+   SHELFD_DATABASE_TYPE=postgres \
+   SHELFD_DATABASE_POSTGRES_DSN="postgres://shelfd:shelfd_password@127.0.0.1:5432/shelfd?sslmode=disable" \
+   SHELFD_STORAGE_LIBRARY_DIR=/Users/bforce/books \
+   SHELFD_STORAGE_DATA_DIR=/Users/bforce/repos/shelved/data \
+   SHELFD_SERVER_PORT=8080 \
+   SHELFD_JWT_SECRET=shelfd-homelab-jwt-secret-key-32bytes \
+   mise exec -- air
+   ```
+2. **Flutter Web Server (Hot Reload)**:
+   ```bash
+   cd apps/app
+   mise exec -- flutter run -d web-server --web-port 3000
+   ```
+   *Never serve Flutter Web statically from the Go server (`/dist`) during active frontend development because static serving loses hot reload and hot restart.*
+3. **Chrome DevTools MCP Automation**:
+   * Inspect page targets: `list_pages`
+   * Navigate to URLs: `navigate_page(pageId, type="url", url="http://localhost:3000/...")`
+   * Audit console & network errors: `list_console_messages(pageId)`
+   * Verify DOM / a11y nodes: `take_snapshot(pageId)`
+   * Capture visual proof: `take_screenshot(pageId)` and copy the saved media artifact into the brain directory to embed into `walkthrough.md`.
 
