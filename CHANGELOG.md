@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/theBenForce/shelfd/compare/v1.2.0...v1.2.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **oauth:** resolve postgres table mapping and enable cors on discovery ([#2](https://github.com/theBenForce/shelfd/issues/2)) ([196ccb0](https://github.com/theBenForce/shelfd/commit/196ccb0289b72e47742a74fd4494fa079d4736b2))
+
 # [1.2.0](https://github.com/theBenForce/shelved/compare/v1.1.1...v1.2.0) (2026-09-10)
 
 
