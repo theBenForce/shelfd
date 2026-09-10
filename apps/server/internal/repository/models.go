@@ -234,7 +234,7 @@ type QueueStatus struct {
 
 // OAuthClient represents a dynamically registered OAuth 2.0 client (RFC 7591).
 type OAuthClient struct {
-	bun.BaseModel `bun:"table:oauth_clients,alias:oc"`
+	bun.BaseModel `bun:"table:oauth_clients"`
 	ID            string    `json:"client_id" bun:"id,pk"`
 	ClientSecret  *string   `json:"client_secret,omitempty" bun:"client_secret"`
 	ClientName    string    `json:"client_name" bun:"client_name,notnull"`
@@ -247,7 +247,7 @@ type OAuthClient struct {
 
 // OAuthCode represents an authorization code awaiting token exchange (RFC 6749 / RFC 7636).
 type OAuthCode struct {
-	bun.BaseModel `bun:"table:oauth_codes,alias:oco"`
+	bun.BaseModel `bun:"table:oauth_codes"`
 	Code                string    `json:"code" bun:"code,pk"`
 	ClientID            string    `json:"client_id" bun:"client_id,notnull"`
 	UserID              string    `json:"user_id" bun:"user_id,notnull"`

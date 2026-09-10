@@ -42,6 +42,7 @@ func TestBunOAuthModelTableNames(t *testing.T) {
 
 	// 2. Verify OAuthClient SELECT query string targets oauth_clients
 	selectClientSQL := db.NewSelect().Model(client).Where("id = ?", "client_test_123").String()
+	t.Logf("SELECT query without ModelTableExpr: %s", selectClientSQL)
 	if strings.Contains(selectClientSQL, "o_auth_clients") {
 		t.Fatalf("OAuthClient select query mistakenly targeted 'o_auth_clients': %s", selectClientSQL)
 	}
@@ -69,10 +70,21 @@ func TestBunOAuthModelTableNames(t *testing.T) {
 
 	// 4. Verify OAuthCode SELECT query string targets oauth_codes
 	selectCodeSQL := db.NewSelect().Model(code).Where("code = ?", "code_test_123").String()
+	t.Logf("SELECT code query: %s", selectCodeSQL)
 	if strings.Contains(selectCodeSQL, "o_auth_codes") {
 		t.Fatalf("OAuthCode select query mistakenly targeted 'o_auth_codes': %s", selectCodeSQL)
 	}
 	if !strings.Contains(selectCodeSQL, "oauth_codes") {
 		t.Fatalf("OAuthCode select query did not target 'oauth_codes': %s", selectCodeSQL)
+	}
+
+	// 5. Verify OAuthCode DELETE query string targets oauth_codes
+	deleteCodeSQL := db.NewDelete().Model((*repository.OAuthCode)(nil)).Where("code = ?", "code_test_123").String()
+	t.Logf("DELETE code query: %s", deleteCodeSQL)
+	if strings.Contains(deleteCodeSQL, "o_auth_codes") {
+		t.Fatalf("OAuthCode delete query mistakenly targeted 'o_auth_codes': %s", deleteCodeSQL)
+	}
+	if !strings.Contains(deleteCodeSQL, "oauth_codes") {
+		t.Fatalf("OAuthCode delete query did not target 'oauth_codes': %s", deleteCodeSQL)
 	}
 }

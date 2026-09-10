@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -102,6 +103,9 @@ func (h *OAuthHandler) HandleDiscovery(w http.ResponseWriter, r *http.Request) {
 		"code_challenge_methods_supported":      []string{"S256", "plain"},
 		"token_endpoint_auth_methods_supported": []string{"client_secret_post", "client_secret_basic", "none"},
 		"scopes_supported":                      []string{"mcp", "library", "read", "write"},
+		"service_documentation":                 base,
+		"client_name":                           "Shelfd",
+		"app_name":                              "Shelfd",
 	}
 
 	writeJSON(w, http.StatusOK, meta)
@@ -465,6 +469,7 @@ func (h *OAuthHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	client, err := h.repo.GetOAuthClientByID(r.Context(), clientID)
 	if err != nil || client == nil {
+		slog.Default().Warn("oauth authorize failed: invalid client_id", "client_id", clientID, "error", err)
 		http.Error(w, "Invalid client_id", http.StatusBadRequest)
 		return
 	}
@@ -479,6 +484,7 @@ func (h *OAuthHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !isAllowed {
+		slog.Default().Warn("oauth authorize failed: unauthorized redirect_uri", "client_id", clientID, "redirect_uri", redirectURI, "allowed_uris", client.RedirectURIs)
 		http.Error(w, "Unauthorized redirect_uri for client", http.StatusBadRequest)
 		return
 	}
