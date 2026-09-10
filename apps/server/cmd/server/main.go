@@ -235,7 +235,7 @@ func main() {
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	rootHandler := api.RequestLoggerMiddleware(logger)(mux)
+	rootHandler := api.RequestLoggerMiddleware(logger)(api.CORSMiddleware(mux))
 	server := &http.Server{
 		Addr:    addr,
 		Handler: rootHandler,
