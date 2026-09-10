@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/theBenForce/shelved/compare/v1.1.0...v1.1.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* auto-detect deployed domain origin and make server url editable in web client ([d3d2bf4](https://github.com/theBenForce/shelved/commit/d3d2bf4520a03bbf29af5e8be8ce12f59f0e614c))
+
 # [1.1.0](https://github.com/theBenForce/shelved/compare/v1.0.0...v1.1.0) (2026-09-10)
 
 
