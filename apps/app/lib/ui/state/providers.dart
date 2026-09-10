@@ -18,6 +18,20 @@ import '../../data/services/api_service.dart';
 import '../../data/services/storage_service.dart';
 import '../core/theme.dart';
 
+/// Resolves the default server URL based on the runtime platform and environment.
+/// In local web dev (e.g. localhost:3000), defaults to http://localhost:8080.
+/// In deployed web environments, defaults to the hosting origin (Uri.base.origin).
+/// In native environments (iOS, Android, macOS), defaults to http://localhost:8080.
+String resolveDefaultServerUrl() {
+  if (kIsWeb) {
+    if ((Uri.base.host == 'localhost' || Uri.base.host == '127.0.0.1') && Uri.base.port != 8080) {
+      return 'http://localhost:8080';
+    }
+    return Uri.base.origin;
+  }
+  return 'http://localhost:8080';
+}
+
 // Service & Repository Providers
 final sharedPreferencesProvider = Provider<SharedPreferences>((ref) {
   throw UnimplementedError('Must override sharedPreferencesProvider');
@@ -30,10 +44,7 @@ final storageServiceProvider = Provider<StorageService>((ref) {
 
 final apiServiceProvider = Provider<ApiService>((ref) {
   final storage = ref.watch(storageServiceProvider);
-  final serverUrl = storage.getServerUrl() ??
-      (kIsWeb
-          ? (Uri.base.port == 8080 ? Uri.base.origin : 'http://localhost:8080')
-          : 'http://localhost:8080');
+  final serverUrl = storage.getServerUrl() ?? resolveDefaultServerUrl();
   final token = storage.getAuthToken();
   return ApiService(baseUrl: serverUrl, token: token);
 });
@@ -95,10 +106,7 @@ class AuthNotifier extends Notifier<AuthState> {
   @override
   AuthState build() {
     final storage = ref.watch(storageServiceProvider);
-    final url = storage.getServerUrl() ??
-        (kIsWeb
-            ? (Uri.base.port == 8080 ? Uri.base.origin : 'http://localhost:8080')
-            : 'http://localhost:8080');
+    final url = storage.getServerUrl() ?? resolveDefaultServerUrl();
     return AuthState(serverUrl: url);
   }
 
@@ -124,13 +132,8 @@ class AuthNotifier extends Notifier<AuthState> {
 
   Future<bool> login(String serverUrl, String username, String password) async {
     final storage = ref.read(storageServiceProvider);
-    final fallbackUrl = storage.getServerUrl() ??
-        (kIsWeb
-            ? (Uri.base.port == 8080 ? Uri.base.origin : 'http://localhost:8080')
-            : 'http://localhost:8080');
-    final effectiveUrl = (kIsWeb && Uri.base.port == 8080)
-        ? Uri.base.origin
-        : (serverUrl.trim().isNotEmpty ? serverUrl.trim() : fallbackUrl);
+    final fallbackUrl = storage.getServerUrl() ?? resolveDefaultServerUrl();
+    final effectiveUrl = serverUrl.trim().isNotEmpty ? serverUrl.trim() : fallbackUrl;
     state = state.copyWith(isLoading: true, error: null, serverUrl: effectiveUrl);
     final authRepo = ref.read(authRepositoryProvider);
     try {

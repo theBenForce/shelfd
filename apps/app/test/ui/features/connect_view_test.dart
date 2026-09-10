@@ -42,4 +42,31 @@ void main() {
     // Verify privacy footer
     expect(find.textContaining('Direct connection to your private server'), findsOneWidget);
   });
+
+  test('resolveDefaultServerUrl returns fallback localhost on non-web platforms', () {
+    expect(resolveDefaultServerUrl(), 'http://localhost:8080');
+  });
+
+  testWidgets('ConnectView pre-fills with saved server URL from preferences', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'shelfd_server_url': 'https://shelfd.thebenforce.com',
+      'shelfd_saved_username': 'customuser',
+    });
+    final prefs = await SharedPreferences.getInstance();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const ConnectView(),
+        ),
+      ),
+    );
+
+    expect(find.text('https://shelfd.thebenforce.com'), findsOneWidget);
+    expect(find.text('customuser'), findsOneWidget);
+  });
 }

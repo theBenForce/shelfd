@@ -25,9 +25,10 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
   @override
   void initState() {
     super.initState();
-    final initialUrl = (kIsWeb && Uri.base.port == 8080) ? Uri.base.origin : 'http://localhost:8080';
-    _urlController = TextEditingController(text: initialUrl);
     final storage = ref.read(storageServiceProvider);
+    final savedUrl = storage.getServerUrl();
+    final initialUrl = (savedUrl != null && savedUrl.isNotEmpty) ? savedUrl : resolveDefaultServerUrl();
+    _urlController = TextEditingController(text: initialUrl);
     final savedUser = storage.getSavedUsername();
     _userController = TextEditingController(
       text: savedUser != null && savedUser.isNotEmpty ? savedUser : 'admin',
@@ -65,9 +66,10 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
             ),
             onPressed: () async {
               Navigator.of(ctx).pop();
-              _urlController.text = 'http://localhost:8080';
+              final defaultUrl = resolveDefaultServerUrl();
+              _urlController.text = defaultUrl;
               try {
-                final info = await ref.read(authRepositoryProvider).testConnection('http://localhost:8080');
+                final info = await ref.read(authRepositoryProvider).testConnection(defaultUrl);
                 if (info.defaultUsername != null && info.defaultUsername!.isNotEmpty && mounted) {
                   _userController.text = info.defaultUsername!;
                 }
@@ -83,7 +85,9 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
   Future<void> _handleConnect() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final url = (kIsWeb && Uri.base.port == 8080) ? Uri.base.origin : _urlController.text.trim();
+    final url = _urlController.text.trim().isNotEmpty
+        ? _urlController.text.trim()
+        : resolveDefaultServerUrl();
     final user = _userController.text.trim();
     final pass = _passwordController.text;
 
@@ -211,7 +215,6 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
                     // Manual Inputs
                     TextFormField(
                       controller: _urlController,
-                      readOnly: kIsWeb,
                       decoration: InputDecoration(
                         labelText: 'Server URL',
                         hintText: 'http://192.168.1.100:8080',
