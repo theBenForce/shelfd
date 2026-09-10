@@ -21,6 +21,10 @@ class Book {
   final String? publishedDate;
   final String? language;
   final int? fileSizeBytes;
+  final String layout;
+  final String? renditionSpread;
+  final String? renditionOrientation;
+  final String? pageProgressionDirection;
 
   const Book({
     required this.id,
@@ -39,7 +43,13 @@ class Book {
     this.publishedDate,
     this.language,
     this.fileSizeBytes,
+    this.layout = 'reflowable',
+    this.renditionSpread,
+    this.renditionOrientation,
+    this.pageProgressionDirection,
   });
+
+  bool get isFixedLayout => layout == 'pre-paginated';
 
   String get authorDisplay {
     if (authors.isEmpty) return 'Unknown Author';
@@ -106,6 +116,10 @@ class Book {
       publishedDate: json['published_date'] as String?,
       language: json['language'] as String?,
       fileSizeBytes: (json['file_size_bytes'] as num?)?.toInt(),
+      layout: json['layout'] as String? ?? 'reflowable',
+      renditionSpread: json['rendition_spread'] as String?,
+      renditionOrientation: json['rendition_orientation'] as String?,
+      pageProgressionDirection: json['page_progression_direction'] as String?,
     );
   }
 
@@ -127,6 +141,10 @@ class Book {
       if (publishedDate != null) 'published_date': publishedDate,
       if (language != null) 'language': language,
       if (fileSizeBytes != null) 'file_size_bytes': fileSizeBytes,
+      'layout': layout,
+      if (renditionSpread != null) 'rendition_spread': renditionSpread,
+      if (renditionOrientation != null) 'rendition_orientation': renditionOrientation,
+      if (pageProgressionDirection != null) 'page_progression_direction': pageProgressionDirection,
     };
   }
 
@@ -147,6 +165,10 @@ class Book {
     String? publishedDate,
     String? language,
     int? fileSizeBytes,
+    String? layout,
+    String? renditionSpread,
+    String? renditionOrientation,
+    String? pageProgressionDirection,
   }) {
     return Book(
       id: id ?? this.id,
@@ -165,6 +187,10 @@ class Book {
       publishedDate: publishedDate ?? this.publishedDate,
       language: language ?? this.language,
       fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
+      layout: layout ?? this.layout,
+      renditionSpread: renditionSpread ?? this.renditionSpread,
+      renditionOrientation: renditionOrientation ?? this.renditionOrientation,
+      pageProgressionDirection: pageProgressionDirection ?? this.pageProgressionDirection,
     );
   }
 }
@@ -175,6 +201,10 @@ class SpineItem {
   final int chapterIndex;
   final String title;
   final String summary;
+  final String? href;
+  final double? pageWidth;
+  final double? pageHeight;
+  final String? pageSpread;
 
   const SpineItem({
     required this.id,
@@ -182,7 +212,15 @@ class SpineItem {
     required this.chapterIndex,
     required this.title,
     this.summary = '',
+    this.href,
+    this.pageWidth,
+    this.pageHeight,
+    this.pageSpread,
   });
+
+  bool get isGatefold =>
+      (pageWidth != null && pageHeight != null && pageHeight! > 0 && (pageWidth! / pageHeight! > 1.2)) ||
+      pageSpread == 'center';
 
   factory SpineItem.fromJson(Map<String, dynamic> json) {
     return SpineItem(
@@ -191,6 +229,10 @@ class SpineItem {
       chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
       title: json['title'] as String? ?? 'Chapter ${json['chapter_index'] ?? 0}',
       summary: json['summary'] as String? ?? '',
+      href: json['href'] as String?,
+      pageWidth: (json['page_width'] as num?)?.toDouble(),
+      pageHeight: (json['page_height'] as num?)?.toDouble(),
+      pageSpread: json['page_spread'] as String?,
     );
   }
 
@@ -201,6 +243,10 @@ class SpineItem {
       'chapter_index': chapterIndex,
       'title': title,
       if (summary.isNotEmpty) 'summary': summary,
+      if (href != null) 'href': href,
+      if (pageWidth != null) 'page_width': pageWidth,
+      if (pageHeight != null) 'page_height': pageHeight,
+      if (pageSpread != null) 'page_spread': pageSpread,
     };
   }
 }

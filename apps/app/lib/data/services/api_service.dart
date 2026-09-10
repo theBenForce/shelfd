@@ -213,6 +213,21 @@ class ApiService {
     return Chapter.fromJson(data);
   }
 
+  String getChapterHtmlUrl(String bookId, dynamic chapterIdentifier) {
+    return _uri('/api/v1/books/$bookId/chapters/$chapterIdentifier/html').toString();
+  }
+
+  Future<String> getChapterHtml(String bookId, dynamic chapterIdentifier) async {
+    final response = await client.get(
+      _uri('/api/v1/books/$bookId/chapters/$chapterIdentifier/html'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    return response.body;
+  }
+
   Future<List<Author>> getAuthors() async {
     final response = await client.get(_uri('/api/v1/authors'), headers: _headers());
     if (response.statusCode >= 400) {

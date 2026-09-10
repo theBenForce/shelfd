@@ -15,6 +15,10 @@ type Book struct {
 	FileSizeBytes  *int64     `json:"file_size_bytes,omitempty" bun:"file_size_bytes"`
 	FileModifiedAt *time.Time `json:"file_modified_at,omitempty" bun:"file_modified_at"`
 	PublishedDate  *string    `json:"published_date,omitempty" bun:"published_date"`
+	Layout         string     `json:"layout" bun:"layout,default:'reflowable'"`
+	RenditionSpread string    `json:"rendition_spread" bun:"rendition_spread,default:'auto'"`
+	RenditionOrientation string `json:"rendition_orientation" bun:"rendition_orientation,default:'auto'"`
+	PageProgressionDirection string `json:"page_progression_direction" bun:"page_progression_direction,default:'ltr'"`
 	CreatedAt      time.Time  `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
@@ -78,6 +82,10 @@ type Chapter struct {
 	Title        *string   `json:"title,omitempty" bun:"title"`
 	Summary      string    `json:"summary" bun:"summary,notnull"`
 	ContentPlain string    `json:"content_plain" bun:"content_plain,notnull"`
+	Href         *string   `json:"href,omitempty" bun:"href"`
+	PageWidth    *int      `json:"page_width,omitempty" bun:"page_width"`
+	PageHeight   *int      `json:"page_height,omitempty" bun:"page_height"`
+	PageSpread   *string   `json:"page_spread,omitempty" bun:"page_spread"`
 	CreatedAt    time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
@@ -88,6 +96,10 @@ type SpineItem struct {
 	ChapterIndex int     `json:"chapter_index" bun:"chapter_index,notnull"`
 	Title        *string `json:"title,omitempty" bun:"title"`
 	Summary      string  `json:"summary,omitempty" bun:"summary"`
+	Href         *string `json:"href,omitempty" bun:"href"`
+	PageWidth    *int    `json:"page_width,omitempty" bun:"page_width"`
+	PageHeight   *int    `json:"page_height,omitempty" bun:"page_height"`
+	PageSpread   *string `json:"page_spread,omitempty" bun:"page_spread"`
 }
 
 // User represents a user account for authentication.

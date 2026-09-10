@@ -117,12 +117,16 @@ func (in *Ingester) importNewBook(ctx context.Context, fullPath, relativePath st
 	coverRelPath := in.resolveCover(reader, bookDirFull, bookDirRel, bookID)
 
 	book := &repository.Book{
-		ID:             bookID,
-		Title:          parsed.Title,
-		FilePath:       relativePath,
-		CoverPath:      coverRelPath,
-		FileSizeBytes:  &sizeBytes,
-		FileModifiedAt: &modTime,
+		ID:                       bookID,
+		Title:                    parsed.Title,
+		FilePath:                 relativePath,
+		CoverPath:                coverRelPath,
+		FileSizeBytes:            &sizeBytes,
+		FileModifiedAt:           &modTime,
+		Layout:                   parsed.Layout,
+		RenditionSpread:          parsed.RenditionSpread,
+		RenditionOrientation:     parsed.RenditionOrientation,
+		PageProgressionDirection: parsed.PageProgressionDirection,
 	}
 	if parsed.Description != "" {
 		book.Description = &parsed.Description
@@ -197,6 +201,10 @@ func (in *Ingester) updateModifiedBook(ctx context.Context, book *repository.Boo
 	book.Title = parsed.Title
 	book.FileSizeBytes = &sizeBytes
 	book.FileModifiedAt = &modTime
+	book.Layout = parsed.Layout
+	book.RenditionSpread = parsed.RenditionSpread
+	book.RenditionOrientation = parsed.RenditionOrientation
+	book.PageProgressionDirection = parsed.PageProgressionDirection
 	if parsed.Description != "" {
 		book.Description = &parsed.Description
 	}
@@ -301,7 +309,7 @@ func (in *Ingester) SaveUpload(ctx context.Context, authorName, title string, r 
 	return in.IngestFile(ctx, finalFilePath, relPath)
 }
 
-// ReparseBookChapters reads the EPUB file on disk for a book and updates the content_plain of its chapters in the repository.
+// ReparseBookChapters reads the EPUB file on disk for a book and updates its layout and chapters in the repository.
 func (in *Ingester) ReparseBookChapters(ctx context.Context, bookID string) error {
 	book, err := in.repo.GetBookByID(ctx, bookID)
 	if err != nil {
@@ -314,7 +322,6 @@ func (in *Ingester) ReparseBookChapters(ctx context.Context, bookID string) erro
 		sizeBytes := fi.Size()
 		book.FileModifiedAt = &modTime
 		book.FileSizeBytes = &sizeBytes
-		_ = in.repo.UpdateBook(ctx, book)
 	}
 
 	reader, err := epub.Open(fullPath)
@@ -322,6 +329,14 @@ func (in *Ingester) ReparseBookChapters(ctx context.Context, bookID string) erro
 		return fmt.Errorf("opening epub: %w", err)
 	}
 	defer reader.Close()
+
+	if parsed, err := reader.ParseBook(); err == nil {
+		book.Layout = parsed.Layout
+		book.RenditionSpread = parsed.RenditionSpread
+		book.RenditionOrientation = parsed.RenditionOrientation
+		book.PageProgressionDirection = parsed.PageProgressionDirection
+	}
+	_ = in.repo.UpdateBook(ctx, book)
 
 	return in.reparseChaptersFromReader(ctx, bookID, reader)
 }
@@ -350,8 +365,14 @@ func (in *Ingester) reparseChaptersFromReader(ctx context.Context, bookID string
 		var chapterID string
 		var chapterIndex int
 		if existing, ok := chapterMap[ch.Index]; ok {
-			if err := in.repo.UpdateChapterContent(ctx, existing.ID, ch.ContentPlain); err != nil {
-				return fmt.Errorf("updating chapter %d content: %w", ch.Index, err)
+			existing.Title = ch.Title
+			existing.ContentPlain = ch.ContentPlain
+			existing.Href = &ch.Href
+			existing.PageWidth = ch.PageWidth
+			existing.PageHeight = ch.PageHeight
+			existing.PageSpread = ch.PageSpread
+			if err := in.repo.UpdateChapter(ctx, existing); err != nil {
+				return fmt.Errorf("updating chapter %d: %w", ch.Index, err)
 			}
 			chapterID = existing.ID
 			chapterIndex = existing.ChapterIndex
@@ -362,6 +383,10 @@ func (in *Ingester) reparseChaptersFromReader(ctx context.Context, bookID string
 				Title:        ch.Title,
 				Summary:      "",
 				ContentPlain: ch.ContentPlain,
+				Href:         &ch.Href,
+				PageWidth:    ch.PageWidth,
+				PageHeight:   ch.PageHeight,
+				PageSpread:   ch.PageSpread,
 			}
 			if err := in.repo.CreateChapter(ctx, chapter); err != nil {
 				return fmt.Errorf("creating chapter %d: %w", ch.Index, err)

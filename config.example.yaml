@@ -59,6 +59,14 @@ ai:
   # embedding_model: "text-embedding-3-small"
   # embedding_dimensions: 256
   # chat_model: "gpt-4o-mini"
+  #
+  # omlx (Local Apple Silicon MLX Server) Example:
+  # provider: "openai"
+  # base_url: "http://127.0.0.1:8000/v1"
+  # api_key: "sk-omlx-..."
+  # embedding_model: "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
+  # embedding_dimensions: 256
+  # chat_model: "gemma-4-E4B-it-MLX-4bit"
 
 mcp:
   # Model Context Protocol (MCP) server integration for AI agents (Cursor, Claude Desktop)

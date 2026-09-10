@@ -1816,5 +1816,153 @@ func TestAuthorPhotoServingAndUpload(t *testing.T) {
 	}
 }
 
+func TestFixedLayoutAssetAndChapterHTMLServing(t *testing.T) {
+	f := setupAPITest(t)
+	token := f.loginAndGetToken(t)
+	ctx := context.Background()
+
+	bookDir := filepath.Join(f.libDir, "Disney", "Coco")
+	if err := os.MkdirAll(bookDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	epubPath := filepath.Join(bookDir, "Coco.epub")
+
+	// Write pre-paginated EPUB with image and xhtml referencing the image
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	m, _ := zw.Create("mimetype")
+	m.Write([]byte("application/epub+zip"))
+	w, _ := zw.Create("META-INF/container.xml")
+	w.Write([]byte(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`))
+	
+	opf, _ := zw.Create("OEBPS/content.opf")
+	opf.Write([]byte(`<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <dc:title>Coco Read-Along</dc:title>
+  <dc:creator>Disney</dc:creator>
+  <meta property="rendition:layout">pre-paginated</meta>
+  <meta property="rendition:spread">auto</meta>
+</metadata>
+<manifest>
+  <item id="c1" href="pages/page1.xhtml" media-type="application/xhtml+xml"/>
+  <item id="img1" href="images/cover.jpg" media-type="image/jpeg"/>
+</manifest>
+<spine page-progression-direction="ltr">
+  <itemref idref="c1" properties="page-spread-right"/>
+</spine>
+</package>`))
+
+	p1, _ := zw.Create("OEBPS/pages/page1.xhtml")
+	p1.Write([]byte(`<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta name="viewport" content="width=1024, height=768"/>
+  <style>body { margin: 0; background: #000; }</style>
+</head>
+<body>
+  <div style="z-index: -1;">Background</div>
+  <img src="../images/cover.jpg" alt="Cover"/>
+</body>
+</html>`))
+
+	dummyImage := []byte("\xff\xd8\xff\xe0\x00\x10JFIFdummy-coco-cover-image")
+	img, _ := zw.Create("OEBPS/images/cover.jpg")
+	img.Write(dummyImage)
+	zw.Close()
+
+	if err := os.WriteFile(epubPath, buf.Bytes(), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	relPath := filepath.Join("Disney", "Coco", "Coco.epub")
+	book, err := f.ingester.IngestFile(ctx, epubPath, relPath)
+	if err != nil {
+		t.Fatalf("IngestFile: %v", err)
+	}
+
+	if book.Layout != "pre-paginated" {
+		t.Errorf("expected book.Layout = 'pre-paginated', got %q", book.Layout)
+	}
+
+	// Test GET /api/v1/books/{id} returns layout fields and spine with dimensions
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+book.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on get book, got %d", rec.Code)
+	}
+	var bookResp struct {
+		Layout string `json:"layout"`
+		Spine  []struct {
+			Href       string  `json:"href"`
+			PageWidth  float64 `json:"page_width"`
+			PageHeight float64 `json:"page_height"`
+			PageSpread string  `json:"page_spread"`
+		} `json:"spine"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &bookResp)
+	if bookResp.Layout != "pre-paginated" {
+		t.Errorf("expected book response layout 'pre-paginated', got %q", bookResp.Layout)
+	}
+	if len(bookResp.Spine) != 1 {
+		t.Fatalf("expected 1 spine item, got %d", len(bookResp.Spine))
+	}
+	item := bookResp.Spine[0]
+	if item.PageWidth != 1024 || item.PageHeight != 768 {
+		t.Errorf("expected 1024x768, got %fx%f", item.PageWidth, item.PageHeight)
+	}
+	if item.PageSpread != "right" {
+		t.Errorf("expected page_spread 'right', got %q", item.PageSpread)
+	}
+
+	// Test GET /api/v1/books/{id}/chapters/0/html
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/books/%s/chapters/0/html", book.ID), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on get chapter html, got %d: %s", rec.Code, rec.Body.String())
+	}
+	htmlBody := rec.Body.String()
+	if !strings.Contains(htmlBody, fmt.Sprintf("/api/v1/books/%s/assets/OEBPS/images/cover.jpg", book.ID)) {
+		t.Errorf("expected rewritten image asset url in chapter html, got:\n%s", htmlBody)
+	}
+	// Check negative z-index was corrected
+	if strings.Contains(htmlBody, "z-index: -1") {
+		t.Errorf("expected negative z-index to be corrected, got:\n%s", htmlBody)
+	}
+	if !strings.Contains(htmlBody, "z-index: 1") {
+		t.Errorf("expected z-index: 1 in corrected style, got:\n%s", htmlBody)
+	}
+
+	// Test GET /api/v1/books/{id}/assets/...
+	assetReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/books/%s/assets/OEBPS/images/cover.jpg", book.ID), nil)
+	assetReq.Header.Set("Authorization", "Bearer "+token)
+	assetRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(assetRec, assetReq)
+
+	if assetRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on asset get, got %d", assetRec.Code)
+	}
+	if !bytes.Equal(assetRec.Body.Bytes(), dummyImage) {
+		t.Errorf("expected asset body to match dummyImage")
+	}
+
+	// Test Path Traversal rejection (Go mux redirects cleaned paths with 301, or handler returns 400/404)
+	badReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/books/%s/assets/../../etc/passwd", book.ID), nil)
+	badReq.Header.Set("Authorization", "Bearer "+token)
+	badRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(badRec, badReq)
+
+	if badRec.Code != http.StatusBadRequest && badRec.Code != http.StatusNotFound && badRec.Code != http.StatusMovedPermanently {
+		t.Errorf("expected 400, 404, or 301 on path traversal attempt, got %d", badRec.Code)
+	}
+}
+
+
 
 

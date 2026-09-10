@@ -61,11 +61,14 @@ type opfItem struct {
 }
 
 type opfSpine struct {
-	Itemrefs []opfItemref `xml:"itemref"`
+	PageProgressionDirection string       `xml:"page-progression-direction,attr"`
+	Itemrefs                 []opfItemref `xml:"itemref"`
 }
 
 type opfItemref struct {
-	IDRef string `xml:"idref,attr"`
+	IDRef      string `xml:"idref,attr"`
+	Properties string `xml:"properties,attr"`
+	Linear     string `xml:"linear,attr"`
 }
 
 func parseOPF(data []byte) (*opfPackage, error) {
@@ -183,7 +186,70 @@ func (r *Reader) ParseBook() (*ParsedBook, error) {
 	// 2. Calibre / EPUB 2: calibre:series + calibre:series_index
 	book.Series = r.resolveSeries()
 
+	// Fixed Layout & Spread Metadata Resolution
+	book.Layout = "reflowable"
+	if r.IsPrePaginated() {
+		book.Layout = "pre-paginated"
+	}
+
+	book.RenditionSpread = "auto"
+	book.RenditionOrientation = "auto"
+	book.PageProgressionDirection = "ltr"
+
+	if r.opf.Spine.PageProgressionDirection != "" {
+		dir := strings.ToLower(strings.TrimSpace(r.opf.Spine.PageProgressionDirection))
+		if dir == "rtl" {
+			book.PageProgressionDirection = "rtl"
+		}
+	}
+
+	for _, m := range meta.Metas {
+		prop := strings.ToLower(strings.TrimSpace(m.Property))
+		name := strings.ToLower(strings.TrimSpace(m.Name))
+		val := strings.ToLower(strings.TrimSpace(m.Value))
+		content := strings.ToLower(strings.TrimSpace(m.Content))
+
+		if prop == "rendition:spread" && val != "" {
+			book.RenditionSpread = val
+		}
+		if prop == "rendition:orientation" && val != "" {
+			book.RenditionOrientation = val
+		} else if name == "orientation-lock" && content != "" {
+			book.RenditionOrientation = content
+		}
+	}
+
 	return book, nil
+}
+
+// IsPrePaginated checks whether the EPUB is fixed-layout based on OPF metadata and spine item properties.
+func (r *Reader) IsPrePaginated() bool {
+	if r.opf == nil {
+		return false
+	}
+
+	// 1. Check package metadata
+	for _, m := range r.opf.Metadata.Metas {
+		prop := strings.ToLower(strings.TrimSpace(m.Property))
+		name := strings.ToLower(strings.TrimSpace(m.Name))
+		val := strings.ToLower(strings.TrimSpace(m.Value))
+		content := strings.ToLower(strings.TrimSpace(m.Content))
+
+		if (prop == "rendition:layout" && val == "pre-paginated") ||
+			(name == "fixed-layout" && (content == "true" || val == "true")) ||
+			(name == "-odread-layout" && (content == "pre-paginated" || val == "pre-paginated")) {
+			return true
+		}
+	}
+
+	// 2. Check spine items
+	for _, item := range r.opf.Spine.Itemrefs {
+		if strings.Contains(strings.ToLower(item.Properties), "rendition:layout-pre-paginated") {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (r *Reader) resolveSeries() *ParsedSeries {

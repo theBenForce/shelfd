@@ -44,13 +44,27 @@ func (r *SQLiteStorageEngine) CreateBook(ctx context.Context, b *Book) error {
 		b.CreatedAt = time.Now().UTC()
 	}
 
+	if b.Layout == "" {
+		b.Layout = "reflowable"
+	}
+	if b.RenditionSpread == "" {
+		b.RenditionSpread = "auto"
+	}
+	if b.RenditionOrientation == "" {
+		b.RenditionOrientation = "auto"
+	}
+	if b.PageProgressionDirection == "" {
+		b.PageProgressionDirection = "ltr"
+	}
+
 	query := `
-		INSERT INTO books (id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO books (id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, layout, rendition_spread, rendition_orientation, page_progression_direction, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		b.ID, b.Title, b.Description, b.Language, b.Publisher, b.Identifier,
-		b.FilePath, b.CoverPath, b.FileSizeBytes, b.FileModifiedAt, b.PublishedDate, b.CreatedAt,
+		b.FilePath, b.CoverPath, b.FileSizeBytes, b.FileModifiedAt, b.PublishedDate,
+		b.Layout, b.RenditionSpread, b.RenditionOrientation, b.PageProgressionDirection, b.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("creating book: %w", err)
@@ -60,14 +74,15 @@ func (r *SQLiteStorageEngine) CreateBook(ctx context.Context, b *Book) error {
 
 func (r *SQLiteStorageEngine) GetBookByID(ctx context.Context, id string) (*Book, error) {
 	query := `
-		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, created_at
+		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, layout, rendition_spread, rendition_orientation, page_progression_direction, created_at
 		FROM books WHERE id = ?
 	`
 	b := &Book{}
 	var fileModAt sql.NullTime
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&b.ID, &b.Title, &b.Description, &b.Language, &b.Publisher, &b.Identifier,
-		&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate, &b.CreatedAt,
+		&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate,
+		&b.Layout, &b.RenditionSpread, &b.RenditionOrientation, &b.PageProgressionDirection, &b.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -83,14 +98,15 @@ func (r *SQLiteStorageEngine) GetBookByID(ctx context.Context, id string) (*Book
 
 func (r *SQLiteStorageEngine) GetBookByFilePath(ctx context.Context, filePath string) (*Book, error) {
 	query := `
-		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, created_at
+		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, layout, rendition_spread, rendition_orientation, page_progression_direction, created_at
 		FROM books WHERE file_path = ?
 	`
 	b := &Book{}
 	var fileModAt sql.NullTime
 	err := r.db.QueryRowContext(ctx, query, filePath).Scan(
 		&b.ID, &b.Title, &b.Description, &b.Language, &b.Publisher, &b.Identifier,
-		&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate, &b.CreatedAt,
+		&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate,
+		&b.Layout, &b.RenditionSpread, &b.RenditionOrientation, &b.PageProgressionDirection, &b.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -105,15 +121,30 @@ func (r *SQLiteStorageEngine) GetBookByFilePath(ctx context.Context, filePath st
 }
 
 func (r *SQLiteStorageEngine) UpdateBook(ctx context.Context, b *Book) error {
+	if b.Layout == "" {
+		b.Layout = "reflowable"
+	}
+	if b.RenditionSpread == "" {
+		b.RenditionSpread = "auto"
+	}
+	if b.RenditionOrientation == "" {
+		b.RenditionOrientation = "auto"
+	}
+	if b.PageProgressionDirection == "" {
+		b.PageProgressionDirection = "ltr"
+	}
+
 	query := `
 		UPDATE books
 		SET title = ?, description = ?, language = ?, publisher = ?, identifier = ?,
-		    file_path = ?, cover_path = ?, file_size_bytes = ?, file_modified_at = ?, published_date = ?
+		    file_path = ?, cover_path = ?, file_size_bytes = ?, file_modified_at = ?, published_date = ?,
+		    layout = ?, rendition_spread = ?, rendition_orientation = ?, page_progression_direction = ?
 		WHERE id = ?
 	`
 	res, err := r.db.ExecContext(ctx, query,
 		b.Title, b.Description, b.Language, b.Publisher, b.Identifier,
-		b.FilePath, b.CoverPath, b.FileSizeBytes, b.FileModifiedAt, b.PublishedDate, b.ID,
+		b.FilePath, b.CoverPath, b.FileSizeBytes, b.FileModifiedAt, b.PublishedDate,
+		b.Layout, b.RenditionSpread, b.RenditionOrientation, b.PageProgressionDirection, b.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating book: %w", err)
@@ -167,7 +198,7 @@ func (r *SQLiteStorageEngine) ListBooks(ctx context.Context, filter BookFilter) 
 	}
 
 	query := `
-		SELECT b.id, b.title, b.description, b.language, b.publisher, b.identifier, b.file_path, b.cover_path, b.file_size_bytes, b.file_modified_at, b.published_date, b.created_at
+		SELECT b.id, b.title, b.description, b.language, b.publisher, b.identifier, b.file_path, b.cover_path, b.file_size_bytes, b.file_modified_at, b.published_date, b.layout, b.rendition_spread, b.rendition_orientation, b.page_progression_direction, b.created_at
 		FROM books b
 	` + joins
 	if len(conditions) > 0 {
@@ -206,7 +237,8 @@ func (r *SQLiteStorageEngine) ListBooks(ctx context.Context, filter BookFilter) 
 		var fileModAt sql.NullTime
 		err := rows.Scan(
 			&b.ID, &b.Title, &b.Description, &b.Language, &b.Publisher, &b.Identifier,
-			&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate, &b.CreatedAt,
+			&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate,
+			&b.Layout, &b.RenditionSpread, &b.RenditionOrientation, &b.PageProgressionDirection, &b.CreatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning book row: %w", err)
@@ -578,11 +610,12 @@ func (r *SQLiteStorageEngine) CreateChapter(ctx context.Context, c *Chapter) err
 	}
 
 	query := `
-		INSERT INTO chapters (id, book_id, chapter_index, title, summary, content_plain, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO chapters (id, book_id, chapter_index, title, summary, content_plain, href, page_width, page_height, page_spread, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
-		c.ID, c.BookID, c.ChapterIndex, c.Title, c.Summary, c.ContentPlain, c.CreatedAt,
+		c.ID, c.BookID, c.ChapterIndex, c.Title, c.Summary, c.ContentPlain,
+		c.Href, c.PageWidth, c.PageHeight, c.PageSpread, c.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("creating chapter: %w", err)
@@ -592,7 +625,7 @@ func (r *SQLiteStorageEngine) CreateChapter(ctx context.Context, c *Chapter) err
 
 func (r *SQLiteStorageEngine) GetChaptersByBookID(ctx context.Context, bookID string) ([]*Chapter, error) {
 	query := `
-		SELECT id, book_id, chapter_index, title, summary, content_plain, created_at
+		SELECT id, book_id, chapter_index, title, summary, content_plain, href, page_width, page_height, page_spread, created_at
 		FROM chapters
 		WHERE book_id = ?
 		ORDER BY chapter_index ASC
@@ -606,8 +639,27 @@ func (r *SQLiteStorageEngine) GetChaptersByBookID(ctx context.Context, bookID st
 	var chapters []*Chapter
 	for rows.Next() {
 		c := &Chapter{}
-		if err := rows.Scan(&c.ID, &c.BookID, &c.ChapterIndex, &c.Title, &c.Summary, &c.ContentPlain, &c.CreatedAt); err != nil {
+		var href, pageSpread sql.NullString
+		var pageWidth, pageHeight sql.NullInt64
+		if err := rows.Scan(
+			&c.ID, &c.BookID, &c.ChapterIndex, &c.Title, &c.Summary, &c.ContentPlain,
+			&href, &pageWidth, &pageHeight, &pageSpread, &c.CreatedAt,
+		); err != nil {
 			return nil, fmt.Errorf("scanning chapter row: %w", err)
+		}
+		if href.Valid {
+			c.Href = &href.String
+		}
+		if pageWidth.Valid {
+			w := int(pageWidth.Int64)
+			c.PageWidth = &w
+		}
+		if pageHeight.Valid {
+			h := int(pageHeight.Int64)
+			c.PageHeight = &h
+		}
+		if pageSpread.Valid {
+			c.PageSpread = &pageSpread.String
 		}
 		chapters = append(chapters, c)
 	}
@@ -616,7 +668,7 @@ func (r *SQLiteStorageEngine) GetChaptersByBookID(ctx context.Context, bookID st
 
 func (r *SQLiteStorageEngine) GetBookSpine(ctx context.Context, bookID string) ([]*SpineItem, error) {
 	query := `
-		SELECT id, book_id, chapter_index, title, summary
+		SELECT id, book_id, chapter_index, title, summary, href, page_width, page_height, page_spread
 		FROM chapters
 		WHERE book_id = ?
 		ORDER BY chapter_index ASC
@@ -630,8 +682,27 @@ func (r *SQLiteStorageEngine) GetBookSpine(ctx context.Context, bookID string) (
 	var spine []*SpineItem
 	for rows.Next() {
 		item := &SpineItem{}
-		if err := rows.Scan(&item.ID, &item.BookID, &item.ChapterIndex, &item.Title, &item.Summary); err != nil {
+		var href, pageSpread sql.NullString
+		var pageWidth, pageHeight sql.NullInt64
+		if err := rows.Scan(
+			&item.ID, &item.BookID, &item.ChapterIndex, &item.Title, &item.Summary,
+			&href, &pageWidth, &pageHeight, &pageSpread,
+		); err != nil {
 			return nil, fmt.Errorf("scanning spine row: %w", err)
+		}
+		if href.Valid {
+			item.Href = &href.String
+		}
+		if pageWidth.Valid {
+			w := int(pageWidth.Int64)
+			item.PageWidth = &w
+		}
+		if pageHeight.Valid {
+			h := int(pageHeight.Int64)
+			item.PageHeight = &h
+		}
+		if pageSpread.Valid {
+			item.PageSpread = &pageSpread.String
 		}
 		spine = append(spine, item)
 	}
@@ -640,12 +711,15 @@ func (r *SQLiteStorageEngine) GetBookSpine(ctx context.Context, bookID string) (
 
 func (r *SQLiteStorageEngine) GetChapterByID(ctx context.Context, id string) (*Chapter, error) {
 	query := `
-		SELECT id, book_id, chapter_index, title, summary, content_plain, created_at
+		SELECT id, book_id, chapter_index, title, summary, content_plain, href, page_width, page_height, page_spread, created_at
 		FROM chapters WHERE id = ?
 	`
 	c := &Chapter{}
+	var href, pageSpread sql.NullString
+	var pageWidth, pageHeight sql.NullInt64
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&c.ID, &c.BookID, &c.ChapterIndex, &c.Title, &c.Summary, &c.ContentPlain, &c.CreatedAt,
+		&c.ID, &c.BookID, &c.ChapterIndex, &c.Title, &c.Summary, &c.ContentPlain,
+		&href, &pageWidth, &pageHeight, &pageSpread, &c.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -653,23 +727,54 @@ func (r *SQLiteStorageEngine) GetChapterByID(ctx context.Context, id string) (*C
 	if err != nil {
 		return nil, fmt.Errorf("querying chapter by id: %w", err)
 	}
+	if href.Valid {
+		c.Href = &href.String
+	}
+	if pageWidth.Valid {
+		w := int(pageWidth.Int64)
+		c.PageWidth = &w
+	}
+	if pageHeight.Valid {
+		h := int(pageHeight.Int64)
+		c.PageHeight = &h
+	}
+	if pageSpread.Valid {
+		c.PageSpread = &pageSpread.String
+	}
 	return c, nil
 }
 
 func (r *SQLiteStorageEngine) GetChapterByBookAndIndex(ctx context.Context, bookID string, chapterIndex int) (*Chapter, error) {
 	query := `
-		SELECT id, book_id, chapter_index, title, summary, content_plain, created_at
+		SELECT id, book_id, chapter_index, title, summary, content_plain, href, page_width, page_height, page_spread, created_at
 		FROM chapters WHERE book_id = ? AND chapter_index = ?
 	`
 	c := &Chapter{}
+	var href, pageSpread sql.NullString
+	var pageWidth, pageHeight sql.NullInt64
 	err := r.db.QueryRowContext(ctx, query, bookID, chapterIndex).Scan(
-		&c.ID, &c.BookID, &c.ChapterIndex, &c.Title, &c.Summary, &c.ContentPlain, &c.CreatedAt,
+		&c.ID, &c.BookID, &c.ChapterIndex, &c.Title, &c.Summary, &c.ContentPlain,
+		&href, &pageWidth, &pageHeight, &pageSpread, &c.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying chapter by book and index: %w", err)
+	}
+	if href.Valid {
+		c.Href = &href.String
+	}
+	if pageWidth.Valid {
+		w := int(pageWidth.Int64)
+		c.PageWidth = &w
+	}
+	if pageHeight.Valid {
+		h := int(pageHeight.Int64)
+		c.PageHeight = &h
+	}
+	if pageSpread.Valid {
+		c.PageSpread = &pageSpread.String
 	}
 	return c, nil
 }
@@ -706,12 +811,35 @@ func (r *SQLiteStorageEngine) UpdateChapterContent(ctx context.Context, chapterI
 	return nil
 }
 
+func (r *SQLiteStorageEngine) UpdateChapter(ctx context.Context, c *Chapter) error {
+	query := `
+		UPDATE chapters
+		SET chapter_index = ?, title = ?, summary = ?, content_plain = ?, href = ?, page_width = ?, page_height = ?, page_spread = ?
+		WHERE id = ?
+	`
+	res, err := r.db.ExecContext(ctx, query,
+		c.ChapterIndex, c.Title, c.Summary, c.ContentPlain,
+		c.Href, c.PageWidth, c.PageHeight, c.PageSpread, c.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("updating chapter: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking affected rows: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *SQLiteStorageEngine) GetUnindexedChapters(ctx context.Context, limit int) ([]*Chapter, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	query := `
-		SELECT id, book_id, chapter_index, title, summary, content_plain, created_at
+		SELECT id, book_id, chapter_index, title, summary, content_plain, href, page_width, page_height, page_spread, created_at
 		FROM chapters
 		WHERE summary = ''
 		ORDER BY created_at ASC, chapter_index ASC
@@ -726,8 +854,27 @@ func (r *SQLiteStorageEngine) GetUnindexedChapters(ctx context.Context, limit in
 	var chapters []*Chapter
 	for rows.Next() {
 		c := &Chapter{}
-		if err := rows.Scan(&c.ID, &c.BookID, &c.ChapterIndex, &c.Title, &c.Summary, &c.ContentPlain, &c.CreatedAt); err != nil {
+		var href, pageSpread sql.NullString
+		var pageWidth, pageHeight sql.NullInt64
+		if err := rows.Scan(
+			&c.ID, &c.BookID, &c.ChapterIndex, &c.Title, &c.Summary, &c.ContentPlain,
+			&href, &pageWidth, &pageHeight, &pageSpread, &c.CreatedAt,
+		); err != nil {
 			return nil, fmt.Errorf("scanning unindexed chapter: %w", err)
+		}
+		if href.Valid {
+			c.Href = &href.String
+		}
+		if pageWidth.Valid {
+			w := int(pageWidth.Int64)
+			c.PageWidth = &w
+		}
+		if pageHeight.Valid {
+			h := int(pageHeight.Int64)
+			c.PageHeight = &h
+		}
+		if pageSpread.Valid {
+			c.PageSpread = &pageSpread.String
 		}
 		chapters = append(chapters, c)
 	}

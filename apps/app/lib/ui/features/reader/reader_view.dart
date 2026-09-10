@@ -11,6 +11,7 @@ import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
+import 'fixed_layout_reader.dart';
 import 'reader_markdown.dart';
 
 class ReaderView extends ConsumerStatefulWidget {
@@ -214,10 +215,19 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
 
   @override
   Widget build(BuildContext context) {
+    final bookDetailState = ref.watch(bookDetailProvider(widget.bookId));
+    final book = bookDetailState.book;
+
+    if (book != null && book.isFixedLayout) {
+      return FixedLayoutReader(
+        book: book,
+        initialChapterIdentifier: widget.chapterIdentifier ?? widget.chapterIndex,
+      );
+    }
+
     final settings = ref.watch(readerSettingsProvider);
     final theme = AppTheme.buildTheme(settings.themeMode);
-    final bookDetailState = ref.watch(bookDetailProvider(widget.bookId));
-    final effectiveSpine = _spine.isNotEmpty ? _spine : (bookDetailState.book?.spine ?? const []);
+    final effectiveSpine = _spine.isNotEmpty ? _spine : (book?.spine ?? const []);
     final spineIdx = _getSpineIndex(effectiveSpine);
 
     final chapterHighlights = (bookDetailState.book?.highlights ?? const []).where((h) {

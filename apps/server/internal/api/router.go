@@ -50,6 +50,8 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
 	mux.HandleFunc("GET /api/v1/server/connect-info", connHandler.GetConnectInfo)
 	mux.HandleFunc("GET /api/v1/books/{id}/cover", bookHandler.GetBookCover)
+	mux.HandleFunc("GET /api/v1/books/{id}/assets/{path...}", bookHandler.GetBookAsset)
+	mux.HandleFunc("GET /api/v1/books/{id}/chapters/{index}/html", bookHandler.GetChapterHTML)
 	mux.HandleFunc("GET /api/v1/authors/{id}/photo", taxHandler.GetAuthorPhoto)
 
 	// Protected routes

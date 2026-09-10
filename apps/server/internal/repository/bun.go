@@ -549,7 +549,7 @@ func (r *BunStorageEngine) GetBookSpine(ctx context.Context, bookID string) ([]*
 	var spine []*SpineItem
 	err := r.db.NewSelect().
 		TableExpr("chapters AS c").
-		ColumnExpr("c.id, c.book_id, c.chapter_index, c.title, c.summary").
+		ColumnExpr("c.id, c.book_id, c.chapter_index, c.title, c.summary, c.href, c.page_width, c.page_height, c.page_spread").
 		Where("c.book_id = ?", bookID).
 		Order("c.chapter_index ASC").
 		Scan(ctx, &spine)
@@ -615,6 +615,21 @@ func (r *BunStorageEngine) UpdateChapterContent(ctx context.Context, chapterID s
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("updating chapter content: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) UpdateChapter(ctx context.Context, chapter *Chapter) error {
+	res, err := r.db.NewUpdate().Model(chapter).WherePK().Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("updating chapter: %w", err)
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {

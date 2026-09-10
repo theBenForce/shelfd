@@ -70,10 +70,14 @@ type BookListItem struct {
 	CoverPath      *string                        `json:"cover_path,omitempty"`
 	FileSizeBytes  *int64                         `json:"file_size_bytes,omitempty"`
 	FileModifiedAt *time.Time                     `json:"file_modified_at,omitempty"`
-	PublishedDate  *string                        `json:"published_date,omitempty"`
-	Authors        []*repository.Author           `json:"authors"`
-	Genres         []*repository.Genre            `json:"genres"`
-	Series         []*repository.BookSeriesDetail `json:"series"`
+	PublishedDate            *string                        `json:"published_date,omitempty"`
+	Layout                   string                         `json:"layout"`
+	RenditionSpread          string                         `json:"rendition_spread"`
+	RenditionOrientation     string                         `json:"rendition_orientation"`
+	PageProgressionDirection string                         `json:"page_progression_direction"`
+	Authors                  []*repository.Author           `json:"authors"`
+	Genres                   []*repository.Genre            `json:"genres"`
+	Series                   []*repository.BookSeriesDetail `json:"series"`
 }
 
 type BookDetailResponse struct {
@@ -179,20 +183,24 @@ func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
 		seriesList, _ := h.repo.GetBookSeries(r.Context(), b.ID)
 
 		items = append(items, BookListItem{
-			ID:            b.ID,
-			Title:         b.Title,
-			Description:   b.Description,
-			Language:      b.Language,
-			Publisher:     b.Publisher,
-			Identifier:    b.Identifier,
-			FilePath:       b.FilePath,
-			CoverPath:      b.CoverPath,
-			FileSizeBytes:  b.FileSizeBytes,
-			FileModifiedAt: b.FileModifiedAt,
-			PublishedDate:  b.PublishedDate,
-			Authors:       authors,
-			Genres:        genres,
-			Series:        seriesList,
+			ID:                       b.ID,
+			Title:                    b.Title,
+			Description:              b.Description,
+			Language:                 b.Language,
+			Publisher:                b.Publisher,
+			Identifier:               b.Identifier,
+			FilePath:                 b.FilePath,
+			CoverPath:                b.CoverPath,
+			FileSizeBytes:            b.FileSizeBytes,
+			FileModifiedAt:           b.FileModifiedAt,
+			PublishedDate:            b.PublishedDate,
+			Layout:                   b.Layout,
+			RenditionSpread:          b.RenditionSpread,
+			RenditionOrientation:     b.RenditionOrientation,
+			PageProgressionDirection: b.PageProgressionDirection,
+			Authors:                  authors,
+			Genres:                   genres,
+			Series:                   seriesList,
 		})
 	}
 
@@ -245,20 +253,24 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, BookDetailResponse{
 		BookListItem: BookListItem{
-			ID:            book.ID,
-			Title:         book.Title,
-			Description:   book.Description,
-			Language:      book.Language,
-			Publisher:     book.Publisher,
-			Identifier:    book.Identifier,
-			FilePath:       book.FilePath,
-			CoverPath:      book.CoverPath,
-			FileSizeBytes:  book.FileSizeBytes,
-			FileModifiedAt: book.FileModifiedAt,
-			PublishedDate:  book.PublishedDate,
-			Authors:       authors,
-			Genres:        genres,
-			Series:        seriesList,
+			ID:                       book.ID,
+			Title:                    book.Title,
+			Description:              book.Description,
+			Language:                 book.Language,
+			Publisher:                book.Publisher,
+			Identifier:               book.Identifier,
+			FilePath:                 book.FilePath,
+			CoverPath:                book.CoverPath,
+			FileSizeBytes:            book.FileSizeBytes,
+			FileModifiedAt:           book.FileModifiedAt,
+			PublishedDate:            book.PublishedDate,
+			Layout:                   book.Layout,
+			RenditionSpread:          book.RenditionSpread,
+			RenditionOrientation:     book.RenditionOrientation,
+			PageProgressionDirection: book.PageProgressionDirection,
+			Authors:                  authors,
+			Genres:                   genres,
+			Series:                   seriesList,
 		},
 		Spine:      spine,
 		Chapters:   chapters,
@@ -414,6 +426,197 @@ func (h *BookHandler) GetChapterDirect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, chapter)
+}
+
+func (h *BookHandler) resolveBookFilePath(b *repository.Book) string {
+	if b == nil || b.FilePath == "" {
+		return ""
+	}
+	// 1. Check relative to libraryDir
+	libPath := filepath.Join(h.libraryDir, b.FilePath)
+	if fi, err := os.Stat(libPath); err == nil && !fi.IsDir() {
+		return libPath
+	}
+	// 2. Check relative to dataDir
+	dataPath := filepath.Join(h.dataDir, b.FilePath)
+	if fi, err := os.Stat(dataPath); err == nil && !fi.IsDir() {
+		return dataPath
+	}
+	// 3. Absolute path
+	if fi, err := os.Stat(b.FilePath); err == nil && !fi.IsDir() {
+		return b.FilePath
+	}
+	return ""
+}
+
+func (h *BookHandler) GetBookAsset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	assetPath := r.PathValue("path")
+	if bookID == "" || assetPath == "" {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		for i, p := range parts {
+			if p == "books" && i+1 < len(parts) {
+				bookID = parts[i+1]
+			}
+			if p == "assets" && i+1 < len(parts) {
+				assetPath = strings.Join(parts[i+1:], "/")
+				break
+			}
+		}
+	}
+
+	if bookID == "" || assetPath == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID and asset path required")
+		return
+	}
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book: %v", err))
+		return
+	}
+
+	epubPath := h.resolveBookFilePath(book)
+	if epubPath == "" {
+		writeJSONError(w, http.StatusNotFound, "Book file not found on disk")
+		return
+	}
+
+	reader, err := epub.Open(epubPath)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to open epub: %v", err))
+		return
+	}
+	defer reader.Close()
+
+	assetData, mimeType, err := reader.ExtractAsset(assetPath)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("Asset not found: %v", err))
+		return
+	}
+
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(assetData)
+}
+
+func (h *BookHandler) GetChapterHTML(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	identifier := r.PathValue("index")
+	if bookID == "" || identifier == "" {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		for i, p := range parts {
+			if p == "books" && i+1 < len(parts) {
+				bookID = parts[i+1]
+			}
+			if p == "chapters" && i+1 < len(parts) {
+				identifier = parts[i+1]
+			}
+		}
+	}
+
+	if bookID == "" || identifier == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID and chapter index required")
+		return
+	}
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book: %v", err))
+		return
+	}
+
+	var chapter *repository.Chapter
+	if index, parseErr := strconv.Atoi(identifier); parseErr == nil {
+		if index == 0 {
+			spine, spineErr := h.repo.GetBookSpine(r.Context(), bookID)
+			if spineErr == nil && len(spine) > 0 {
+				chapter, err = h.repo.GetChapterByID(r.Context(), spine[0].ID)
+			} else {
+				err = repository.ErrNotFound
+			}
+		} else {
+			chapter, err = h.repo.GetChapterByBookAndIndex(r.Context(), bookID, index)
+		}
+	} else if ulid.IsValid(identifier) || isUUID(identifier) {
+		chapter, err = h.repo.GetChapterByID(r.Context(), identifier)
+		if err == nil && chapter != nil && chapter.BookID != bookID {
+			writeJSONError(w, http.StatusNotFound, "Chapter not found")
+			return
+		}
+	} else {
+		writeJSONError(w, http.StatusBadRequest, "Invalid chapter identifier")
+		return
+	}
+
+	if errors.Is(err, repository.ErrNotFound) || chapter == nil {
+		writeJSONError(w, http.StatusNotFound, "Chapter not found")
+		return
+	}
+
+	epubPath := h.resolveBookFilePath(book)
+	if epubPath == "" {
+		writeJSONError(w, http.StatusNotFound, "Book file not found on disk")
+		return
+	}
+
+	reader, err := epub.Open(epubPath)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to open epub: %v", err))
+		return
+	}
+	defer reader.Close()
+
+	var rawHTML []byte
+	var docHref string
+	if chapter.Href != nil && *chapter.Href != "" {
+		docHref = *chapter.Href
+		rawHTML, err = reader.ExtractRawDocument(docHref)
+	}
+
+	if len(rawHTML) == 0 {
+		parsedChapters, pErr := reader.ExtractChapters()
+		if pErr == nil {
+			for _, pc := range parsedChapters {
+				if pc.Index == chapter.ChapterIndex {
+					docHref = pc.Href
+					rawHTML, err = reader.ExtractRawDocument(docHref)
+					break
+				}
+			}
+		}
+	}
+
+	if err != nil || len(rawHTML) == 0 {
+		writeJSONError(w, http.StatusNotFound, "Chapter document not found in epub")
+		return
+	}
+
+	rewrittenHTML := epub.RewritePageHTML(string(rawHTML), bookID, docHref, chapter.PageWidth, chapter.PageHeight)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(rewrittenHTML))
 }
 
 func (h *BookHandler) UploadBook(w http.ResponseWriter, r *http.Request) {

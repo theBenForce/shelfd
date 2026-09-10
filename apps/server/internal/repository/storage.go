@@ -49,6 +49,7 @@ type StorageEngine interface {
 	GetChapterByBookAndIndex(ctx context.Context, bookID string, chapterIndex int) (*Chapter, error)
 	UpdateChapterSummary(ctx context.Context, chapterID string, summary string) error
 	UpdateChapterContent(ctx context.Context, chapterID string, contentPlain string) error
+	UpdateChapter(ctx context.Context, chapter *Chapter) error
 	GetUnindexedChapters(ctx context.Context, limit int) ([]*Chapter, error)
 
 	// Paragraphs

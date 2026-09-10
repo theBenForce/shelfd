@@ -408,3 +408,156 @@ func TestExtractChapters_PreservesMarkdownFormatting(t *testing.T) {
 	}
 }
 
+func TestFixedLayoutDetection(t *testing.T) {
+	// EPUB 3 pre-paginated
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfEPUB3 := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Coco Read-Along Storybook</dc:title>
+    <meta property="rendition:layout">pre-paginated</meta>
+    <meta property="rendition:spread">auto</meta>
+    <meta property="rendition:orientation">auto</meta>
+  </metadata>
+  <manifest>
+    <item id="cover" href="text/cover.xhtml" media-type="application/xhtml+xml"/>
+    <item id="p1" href="text/p01.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine page-progression-direction="ltr">
+    <itemref idref="cover" properties="page-spread-right"/>
+    <itemref idref="p1" properties="page-spread-left"/>
+  </spine>
+</package>`
+
+	coverHTML := `<!DOCTYPE html><html><head><meta name="viewport" content="width=1024, height=768"/></head><body><img src="../images/cover.jpg"/></body></html>`
+	p1HTML := `<!DOCTYPE html><html><head><meta name="viewport" content="width=1024, height=768"/></head><body><p>Story text</p></body></html>`
+
+	epubBytes := createTestEPUB(map[string][]byte{
+		"META-INF/container.xml": []byte(containerXML),
+		"OEBPS/content.opf":      []byte(opfEPUB3),
+		"OEBPS/text/cover.xhtml": []byte(coverHTML),
+		"OEBPS/text/p01.xhtml":   []byte(p1HTML),
+	})
+
+	zr, err := zip.NewReader(bytes.NewReader(epubBytes), int64(len(epubBytes)))
+	if err != nil {
+		t.Fatalf("zip new reader error: %v", err)
+	}
+
+	reader, err := epub.NewReader(zr)
+	if err != nil {
+		t.Fatalf("epub new reader error: %v", err)
+	}
+
+	if !reader.IsPrePaginated() {
+		t.Errorf("expected IsPrePaginated to return true for EPUB 3 pre-paginated")
+	}
+
+	book, err := reader.ParseBook()
+	if err != nil {
+		t.Fatalf("parse book error: %v", err)
+	}
+
+	if book.Layout != "pre-paginated" {
+		t.Errorf("expected book.Layout == 'pre-paginated', got %s", book.Layout)
+	}
+	if book.RenditionSpread != "auto" {
+		t.Errorf("expected rendition_spread == 'auto', got %s", book.RenditionSpread)
+	}
+	if book.PageProgressionDirection != "ltr" {
+		t.Errorf("expected page_progression_direction == 'ltr', got %s", book.PageProgressionDirection)
+	}
+
+	chapters, err := reader.ExtractChapters()
+	if err != nil {
+		t.Fatalf("extract chapters error: %v", err)
+	}
+
+	// Cover has no text, but since it's pre-paginated, it MUST NOT be discarded!
+	if len(chapters) != 2 {
+		t.Fatalf("expected 2 chapters (including image-only cover), got %d", len(chapters))
+	}
+
+	if chapters[0].PageWidth == nil || *chapters[0].PageWidth != 1024 {
+		t.Errorf("expected cover width 1024, got %v", chapters[0].PageWidth)
+	}
+	if chapters[0].PageHeight == nil || *chapters[0].PageHeight != 768 {
+		t.Errorf("expected cover height 768, got %v", chapters[0].PageHeight)
+	}
+	if chapters[0].PageSpread == nil || *chapters[0].PageSpread != "right" {
+		t.Errorf("expected cover spread 'right', got %v", chapters[0].PageSpread)
+	}
+	if chapters[1].PageSpread == nil || *chapters[1].PageSpread != "left" {
+		t.Errorf("expected p1 spread 'left', got %v", chapters[1].PageSpread)
+	}
+}
+
+func TestExtractPageDimensions_SVGViewBox(t *testing.T) {
+	svgHTML := `<!DOCTYPE html><html><head><title>Page</title></head><body>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="100%" height="100%">
+  <image href="../images/p1.jpg" width="1200" height="800"/>
+</svg></body></html>`
+
+	w, h := epub.ExtractPageDimensions(svgHTML)
+	if w == nil || *w != 1200 {
+		t.Errorf("expected width 1200, got %v", w)
+	}
+	if h == nil || *h != 800 {
+		t.Errorf("expected height 800, got %v", h)
+	}
+}
+
+func TestRewritePageHTML(t *testing.T) {
+	rawHTML := `<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" href="../css/styles.css" type="text/css"/>
+</head>
+<body>
+  <div style="position: relative; width: 1024px; height: 768px;">
+    <img src="../images/artwork.jpg" style="position: absolute; left: 0; top: 0; z-index: -1;" />
+    <div style="position: absolute; left: 50px; top: 100px; z-index: 2;">
+      <p>Hello Story</p>
+    </div>
+  </div>
+</body>
+</html>`
+
+	bookID := "test-book-123"
+	chapterHref := "OEBPS/text/page01.xhtml"
+	pageWidth := 1024
+	pageHeight := 768
+
+	rewritten := epub.RewritePageHTML(rawHTML, bookID, chapterHref, &pageWidth, &pageHeight)
+
+	// Verify relative asset URLs are rewritten to Shelfd API endpoints
+	expectedCSS := `/api/v1/books/test-book-123/assets/OEBPS/css/styles.css`
+	if !strings.Contains(rewritten, expectedCSS) {
+		t.Errorf("expected rewritten CSS url %s, got:\n%s", expectedCSS, rewritten)
+	}
+
+	expectedImg := `/api/v1/books/test-book-123/assets/OEBPS/images/artwork.jpg`
+	if !strings.Contains(rewritten, expectedImg) {
+		t.Errorf("expected rewritten image url %s, got:\n%s", expectedImg, rewritten)
+	}
+
+	// Verify negative z-index is normalized to 1
+	if strings.Contains(rewritten, "z-index: -1") {
+		t.Errorf("expected negative z-index to be normalized to positive")
+	}
+	if !strings.Contains(rewritten, "z-index: 1") {
+		t.Errorf("expected z-index: 1 for background image")
+	}
+
+	// Verify viewport meta tag is injected
+	if !strings.Contains(rewritten, `width=1024, height=768`) {
+		t.Errorf("expected injected viewport tag")
+	}
+}
+

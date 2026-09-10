@@ -26,22 +26,30 @@ type ParsedSeries struct {
 
 // ParsedBook holds extracted metadata from an EPUB package.
 type ParsedBook struct {
-	Title         string
-	Authors       []ParsedAuthor
-	Genres        []string
-	Description   string
-	Publisher     string
-	Language      string
-	Identifier    string
-	PublishedDate string
-	Series        *ParsedSeries
+	Title                    string
+	Authors                  []ParsedAuthor
+	Genres                   []string
+	Description              string
+	Publisher                string
+	Language                 string
+	Identifier               string
+	PublishedDate            string
+	Series                   *ParsedSeries
+	Layout                   string // "reflowable" or "pre-paginated"
+	RenditionSpread          string // "auto", "landscape", "both", "none"
+	RenditionOrientation     string // "auto", "landscape", "portrait"
+	PageProgressionDirection string // "ltr" or "rtl"
 }
 
-// ParsedChapter holds extracted plaintext content for an EPUB spine section.
+// ParsedChapter holds extracted plaintext content and layout metadata for an EPUB spine section.
 type ParsedChapter struct {
 	Index        int
 	Title        *string
 	ContentPlain string
+	Href         string
+	PageWidth    *int
+	PageHeight   *int
+	PageSpread   *string
 }
 
 // Reader provides safe inspection and extraction methods for an EPUB archive.
@@ -147,6 +155,20 @@ func (r *Reader) Close() error {
 		return r.closer.Close()
 	}
 	return nil
+}
+
+// RootBase returns the base directory of the root OPF file inside the EPUB zip.
+func (r *Reader) RootBase() string {
+	return r.rootBase
+}
+
+// ReadEntry reads the raw bytes of an entry inside the EPUB zip by archive path.
+func (r *Reader) ReadEntry(name string) ([]byte, error) {
+	zf := r.findFile(name)
+	if zf == nil {
+		return nil, fmt.Errorf("file %s not found in epub", name)
+	}
+	return readZipFile(zf)
 }
 
 func (r *Reader) findFile(name string) *zip.File {

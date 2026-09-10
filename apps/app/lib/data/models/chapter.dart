@@ -5,6 +5,10 @@ class Chapter {
   final String title;
   final String summary;
   final String? content;
+  final String? href;
+  final double? pageWidth;
+  final double? pageHeight;
+  final String? pageSpread;
 
   const Chapter({
     required this.id,
@@ -13,6 +17,10 @@ class Chapter {
     required this.title,
     this.summary = '',
     this.content,
+    this.href,
+    this.pageWidth,
+    this.pageHeight,
+    this.pageSpread,
   });
 
   factory Chapter.fromJson(Map<String, dynamic> json) {
@@ -23,6 +31,10 @@ class Chapter {
       title: json['title'] as String? ?? '',
       summary: json['summary'] as String? ?? '',
       content: (json['content_plain'] ?? json['content']) as String?,
+      href: json['href'] as String?,
+      pageWidth: (json['page_width'] as num?)?.toDouble(),
+      pageHeight: (json['page_height'] as num?)?.toDouble(),
+      pageSpread: json['page_spread'] as String?,
     );
   }
 
@@ -34,6 +46,10 @@ class Chapter {
       'title': title,
       'summary': summary,
       if (content != null) 'content': content,
+      if (href != null) 'href': href,
+      if (pageWidth != null) 'page_width': pageWidth,
+      if (pageHeight != null) 'page_height': pageHeight,
+      if (pageSpread != null) 'page_spread': pageSpread,
     };
   }
 }
