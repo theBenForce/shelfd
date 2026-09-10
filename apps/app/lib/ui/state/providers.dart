@@ -435,6 +435,87 @@ class LibraryNotifier extends Notifier<LibraryState> {
   void setFilter(String filter) {
     state = state.copyWith(activeFilter: filter);
   }
+
+  void addBook(Book book) {
+    if (state.books.any((b) => b.id == book.id)) {
+      updateBook(book);
+      return;
+    }
+
+    final updatedBooks = [book, ...state.books];
+
+    // Merge Authors
+    final updatedAuthors = List<Author>.from(state.authors);
+    for (final author in book.authors) {
+      final index = updatedAuthors.indexWhere((a) => a.id == author.id || a.name.toLowerCase() == author.name.toLowerCase());
+      if (index >= 0) {
+        final existing = updatedAuthors[index];
+        updatedAuthors[index] = Author(
+          id: existing.id,
+          name: existing.name,
+          photoUrl: existing.photoUrl,
+          bookCount: existing.bookCount + 1,
+        );
+      } else {
+        updatedAuthors.add(Author(
+          id: author.id,
+          name: author.name,
+          photoUrl: author.photoUrl,
+          bookCount: 1,
+        ));
+      }
+    }
+
+    // Merge Series
+    final updatedSeries = List<Series>.from(state.series);
+    if (book.series != null) {
+      final s = book.series!;
+      final index = updatedSeries.indexWhere((existing) => existing.id == s.id || existing.name.toLowerCase() == s.name.toLowerCase());
+      if (index >= 0) {
+        final existing = updatedSeries[index];
+        updatedSeries[index] = Series(
+          id: existing.id,
+          name: existing.name,
+          coverUrl: existing.coverUrl ?? s.coverUrl,
+          bookCount: existing.bookCount + 1,
+        );
+      } else {
+        updatedSeries.add(Series(
+          id: s.id,
+          name: s.name,
+          coverUrl: s.coverUrl ?? book.coverUrl,
+          bookCount: 1,
+        ));
+      }
+    }
+
+    // Merge Genres
+    final updatedGenres = List<Genre>.from(state.genres);
+    for (final genre in book.genres) {
+      if (!updatedGenres.any((g) => g.id == genre.id || g.name.toLowerCase() == genre.name.toLowerCase())) {
+        updatedGenres.add(genre);
+      }
+    }
+
+    state = state.copyWith(
+      books: updatedBooks,
+      authors: updatedAuthors,
+      series: updatedSeries,
+      genres: updatedGenres,
+      totalBooks: state.totalBooks + 1,
+    );
+  }
+
+  void updateBook(Book book) {
+    final index = state.books.indexWhere((b) => b.id == book.id);
+    if (index < 0) {
+      addBook(book);
+      return;
+    }
+    final updatedBooks = List<Book>.from(state.books);
+    updatedBooks[index] = book;
+    state = state.copyWith(books: updatedBooks);
+  }
 }
 
 final libraryProvider = NotifierProvider<LibraryNotifier, LibraryState>(LibraryNotifier.new);
@@ -597,7 +678,7 @@ class QueueState {
 }
 
 class QueueNotifier extends Notifier<QueueState> {
-  StreamSubscription<QueueStatus>? _subscription;
+  StreamSubscription<ShelfdEvent>? _subscription;
   Timer? _reconnectTimer;
   bool _isDisposed = false;
 
@@ -633,9 +714,18 @@ class QueueNotifier extends Notifier<QueueState> {
     }
 
     try {
-      _subscription = apiService.streamQueueEvents().listen(
-        (status) {
-          state = QueueState(status: status, isLoading: false);
+      _subscription = apiService.streamEvents().listen(
+        (event) {
+          switch (event) {
+            case QueueStatusEvent(:final status):
+              state = QueueState(status: status, isLoading: false);
+            case BookAddedEvent(:final book):
+              ref.read(libraryProvider.notifier).addBook(book);
+            case BookUpdatedEvent(:final book):
+              ref.read(libraryProvider.notifier).updateBook(book);
+            case ScanStatusEvent():
+              break;
+          }
         },
         onError: (err) {
           debugPrint('Queue SSE stream error: $err');

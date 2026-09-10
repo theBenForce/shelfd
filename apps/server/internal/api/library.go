@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 	"github.com/shelfd/shelfd/internal/worker"
@@ -16,6 +17,7 @@ type LibraryHandler struct {
 	scanner  *scanner.Scanner
 	ingester *scanner.Ingester
 	worker   *worker.Worker
+	hub      *events.Hub
 	logger   *slog.Logger
 	mu       sync.Mutex
 	scanning bool
@@ -26,6 +28,7 @@ func NewLibraryHandler(
 	s *scanner.Scanner,
 	ingester *scanner.Ingester,
 	w *worker.Worker,
+	hub *events.Hub,
 	logger *slog.Logger,
 ) *LibraryHandler {
 	if logger == nil {
@@ -36,6 +39,7 @@ func NewLibraryHandler(
 		scanner:  s,
 		ingester: ingester,
 		worker:   w,
+		hub:      hub,
 		logger:   logger,
 	}
 }
@@ -68,16 +72,32 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		h.logger.Info("starting background library scan")
 		ctx := context.Background()
 
+		if h.hub != nil {
+			h.hub.Broadcast(events.Event{
+				Type: events.EventScanStatus,
+				Data: map[string]any{"status": "started"},
+			})
+		}
+
 		// Backfill any database chapters that haven't been chunked into paragraphs yet
 		backfilled := 0
 		if n, err := h.repo.BackfillParagraphs(ctx); err == nil && n > 0 {
 			backfilled = n
 			h.logger.Info("backfilled paragraphs from existing chapters", "count", backfilled)
+			if h.worker != nil {
+				h.worker.Trigger()
+			}
 		}
 
 		discovered, err := h.scanner.Scan()
 		if err != nil {
 			h.logger.Error("background scan failed", "error", err)
+			if h.hub != nil {
+				h.hub.Broadcast(events.Event{
+					Type: events.EventScanStatus,
+					Data: map[string]any{"status": "failed", "error": err.Error()},
+				})
+			}
 			return
 		}
 
@@ -86,7 +106,7 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		modifiedCount := 0
 		unchangedCount := 0
 		for _, f := range discovered {
-			_, status, err := h.ingester.SyncFile(ctx, f.FullPath, f.RelativePath)
+			book, status, err := h.ingester.SyncFile(ctx, f.FullPath, f.RelativePath)
 			if err != nil {
 				h.logger.Error("failed to sync discovered file", "file", f.RelativePath, "error", err)
 				continue
@@ -94,8 +114,44 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 			switch status {
 			case scanner.SyncStatusNew:
 				newCount++
+				// Paragraphs are chunked & queued in DB. Trigger worker immediately to run in background!
+				if h.worker != nil {
+					h.worker.Trigger()
+				}
+				// Broadcast realtime book_added event to frontend immediately
+				if h.hub != nil && book != nil {
+					bookItem := BuildBookListItem(ctx, h.repo, book)
+					h.hub.Broadcast(events.Event{
+						Type: events.EventBookAdded,
+						Data: bookItem,
+					})
+					if qStatus, err := h.repo.GetQueueStatus(ctx); err == nil {
+						if h.worker != nil {
+							rt := h.worker.GetRuntimeStatus()
+							if rt.IsBusy {
+								qStatus.IsActive = true
+								qStatus.CurrentBook = rt.CurrentBook
+								qStatus.CurrentChapter = rt.CurrentChapter
+							}
+						}
+						h.hub.Broadcast(events.Event{
+							Type: events.EventQueueStatus,
+							Data: qStatus,
+						})
+					}
+				}
 			case scanner.SyncStatusModified:
 				modifiedCount++
+				if h.worker != nil {
+					h.worker.Trigger()
+				}
+				if h.hub != nil && book != nil {
+					bookItem := BuildBookListItem(ctx, h.repo, book)
+					h.hub.Broadcast(events.Event{
+						Type: events.EventBookUpdated,
+						Data: bookItem,
+					})
+				}
 			case scanner.SyncStatusUnchanged:
 				unchangedCount++
 			}
@@ -109,6 +165,18 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 		if (newCount > 0 || modifiedCount > 0 || backfilled > 0) && h.worker != nil {
 			h.worker.Trigger()
+		}
+
+		if h.hub != nil {
+			h.hub.Broadcast(events.Event{
+				Type: events.EventScanStatus,
+				Data: map[string]any{
+					"status":    "completed",
+					"new":       newCount,
+					"modified":  modifiedCount,
+					"unchanged": unchangedCount,
+				},
+			})
 		}
 	}()
 

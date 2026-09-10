@@ -4,6 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shelf/data/models/author.dart';
+import 'package:shelf/data/models/book.dart';
+import 'package:shelf/data/models/series.dart';
 import 'package:shelf/data/repositories/book_repository.dart';
 import 'package:shelf/data/services/api_service.dart';
 import 'package:shelf/data/services/storage_service.dart';
@@ -98,5 +101,56 @@ void main() {
     state = container.read(libraryProvider);
     expect(state.books.length, 30);
     expect(requestedPage, 2);
+  });
+
+  test('LibraryNotifier.addBook adds new book and updates author/series groupings', () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final notifier = container.read(libraryProvider.notifier);
+    expect(container.read(libraryProvider).books.isEmpty, isTrue);
+
+    const book = Book(
+      id: 'book-1',
+      title: 'Dune',
+      authors: [Author(id: 'auth-1', name: 'Frank Herbert')],
+      series: Series(id: 'series-1', name: 'Dune Chronicles'),
+    );
+
+    notifier.addBook(book);
+
+    final state = container.read(libraryProvider);
+    expect(state.books.length, 1);
+    expect(state.totalBooks, 1);
+    expect(state.books.first.title, 'Dune');
+    expect(state.authors.length, 1);
+    expect(state.authors.first.name, 'Frank Herbert');
+    expect(state.series.length, 1);
+    expect(state.series.first.name, 'Dune Chronicles');
+  });
+
+  test('LibraryNotifier.updateBook updates existing book in place', () async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    final notifier = container.read(libraryProvider.notifier);
+
+    const book = Book(
+      id: 'book-1',
+      title: 'Dune',
+      authors: [Author(id: 'auth-1', name: 'Frank Herbert')],
+    );
+    notifier.addBook(book);
+
+    const updatedBook = Book(
+      id: 'book-1',
+      title: 'Dune (Updated Edition)',
+      authors: [Author(id: 'auth-1', name: 'Frank Herbert')],
+    );
+    notifier.updateBook(updatedBook);
+
+    final state = container.read(libraryProvider);
+    expect(state.books.length, 1);
+    expect(state.books.first.title, 'Dune (Updated Edition)');
   });
 }

@@ -50,12 +50,9 @@ class AppShell extends ConsumerWidget {
 
     Future<void> handleScan() async {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Scanning library...')),
+        const SnackBar(content: Text('Scanning library for new books...')),
       );
       await ref.read(bookRepositoryProvider).triggerScan();
-      if (context.mounted) {
-        ref.read(libraryProvider.notifier).loadLibrary(refresh: true);
-      }
     }
 
     return ShelfdAdaptiveScaffold(

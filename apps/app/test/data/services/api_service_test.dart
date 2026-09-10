@@ -264,6 +264,61 @@ void main() {
       expect(events[1].currentChapter, 'The Sprawl');
     });
 
+    test('streamEvents decodes mixed SSE stream into typed ShelfdEvent instances', () async {
+      final ssePayload = 'event: queue_status\n'
+          'data: {"total_chapters": 10, "indexed_chapters": 5, "pending_chapters": 5, "pending_uploads": 0, "progress_percent": 50.0, "is_active": true}\n\n'
+          'event: book_added\n'
+          'data: {"id": "book-99", "title": "Dune", "authors": [{"id": "auth-1", "name": "Frank Herbert"}]}\n\n'
+          'event: scan_status\n'
+          'data: {"status": "completed", "new": 1}\n\n';
+
+      final mockClient = MockClient.streaming((request, bodyStream) async {
+        expect(request.url.path, '/api/v1/queue/events');
+        final stream = Stream.value(utf8.encode(ssePayload));
+        return http.StreamedResponse(stream, 200, headers: {'content-type': 'text/event-stream'});
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final events = await apiService.streamEvents().take(3).toList();
+
+      expect(events.length, 3);
+
+      expect(events[0], isA<QueueStatusEvent>());
+      final qEvt = events[0] as QueueStatusEvent;
+      expect(qEvt.status.totalChapters, 10);
+      expect(qEvt.status.indexedChapters, 5);
+
+      expect(events[1], isA<BookAddedEvent>());
+      final bEvt = events[1] as BookAddedEvent;
+      expect(bEvt.book.id, 'book-99');
+      expect(bEvt.book.title, 'Dune');
+      expect(bEvt.book.authors.first.name, 'Frank Herbert');
+
+      expect(events[2], isA<ScanStatusEvent>());
+      final sEvt = events[2] as ScanStatusEvent;
+      expect(sEvt.data['status'], 'completed');
+      expect(sEvt.data['new'], 1);
+    });
+
+    test('streamQueueEvents ignores non-queue_status events in stream', () async {
+      final ssePayload = 'event: book_added\n'
+          'data: {"id": "book-99", "title": "Dune"}\n\n'
+          'event: queue_status\n'
+          'data: {"total_chapters": 12, "indexed_chapters": 12, "pending_chapters": 0, "pending_uploads": 0, "progress_percent": 100.0, "is_active": false}\n\n';
+
+      final mockClient = MockClient.streaming((request, bodyStream) async {
+        final stream = Stream.value(utf8.encode(ssePayload));
+        return http.StreamedResponse(stream, 200, headers: {'content-type': 'text/event-stream'});
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final events = await apiService.streamQueueEvents().take(1).toList();
+
+      expect(events.length, 1);
+      expect(events[0].totalChapters, 12);
+      expect(events[0].progressPercent, 100.0);
+    });
+
     test('streamQueueEvents throws ApiException on error status', () async {
       final mockClient = MockClient.streaming((request, bodyStream) async {
         final stream = Stream.value(utf8.encode('Unauthorized'));

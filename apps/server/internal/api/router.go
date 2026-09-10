@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/shelfd/shelfd/internal/ai"
+	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 	"github.com/shelfd/shelfd/internal/worker"
@@ -12,14 +13,15 @@ import (
 
 // RouterConfig contains dependencies for assembling the Shelfd REST API.
 type RouterConfig struct {
-	Repo         repository.StorageEngine
-	Ingester     *scanner.Ingester
-	Scanner      *scanner.Scanner
-	Worker       *worker.Worker
-	UploadWorker *worker.UploadWorker
-	AIClient     ai.Client
-	DataDir      string
-	LibraryDir   string
+	Repo            repository.StorageEngine
+	Ingester        *scanner.Ingester
+	Scanner         *scanner.Scanner
+	Worker          *worker.Worker
+	UploadWorker    *worker.UploadWorker
+	AIClient        ai.Client
+	Hub             *events.Hub
+	DataDir         string
+	LibraryDir      string
 	JWTSecret       string
 	Host            string
 	Port            int
@@ -38,11 +40,11 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	}
 
 	authHandler := NewAuthHandler(cfg.Repo, cfg.JWTSecret, logger)
-	bookHandler := NewBookHandler(cfg.Repo, cfg.Ingester, cfg.Worker, cfg.UploadWorker, cfg.AIClient, cfg.DataDir, cfg.LibraryDir, logger)
+	bookHandler := NewBookHandler(cfg.Repo, cfg.Ingester, cfg.Worker, cfg.UploadWorker, cfg.AIClient, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
 	taxHandler := NewTaxonomyHandler(cfg.Repo, cfg.LibraryDir, cfg.DataDir, logger)
-	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, logger)
+	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, cfg.Hub, logger)
 	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version, cfg.DefaultUsername)
-	queueHandler := NewQueueHandler(cfg.Repo, cfg.Worker, cfg.UploadWorker)
+	queueHandler := NewQueueHandler(cfg.Repo, cfg.Worker, cfg.UploadWorker, cfg.Hub)
 
 	auth := AuthMiddleware(cfg.Repo, cfg.JWTSecret)
 
