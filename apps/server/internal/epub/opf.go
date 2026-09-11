@@ -1,7 +1,6 @@
 package epub
 
 import (
-	"bytes"
 	"encoding/xml"
 	"fmt"
 	"path"
@@ -73,8 +72,7 @@ type opfItemref struct {
 
 func parseOPF(data []byte) (*opfPackage, error) {
 	var pkg opfPackage
-	decoder := xml.NewDecoder(bytes.NewReader(data))
-	if err := decoder.Decode(&pkg); err != nil {
+	if err := decodeXMLResilient(data, "package", &pkg); err != nil {
 		return nil, fmt.Errorf("xml decode opf: %w", err)
 	}
 	return &pkg, nil

@@ -184,6 +184,15 @@ func UpdateMetadata(epubPath string, update MetadataUpdate) error {
 }
 
 func buildUpdatedOPF(rawOPF []byte, parsed *opfPackage, update MetadataUpdate) ([]byte, error) {
+	// Sanitize corrupted preambles before <package if present
+	if pkgIdx := findRootElement(rawOPF, "package"); pkgIdx > 0 {
+		testXML := append(append([]byte(nil), rawOPF[:pkgIdx]...), []byte("<test/>")...)
+		var dummy struct{}
+		if err := xml.NewDecoder(bytes.NewReader(testXML)).Decode(&dummy); err != nil {
+			rawOPF = append([]byte("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"), rawOPF[pkgIdx:]...)
+		}
+	}
+
 	// Find <metadata and </metadata>
 	lower := bytes.ToLower(rawOPF)
 	startMetaIdx := bytes.Index(lower, []byte("<metadata"))

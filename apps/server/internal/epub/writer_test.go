@@ -296,4 +296,73 @@ func TestUpdateMetadata_ZipSlipRejection(t *testing.T) {
 	}
 }
 
+func TestUpdateMetadata_RepairsCorruptedLine1Declaration(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfXML := `<}Q \  * \t  YFO.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Original Title</dc:title>
+    <dc:creator>Original Author</dc:creator>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>`
+
+	epubBytes := createTestEPUB(map[string][]byte{
+		"META-INF/container.xml": []byte(containerXML),
+		"content.opf":            []byte(opfXML),
+		"ch1.xhtml":              []byte("<html><body><p>Text</p></body></html>"),
+	})
+
+	tmpEPUB := filepath.Join(t.TempDir(), "corrupted_opf_update.epub")
+	if err := os.WriteFile(tmpEPUB, epubBytes, 0644); err != nil {
+		t.Fatalf("writing temp epub: %v", err)
+	}
+
+	update := epub.MetadataUpdate{
+		Title:   "Repaired Title",
+		Authors: []string{"Repaired Author"},
+	}
+
+	if err := epub.UpdateMetadata(tmpEPUB, update); err != nil {
+		t.Fatalf("UpdateMetadata failed on epub with corrupted line-1: %v", err)
+	}
+
+	// Verify the written OPF entry in the zip has a valid XML declaration and does not contain garbage
+	reader, err := epub.Open(tmpEPUB)
+	if err != nil {
+		t.Fatalf("epub.Open failed on updated epub: %v", err)
+	}
+	defer reader.Close()
+
+	rawEntry, err := reader.ReadEntry("content.opf")
+	if err != nil {
+		t.Fatalf("reading updated content.opf: %v", err)
+	}
+	if strings.Contains(string(rawEntry), "<}Q") {
+		t.Errorf("expected corrupted line-1 to be cleaned up, got: %s", string(rawEntry[:80]))
+	}
+	if !strings.HasPrefix(string(rawEntry), "<?xml") {
+		t.Errorf("expected clean <?xml declaration, got: %s", string(rawEntry[:80]))
+	}
+
+	parsed, err := reader.ParseBook()
+	if err != nil {
+		t.Fatalf("ParseBook failed: %v", err)
+	}
+	if parsed.Title != "Repaired Title" {
+		t.Errorf("expected Title 'Repaired Title', got %q", parsed.Title)
+	}
+}
+
 
