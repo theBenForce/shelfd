@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/shelfd/shelfd/internal/ai"
@@ -13,13 +14,18 @@ import (
 type ToolExecutor struct {
 	repo     repository.StorageEngine
 	aiClient ai.Client
+	logger   *slog.Logger
 }
 
-// NewToolExecutor creates a new ToolExecutor.
-func NewToolExecutor(repo repository.StorageEngine, aiClient ai.Client) *ToolExecutor {
+// NewToolExecutor creates a new ToolExecutor with structured logger.
+func NewToolExecutor(repo repository.StorageEngine, aiClient ai.Client, logger *slog.Logger) *ToolExecutor {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &ToolExecutor{
 		repo:     repo,
 		aiClient: aiClient,
+		logger:   logger,
 	}
 }
 
@@ -70,15 +76,15 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 		Limit: limit,
 	}
 
+	var fallbackNotes []string
+
 	if authorName, ok := args["author"].(string); ok && strings.TrimSpace(authorName) != "" {
 		author, err := te.repo.GetAuthorByName(ctx, strings.TrimSpace(authorName))
 		if err == nil && author != nil {
 			filter.AuthorID = &author.ID
 		} else {
-			// Specified author does not exist
-			return &CallToolResult{
-				Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("No results found: author '%s' not found in library.", authorName)}},
-			}, nil
+			te.logger.Warn("filter author not found, proceeding without author filter", "author", authorName)
+			fallbackNotes = append(fallbackNotes, fmt.Sprintf("Author '%s' not found in library; searched across all authors.", authorName))
 		}
 	}
 
@@ -87,9 +93,18 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 		if err == nil && genre != nil {
 			filter.GenreID = &genre.ID
 		} else {
-			return &CallToolResult{
-				Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("No results found: genre '%s' not found in library.", genreName)}},
-			}, nil
+			te.logger.Warn("filter genre not found, proceeding without genre filter", "genre", genreName)
+			fallbackNotes = append(fallbackNotes, fmt.Sprintf("Genre '%s' not found in library; searched across all genres.", genreName))
+		}
+	}
+
+	if topicName, ok := args["topic"].(string); ok && strings.TrimSpace(topicName) != "" {
+		topic, err := te.repo.GetTopicByName(ctx, strings.TrimSpace(topicName))
+		if err == nil && topic != nil {
+			filter.TopicID = &topic.ID
+		} else {
+			te.logger.Warn("filter topic not found, proceeding without topic filter", "topic", topicName)
+			fallbackNotes = append(fallbackNotes, fmt.Sprintf("Topic '%s' not found in library; searched across all topics.", topicName))
 		}
 	}
 
@@ -98,9 +113,8 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 		if err == nil && series != nil {
 			filter.SeriesID = &series.ID
 		} else {
-			return &CallToolResult{
-				Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("No results found: series '%s' not found in library.", seriesName)}},
-			}, nil
+			te.logger.Warn("filter series not found, proceeding without series filter", "series", seriesName)
+			fallbackNotes = append(fallbackNotes, fmt.Sprintf("Series '%s' not found in library; searched across all series.", seriesName))
 		}
 	}
 
@@ -120,13 +134,26 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 		}, nil
 	}
 
+	var sb strings.Builder
+	for _, note := range fallbackNotes {
+		sb.WriteString(fmt.Sprintf("(Note: %s)\n\n", note))
+	}
+
 	if len(hits) == 0 {
+		sb.WriteString("No matching passages found.")
+		te.logger.Info("mcp search_library executed",
+			"query", query,
+			"hits", 0,
+			"author_filter", filter.AuthorID != nil,
+			"genre_filter", filter.GenreID != nil,
+			"topic_filter", filter.TopicID != nil,
+			"series_filter", filter.SeriesID != nil,
+		)
 		return &CallToolResult{
-			Content: []ContentItem{{Type: "text", Text: "No matching passages found."}},
+			Content: []ContentItem{{Type: "text", Text: strings.TrimSpace(sb.String())}},
 		}, nil
 	}
 
-	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Found %d relevant passage(s):\n\n", len(hits)))
 
 	for i, hit := range hits {
@@ -169,7 +196,15 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 		sb.WriteString(fmt.Sprintf("   Cosine Distance: %.4f\n", hit.Distance))
 		sb.WriteString(fmt.Sprintf("   Excerpt: %s\n\n", excerpt))
 	}
-	sb.WriteString("(Tip: Call read_chapter_content with book_id, chapter_index, start_paragraph, and end_paragraph to read full context.)")
+
+	te.logger.Info("mcp search_library executed",
+		"query", query,
+		"hits", len(hits),
+		"author_filter", filter.AuthorID != nil,
+		"genre_filter", filter.GenreID != nil,
+		"topic_filter", filter.TopicID != nil,
+		"series_filter", filter.SeriesID != nil,
+	)
 
 	return &CallToolResult{
 		Content: []ContentItem{{Type: "text", Text: strings.TrimSpace(sb.String())}},
@@ -197,6 +232,7 @@ func (te *ToolExecutor) getBookMetadata(ctx context.Context, args map[string]any
 
 	authors, _ := te.repo.GetBookAuthors(ctx, bookID)
 	genres, _ := te.repo.GetBookGenres(ctx, bookID)
+	topics, _ := te.repo.GetBookTopics(ctx, bookID)
 	seriesList, _ := te.repo.GetBookSeries(ctx, bookID)
 	chapters, _ := te.repo.GetChaptersByBookID(ctx, bookID)
 
@@ -232,6 +268,14 @@ func (te *ToolExecutor) getBookMetadata(ctx context.Context, args map[string]any
 		sb.WriteString(fmt.Sprintf("- **Genres**: %s\n", strings.Join(genreNames, ", ")))
 	}
 
+	if len(topics) > 0 {
+		var topicNames []string
+		for _, t := range topics {
+			topicNames = append(topicNames, t.Name)
+		}
+		sb.WriteString(fmt.Sprintf("- **Topics**: %s\n", strings.Join(topicNames, ", ")))
+	}
+
 	if book.Publisher != nil && *book.Publisher != "" {
 		sb.WriteString(fmt.Sprintf("- **Publisher**: %s\n", *book.Publisher))
 	}
@@ -257,6 +301,8 @@ func (te *ToolExecutor) getBookMetadata(ctx context.Context, args map[string]any
 			}
 		}
 	}
+
+	te.logger.Debug("mcp get_book_metadata executed", "book_id", bookID, "title", book.Title, "chapters", len(chapters))
 
 	return &CallToolResult{
 		Content: []ContentItem{{Type: "text", Text: strings.TrimSpace(sb.String())}},
@@ -381,6 +427,14 @@ func (te *ToolExecutor) readChapterContent(ctx context.Context, args map[string]
 	for i := startPara - 1; i < endPara; i++ {
 		sb.WriteString(fmt.Sprintf("[¶%d] %s\n\n", i+1, paras[i]))
 	}
+
+	te.logger.Debug("mcp read_chapter_content executed",
+		"book_id", bookID,
+		"chapter_index", chapter.ChapterIndex,
+		"start_paragraph", startPara,
+		"end_paragraph", endPara,
+		"total_paragraphs", totalParas,
+	)
 
 	return &CallToolResult{
 		Content: []ContentItem{{Type: "text", Text: strings.TrimSpace(sb.String())}},

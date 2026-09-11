@@ -44,7 +44,7 @@ func NewServer(repo repository.StorageEngine, aiClient ai.Client, cfg Config) *S
 	return &Server{
 		basePath: basePath,
 		sessions: NewSessionManager(),
-		executor: NewToolExecutor(repo, aiClient),
+		executor: NewToolExecutor(repo, aiClient, logger),
 		repo:     repo,
 		logger:   logger,
 	}
@@ -269,6 +269,7 @@ func (s *Server) dispatch(ctx context.Context, req JSONRPCRequest) *JSONRPCRespo
 		var params CallToolParams
 		if len(req.Params) > 0 {
 			if err := json.Unmarshal(req.Params, &params); err != nil {
+				s.logger.Warn("mcp failed to parse tool call arguments", "error", err)
 				return &JSONRPCResponse{
 					JSONRPC: "2.0",
 					ID:      req.ID,
@@ -280,8 +281,13 @@ func (s *Server) dispatch(ctx context.Context, req JSONRPCRequest) *JSONRPCRespo
 			}
 		}
 
+		s.logger.Info("mcp tool call received", "tool", params.Name, "arguments", params.Arguments)
+		start := time.Now()
 		result, err := s.executor.Execute(ctx, params.Name, params.Arguments)
+		duration := time.Since(start)
+
 		if err != nil {
+			s.logger.Error("mcp tool execution error", "tool", params.Name, "duration_ms", duration.Milliseconds(), "error", err)
 			return &JSONRPCResponse{
 				JSONRPC: "2.0",
 				ID:      req.ID,
@@ -290,6 +296,12 @@ func (s *Server) dispatch(ctx context.Context, req JSONRPCRequest) *JSONRPCRespo
 					Message: fmt.Sprintf("Tool execution error: %v", err),
 				},
 			}
+		}
+
+		if result != nil && result.IsError {
+			s.logger.Warn("mcp tool returned error", "tool", params.Name, "duration_ms", duration.Milliseconds())
+		} else {
+			s.logger.Info("mcp tool completed", "tool", params.Name, "duration_ms", duration.Milliseconds())
 		}
 
 		return &JSONRPCResponse{

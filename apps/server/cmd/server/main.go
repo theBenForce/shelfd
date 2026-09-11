@@ -26,6 +26,7 @@ import (
 	"github.com/shelfd/shelfd/internal/mcp"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
+	"github.com/shelfd/shelfd/internal/taxonomy"
 	"github.com/shelfd/shelfd/internal/worker"
 )
 
@@ -41,6 +42,8 @@ func main() {
 
 	configFlag := flag.String("config", "", "Path to config.yaml")
 	scanFlag := flag.Bool("scan", false, "Scan library directory for books and exit")
+	migrateTopicsFlag := flag.Bool("migrate-topics", false, "Migrate existing book genres to topics and canonical genres using AI and exit")
+	forceFlag := flag.Bool("force", false, "Force topic migration even for books that already have topics")
 	flag.Parse()
 
 	envPath := config.LoadDotEnv()
@@ -140,12 +143,6 @@ func main() {
 		logger.Info("Backfilled paragraphs for existing chapters", "count", backfilled)
 	}
 
-	// One-off scan mode
-	if *scanFlag {
-		runScan(ctx, repo, cfg, logger)
-		return
-	}
-
 	// Initialize AI client
 	aiClient, err := ai.NewClient(&cfg.AI)
 	if err != nil {
@@ -153,6 +150,26 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Info("AI client initialized", "provider", cfg.AI.Provider, "base_url", cfg.AI.BaseURL)
+
+	taxService := taxonomy.NewTaxonomyService(repo, aiClient, logger)
+
+	// One-off scan mode
+	if *scanFlag {
+		runScan(ctx, repo, cfg, taxService, logger)
+		return
+	}
+
+	// One-off topic migration mode
+	if *migrateTopicsFlag {
+		logger.Info("Starting library topics migration", "force", *forceFlag)
+		count, err := taxService.MigrateLibraryTopics(ctx, *forceFlag)
+		if err != nil {
+			logger.Error("Library topics migration failed", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("Library topics migration completed successfully", "migrated_books", count)
+		return
+	}
 
 	// Ensure seed admin user and MCP token exist if no tokens are configured
 	ensureSeedToken(ctx, repo, cfg, logger)
@@ -170,6 +187,7 @@ func main() {
 	// Scanner and ingester
 	scannerInst := scanner.NewScanner(cfg.Storage.LibraryDir)
 	ingester := scanner.NewIngester(repo, cfg.Storage.LibraryDir, cfg.Storage.DataDir)
+	ingester.SetTaxonomyNormalizer(taxService)
 
 	// Event Hub for real-time SSE broadcasts
 	eventHub := events.NewHub()
@@ -266,7 +284,7 @@ func main() {
 	logger.Info("Shelfd daemon stopped")
 }
 
-func runScan(ctx context.Context, repo repository.StorageEngine, cfg *config.Config, logger *slog.Logger) {
+func runScan(ctx context.Context, repo repository.StorageEngine, cfg *config.Config, taxService *taxonomy.TaxonomyService, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -280,6 +298,9 @@ func runScan(ctx context.Context, repo repository.StorageEngine, cfg *config.Con
 	logger.Info("Discovered EPUB files", "count", len(discovered))
 
 	ingester := scanner.NewIngester(repo, cfg.Storage.LibraryDir, cfg.Storage.DataDir)
+	if taxService != nil {
+		ingester.SetTaxonomyNormalizer(taxService)
+	}
 	newCount := 0
 	modifiedCount := 0
 	unchangedCount := 0

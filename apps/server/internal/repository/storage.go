@@ -27,6 +27,12 @@ type StorageEngine interface {
 	GetGenreByName(ctx context.Context, name string) (*Genre, error)
 	ListGenres(ctx context.Context) ([]*Genre, error)
 
+	// Topics
+	UpsertTopic(ctx context.Context, name string) (*Topic, error)
+	GetTopicByID(ctx context.Context, id string) (*Topic, error)
+	GetTopicByName(ctx context.Context, name string) (*Topic, error)
+	ListTopics(ctx context.Context) ([]*Topic, error)
+
 	// Series
 	UpsertSeries(ctx context.Context, name string, description *string) (*Series, error)
 	GetSeriesByID(ctx context.Context, id string) (*Series, error)
@@ -36,10 +42,15 @@ type StorageEngine interface {
 	// Junction links
 	LinkBookAuthor(ctx context.Context, bookID, authorID, role string) error
 	LinkBookGenre(ctx context.Context, bookID, genreID string) error
+	UnlinkBookGenre(ctx context.Context, bookID, genreID string) error
+	LinkBookTopic(ctx context.Context, bookID, topicID string) error
+	UnlinkBookTopic(ctx context.Context, bookID, topicID string) error
 	LinkBookSeries(ctx context.Context, bookID, seriesID string, sequenceNumber *float64) error
 	GetBookAuthors(ctx context.Context, bookID string) ([]*Author, error)
 	GetBookGenres(ctx context.Context, bookID string) ([]*Genre, error)
+	GetBookTopics(ctx context.Context, bookID string) ([]*Topic, error)
 	GetBookSeries(ctx context.Context, bookID string) ([]*BookSeriesDetail, error)
+	PruneOrphanedGenres(ctx context.Context) (int, error)
 
 	// Chapters
 	CreateChapter(ctx context.Context, chapter *Chapter) error

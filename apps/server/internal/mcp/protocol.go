@@ -96,7 +96,7 @@ func AvailableTools() []Tool {
 				"properties": map[string]any{
 					"query": map[string]any{
 						"type":        "string",
-						"description": "Natural language search prompt (e.g. 'How do the characters escape the orbital station?')",
+						"description": "Natural language search prompt or thematic concept (e.g. 'How do the characters escape the orbital station?' or 'books about artificial intelligence'). Semantic vector search operates across this text.",
 					},
 					"author": map[string]any{
 						"type":        "string",
@@ -104,7 +104,11 @@ func AvailableTools() []Tool {
 					},
 					"genre": map[string]any{
 						"type":        "string",
-						"description": "Optional genre filter (e.g. 'Science Fiction')",
+						"description": "Optional broad literary genre filter (e.g. 'Science Fiction', 'Nonfiction'). For topics, concepts, or themes (e.g. 'AI', 'space travel'), include them directly in 'query' or 'topic' instead.",
+					},
+					"topic": map[string]any{
+						"type":        "string",
+						"description": "Optional conceptual topic or thematic filter (e.g. 'Artificial Intelligence', 'Cyberpunk', 'Space Exploration')",
 					},
 					"series": map[string]any{
 						"type":        "string",

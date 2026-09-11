@@ -443,6 +443,13 @@ func TestAuthorGenreSeriesUpserts(t *testing.T) {
 	if _, err := repo.GetAuthorByName(ctx, "ghost-name"); err != repository.ErrNotFound {
 		t.Errorf("expected ErrNotFound for missing author, got %v", err)
 	}
+	authorByPartial, err := repo.GetAuthorByName(ctx, "Asimov")
+	if err != nil || authorByPartial.ID != a1.ID {
+		t.Fatalf("get author by partial substring 'Asimov': %v", err)
+	}
+	if _, err := repo.GetAuthorByName(ctx, "   "); err != repository.ErrNotFound {
+		t.Errorf("expected ErrNotFound for whitespace author, got %v", err)
+	}
 
 	// Genre upsert
 	g1, err := repo.UpsertGenre(ctx, "Cyberpunk")
@@ -464,6 +471,14 @@ func TestAuthorGenreSeriesUpserts(t *testing.T) {
 	if err != nil || genreByName.ID != g1.ID {
 		t.Fatalf("get genre by name: %v", err)
 	}
+	genreByPartial, err := repo.GetGenreByName(ctx, "Cyber")
+	if err != nil || genreByPartial.ID != g1.ID {
+		t.Fatalf("get genre by partial substring 'Cyber': %v", err)
+	}
+	genreBySuffix, err := repo.GetGenreByName(ctx, "punk")
+	if err != nil || genreBySuffix.ID != g1.ID {
+		t.Fatalf("get genre by partial substring 'punk': %v", err)
+	}
 	allGenres, err := repo.ListGenres(ctx)
 	if err != nil || len(allGenres) != 1 {
 		t.Fatalf("list genres: %v", err)
@@ -476,6 +491,9 @@ func TestAuthorGenreSeriesUpserts(t *testing.T) {
 	}
 	if _, err := repo.GetGenreByName(ctx, "ghost-name"); err != repository.ErrNotFound {
 		t.Errorf("expected ErrNotFound for missing genre, got %v", err)
+	}
+	if _, err := repo.GetGenreByName(ctx, "   "); err != repository.ErrNotFound {
+		t.Errorf("expected ErrNotFound for whitespace genre, got %v", err)
 	}
 
 	// Series with fractional sequence number (e.g. 2.5)
@@ -504,6 +522,13 @@ func TestAuthorGenreSeriesUpserts(t *testing.T) {
 	}
 	if _, err := repo.GetSeriesByName(ctx, "ghost-name"); err != repository.ErrNotFound {
 		t.Errorf("expected ErrNotFound for missing series, got %v", err)
+	}
+	seriesByPartial, err := repo.GetSeriesByName(ctx, "praw")
+	if err != nil || seriesByPartial.ID != s1.ID {
+		t.Fatalf("get series by partial substring 'praw': %v", err)
+	}
+	if _, err := repo.GetSeriesByName(ctx, "   "); err != repository.ErrNotFound {
+		t.Errorf("expected ErrNotFound for whitespace series, got %v", err)
 	}
 
 	b := &repository.Book{Title: "Short Story", FilePath: "William Gibson/Sprawl/2.5.epub"}
@@ -1480,3 +1505,206 @@ func TestInsertParagraphVectorsBatch(t *testing.T) {
 		t.Errorf("expected 0 unindexed paragraphs after batch insert, got %d", len(unindexedAfter))
 	}
 }
+
+func TestTopicManagementAndFiltering(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupTestDB(t)
+	defer repo.Close()
+
+	// 1. Upsert topics
+	topicAI, err := repo.UpsertTopic(ctx, "Artificial Intelligence")
+	if err != nil {
+		t.Fatalf("upsert topic AI: %v", err)
+	}
+	if topicAI.Name != "Artificial Intelligence" {
+		t.Fatalf("expected Artificial Intelligence, got %s", topicAI.Name)
+	}
+
+	topicSpace, err := repo.UpsertTopic(ctx, "Space Exploration")
+	if err != nil {
+		t.Fatalf("upsert topic Space: %v", err)
+	}
+
+	// Upsert duplicate returns same topic
+	dupAI, err := repo.UpsertTopic(ctx, "Artificial Intelligence")
+	if err != nil {
+		t.Fatalf("upsert duplicate AI: %v", err)
+	}
+	if dupAI.ID != topicAI.ID {
+		t.Errorf("expected duplicate upsert to return same ID, got %s vs %s", dupAI.ID, topicAI.ID)
+	}
+
+	// 2. GetTopicByID
+	fetched, err := repo.GetTopicByID(ctx, topicAI.ID)
+	if err != nil {
+		t.Fatalf("get topic by ID: %v", err)
+	}
+	if fetched.Name != topicAI.Name {
+		t.Errorf("expected %s, got %s", topicAI.Name, fetched.Name)
+	}
+
+	// 3. GetTopicByName (exact, case-insensitive, substring, empty)
+	exact, err := repo.GetTopicByName(ctx, "Artificial Intelligence")
+	if err != nil {
+		t.Fatalf("get topic by name exact: %v", err)
+	}
+	if exact.ID != topicAI.ID {
+		t.Errorf("expected %s, got %s", topicAI.ID, exact.ID)
+	}
+
+	caseInsensitive, err := repo.GetTopicByName(ctx, "artificial intelligence")
+	if err != nil {
+		t.Fatalf("get topic by name case insensitive: %v", err)
+	}
+	if caseInsensitive.ID != topicAI.ID {
+		t.Errorf("expected %s, got %s", topicAI.ID, caseInsensitive.ID)
+	}
+
+	sub, err := repo.GetTopicByName(ctx, "Intelligence")
+	if err != nil {
+		t.Fatalf("get topic by name substring: %v", err)
+	}
+	if sub.ID != topicAI.ID {
+		t.Errorf("expected %s, got %s", topicAI.ID, sub.ID)
+	}
+
+	if _, err := repo.GetTopicByName(ctx, "   "); !errors.Is(err, repository.ErrNotFound) {
+		t.Errorf("expected ErrNotFound for whitespace name, got %v", err)
+	}
+
+	// 4. ListTopics
+	topics, err := repo.ListTopics(ctx)
+	if err != nil {
+		t.Fatalf("list topics: %v", err)
+	}
+	if len(topics) != 2 {
+		t.Fatalf("expected 2 topics, got %d", len(topics))
+	}
+	if topics[0].Name != "Artificial Intelligence" || topics[1].Name != "Space Exploration" {
+		t.Errorf("unexpected topic order: %v, %v", topics[0].Name, topics[1].Name)
+	}
+
+	// 5. Create Book and link topic
+	book := &repository.Book{
+		ID:       "book-neuro",
+		Title:    "Neuromancer",
+		FilePath: "William Gibson/Neuromancer/Neuromancer.epub",
+	}
+	if err := repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("create book: %v", err)
+	}
+
+	if err := repo.LinkBookTopic(ctx, book.ID, topicAI.ID); err != nil {
+		t.Fatalf("link book topic: %v", err)
+	}
+
+	// GetBookTopics
+	bookTopics, err := repo.GetBookTopics(ctx, book.ID)
+	if err != nil {
+		t.Fatalf("get book topics: %v", err)
+	}
+	if len(bookTopics) != 1 || bookTopics[0].ID != topicAI.ID {
+		t.Fatalf("expected 1 topic (%s), got %v", topicAI.ID, bookTopics)
+	}
+
+	// 6. ListBooks & CountBooks with TopicID filter
+	filterAI := repository.BookFilter{TopicID: &topicAI.ID}
+	booksAI, err := repo.ListBooks(ctx, filterAI)
+	if err != nil {
+		t.Fatalf("list books with topic filter: %v", err)
+	}
+	if len(booksAI) != 1 || booksAI[0].ID != book.ID {
+		t.Fatalf("expected Neuromancer, got %v", booksAI)
+	}
+
+	countAI, err := repo.CountBooks(ctx, filterAI)
+	if err != nil {
+		t.Fatalf("count books with topic filter: %v", err)
+	}
+	if countAI != 1 {
+		t.Fatalf("expected count 1, got %d", countAI)
+	}
+
+	filterSpace := repository.BookFilter{TopicID: &topicSpace.ID}
+	booksSpace, err := repo.ListBooks(ctx, filterSpace)
+	if err != nil {
+		t.Fatalf("list books with space topic: %v", err)
+	}
+	if len(booksSpace) != 0 {
+		t.Fatalf("expected 0 books for space topic, got %d", len(booksSpace))
+	}
+
+	// 7. UnlinkBookTopic
+	if err := repo.UnlinkBookTopic(ctx, book.ID, topicAI.ID); err != nil {
+		t.Fatalf("unlink book topic: %v", err)
+	}
+	bookTopicsAfter, err := repo.GetBookTopics(ctx, book.ID)
+	if err != nil {
+		t.Fatalf("get book topics after unlink: %v", err)
+	}
+	if len(bookTopicsAfter) != 0 {
+		t.Fatalf("expected 0 book topics after unlink, got %d", len(bookTopicsAfter))
+	}
+}
+
+func TestGenreUnlinkingAndPruning(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupTestDB(t)
+	defer repo.Close()
+
+	g1, err := repo.UpsertGenre(ctx, "Cyberpunk")
+	if err != nil {
+		t.Fatalf("upsert g1: %v", err)
+	}
+	g2, err := repo.UpsertGenre(ctx, "Orphaned Genre")
+	if err != nil {
+		t.Fatalf("upsert g2: %v", err)
+	}
+
+	book := &repository.Book{
+		ID:       "book-genre-prune",
+		Title:    "Count Zero",
+		FilePath: "William Gibson/Count Zero/Count Zero.epub",
+	}
+	if err := repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("create book: %v", err)
+	}
+
+	if err := repo.LinkBookGenre(ctx, book.ID, g1.ID); err != nil {
+		t.Fatalf("link book genre: %v", err)
+	}
+
+	// Pruning now should only remove g2
+	pruned, err := repo.PruneOrphanedGenres(ctx)
+	if err != nil {
+		t.Fatalf("prune genres: %v", err)
+	}
+	if pruned != 1 {
+		t.Fatalf("expected 1 pruned genre, got %d", pruned)
+	}
+
+	// g1 still exists
+	if _, err := repo.GetGenreByID(ctx, g1.ID); err != nil {
+		t.Fatalf("expected g1 to exist, got %v", err)
+	}
+	// g2 is gone
+	if _, err := repo.GetGenreByID(ctx, g2.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected g2 to be ErrNotFound, got %v", err)
+	}
+
+	// Unlink g1 from book and prune
+	if err := repo.UnlinkBookGenre(ctx, book.ID, g1.ID); err != nil {
+		t.Fatalf("unlink book genre: %v", err)
+	}
+	pruned2, err := repo.PruneOrphanedGenres(ctx)
+	if err != nil {
+		t.Fatalf("prune genres 2: %v", err)
+	}
+	if pruned2 != 1 {
+		t.Fatalf("expected 1 pruned genre, got %d", pruned2)
+	}
+	if _, err := repo.GetGenreByID(ctx, g1.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected g1 to be ErrNotFound after unlink and prune, got %v", err)
+	}
+}
+
