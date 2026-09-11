@@ -282,23 +282,92 @@ func TestParseEPUB3Standard(t *testing.T) {
 }
 
 func TestZipSlipRejection(t *testing.T) {
-	// Attempt Zip Slip path traversal
+	testCases := []struct {
+		name      string
+		entryName string
+	}{
+		{"parent traversal", "../../../../etc/passwd"},
+		{"leading slash with traversal", "/../../../../etc/passwd"},
+		{"root parent traversal", "/.."},
+		{"nested parent traversal", "folder/../../../etc/passwd"},
+		{"windows backslash traversal", `..\..\windows\win.ini`},
+		{"nested backslash traversal", `folder\..\..\secret.txt`},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string][]byte{
+				tc.entryName:             []byte("malicious content"),
+				"META-INF/container.xml": []byte("<container/>"),
+			}
+
+			epubBytes := createTestEPUB(files)
+			tempDir := t.TempDir()
+			epubPath := filepath.Join(tempDir, "malicious.epub")
+			if err := os.WriteFile(epubPath, epubBytes, 0644); err != nil {
+				t.Fatalf("writing malicious epub: %v", err)
+			}
+
+			_, err := epub.Open(epubPath)
+			if err == nil {
+				t.Fatalf("expected error opening zip slip archive for %s, got nil", tc.entryName)
+			}
+			if !strings.Contains(err.Error(), "illegal path traversal") {
+				t.Errorf("expected illegal path traversal error for %s, got: %v", tc.entryName, err)
+			}
+		})
+	}
+}
+
+func TestZipRootSlashEntryAllowed(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfXML := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Root Slash Book</dc:title>
+    <dc:creator>Author Name</dc:creator>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>`
+
 	files := map[string][]byte{
-		"../../../../etc/passwd": []byte("root:x:0:0:root:/root:/bin/bash"),
-		"META-INF/container.xml": []byte("<container/>"),
+		"/":                      []byte{},
+		"":                       []byte{},
+		"META-INF/container.xml": []byte(containerXML),
+		"content.opf":            []byte(opfXML),
+		"ch1.xhtml":              []byte("<html><body>Chapter 1</body></html>"),
 	}
 
 	epubBytes := createTestEPUB(files)
 	tempDir := t.TempDir()
-	epubPath := filepath.Join(tempDir, "malicious.epub")
-	os.WriteFile(epubPath, epubBytes, 0644)
-
-	_, err := epub.Open(epubPath)
-	if err == nil {
-		t.Fatalf("expected error opening zip slip archive, got nil")
+	epubPath := filepath.Join(tempDir, "rootslash.epub")
+	if err := os.WriteFile(epubPath, epubBytes, 0644); err != nil {
+		t.Fatalf("writing test epub: %v", err)
 	}
-	if !strings.Contains(err.Error(), "illegal path traversal") {
-		t.Errorf("expected illegal path traversal error, got: %v", err)
+
+	reader, err := epub.Open(epubPath)
+	if err != nil {
+		t.Fatalf("expected epub.Open to succeed for archive with '/' and empty entries, got: %v", err)
+	}
+	defer reader.Close()
+
+	book, err := reader.ParseBook()
+	if err != nil {
+		t.Fatalf("expected ParseBook to succeed, got: %v", err)
+	}
+	if book.Title != "Root Slash Book" {
+		t.Errorf("expected title 'Root Slash Book', got: %q", book.Title)
 	}
 }
 

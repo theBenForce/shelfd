@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 )
 
@@ -93,13 +92,29 @@ func NewReader(zr *zip.Reader) (*Reader, error) {
 	return newReader(zr, nil)
 }
 
+// validateZipEntry checks an archive entry path for Zip Slip and directory traversal attacks.
+// Root entries ("/", "", "./") and leading slashes are permitted if they do not escape above the root.
+func validateZipEntry(name string) error {
+	if name == "/" || name == "" {
+		return nil
+	}
+	slashName := strings.ReplaceAll(name, "\\", "/")
+	trimmed := strings.TrimLeft(slashName, "/")
+	clean := path.Clean(trimmed)
+	if clean == "." || clean == "" {
+		return nil
+	}
+	if strings.HasPrefix(clean, "..") || strings.Contains(slashName, "../") {
+		return fmt.Errorf("illegal path traversal detected in entry: %s", name)
+	}
+	return nil
+}
+
 func newReader(zr *zip.Reader, closer io.Closer) (*Reader, error) {
 	// Guard against Zip Slip and path traversal
 	for _, file := range zr.File {
-		clean := filepath.Clean(file.Name)
-		if strings.HasPrefix(clean, "..") || strings.HasPrefix(clean, "/") ||
-			strings.Contains(file.Name, "../") || strings.Contains(file.Name, `..\`) {
-			return nil, fmt.Errorf("illegal path traversal detected in entry: %s", file.Name)
+		if err := validateZipEntry(file.Name); err != nil {
+			return nil, err
 		}
 	}
 
@@ -172,9 +187,9 @@ func (r *Reader) ReadEntry(name string) ([]byte, error) {
 }
 
 func (r *Reader) findFile(name string) *zip.File {
-	normalized := path.Clean(name)
+	normalized := strings.TrimPrefix(path.Clean(strings.ReplaceAll(name, "\\", "/")), "/")
 	for _, f := range r.zip.File {
-		if path.Clean(f.Name) == normalized {
+		if strings.TrimPrefix(path.Clean(strings.ReplaceAll(f.Name, "\\", "/")), "/") == normalized {
 			return f
 		}
 	}
