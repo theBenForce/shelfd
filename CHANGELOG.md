@@ -1,3 +1,17 @@
+# [1.4.0](https://github.com/theBenForce/shelfd/compare/v1.3.1...v1.4.0) (2026-09-11)
+
+
+### Bug Fixes
+
+* **epub:** permit root directory entry and leading slash in zip slip validation ([#7](https://github.com/theBenForce/shelfd/issues/7)) ([#10](https://github.com/theBenForce/shelfd/issues/10)) ([86fa69f](https://github.com/theBenForce/shelfd/commit/86fa69fcf5ecf704fdd58a60be6854bdc906e2a4))
+* **epub:** recover from malformed line-1 xml declarations in container and opf ([#8](https://github.com/theBenForce/shelfd/issues/8)) ([#11](https://github.com/theBenForce/shelfd/issues/11)) ([53abd53](https://github.com/theBenForce/shelfd/commit/53abd535223217a032c078b39915e4c1b93dc970))
+
+
+### Features
+
+* revamp library view with live search, tag autocomplete, and genre/topic navigation ([#14](https://github.com/theBenForce/shelfd/issues/14)) ([bcc0a97](https://github.com/theBenForce/shelfd/commit/bcc0a976df64fd19c4fdff05dd43d75741408143))
+* staged uploads review queue, recursive folder drop, and metadata inspector ([#13](https://github.com/theBenForce/shelfd/issues/13)) ([51c4b61](https://github.com/theBenForce/shelfd/commit/51c4b61d07418c98ab29fc9d2075b314e88c91cc))
+
 ## [1.3.1](https://github.com/theBenForce/shelfd/compare/v1.3.0...v1.3.1) (2026-09-11)
 
 
