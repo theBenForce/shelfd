@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shelfd/shelfd/internal/epub"
@@ -217,4 +218,82 @@ func TestUpdateMetadata_EscapingAndNewSeries(t *testing.T) {
 		t.Errorf("expected SeqNum 1.5, got %+v", parsed.Series)
 	}
 }
+
+func TestUpdateMetadata_WithRootSlashEntry(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfXML := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Original Title</dc:title>
+    <dc:creator>Original Author</dc:creator>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>`
+
+	epubBytes := createTestEPUB(map[string][]byte{
+		"/":                      []byte{},
+		"":                       []byte{},
+		"META-INF/container.xml": []byte(containerXML),
+		"content.opf":            []byte(opfXML),
+		"ch1.xhtml":              []byte("<html><body><p>Text</p></body></html>"),
+	})
+
+	tmpEPUB := filepath.Join(t.TempDir(), "rootslash_update.epub")
+	if err := os.WriteFile(tmpEPUB, epubBytes, 0644); err != nil {
+		t.Fatalf("writing temp epub: %v", err)
+	}
+
+	update := epub.MetadataUpdate{
+		Title:   "Updated Root Slash Title",
+		Authors: []string{"Updated Author"},
+	}
+
+	if err := epub.UpdateMetadata(tmpEPUB, update); err != nil {
+		t.Fatalf("UpdateMetadata failed on epub with root slash: %v", err)
+	}
+
+	reader, err := epub.Open(tmpEPUB)
+	if err != nil {
+		t.Fatalf("epub.Open failed: %v", err)
+	}
+	defer reader.Close()
+
+	parsed, err := reader.ParseBook()
+	if err != nil {
+		t.Fatalf("ParseBook failed: %v", err)
+	}
+	if parsed.Title != "Updated Root Slash Title" {
+		t.Errorf("expected Title 'Updated Root Slash Title', got %q", parsed.Title)
+	}
+}
+
+func TestUpdateMetadata_ZipSlipRejection(t *testing.T) {
+	epubBytes := createTestEPUB(map[string][]byte{
+		"../../../../etc/passwd": []byte("evil"),
+		"META-INF/container.xml": []byte("<container/>"),
+	})
+
+	tmpEPUB := filepath.Join(t.TempDir(), "malicious_writer.epub")
+	_ = os.WriteFile(tmpEPUB, epubBytes, 0644)
+
+	err := epub.UpdateMetadata(tmpEPUB, epub.MetadataUpdate{Title: "New"})
+	if err == nil {
+		t.Fatalf("expected error from UpdateMetadata on malicious archive, got nil")
+	}
+	if !strings.Contains(err.Error(), "illegal path traversal") {
+		t.Errorf("expected illegal path traversal error, got: %v", err)
+	}
+}
+
 

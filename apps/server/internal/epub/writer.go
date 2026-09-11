@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -40,17 +41,15 @@ func UpdateMetadata(epubPath string, update MetadataUpdate) error {
 
 	// Guard against Zip Slip
 	for _, f := range zr.File {
-		clean := filepath.Clean(f.Name)
-		if strings.HasPrefix(clean, "..") || strings.HasPrefix(clean, "/") ||
-			strings.Contains(f.Name, "../") || strings.Contains(f.Name, `..\`) {
-			return fmt.Errorf("illegal path traversal detected in entry: %s", f.Name)
+		if err := validateZipEntry(f.Name); err != nil {
+			return err
 		}
 	}
 
 	// Locate container.xml
 	var containerFile *zip.File
 	for _, f := range zr.File {
-		if f.Name == "META-INF/container.xml" {
+		if strings.TrimPrefix(path.Clean(strings.ReplaceAll(f.Name, "\\", "/")), "/") == "META-INF/container.xml" {
 			containerFile = f
 			break
 		}
@@ -124,12 +123,13 @@ func UpdateMetadata(epubPath string, update MetadataUpdate) error {
 	}
 
 	// 2. Stream all other entries from original archive
+	cleanRootPath := strings.TrimPrefix(path.Clean(strings.ReplaceAll(rootPath, "\\", "/")), "/")
 	for _, entry := range zr.File {
-		if entry.Name == "mimetype" {
+		if entry.Name == "mimetype" || entry.Name == "" {
 			continue
 		}
 
-		if entry.Name == rootPath {
+		if entry.Name == rootPath || strings.TrimPrefix(path.Clean(strings.ReplaceAll(entry.Name, "\\", "/")), "/") == cleanRootPath {
 			// Write updated OPF
 			h := &zip.FileHeader{
 				Name:     rootPath,
