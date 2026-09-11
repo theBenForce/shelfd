@@ -663,32 +663,6 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
           const _QueueStatusCard(),
           const SizedBox(height: AppTokens.space12),
 
-          // Upload EPUB Button (if callback provided)
-          if (widget.onUpload != null) ...[
-            SizedBox(
-              width: double.infinity,
-              height: 40,
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: AppTokens.boneSurface,
-                  foregroundColor: AppTokens.charcoalInk,
-                  side: const BorderSide(color: AppTokens.crispBorder),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                  ),
-                  padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
-                ),
-                onPressed: widget.onUpload,
-                icon: const Icon(Icons.upload_file_outlined, size: 18),
-                label: const Text(
-                  'Upload EPUB',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-            const SizedBox(height: AppTokens.space8),
-          ],
-
           // Rescan Library Button (if callback provided)
           if (widget.onRescan != null) ...[
             SizedBox(
@@ -943,39 +917,6 @@ class _QueueStatusCard extends ConsumerWidget {
     final isActive = status.isActive || status.pendingChapters > 0 || status.pendingUploads > 0;
 
     if (!isActive) {
-      if (status.stagedUploads > 0) {
-        return InkWell(
-          onTap: () => context.go('/uploads'),
-          borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF9DB),
-              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              border: Border.all(color: const Color(0xFFFFE066)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline_rounded, size: 14, color: Color(0xFFF08C00)),
-                const SizedBox(width: AppTokens.space8),
-                Expanded(
-                  child: Text(
-                    '${status.stagedUploads} staged for review',
-                    style: AppTypography.bodySans(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFFD9480F),
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const Icon(Icons.arrow_forward_ios_rounded, size: 10, color: Color(0xFFD9480F)),
-              ],
-            ),
-          ),
-        );
-      }
-
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
