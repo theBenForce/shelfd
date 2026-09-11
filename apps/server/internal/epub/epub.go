@@ -216,10 +216,47 @@ type containerXML struct {
 	} `xml:"rootfiles>rootfile"`
 }
 
+// findRootElement searches for the starting index of a given XML root tag name,
+// handling case-insensitivity and possible namespace prefixes (e.g. <package, <opf:package).
+func findRootElement(data []byte, tagName string) int {
+	lower := bytes.ToLower(data)
+	target := []byte("<" + strings.ToLower(tagName))
+	if idx := bytes.Index(lower, target); idx != -1 {
+		return idx
+	}
+	targetColon := []byte(":" + strings.ToLower(tagName))
+	if colonIdx := bytes.Index(lower, targetColon); colonIdx != -1 {
+		start := bytes.LastIndexByte(lower[:colonIdx], '<')
+		if start != -1 {
+			return start
+		}
+	}
+	return -1
+}
+
+// decodeXMLResilient attempts standard XML decoding first. If decoding fails
+// (e.g. due to corrupted line-1 processing instructions or invalid preamble bytes),
+// it attempts recovery by locating the root element and decoding from there.
+func decodeXMLResilient(data []byte, rootTag string, v any) error {
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	err := decoder.Decode(v)
+	if err == nil {
+		return nil
+	}
+
+	if idx := findRootElement(data, rootTag); idx != -1 {
+		recoveryDecoder := xml.NewDecoder(bytes.NewReader(data[idx:]))
+		if recErr := recoveryDecoder.Decode(v); recErr == nil {
+			return nil
+		}
+	}
+
+	return err
+}
+
 func parseContainerXML(data []byte) (string, error) {
 	var c containerXML
-	decoder := xml.NewDecoder(bytes.NewReader(data))
-	if err := decoder.Decode(&c); err != nil {
+	if err := decodeXMLResilient(data, "container", &c); err != nil {
 		return "", err
 	}
 

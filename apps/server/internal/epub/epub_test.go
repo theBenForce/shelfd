@@ -371,6 +371,97 @@ func TestZipRootSlashEntryAllowed(t *testing.T) {
 	}
 }
 
+func TestMalformedLine1XMLDeclaration(t *testing.T) {
+	testCases := []struct {
+		name         string
+		containerXML string
+		opfXML       string
+	}{
+		{
+			name: "corrupted container.xml line 1",
+			containerXML: `<}-' 1+5nJ(.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`,
+			opfXML: `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Resilient Title 1</dc:title>
+  </metadata>
+  <manifest><item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine><itemref idref="ch1"/></spine>
+</package>`,
+		},
+		{
+			name: "corrupted content.opf line 1",
+			containerXML: `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`,
+			opfXML: `<}Q \  * \t  YFO.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Resilient Title 2</dc:title>
+  </metadata>
+  <manifest><item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine><itemref idref="ch1"/></spine>
+</package>`,
+		},
+		{
+			name: "corrupted both container.xml and opf with prefixed package tag",
+			containerXML: `<%]? \n!>3 ="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`,
+			opfXML: `<}-' 1+5nJ(.0"?>
+<opf:package xmlns:opf="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Resilient Title 3</dc:title>
+  </metadata>
+  <manifest><item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine><itemref idref="ch1"/></spine>
+</opf:package>`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string][]byte{
+				"META-INF/container.xml": []byte(tc.containerXML),
+				"content.opf":            []byte(tc.opfXML),
+				"ch1.xhtml":              []byte("<html><body>Chapter 1</body></html>"),
+			}
+
+			epubBytes := createTestEPUB(files)
+			tempDir := t.TempDir()
+			epubPath := filepath.Join(tempDir, "resilient.epub")
+			if err := os.WriteFile(epubPath, epubBytes, 0644); err != nil {
+				t.Fatalf("writing test epub: %v", err)
+			}
+
+			reader, err := epub.Open(epubPath)
+			if err != nil {
+				t.Fatalf("expected epub.Open to succeed despite corrupted line 1, got: %v", err)
+			}
+			defer reader.Close()
+
+			book, err := reader.ParseBook()
+			if err != nil {
+				t.Fatalf("expected ParseBook to succeed, got: %v", err)
+			}
+			if !strings.HasPrefix(book.Title, "Resilient Title") {
+				t.Errorf("unexpected book title: %q", book.Title)
+			}
+		})
+	}
+}
+
 func TestExtractChapters_PreservesMarkdownFormatting(t *testing.T) {
 	containerXML := `<?xml version="1.0"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
