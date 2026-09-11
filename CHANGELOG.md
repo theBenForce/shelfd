@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/theBenForce/shelfd/compare/v1.3.0...v1.3.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **mcp:** improve search tool usability, taxonomy filtering, and topics architecture ([#6](https://github.com/theBenForce/shelfd/issues/6)) ([3235aee](https://github.com/theBenForce/shelfd/commit/3235aeec6f5ea74664aee118faa27c095663f20d)), closes [#5](https://github.com/theBenForce/shelfd/issues/5)
+
 # [1.3.0](https://github.com/theBenForce/shelfd/compare/v1.2.2...v1.3.0) (2026-09-10)
 
 
