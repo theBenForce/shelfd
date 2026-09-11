@@ -299,3 +299,21 @@ func (h *TaxonomyHandler) ListSeries(w http.ResponseWriter, r *http.Request) {
 		"series": seriesList,
 	})
 }
+
+func (h *TaxonomyHandler) ListTopics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	topics, err := h.repo.ListTopics(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to list topics: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"topics": topics,
+	})
+}
+

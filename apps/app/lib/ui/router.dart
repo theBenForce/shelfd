@@ -106,6 +106,18 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
             ],
           ),
           GoRoute(
+            path: '/genres',
+            builder: (context, state) => const LibraryView(
+              mode: LibraryViewMode.genres,
+            ),
+          ),
+          GoRoute(
+            path: '/topics',
+            builder: (context, state) => const LibraryView(
+              mode: LibraryViewMode.topics,
+            ),
+          ),
+          GoRoute(
             path: '/search',
             builder: (context, state) => const SearchView(),
           ),

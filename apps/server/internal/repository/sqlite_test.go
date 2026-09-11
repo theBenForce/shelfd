@@ -291,6 +291,20 @@ func TestBookCRUDAndFiltering(t *testing.T) {
 		t.Fatalf("expected 1 book matching 'Androids', got %v", booksBySearch)
 	}
 
+	// Filter by AuthorName
+	authorNameQuery := "dick"
+	booksByAuthorName, err := repo.ListBooks(ctx, repository.BookFilter{AuthorName: &authorNameQuery})
+	if err != nil || len(booksByAuthorName) != 1 || booksByAuthorName[0].ID != book2.ID {
+		t.Fatalf("expected 1 book matching authorName 'dick', got %v (err: %v)", booksByAuthorName, err)
+	}
+
+	// Filter by GenreName
+	genreNameQuery := "cyberpunk"
+	booksByGenreName, err := repo.ListBooks(ctx, repository.BookFilter{GenreName: &genreNameQuery})
+	if err != nil || len(booksByGenreName) != 1 || booksByGenreName[0].ID != book1.ID {
+		t.Fatalf("expected 1 book matching genreName 'cyberpunk', got %v (err: %v)", booksByGenreName, err)
+	}
+
 	// Pagination
 	allBooks, err := repo.ListBooks(ctx, repository.BookFilter{Limit: 1, Offset: 0})
 	if err != nil || len(allBooks) != 1 {
@@ -309,6 +323,19 @@ func TestBookCRUDAndFiltering(t *testing.T) {
 	authorCount, err := repo.CountBooks(ctx, repository.BookFilter{AuthorID: &author2.ID})
 	if err != nil || authorCount != 1 {
 		t.Fatalf("expected 1 book by author2 count, got %d", authorCount)
+	}
+	authorNameCount, err := repo.CountBooks(ctx, repository.BookFilter{AuthorName: &authorNameQuery})
+	if err != nil || authorNameCount != 1 {
+		t.Fatalf("expected 1 book by authorName count, got %d", authorNameCount)
+	}
+
+	// Verify ListGenres returns BookCount
+	genresList, err := repo.ListGenres(ctx)
+	if err != nil || len(genresList) == 0 {
+		t.Fatalf("expected genres from ListGenres, got %v (err: %v)", genresList, err)
+	}
+	if genresList[0].BookCount < 1 {
+		t.Fatalf("expected genre BookCount >= 1, got %d", genresList[0].BookCount)
 	}
 }
 

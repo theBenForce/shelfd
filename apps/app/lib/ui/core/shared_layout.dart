@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../data/models/author.dart';
 import '../../data/models/book.dart';
+import '../../data/models/genre.dart';
 import '../../data/models/series.dart';
+import '../../data/models/topic.dart';
 import '../state/providers.dart';
 import 'responsive.dart';
 import 'tokens.dart';
@@ -482,10 +484,12 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
     final isBooks = p.startsWith('/books') || p == '/library' || p.startsWith('/book/');
     final isSeries = p.startsWith('/series');
     final isAuthors = p.startsWith('/authors') || p.startsWith('/author');
+    final isGenres = p.startsWith('/genres') || p.startsWith('/genre');
+    final isTopics = p.startsWith('/topics') || p.startsWith('/topic');
     final isSearch = p.startsWith('/search') || (widget.currentPath == null && widget.currentIndex == 1);
     final isUploads = p.startsWith('/uploads');
     final isSettings = p.startsWith('/settings') || (widget.currentPath == null && widget.currentIndex == 2);
-    final isLibraryActive = isBooks || isSeries || isAuthors || (widget.currentPath == null && widget.currentIndex == 0);
+    final isLibraryActive = isBooks || isSeries || isAuthors || isGenres || isTopics || (widget.currentPath == null && widget.currentIndex == 0);
     final queueStatus = ref.watch(queueProvider).status;
     final stagedCount = queueStatus?.stagedUploads ?? 0;
 
@@ -590,7 +594,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                       icon: Icons.menu_book_outlined,
                       selectedIcon: Icons.menu_book_rounded,
                       label: 'Books',
-                      isSelected: isBooks || (isLibraryActive && !isSeries && !isAuthors),
+                      isSelected: isBooks || (isLibraryActive && !isSeries && !isAuthors && !isGenres && !isTopics),
                       onTap: () => _navigate('/books', 0),
                     ),
                     _SideNavSubItem(
@@ -606,6 +610,20 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                       label: 'Authors',
                       isSelected: isAuthors,
                       onTap: () => _navigate('/authors', 0),
+                    ),
+                    _SideNavSubItem(
+                      icon: Icons.category_outlined,
+                      selectedIcon: Icons.category_rounded,
+                      label: 'Genres',
+                      isSelected: isGenres,
+                      onTap: () => _navigate('/genres', 0),
+                    ),
+                    _SideNavSubItem(
+                      icon: Icons.label_outline_rounded,
+                      selectedIcon: Icons.label_rounded,
+                      label: 'Topics',
+                      isSelected: isTopics,
+                      onTap: () => _navigate('/topics', 0),
                     ),
                   ],
                   const SizedBox(height: AppTokens.space8),
@@ -1131,6 +1149,10 @@ class ShelfdGridCard extends StatelessWidget {
         return _buildSeriesCard(series);
       case AuthorGridItem(:final author):
         return _buildAuthorCard(author);
+      case GenreGridItem(:final genre):
+        return _buildGenreCard(genre);
+      case TopicGridItem(:final topic):
+        return _buildTopicCard(topic);
     }
   }
 
@@ -1316,6 +1338,92 @@ class ShelfdGridCard extends StatelessWidget {
           const SizedBox(height: AppTokens.space12),
           Text(
             author.name,
+            maxLines: 2,
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: AppTokens.space8),
+          StatusBadge(
+            label: bookCountLabel,
+            backgroundColor: AppTokens.boneContainer,
+            textColor: AppTokens.mutedCopy,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGenreCard(Genre genre) {
+    final bookCountLabel = genre.bookCount == 1 ? '1 Book' : '${genre.bookCount} Books';
+
+    return BentoCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(AppTokens.space16),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppTokens.boneContainer,
+              shape: BoxShape.circle,
+              border: Border.all(color: AppTokens.crispBorder),
+            ),
+            child: const Icon(
+              Icons.category_outlined,
+              size: 28,
+              color: AppTokens.charcoalInk,
+            ),
+          ),
+          const SizedBox(height: AppTokens.space12),
+          Text(
+            genre.name,
+            maxLines: 2,
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: AppTokens.space8),
+          StatusBadge(
+            label: bookCountLabel,
+            backgroundColor: AppTokens.boneContainer,
+            textColor: AppTokens.mutedCopy,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopicCard(Topic topic) {
+    final bookCountLabel = topic.bookCount == 1 ? '1 Book' : '${topic.bookCount} Books';
+
+    return BentoCard(
+      onTap: onTap,
+      padding: const EdgeInsets.all(AppTokens.space16),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppTokens.boneContainer,
+              shape: BoxShape.circle,
+              border: Border.all(color: AppTokens.crispBorder),
+            ),
+            child: const Icon(
+              Icons.label_outline_rounded,
+              size: 28,
+              color: AppTokens.charcoalInk,
+            ),
+          ),
+          const SizedBox(height: AppTokens.space12),
+          Text(
+            topic.name,
             maxLines: 2,
             textAlign: TextAlign.center,
             overflow: TextOverflow.ellipsis,

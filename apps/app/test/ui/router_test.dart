@@ -44,7 +44,11 @@ class MockBookRepo implements BookRepository {
     int page = 1,
     int perPage = 24,
     String? authorId,
+    String? authorName,
     String? genreId,
+    String? genreName,
+    String? topicId,
+    String? topicName,
     String? seriesId,
     String? search,
   }) async {
@@ -165,6 +169,24 @@ void main() {
     testWidgets('renders AppShell around /authors route', (tester) async {
       setViewport(tester);
       await tester.pumpWidget(buildApp('/authors'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AppShell), findsOneWidget);
+      expect(find.byType(LibraryView), findsOneWidget);
+    });
+
+    testWidgets('renders AppShell around /genres route', (tester) async {
+      setViewport(tester);
+      await tester.pumpWidget(buildApp('/genres'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AppShell), findsOneWidget);
+      expect(find.byType(LibraryView), findsOneWidget);
+    });
+
+    testWidgets('renders AppShell around /topics route', (tester) async {
+      setViewport(tester);
+      await tester.pumpWidget(buildApp('/topics'));
       await tester.pumpAndSettle();
 
       expect(find.byType(AppShell), findsOneWidget);

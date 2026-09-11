@@ -6,6 +6,7 @@ import '../models/genre.dart';
 import '../models/highlight.dart';
 import '../models/paginated_books.dart';
 import '../models/series.dart';
+import '../models/topic.dart';
 import '../models/upload_job.dart';
 import '../services/api_service.dart';
 import '../services/storage_service.dart';
@@ -23,7 +24,11 @@ class BookRepository {
     int page = 1,
     int perPage = 24,
     String? authorId,
+    String? authorName,
     String? genreId,
+    String? genreName,
+    String? topicId,
+    String? topicName,
     String? seriesId,
     String? search,
   }) async {
@@ -31,7 +36,11 @@ class BookRepository {
       page: page,
       perPage: perPage,
       authorId: authorId,
+      authorName: authorName,
       genreId: genreId,
+      genreName: genreName,
+      topicId: topicId,
+      topicName: topicName,
       seriesId: seriesId,
       search: search,
     );
@@ -55,7 +64,11 @@ class BookRepository {
     int page = 1,
     int perPage = 24,
     String? authorId,
+    String? authorName,
     String? genreId,
+    String? genreName,
+    String? topicId,
+    String? topicName,
     String? seriesId,
     String? search,
   }) async {
@@ -63,7 +76,11 @@ class BookRepository {
       page: page,
       perPage: perPage,
       authorId: authorId,
+      authorName: authorName,
       genreId: genreId,
+      genreName: genreName,
+      topicId: topicId,
+      topicName: topicName,
       seriesId: seriesId,
       search: search,
     );
@@ -78,6 +95,7 @@ class BookRepository {
 
   Future<List<Author>> getAuthors() => apiService.getAuthors();
   Future<List<Genre>> getGenres() => apiService.getGenres();
+  Future<List<Topic>> getTopics() => apiService.getTopics();
   Future<List<Series>> getSeries() => apiService.getSeries();
   Future<void> triggerScan() => apiService.triggerLibraryScan();
 

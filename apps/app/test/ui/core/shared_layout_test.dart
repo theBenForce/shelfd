@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
+import 'package:shelf/data/models/genre.dart';
 import 'package:shelf/data/models/queue_status.dart';
 import 'package:shelf/data/models/series.dart';
+import 'package:shelf/data/models/topic.dart';
 import 'package:shelf/ui/core/shared_layout.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/core/tokens.dart';
@@ -347,11 +349,13 @@ void main() {
         ),
       );
 
-      // Accordion is open by default: Books, Series, Authors visible
+      // Accordion is open by default: Books, Series, Authors, Genres, Topics visible
       expect(find.text('Library'), findsOneWidget);
       expect(find.text('Books'), findsOneWidget);
       expect(find.text('Series'), findsOneWidget);
       expect(find.text('Authors'), findsOneWidget);
+      expect(find.text('Genres'), findsOneWidget);
+      expect(find.text('Topics'), findsOneWidget);
 
       // Tap Library accordion header to collapse
       await tester.tap(find.text('Library'));
@@ -361,6 +365,8 @@ void main() {
       expect(find.text('Books'), findsNothing);
       expect(find.text('Series'), findsNothing);
       expect(find.text('Authors'), findsNothing);
+      expect(find.text('Genres'), findsNothing);
+      expect(find.text('Topics'), findsNothing);
 
       // Tap Library accordion header again to expand
       await tester.tap(find.text('Library'));
@@ -369,9 +375,11 @@ void main() {
       expect(find.text('Books'), findsOneWidget);
       expect(find.text('Series'), findsOneWidget);
       expect(find.text('Authors'), findsOneWidget);
+      expect(find.text('Genres'), findsOneWidget);
+      expect(find.text('Topics'), findsOneWidget);
     });
 
-    testWidgets('ShelfdGridCard renders BookGridItem, SeriesGridItem, and AuthorGridItem correctly', (tester) async {
+    testWidgets('ShelfdGridCard renders BookGridItem, SeriesGridItem, AuthorGridItem, GenreGridItem, and TopicGridItem correctly', (tester) async {
       final bookItem = BookGridItem(
         const Book(id: 'b1', title: 'Test Book Title', authors: [Author(id: 'a1', name: 'Author One')]),
       );
@@ -381,6 +389,12 @@ void main() {
       final authorItem = AuthorGridItem(
         const Author(id: 'a1', name: 'Rick Riordan', bookCount: 4),
       );
+      final genreItem = GenreGridItem(
+        const Genre(id: 'g1', name: 'Science Fiction', bookCount: 5),
+      );
+      final topicItem = TopicGridItem(
+        const Topic(id: 't1', name: 'Space Exploration', bookCount: 2),
+      );
 
       await tester.pumpWidget(
         MaterialApp(
@@ -388,10 +402,13 @@ void main() {
           home: Scaffold(
             body: GridView.count(
               crossAxisCount: 3,
+              childAspectRatio: 0.85,
               children: [
                 ShelfdGridCard(item: bookItem, onTap: () {}),
                 ShelfdGridCard(item: seriesItem, onTap: () {}),
                 ShelfdGridCard(item: authorItem, onTap: () {}),
+                ShelfdGridCard(item: genreItem, onTap: () {}),
+                ShelfdGridCard(item: topicItem, onTap: () {}),
               ],
             ),
           ),
@@ -406,6 +423,12 @@ void main() {
 
       expect(find.text('Rick Riordan'), findsOneWidget);
       expect(find.text('4 Books'), findsOneWidget);
+
+      expect(find.text('Science Fiction'), findsOneWidget);
+      expect(find.text('5 Books'), findsOneWidget);
+
+      expect(find.text('Space Exploration'), findsOneWidget);
+      expect(find.text('2 Books'), findsOneWidget);
     });
 
     test('LibraryState groupedBookItems groups books by series into single SeriesGridItem', () {

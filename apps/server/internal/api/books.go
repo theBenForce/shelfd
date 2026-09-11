@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -82,6 +83,7 @@ type BookListItem struct {
 	PageProgressionDirection string                         `json:"page_progression_direction"`
 	Authors                  []*repository.Author           `json:"authors"`
 	Genres                   []*repository.Genre            `json:"genres"`
+	Topics                   []*repository.Topic            `json:"topics"`
 	Series                   []*repository.BookSeriesDetail `json:"series"`
 }
 
@@ -97,6 +99,7 @@ type BookDetailResponse struct {
 func BuildBookListItem(ctx context.Context, repo repository.StorageEngine, b *repository.Book) BookListItem {
 	authors, _ := repo.GetBookAuthors(ctx, b.ID)
 	genres, _ := repo.GetBookGenres(ctx, b.ID)
+	topics, _ := repo.GetBookTopics(ctx, b.ID)
 	seriesList, _ := repo.GetBookSeries(ctx, b.ID)
 
 	return BookListItem{
@@ -117,6 +120,7 @@ func BuildBookListItem(ctx context.Context, repo repository.StorageEngine, b *re
 		PageProgressionDirection: b.PageProgressionDirection,
 		Authors:                  authors,
 		Genres:                   genres,
+		Topics:                   topics,
 		Series:                   seriesList,
 	}
 }
@@ -142,6 +146,34 @@ type BookChatResponse struct {
 	Citations []BookCitation `json:"citations"`
 }
 
+var tokenRe = regexp.MustCompile(`(?i)\b(author|genre|topic):\s*(?:"([^"]*)"|(\S+))`)
+var spaceRe = regexp.MustCompile(`\s+`)
+
+func parseBookSearchTokens(input string) (cleanSearch string, author *string, genre *string, topic *string) {
+	matches := tokenRe.FindAllStringSubmatch(input, -1)
+	for _, m := range matches {
+		tag := strings.ToLower(m[1])
+		val := m[2]
+		if val == "" {
+			val = m[3]
+		}
+		val = strings.TrimSpace(val)
+		if val != "" {
+			switch tag {
+			case "author":
+				author = &val
+			case "genre":
+				genre = &val
+			case "topic":
+				topic = &val
+			}
+		}
+	}
+	clean := tokenRe.ReplaceAllString(input, " ")
+	clean = strings.TrimSpace(spaceRe.ReplaceAllString(clean, " "))
+	return clean, author, genre, topic
+}
+
 func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -154,14 +186,44 @@ func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
 	if authorID := strings.TrimSpace(q.Get("author_id")); authorID != "" {
 		filter.AuthorID = &authorID
 	}
+	if author := strings.TrimSpace(q.Get("author")); author != "" {
+		filter.AuthorName = &author
+	} else if authorName := strings.TrimSpace(q.Get("author_name")); authorName != "" {
+		filter.AuthorName = &authorName
+	}
 	if genreID := strings.TrimSpace(q.Get("genre_id")); genreID != "" {
 		filter.GenreID = &genreID
+	}
+	if genre := strings.TrimSpace(q.Get("genre")); genre != "" {
+		filter.GenreName = &genre
+	} else if genreName := strings.TrimSpace(q.Get("genre_name")); genreName != "" {
+		filter.GenreName = &genreName
+	}
+	if topicID := strings.TrimSpace(q.Get("topic_id")); topicID != "" {
+		filter.TopicID = &topicID
+	}
+	if topic := strings.TrimSpace(q.Get("topic")); topic != "" {
+		filter.TopicName = &topic
+	} else if topicName := strings.TrimSpace(q.Get("topic_name")); topicName != "" {
+		filter.TopicName = &topicName
 	}
 	if seriesID := strings.TrimSpace(q.Get("series_id")); seriesID != "" {
 		filter.SeriesID = &seriesID
 	}
-	if search := strings.TrimSpace(q.Get("search")); search != "" {
-		filter.Search = &search
+	if rawSearch := strings.TrimSpace(q.Get("search")); rawSearch != "" {
+		cleanSearch, parsedAuthor, parsedGenre, parsedTopic := parseBookSearchTokens(rawSearch)
+		if cleanSearch != "" {
+			filter.Search = &cleanSearch
+		}
+		if filter.AuthorName == nil && parsedAuthor != nil {
+			filter.AuthorName = parsedAuthor
+		}
+		if filter.GenreName == nil && parsedGenre != nil {
+			filter.GenreName = parsedGenre
+		}
+		if filter.TopicName == nil && parsedTopic != nil {
+			filter.TopicName = parsedTopic
+		}
 	}
 	if sortBy := strings.TrimSpace(q.Get("sort_by")); sortBy != "" {
 		filter.SortBy = sortBy

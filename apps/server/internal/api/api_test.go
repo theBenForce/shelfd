@@ -477,6 +477,41 @@ func TestAPI_Books_CRUDAndBrowsing(t *testing.T) {
 		t.Errorf("expected 1 book for matching search, got %d", len(listResp.Books))
 	}
 
+	// 3b. Search with Author:"Arthur C. Clarke" syntax
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/books?search=Author:%22Arthur%20C.%20Clarke%22", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	var authorSyntaxResp struct {
+		Books []api.BookListItem `json:"books"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &authorSyntaxResp)
+	if len(authorSyntaxResp.Books) != 1 {
+		t.Errorf("expected 1 book for Author:\"Arthur C. Clarke\" syntax search, got %d", len(authorSyntaxResp.Books))
+	}
+
+	// 3c. Search with combined title and Author:"Clarke" syntax
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/books?search=Odyssey%20Author:%22Clarke%22", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	var combinedSyntaxResp struct {
+		Books []api.BookListItem `json:"books"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &combinedSyntaxResp)
+	if len(combinedSyntaxResp.Books) != 1 {
+		t.Errorf("expected 1 book for combined title and author search, got %d", len(combinedSyntaxResp.Books))
+	}
+
+	// 3d. Test GET /api/v1/topics
+	topicReq := httptest.NewRequest(http.MethodGet, "/api/v1/topics", nil)
+	topicReq.Header.Set("Authorization", "Bearer "+token)
+	topicRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(topicRec, topicReq)
+	if topicRec.Code != http.StatusOK {
+		t.Errorf("expected 200 for GET /api/v1/topics, got %d", topicRec.Code)
+	}
+
 	// 4. Get book detail
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/"+book.ID, nil)
 	req.Header.Set("Authorization", "Bearer "+token)

@@ -8,11 +8,14 @@ import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
 import '../upload/upload_drop_target.dart';
+import 'library_filter_bar.dart';
 
 enum LibraryViewMode {
   books,
   series,
   authors,
+  genres,
+  topics,
 }
 
 class LibraryView extends ConsumerStatefulWidget {
@@ -42,7 +45,11 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
             ? 'series'
             : widget.mode == LibraryViewMode.authors
                 ? 'authors'
-                : 'all');
+                : widget.mode == LibraryViewMode.genres
+                    ? 'genres'
+                    : widget.mode == LibraryViewMode.topics
+                        ? 'topics'
+                        : 'all');
     Future.microtask(() {
       ref.read(libraryProvider.notifier).setFilter(initial);
       ref.read(libraryProvider.notifier).loadLibrary();
@@ -57,7 +64,11 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
           ? 'series'
           : widget.mode == LibraryViewMode.authors
               ? 'authors'
-              : (widget.initialFilter ?? 'all');
+              : widget.mode == LibraryViewMode.genres
+                  ? 'genres'
+                  : widget.mode == LibraryViewMode.topics
+                      ? 'topics'
+                      : (widget.initialFilter ?? 'all');
       ref.read(libraryProvider.notifier).setFilter(newFilter);
     } else {
       final current = (widget.initialFilter != null && widget.initialFilter!.isNotEmpty)
@@ -110,21 +121,40 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
 
     final isSeries = widget.mode == LibraryViewMode.series || libraryState.activeFilter == 'series';
     final isAuthors = widget.mode == LibraryViewMode.authors || libraryState.activeFilter == 'authors';
+    final isGenres = widget.mode == LibraryViewMode.genres || libraryState.activeFilter == 'genres';
+    final isTopics = widget.mode == LibraryViewMode.topics || libraryState.activeFilter == 'topics';
 
-    final String pageTitle = isSeries ? 'Series' : (isAuthors ? 'Authors' : 'Books');
+    final String pageTitle = isSeries
+        ? 'Series'
+        : isAuthors
+            ? 'Authors'
+            : isGenres
+                ? 'Genres'
+                : isTopics
+                    ? 'Topics'
+                    : 'Books';
+
     final String badgeLabel = isSeries
         ? '${libraryState.filteredSeries.length} Series'
         : isAuthors
             ? '${libraryState.filteredAuthors.length} Authors'
-            : (libraryState.totalBooks > 0
-                ? '${libraryState.totalBooks} Books'
-                : '${libraryState.books.length} Books');
+            : isGenres
+                ? '${libraryState.filteredGenres.length} Genres'
+                : isTopics
+                    ? '${libraryState.filteredTopics.length} Topics'
+                    : (libraryState.searchQuery.trim().isNotEmpty
+                        ? '${libraryState.filteredBooks.length} Books found'
+                        : (libraryState.totalBooks > 0
+                            ? '${libraryState.totalBooks} Books'
+                            : '${libraryState.books.length} Books'));
 
     final filterItems = const [
       FilterPillItem(id: 'all', label: 'All Books'),
       FilterPillItem(id: 'unread', label: 'Unread'),
       FilterPillItem(id: 'series', label: 'Series'),
       FilterPillItem(id: 'authors', label: 'Authors'),
+      FilterPillItem(id: 'genres', label: 'Genres'),
+      FilterPillItem(id: 'topics', label: 'Topics'),
     ];
 
     Future<void> handleScan() async {
@@ -136,6 +166,8 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
 
     if (!isSeries &&
         !isAuthors &&
+        !isGenres &&
+        !isTopics &&
         libraryState.activeFilter != 'all' &&
         libraryState.filteredBooks.length < 8 &&
         libraryState.hasMore &&
@@ -168,7 +200,13 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
       ],
     );
 
-    final selectedFilterId = isSeries ? 'series' : (isAuthors ? 'authors' : libraryState.activeFilter);
+    final selectedFilterId = isSeries
+        ? 'series'
+        : (isAuthors
+            ? 'authors'
+            : (isGenres
+                ? 'genres'
+                : (isTopics ? 'topics' : libraryState.activeFilter)));
 
     final bodyContent = SafeArea(
       child: Column(
@@ -229,6 +267,22 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
               ),
             ),
 
+          // Interactive Filter / Search Bar
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  horizontalPad,
+                  isDesktop ? AppTokens.space8 : AppTokens.space12,
+                  horizontalPad,
+                  AppTokens.space4,
+                ),
+                child: const LibraryFilterBar(),
+              ),
+            ),
+          ),
+
           // Filter Pills Row (DRY shared component)
           Center(
             child: ConstrainedBox(
@@ -243,6 +297,10 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                       context.go('/series');
                     } else if (filterId == 'authors') {
                       context.go('/authors');
+                    } else if (filterId == 'genres') {
+                      context.go('/genres');
+                    } else if (filterId == 'topics') {
+                      context.go('/topics');
                     } else {
                       ref.read(libraryProvider.notifier).setFilter(filterId);
                       if (filterId == 'all') {
@@ -328,7 +386,15 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
       child: ShelfdAdaptiveScaffold(
         currentIndex: currentNavIndex,
         onNavTap: _onNavTapped,
-        currentPath: isSeries ? '/series' : isAuthors ? '/authors' : '/books',
+        currentPath: isSeries
+            ? '/series'
+            : isAuthors
+                ? '/authors'
+                : isGenres
+                    ? '/genres'
+                    : isTopics
+                        ? '/topics'
+                        : '/books',
         onNavigate: (path) => context.go(path),
         onRescan: handleScan,
         onUpload: () => pickAndUploadEpub(context, ref),
@@ -341,11 +407,17 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
   Widget _buildBodyContent(BuildContext context, LibraryState libraryState, double horizontalPad) {
     final isSeries = widget.mode == LibraryViewMode.series || libraryState.activeFilter == 'series';
     final isAuthors = widget.mode == LibraryViewMode.authors || libraryState.activeFilter == 'authors';
+    final isGenres = widget.mode == LibraryViewMode.genres || libraryState.activeFilter == 'genres';
+    final isTopics = widget.mode == LibraryViewMode.topics || libraryState.activeFilter == 'topics';
 
     if (isSeries) {
       return _buildSeriesContent(context, libraryState, horizontalPad);
     } else if (isAuthors) {
       return _buildAuthorsContent(context, libraryState, horizontalPad);
+    } else if (isGenres) {
+      return _buildGenresContent(context, libraryState, horizontalPad);
+    } else if (isTopics) {
+      return _buildTopicsContent(context, libraryState, horizontalPad);
     } else {
       return _buildBooksContent(context, libraryState, horizontalPad);
     }
@@ -471,9 +543,184 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
     );
   }
 
+  Widget _buildGenresContent(BuildContext context, LibraryState state, double horizontalPad) {
+    final genreItems = state.genreGridItems;
+    if (genreItems.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppTokens.space32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.category_outlined,
+                size: 48,
+                color: AppTokens.mutedCopy,
+              ),
+              const SizedBox(height: AppTokens.space16),
+              Text(
+                'No genres found',
+                style: AppTypography.titleSerif(fontSize: 20),
+              ),
+              const SizedBox(height: AppTokens.space8),
+              Text(
+                'Books in your library with genre tags will appear here.',
+                textAlign: TextAlign.center,
+                style: AppTypography.bodySans(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
+        child: GridView.builder(
+          padding: EdgeInsets.symmetric(
+            horizontal: horizontalPad,
+            vertical: AppTokens.space16,
+          ),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 220.0,
+            childAspectRatio: 0.85,
+            crossAxisSpacing: AppTokens.space16,
+            mainAxisSpacing: AppTokens.space16,
+          ),
+          itemCount: genreItems.length,
+          itemBuilder: (context, index) {
+            final item = genreItems[index];
+            return ShelfdGridCard(
+              item: item,
+              onTap: () {
+                ref.read(libraryProvider.notifier).setSearchQuery('genre:"${item.displayName}"');
+                context.go('/books');
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopicsContent(BuildContext context, LibraryState state, double horizontalPad) {
+    final topicItems = state.topicGridItems;
+    if (topicItems.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppTokens.space32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.label_outline_rounded,
+                size: 48,
+                color: AppTokens.mutedCopy,
+              ),
+              const SizedBox(height: AppTokens.space16),
+              Text(
+                'No topics found',
+                style: AppTypography.titleSerif(fontSize: 20),
+              ),
+              const SizedBox(height: AppTokens.space8),
+              Text(
+                'Books in your library with topic tags will appear here.',
+                textAlign: TextAlign.center,
+                style: AppTypography.bodySans(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
+        child: GridView.builder(
+          padding: EdgeInsets.symmetric(
+            horizontal: horizontalPad,
+            vertical: AppTokens.space16,
+          ),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 220.0,
+            childAspectRatio: 0.85,
+            crossAxisSpacing: AppTokens.space16,
+            mainAxisSpacing: AppTokens.space16,
+          ),
+          itemCount: topicItems.length,
+          itemBuilder: (context, index) {
+            final item = topicItems[index];
+            return ShelfdGridCard(
+              item: item,
+              onTap: () {
+                ref.read(libraryProvider.notifier).setSearchQuery('topic:"${item.displayName}"');
+                context.go('/books');
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _buildBooksContent(BuildContext context, LibraryState state, double horizontalPad) {
     final items = state.groupedBookItems;
     if (items.isEmpty) {
+      final isFiltered = state.searchQuery.trim().isNotEmpty || state.activeFilter != 'all';
+      if (isFiltered) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(AppTokens.space32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.search_off_rounded,
+                  size: 48,
+                  color: AppTokens.mutedCopy,
+                ),
+                const SizedBox(height: AppTokens.space16),
+                Text(
+                  'No matching books',
+                  style: AppTypography.titleSerif(fontSize: 20),
+                ),
+                const SizedBox(height: AppTokens.space8),
+                Text(
+                  'Try searching for different terms or clear your search filter.',
+                  textAlign: TextAlign.center,
+                  style: AppTypography.bodySans(fontSize: 14),
+                ),
+                const SizedBox(height: AppTokens.space16),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTokens.charcoalInk,
+                    side: const BorderSide(color: AppTokens.crispBorder),
+                    backgroundColor: AppTokens.boneSurface,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppTokens.space16,
+                      vertical: AppTokens.space12,
+                    ),
+                  ),
+                  onPressed: () {
+                    ref.read(libraryProvider.notifier).setSearchQuery('');
+                  },
+                  icon: const Icon(Icons.clear_all_rounded, size: 18),
+                  label: const Text(
+                    'Clear search',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(AppTokens.space32),
@@ -554,6 +801,12 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                           context.go('/series/${series.id}');
                         case AuthorGridItem(:final author):
                           context.go('/authors/${author.id}');
+                        case GenreGridItem(:final genre):
+                          ref.read(libraryProvider.notifier).setSearchQuery('genre:"${genre.name}"');
+                          context.go('/books');
+                        case TopicGridItem(:final topic):
+                          ref.read(libraryProvider.notifier).setSearchQuery('topic:"${topic.name}"');
+                          context.go('/books');
                       }
                     },
                   );
