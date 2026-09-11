@@ -264,5 +264,52 @@ void main() {
 
       await expectLater(bookRepo.deleteUploadJob('job-repo-1'), completes);
     });
+
+    test('BookRepository getStagedUploadJobs delegates to ApiService', () async {
+      final mockClient = MockClient((request) async {
+        if (request.method == 'GET' &&
+            request.url.path == '/api/v1/books/upload/jobs' &&
+            request.url.queryParameters['status'] == 'staged') {
+          return http.Response(
+            jsonEncode({
+              'jobs': [
+                {
+                  'job_id': 'job-staged-42',
+                  'status': 'staged',
+                  'filename': 'neuromancer.epub',
+                  'has_cover': true,
+                  'metadata': {
+                    'title': 'Neuromancer',
+                    'authors': ['William Gibson'],
+                  },
+                }
+              ],
+              'total': 1,
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+      final jobs = await bookRepo.getStagedUploadJobs();
+      expect(jobs.length, 1);
+      expect(jobs.first.jobId, 'job-staged-42');
+      expect(jobs.first.filename, 'neuromancer.epub');
+      expect(jobs.first.metadata.title, 'Neuromancer');
+      expect(jobs.first.metadata.primaryAuthor, 'William Gibson');
+    });
+
+    test('StorageService persists auto-commit upload preference', () async {
+      expect(storageService.getAutoCommitUploads(), isFalse);
+      await storageService.saveAutoCommitUploads(true);
+      expect(storageService.getAutoCommitUploads(), isTrue);
+      await storageService.saveAutoCommitUploads(false);
+      expect(storageService.getAutoCommitUploads(), isFalse);
+    });
   });
 }

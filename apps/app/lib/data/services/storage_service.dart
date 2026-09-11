@@ -13,6 +13,7 @@ class StorageService {
   static const _keyFontSize = 'shelfd_font_size';
   static const _keyLineHeight = 'shelfd_line_height';
   static const _keyFontFamily = 'shelfd_font_family';
+  static const _keyAutoCommitUploads = 'shelfd_auto_commit_uploads';
   static const _prefixProgress = 'shelfd_progress_';
   static const _prefixChapter = 'shelfd_chapter_';
   static const _prefixHighlights = 'shelfd_highlights_';
@@ -51,6 +52,10 @@ class StorageService {
 
   String getFontFamily() => _prefs.getString(_keyFontFamily) ?? 'serif';
   Future<void> saveFontFamily(String family) => _prefs.setString(_keyFontFamily, family);
+
+  // Upload preferences
+  bool getAutoCommitUploads() => _prefs.getBool(_keyAutoCommitUploads) ?? false;
+  Future<void> saveAutoCommitUploads(bool enabled) => _prefs.setBool(_keyAutoCommitUploads, enabled);
 
   // Reading progress
   double getReadingProgress(String bookId) {

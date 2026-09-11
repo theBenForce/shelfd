@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class StagedMetadata {
   final String title;
   final List<String> authors;
@@ -119,20 +121,43 @@ class StagedUploadJob {
 
   factory StagedUploadJob.fromJson(Map<String, dynamic> json) {
     final rawWarnings = json['warnings'] as List<dynamic>? ?? [];
-    final metaJson = (json['metadata'] as Map<String, dynamic>?) ?? {};
+
+    Map<String, dynamic> metaJson = {};
+    if (json['metadata'] is Map<String, dynamic>) {
+      metaJson = json['metadata'] as Map<String, dynamic>;
+    } else if (json['metadata'] is String && (json['metadata'] as String).isNotEmpty) {
+      try {
+        final decoded = jsonDecode(json['metadata'] as String);
+        if (decoded is Map<String, dynamic>) {
+          metaJson = decoded;
+        }
+      } catch (_) {}
+    }
 
     DateTime? created;
     if (json['created_at'] != null) {
       created = DateTime.tryParse(json['created_at'].toString());
     }
 
+    final metadata = StagedMetadata.fromJson(metaJson);
+    final warnings = rawWarnings.map((w) => w.toString()).toList();
+    if (warnings.isEmpty) {
+      if (metadata.authors.isEmpty ||
+          (metadata.authors.length == 1 && metadata.authors[0].toLowerCase() == 'unknown')) {
+        warnings.add('No author found in EPUB metadata');
+      }
+      if (metadata.title == 'Untitled' || metadata.title.isEmpty) {
+        warnings.add('No title found in EPUB metadata');
+      }
+    }
+
     return StagedUploadJob(
       jobId: json['job_id'] as String? ?? json['id'] as String? ?? '',
       status: json['status'] as String? ?? 'staged',
       filename: json['filename'] as String? ?? '',
-      metadata: StagedMetadata.fromJson(metaJson),
+      metadata: metadata,
       hasCover: json['has_cover'] as bool? ?? false,
-      warnings: rawWarnings.map((w) => w.toString()).toList(),
+      warnings: warnings,
       createdAt: created,
     );
   }
