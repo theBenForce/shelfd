@@ -17,6 +17,7 @@ import '../../data/repositories/reader_repository.dart';
 import '../../data/services/api_service.dart';
 import '../../data/services/storage_service.dart';
 import '../core/theme.dart';
+export 'upload_provider.dart';
 
 /// Resolves the default server URL based on the runtime platform and environment.
 /// In local web dev (e.g. localhost:3000), defaults to http://localhost:8080.
@@ -758,9 +759,13 @@ class QueueNotifier extends Notifier<QueueState> {
     final apiService = ref.read(apiServiceProvider);
     try {
       final status = await apiService.getQueueStatus();
-      state = QueueState(status: status, isLoading: false);
+      if (!_isDisposed) {
+        state = QueueState(status: status, isLoading: false);
+      }
     } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
+      if (!_isDisposed) {
+        state = state.copyWith(isLoading: false, error: e.toString());
+      }
     }
   }
 }

@@ -18,6 +18,7 @@ import 'package:shelf/ui/features/reader/reader_view.dart';
 import 'package:shelf/ui/features/search/search_view.dart';
 import 'package:shelf/ui/features/series/series_detail_view.dart';
 import 'package:shelf/ui/features/settings/settings_view.dart';
+import 'package:shelf/ui/features/upload/uploads_view.dart';
 import 'package:shelf/ui/router.dart';
 import 'package:shelf/ui/state/providers.dart';
 
@@ -195,6 +196,15 @@ void main() {
 
       expect(find.byType(AppShell), findsOneWidget);
       expect(find.byType(SettingsView), findsOneWidget);
+    });
+
+    testWidgets('renders AppShell around /uploads route', (tester) async {
+      setViewport(tester);
+      await tester.pumpWidget(buildApp('/uploads'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AppShell), findsOneWidget);
+      expect(find.byType(UploadsView), findsOneWidget);
     });
 
     testWidgets('renders SeriesDetailView on /series/:seriesId subroute with AppShell', (tester) async {

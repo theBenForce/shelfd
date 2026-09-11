@@ -1,103 +1,15 @@
 import 'package:desktop_drop/desktop_drop.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
-import 'upload_review_dialog.dart';
+import 'directory_scanner.dart';
 
-/// Helper to trigger the native file picker for an EPUB file and launch the review flow.
+/// Helper to navigate to the dedicated Uploads & Ingestion page.
 Future<void> pickAndUploadEpub(BuildContext context, WidgetRef ref) async {
-  try {
-    final picked = await FilePicker.pickFile(
-      type: FileType.custom,
-      allowedExtensions: ['epub'],
-    );
-
-    if (picked == null) {
-      return;
-    }
-
-    final bytes = await picked.readAsBytes();
-    if (bytes.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not read selected EPUB file')),
-        );
-      }
-      return;
-    }
-
-    if (!context.mounted) return;
-    await _handleEpubUpload(context, ref, filename: picked.name, bytes: bytes);
-  } catch (e) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to pick file: $e')),
-      );
-    }
-  }
-}
-
-Future<void> _handleEpubUpload(
-  BuildContext context,
-  WidgetRef ref, {
-  required String filename,
-  required List<int> bytes,
-}) async {
-  if (!filename.toLowerCase().endsWith('.epub')) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Please select a valid .epub file')),
-    );
-    return;
-  }
-
-  final messenger = ScaffoldMessenger.of(context);
-  messenger.showSnackBar(
-    SnackBar(
-      content: Row(
-        children: [
-          const SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-          ),
-          const SizedBox(width: AppTokens.space12),
-          Text('Staging $filename for review...'),
-        ],
-      ),
-      duration: const Duration(seconds: 4),
-    ),
-  );
-
-  try {
-    final bookRepo = ref.read(bookRepositoryProvider);
-    final stagedJob = await bookRepo.stageUpload(filename: filename, bytes: bytes);
-
-    if (!context.mounted) return;
-    messenger.hideCurrentSnackBar();
-
-    final book = await showUploadReviewModal(context, stagedJob);
-    if (book != null && context.mounted) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Added "${book.title}" to library'),
-          backgroundColor: AppTokens.charcoalInk,
-        ),
-      );
-    }
-  } catch (e) {
-    if (context.mounted) {
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Failed to stage EPUB: $e'),
-          backgroundColor: const Color(0xFFC92A2A),
-        ),
-      );
-    }
-  }
+  context.go('/uploads');
 }
 
 /// A wrapper widget that listens for drag-and-dropped EPUB files and displays
@@ -123,12 +35,49 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
         setState(() => _isDragging = false);
         if (details.files.isEmpty) return;
 
-        final item = details.files.first;
-        final filename = item.name;
-        final bytes = await item.readAsBytes();
+        final pickedList = <PickedEpubFile>[];
+
+        for (final item in details.files) {
+          final path = item.path;
+          if (path.isNotEmpty && isDirectoryPath(path)) {
+            final nestedEpubs = await scanPathForEpubs(path);
+            pickedList.addAll(nestedEpubs);
+          } else if (item.name.toLowerCase().endsWith('.epub')) {
+            pickedList.add(PickedEpubFile(
+              name: item.name,
+              path: item.path.isNotEmpty ? item.path : null,
+              readBytes: () => item.readAsBytes(),
+            ));
+          }
+        }
+
+        if (pickedList.isEmpty) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('No valid .epub files detected in dropped items')),
+            );
+          }
+          return;
+        }
 
         if (context.mounted) {
-          await _handleEpubUpload(context, ref, filename: filename, bytes: bytes);
+          final count = await ref.read(uploadProvider.notifier).uploadEpubFiles(pickedList);
+          if (context.mounted) {
+            final currentPath = GoRouterState.of(context).uri.path;
+            if (currentPath != '/uploads') {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Staged $count book(s) for review'),
+                  backgroundColor: AppTokens.charcoalInk,
+                  action: SnackBarAction(
+                    label: 'View in Uploads',
+                    textColor: const Color(0xFFFFD43B),
+                    onPressed: () => context.go('/uploads'),
+                  ),
+                ),
+              );
+            }
+          }
         }
       },
       child: Stack(

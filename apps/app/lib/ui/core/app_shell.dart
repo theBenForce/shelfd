@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../features/upload/upload_drop_target.dart';
 import '../state/providers.dart';
 import 'shared_layout.dart';
 
@@ -22,6 +21,9 @@ class AppShell extends ConsumerWidget {
     if (location.startsWith('/search')) {
       return 3;
     }
+    if (location.startsWith('/uploads')) {
+      return 5;
+    }
     if (location.startsWith('/settings')) {
       return 4;
     }
@@ -39,6 +41,8 @@ class AppShell extends ConsumerWidget {
       context.go('/search');
     } else if (index == 4) {
       context.go('/settings');
+    } else if (index == 5) {
+      context.go('/uploads');
     }
   }
 
@@ -61,7 +65,7 @@ class AppShell extends ConsumerWidget {
       currentPath: currentPath,
       onNavigate: (path) => context.go(path),
       onRescan: handleScan,
-      onUpload: () => pickAndUploadEpub(context, ref),
+      onUpload: () => context.go('/uploads'),
       isRescanning: queueState.isLoading,
       body: child,
     );

@@ -162,6 +162,26 @@ class StagedUploadJob {
     );
   }
 
+  StagedUploadJob copyWith({
+    String? jobId,
+    String? status,
+    String? filename,
+    StagedMetadata? metadata,
+    bool? hasCover,
+    List<String>? warnings,
+    DateTime? createdAt,
+  }) {
+    return StagedUploadJob(
+      jobId: jobId ?? this.jobId,
+      status: status ?? this.status,
+      filename: filename ?? this.filename,
+      metadata: metadata ?? this.metadata,
+      hasCover: hasCover ?? this.hasCover,
+      warnings: warnings ?? this.warnings,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'job_id': jobId,
