@@ -24,7 +24,11 @@ class _MockAuthorBookRepository implements BookRepository {
     int page = 1,
     int perPage = 24,
     String? authorId,
+    String? authorName,
     String? genreId,
+    String? genreName,
+    String? topicId,
+    String? topicName,
     String? seriesId,
     String? search,
   }) async {

@@ -92,6 +92,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/authors", auth(http.HandlerFunc(taxHandler.ListAuthors)))
 	mux.Handle("POST /api/v1/authors/{id}/photo", auth(http.HandlerFunc(taxHandler.UploadAuthorPhoto)))
 	mux.Handle("GET /api/v1/genres", auth(http.HandlerFunc(taxHandler.ListGenres)))
+	mux.Handle("GET /api/v1/topics", auth(http.HandlerFunc(taxHandler.ListTopics)))
 	mux.Handle("GET /api/v1/series", auth(http.HandlerFunc(taxHandler.ListSeries)))
 
 	mux.Handle("GET /api/v1/queue/status", auth(http.HandlerFunc(queueHandler.GetStatus)))

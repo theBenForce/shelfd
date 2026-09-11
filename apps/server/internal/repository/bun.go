@@ -116,11 +116,23 @@ func (r *BunStorageEngine) applyBookFilter(q *bun.SelectQuery, filter BookFilter
 	if filter.AuthorID != nil {
 		q = q.Where("id IN (SELECT book_id FROM book_authors WHERE author_id = ?)", *filter.AuthorID)
 	}
+	if filter.AuthorName != nil && strings.TrimSpace(*filter.AuthorName) != "" {
+		term := "%" + strings.ToLower(strings.TrimSpace(*filter.AuthorName)) + "%"
+		q = q.Where("id IN (SELECT ba.book_id FROM book_authors ba JOIN authors a ON a.id = ba.author_id WHERE LOWER(a.name) LIKE ?)", term)
+	}
 	if filter.GenreID != nil {
 		q = q.Where("id IN (SELECT book_id FROM book_genres WHERE genre_id = ?)", *filter.GenreID)
 	}
+	if filter.GenreName != nil && strings.TrimSpace(*filter.GenreName) != "" {
+		term := "%" + strings.ToLower(strings.TrimSpace(*filter.GenreName)) + "%"
+		q = q.Where("id IN (SELECT bg.book_id FROM book_genres bg JOIN genres g ON g.id = bg.genre_id WHERE LOWER(g.name) LIKE ?)", term)
+	}
 	if filter.TopicID != nil {
 		q = q.Where("id IN (SELECT book_id FROM book_topics WHERE topic_id = ?)", *filter.TopicID)
+	}
+	if filter.TopicName != nil && strings.TrimSpace(*filter.TopicName) != "" {
+		term := "%" + strings.ToLower(strings.TrimSpace(*filter.TopicName)) + "%"
+		q = q.Where("id IN (SELECT bt.book_id FROM book_topics bt JOIN topics t ON t.id = bt.topic_id WHERE LOWER(t.name) LIKE ?)", term)
 	}
 	if filter.SeriesID != nil {
 		q = q.Where("id IN (SELECT book_id FROM book_series WHERE series_id = ?)", *filter.SeriesID)
@@ -326,7 +338,14 @@ func (r *BunStorageEngine) GetGenreByName(ctx context.Context, name string) (*Ge
 
 func (r *BunStorageEngine) ListGenres(ctx context.Context) ([]*Genre, error) {
 	var genres []*Genre
-	err := r.db.NewSelect().Model(&genres).Order("name ASC").Scan(ctx)
+	err := r.db.NewSelect().
+		TableExpr("genres AS g").
+		ColumnExpr("g.id, g.name, g.created_at").
+		ColumnExpr("COUNT(bg.book_id) AS book_count").
+		Join("LEFT JOIN book_genres AS bg ON bg.genre_id = g.id").
+		GroupExpr("g.id, g.name, g.created_at").
+		OrderExpr("g.name ASC").
+		Scan(ctx, &genres)
 	if err != nil {
 		return nil, fmt.Errorf("listing genres: %w", err)
 	}
@@ -403,7 +422,14 @@ func (r *BunStorageEngine) GetTopicByName(ctx context.Context, name string) (*To
 
 func (r *BunStorageEngine) ListTopics(ctx context.Context) ([]*Topic, error) {
 	var topics []*Topic
-	err := r.db.NewSelect().Model(&topics).Order("name ASC").Scan(ctx)
+	err := r.db.NewSelect().
+		TableExpr("topics AS t").
+		ColumnExpr("t.id, t.name, t.created_at").
+		ColumnExpr("COUNT(bt.book_id) AS book_count").
+		Join("LEFT JOIN book_topics AS bt ON bt.topic_id = t.id").
+		GroupExpr("t.id, t.name, t.created_at").
+		OrderExpr("t.name ASC").
+		Scan(ctx, &topics)
 	if err != nil {
 		return nil, fmt.Errorf("listing topics: %w", err)
 	}

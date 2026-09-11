@@ -11,6 +11,7 @@ import '../models/highlight.dart';
 import '../models/queue_status.dart';
 import '../models/search_result.dart';
 import '../models/series.dart';
+import '../models/topic.dart';
 import '../models/paginated_books.dart';
 import '../models/upload_job.dart';
 import '../models/user.dart';
@@ -148,7 +149,11 @@ class ApiService {
     int page = 1,
     int perPage = 24,
     String? authorId,
+    String? authorName,
     String? genreId,
+    String? genreName,
+    String? topicId,
+    String? topicName,
     String? seriesId,
     String? search,
   }) async {
@@ -158,7 +163,11 @@ class ApiService {
       'limit': perPage,
       'offset': (page - 1) * perPage,
       if (authorId != null && authorId.isNotEmpty) 'author_id': authorId,
+      if (authorName != null && authorName.isNotEmpty) 'author': authorName,
       if (genreId != null && genreId.isNotEmpty) 'genre_id': genreId,
+      if (genreName != null && genreName.isNotEmpty) 'genre': genreName,
+      if (topicId != null && topicId.isNotEmpty) 'topic_id': topicId,
+      if (topicName != null && topicName.isNotEmpty) 'topic': topicName,
       if (seriesId != null && seriesId.isNotEmpty) 'series_id': seriesId,
       if (search != null && search.isNotEmpty) 'search': search,
     };
@@ -201,7 +210,11 @@ class ApiService {
     int page = 1,
     int perPage = 24,
     String? authorId,
+    String? authorName,
     String? genreId,
+    String? genreName,
+    String? topicId,
+    String? topicName,
     String? seriesId,
     String? search,
   }) async {
@@ -209,7 +222,11 @@ class ApiService {
       page: page,
       perPage: perPage,
       authorId: authorId,
+      authorName: authorName,
       genreId: genreId,
+      genreName: genreName,
+      topicId: topicId,
+      topicName: topicName,
       seriesId: seriesId,
       search: search,
     );
@@ -285,6 +302,24 @@ class ApiService {
     return data
         .whereType<Map<String, dynamic>>()
         .map((g) => Genre.fromJson(g))
+        .toList();
+  }
+
+  Future<List<Topic>> getTopics() async {
+    final response = await client.get(_uri('/api/v1/topics'), headers: _headers());
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final body = jsonDecode(response.body);
+    List<dynamic> data = [];
+    if (body is Map<String, dynamic>) {
+      data = (body['topics'] ?? body['data']) as List<dynamic>? ?? [];
+    } else if (body is List<dynamic>) {
+      data = body;
+    }
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map((t) => Topic.fromJson(t))
         .toList();
   }
 

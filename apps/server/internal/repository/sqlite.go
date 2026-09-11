@@ -187,13 +187,25 @@ func (r *SQLiteStorageEngine) ListBooks(ctx context.Context, filter BookFilter) 
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?)")
 		args = append(args, *filter.AuthorID)
 	}
+	if filter.AuthorName != nil && strings.TrimSpace(*filter.AuthorName) != "" {
+		conditions = append(conditions, "b.id IN (SELECT ba.book_id FROM book_authors ba JOIN authors a ON a.id = ba.author_id WHERE LOWER(a.name) LIKE ?)")
+		args = append(args, "%"+strings.ToLower(strings.TrimSpace(*filter.AuthorName))+"%")
+	}
 	if filter.GenreID != nil {
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?)")
 		args = append(args, *filter.GenreID)
 	}
+	if filter.GenreName != nil && strings.TrimSpace(*filter.GenreName) != "" {
+		conditions = append(conditions, "b.id IN (SELECT bg.book_id FROM book_genres bg JOIN genres g ON g.id = bg.genre_id WHERE LOWER(g.name) LIKE ?)")
+		args = append(args, "%"+strings.ToLower(strings.TrimSpace(*filter.GenreName))+"%")
+	}
 	if filter.TopicID != nil {
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?)")
 		args = append(args, *filter.TopicID)
+	}
+	if filter.TopicName != nil && strings.TrimSpace(*filter.TopicName) != "" {
+		conditions = append(conditions, "b.id IN (SELECT bt.book_id FROM book_topics bt JOIN topics t ON t.id = bt.topic_id WHERE LOWER(t.name) LIKE ?)")
+		args = append(args, "%"+strings.ToLower(strings.TrimSpace(*filter.TopicName))+"%")
 	}
 	if filter.Search != nil && strings.TrimSpace(*filter.Search) != "" {
 		conditions = append(conditions, "(LOWER(b.title) LIKE ? OR LOWER(b.description) LIKE ?)")
@@ -402,7 +414,14 @@ func (r *SQLiteStorageEngine) GetGenreByName(ctx context.Context, name string) (
 }
 
 func (r *SQLiteStorageEngine) ListGenres(ctx context.Context) ([]*Genre, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT id, name, created_at FROM genres ORDER BY name COLLATE NOCASE ASC")
+	query := `
+		SELECT g.id, g.name, g.created_at, COUNT(bg.book_id) AS book_count
+		FROM genres g
+		LEFT JOIN book_genres bg ON bg.genre_id = g.id
+		GROUP BY g.id, g.name, g.created_at
+		ORDER BY g.name COLLATE NOCASE ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("listing genres: %w", err)
 	}
@@ -411,7 +430,7 @@ func (r *SQLiteStorageEngine) ListGenres(ctx context.Context) ([]*Genre, error) 
 	var genres []*Genre
 	for rows.Next() {
 		g := &Genre{}
-		if err := rows.Scan(&g.ID, &g.Name, &g.CreatedAt); err != nil {
+		if err := rows.Scan(&g.ID, &g.Name, &g.CreatedAt, &g.BookCount); err != nil {
 			return nil, fmt.Errorf("scanning genre: %w", err)
 		}
 		genres = append(genres, g)
@@ -473,7 +492,14 @@ func (r *SQLiteStorageEngine) GetTopicByName(ctx context.Context, name string) (
 }
 
 func (r *SQLiteStorageEngine) ListTopics(ctx context.Context) ([]*Topic, error) {
-	rows, err := r.db.QueryContext(ctx, "SELECT id, name, created_at FROM topics ORDER BY name COLLATE NOCASE ASC")
+	query := `
+		SELECT t.id, t.name, t.created_at, COUNT(bt.book_id) AS book_count
+		FROM topics t
+		LEFT JOIN book_topics bt ON bt.topic_id = t.id
+		GROUP BY t.id, t.name, t.created_at
+		ORDER BY t.name COLLATE NOCASE ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("listing topics: %w", err)
 	}
@@ -482,7 +508,7 @@ func (r *SQLiteStorageEngine) ListTopics(ctx context.Context) ([]*Topic, error) 
 	var topics []*Topic
 	for rows.Next() {
 		t := &Topic{}
-		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt, &t.BookCount); err != nil {
 			return nil, fmt.Errorf("scanning topic: %w", err)
 		}
 		topics = append(topics, t)
@@ -1078,21 +1104,34 @@ func (r *SQLiteStorageEngine) CountBooks(ctx context.Context, filter BookFilter)
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?)")
 		args = append(args, *filter.AuthorID)
 	}
+	if filter.AuthorName != nil && strings.TrimSpace(*filter.AuthorName) != "" {
+		conditions = append(conditions, "b.id IN (SELECT ba.book_id FROM book_authors ba JOIN authors a ON a.id = ba.author_id WHERE LOWER(a.name) LIKE ?)")
+		args = append(args, "%"+strings.ToLower(strings.TrimSpace(*filter.AuthorName))+"%")
+	}
 	if filter.GenreID != nil {
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?)")
 		args = append(args, *filter.GenreID)
 	}
+	if filter.GenreName != nil && strings.TrimSpace(*filter.GenreName) != "" {
+		conditions = append(conditions, "b.id IN (SELECT bg.book_id FROM book_genres bg JOIN genres g ON g.id = bg.genre_id WHERE LOWER(g.name) LIKE ?)")
+		args = append(args, "%"+strings.ToLower(strings.TrimSpace(*filter.GenreName))+"%")
+	}
 	if filter.TopicID != nil {
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?)")
 		args = append(args, *filter.TopicID)
+	}
+	if filter.TopicName != nil && strings.TrimSpace(*filter.TopicName) != "" {
+		conditions = append(conditions, "b.id IN (SELECT bt.book_id FROM book_topics bt JOIN topics t ON t.id = bt.topic_id WHERE LOWER(t.name) LIKE ?)")
+		args = append(args, "%"+strings.ToLower(strings.TrimSpace(*filter.TopicName))+"%")
 	}
 	if filter.SeriesID != nil {
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_series WHERE series_id = ?)")
 		args = append(args, *filter.SeriesID)
 	}
 	if filter.Search != nil && strings.TrimSpace(*filter.Search) != "" {
-		conditions = append(conditions, "b.title LIKE ?")
-		args = append(args, "%"+strings.TrimSpace(*filter.Search)+"%")
+		conditions = append(conditions, "(LOWER(b.title) LIKE ? OR LOWER(b.description) LIKE ?)")
+		term := "%" + strings.ToLower(strings.TrimSpace(*filter.Search)) + "%"
+		args = append(args, term, term)
 	}
 
 	query := "SELECT COUNT(*) FROM books b"

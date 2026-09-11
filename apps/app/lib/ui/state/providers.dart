@@ -10,6 +10,7 @@ import '../../data/models/highlight.dart';
 import '../../data/models/queue_status.dart';
 import '../../data/models/search_result.dart';
 import '../../data/models/series.dart';
+import '../../data/models/topic.dart';
 import '../../data/models/user.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/book_repository.dart';
@@ -17,6 +18,7 @@ import '../../data/repositories/reader_repository.dart';
 import '../../data/services/api_service.dart';
 import '../../data/services/storage_service.dart';
 import '../core/theme.dart';
+import '../features/library/library_query_parser.dart';
 export 'upload_provider.dart';
 
 /// Resolves the default server URL based on the runtime platform and environment.
@@ -233,13 +235,57 @@ class AuthorGridItem extends LibraryGridItem {
   int? get bookCount => author.bookCount;
 }
 
+class GenreGridItem extends LibraryGridItem {
+  final Genre genre;
+
+  GenreGridItem(this.genre);
+
+  @override
+  String get id => genre.id;
+
+  @override
+  String get displayName => genre.name;
+
+  @override
+  String? get subtitle => 'Genre';
+
+  @override
+  String? get imageUrl => null;
+
+  @override
+  int? get bookCount => genre.bookCount > 0 ? genre.bookCount : null;
+}
+
+class TopicGridItem extends LibraryGridItem {
+  final Topic topic;
+
+  TopicGridItem(this.topic);
+
+  @override
+  String get id => topic.id;
+
+  @override
+  String get displayName => topic.name;
+
+  @override
+  String? get subtitle => 'Topic';
+
+  @override
+  String? get imageUrl => null;
+
+  @override
+  int? get bookCount => topic.bookCount > 0 ? topic.bookCount : null;
+}
+
 // Library State
 class LibraryState {
   final List<Book> books;
   final List<Author> authors;
   final List<Genre> genres;
+  final List<Topic> topics;
   final List<Series> series;
-  final String activeFilter; // 'all', 'series', 'authors', 'unread'
+  final String activeFilter; // 'all', 'series', 'authors', 'genres', 'topics', 'unread'
+  final String searchQuery;
   final bool isLoading;
   final bool isLoadingMore;
   final bool hasMore;
@@ -251,8 +297,10 @@ class LibraryState {
     this.books = const [],
     this.authors = const [],
     this.genres = const [],
+    this.topics = const [],
     this.series = const [],
     this.activeFilter = 'all',
+    this.searchQuery = '',
     this.isLoading = false,
     this.isLoadingMore = false,
     this.hasMore = true,
@@ -262,6 +310,13 @@ class LibraryState {
   });
 
   List<LibraryGridItem> get groupedBookItems {
+    // If a search query is active, return individual matching books directly so results are not hidden in series cards
+    if (searchQuery.trim().isNotEmpty) {
+      final items = filteredBooks.map((b) => BookGridItem(b)).toList();
+      items.sort((a, b) => a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
+      return items;
+    }
+
     final List<LibraryGridItem> items = [];
     final Map<String, List<Book>> seriesBooksMap = {};
     final List<Book> standaloneBooks = [];
@@ -301,11 +356,39 @@ class LibraryState {
   }
 
   List<SeriesGridItem> get seriesGridItems {
-    return filteredSeries.map((s) => SeriesGridItem(s)).toList();
+    var list = filteredSeries;
+    if (searchQuery.trim().isNotEmpty) {
+      final q = searchQuery.toLowerCase().trim();
+      list = list.where((s) => s.name.toLowerCase().contains(q)).toList();
+    }
+    return list.map((s) => SeriesGridItem(s)).toList();
   }
 
   List<AuthorGridItem> get authorGridItems {
-    return filteredAuthors.map((a) => AuthorGridItem(a)).toList();
+    var list = filteredAuthors;
+    if (searchQuery.trim().isNotEmpty) {
+      final q = searchQuery.toLowerCase().trim();
+      list = list.where((a) => a.name.toLowerCase().contains(q)).toList();
+    }
+    return list.map((a) => AuthorGridItem(a)).toList();
+  }
+
+  List<GenreGridItem> get genreGridItems {
+    var list = filteredGenres;
+    if (searchQuery.trim().isNotEmpty) {
+      final q = searchQuery.toLowerCase().trim();
+      list = list.where((g) => g.name.toLowerCase().contains(q)).toList();
+    }
+    return list.map((g) => GenreGridItem(g)).toList();
+  }
+
+  List<TopicGridItem> get topicGridItems {
+    var list = filteredTopics;
+    if (searchQuery.trim().isNotEmpty) {
+      final q = searchQuery.toLowerCase().trim();
+      list = list.where((t) => t.name.toLowerCase().contains(q)).toList();
+    }
+    return list.map((t) => TopicGridItem(t)).toList();
   }
 
   List<Book> get filteredBooks {
@@ -321,6 +404,12 @@ class LibraryState {
         list = books.toList();
         break;
     }
+
+    if (searchQuery.trim().isNotEmpty) {
+      final parsed = ParsedLibraryQuery.parse(searchQuery);
+      list = list.where((b) => parsed.matchesBook(b)).toList();
+    }
+
     list.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
     return list;
   }
@@ -339,12 +428,28 @@ class LibraryState {
     return list;
   }
 
+  List<Genre> get filteredGenres {
+    final withBooks = genres.where((g) => g.bookCount > 0).toList();
+    final list = withBooks.isNotEmpty ? withBooks : genres.toList();
+    list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return list;
+  }
+
+  List<Topic> get filteredTopics {
+    final withBooks = topics.where((t) => t.bookCount > 0).toList();
+    final list = withBooks.isNotEmpty ? withBooks : topics.toList();
+    list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return list;
+  }
+
   LibraryState copyWith({
     List<Book>? books,
     List<Author>? authors,
     List<Genre>? genres,
+    List<Topic>? topics,
     List<Series>? series,
     String? activeFilter,
+    String? searchQuery,
     bool? isLoading,
     bool? isLoadingMore,
     bool? hasMore,
@@ -356,8 +461,10 @@ class LibraryState {
       books: books ?? this.books,
       authors: authors ?? this.authors,
       genres: genres ?? this.genres,
+      topics: topics ?? this.topics,
       series: series ?? this.series,
       activeFilter: activeFilter ?? this.activeFilter,
+      searchQuery: searchQuery ?? this.searchQuery,
       isLoading: isLoading ?? this.isLoading,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       hasMore: hasMore ?? this.hasMore,
@@ -370,9 +477,13 @@ class LibraryState {
 
 class LibraryNotifier extends Notifier<LibraryState> {
   static const int pageSize = 24;
+  Timer? _searchDebounceTimer;
 
   @override
   LibraryState build() {
+    ref.onDispose(() {
+      _searchDebounceTimer?.cancel();
+    });
     return const LibraryState();
   }
 
@@ -386,9 +497,18 @@ class LibraryNotifier extends Notifier<LibraryState> {
     );
     final bookRepo = ref.read(bookRepositoryProvider);
     try {
-      final pageData = await bookRepo.getBooksPage(page: 1, perPage: pageSize);
+      final parsed = ParsedLibraryQuery.parse(state.searchQuery);
+      final pageData = await bookRepo.getBooksPage(
+        page: 1,
+        perPage: pageSize,
+        search: parsed.titleQuery.isNotEmpty ? parsed.titleQuery : null,
+        authorName: parsed.authorQuery,
+        genreName: parsed.genreQuery,
+        topicName: parsed.topicQuery,
+      );
       final authors = await bookRepo.getAuthors();
       final genres = await bookRepo.getGenres();
+      final topics = await bookRepo.getTopics();
       final series = await bookRepo.getSeries();
       final hasMore = pageData.books.length < pageData.total;
 
@@ -396,6 +516,7 @@ class LibraryNotifier extends Notifier<LibraryState> {
         books: pageData.books,
         authors: authors,
         genres: genres,
+        topics: topics,
         series: series,
         totalBooks: pageData.total,
         currentPage: 1,
@@ -415,7 +536,15 @@ class LibraryNotifier extends Notifier<LibraryState> {
     final bookRepo = ref.read(bookRepositoryProvider);
     final nextPage = state.currentPage + 1;
     try {
-      final pageData = await bookRepo.getBooksPage(page: nextPage, perPage: pageSize);
+      final parsed = ParsedLibraryQuery.parse(state.searchQuery);
+      final pageData = await bookRepo.getBooksPage(
+        page: nextPage,
+        perPage: pageSize,
+        search: parsed.titleQuery.isNotEmpty ? parsed.titleQuery : null,
+        authorName: parsed.authorQuery,
+        genreName: parsed.genreQuery,
+        topicName: parsed.topicQuery,
+      );
       final seen = <String>{for (final b in state.books) b.id};
       final dedupedNew = pageData.books.where((b) => seen.add(b.id)).toList();
       final combinedBooks = [...state.books, ...dedupedNew];
@@ -431,6 +560,15 @@ class LibraryNotifier extends Notifier<LibraryState> {
     } catch (e) {
       state = state.copyWith(isLoadingMore: false, error: e.toString());
     }
+  }
+
+  void setSearchQuery(String query) {
+    if (state.searchQuery == query) return;
+    state = state.copyWith(searchQuery: query);
+    _searchDebounceTimer?.cancel();
+    _searchDebounceTimer = Timer(const Duration(milliseconds: 300), () {
+      loadLibrary();
+    });
   }
 
   void setFilter(String filter) {
@@ -498,11 +636,20 @@ class LibraryNotifier extends Notifier<LibraryState> {
       }
     }
 
+    // Merge Topics
+    final updatedTopics = List<Topic>.from(state.topics);
+    for (final topic in book.topics) {
+      if (!updatedTopics.any((t) => t.id == topic.id || t.name.toLowerCase() == topic.name.toLowerCase())) {
+        updatedTopics.add(topic);
+      }
+    }
+
     state = state.copyWith(
       books: updatedBooks,
       authors: updatedAuthors,
       series: updatedSeries,
       genres: updatedGenres,
+      topics: updatedTopics,
       totalBooks: state.totalBooks + 1,
     );
   }

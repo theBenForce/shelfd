@@ -39,6 +39,7 @@ type Author struct {
 type Genre struct {
 	ID        string    `json:"id" bun:"id,pk"`
 	Name      string    `json:"name" bun:"name,notnull"`
+	BookCount int       `json:"book_count,omitempty" bun:",scanonly"`
 	CreatedAt time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
@@ -46,6 +47,7 @@ type Genre struct {
 type Topic struct {
 	ID        string    `json:"id" bun:"id,pk"`
 	Name      string    `json:"name" bun:"name,notnull"`
+	BookCount int       `json:"book_count,omitempty" bun:",scanonly"`
 	CreatedAt time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
@@ -138,15 +140,18 @@ type APIToken struct {
 
 // BookFilter specifies search and filtering criteria for books.
 type BookFilter struct {
-	AuthorID  *string
-	GenreID   *string
-	TopicID   *string
-	SeriesID  *string
-	Search    *string
-	Limit     int
-	Offset    int
-	SortBy    string
-	SortOrder string
+	AuthorID   *string
+	AuthorName *string
+	GenreID    *string
+	GenreName  *string
+	TopicID    *string
+	TopicName  *string
+	SeriesID   *string
+	Search     *string
+	Limit      int
+	Offset     int
+	SortBy     string
+	SortOrder  string
 }
 
 // Paragraph represents a consolidated text passage within a chapter.

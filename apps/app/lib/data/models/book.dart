@@ -3,6 +3,7 @@ import 'bookmark.dart';
 import 'genre.dart';
 import 'highlight.dart';
 import 'series.dart';
+import 'topic.dart';
 
 class Book {
   final String id;
@@ -11,6 +12,7 @@ class Book {
   final String? coverUrl;
   final List<Author> authors;
   final List<Genre> genres;
+  final List<Topic> topics;
   final Series? series;
   final double? seriesSequence;
   final double readingProgress;
@@ -33,6 +35,7 @@ class Book {
     this.coverUrl,
     this.authors = const [],
     this.genres = const [],
+    this.topics = const [],
     this.series,
     this.seriesSequence,
     this.readingProgress = 0.0,
@@ -59,6 +62,7 @@ class Book {
   factory Book.fromJson(Map<String, dynamic> json, {String? baseUrl}) {
     final rawAuthors = json['authors'] as List<dynamic>? ?? [];
     final rawGenres = json['genres'] as List<dynamic>? ?? [];
+    final rawTopics = json['topics'] as List<dynamic>? ?? [];
     final rawBookmarks = json['bookmarks'] as List<dynamic>? ?? [];
     final rawHighlights = json['highlights'] as List<dynamic>? ?? [];
 
@@ -97,6 +101,10 @@ class Book {
           .whereType<Map<String, dynamic>>()
           .map((g) => Genre.fromJson(g))
           .toList(),
+      topics: rawTopics
+          .whereType<Map<String, dynamic>>()
+          .map((t) => Topic.fromJson(t))
+          .toList(),
       series: seriesObj,
       seriesSequence: seqNum ?? (json['series_sequence'] as num?)?.toDouble(),
       readingProgress: (json['reading_progress'] as num?)?.toDouble() ?? 0.0,
@@ -131,6 +139,7 @@ class Book {
       if (coverUrl != null) 'cover_url': coverUrl,
       'authors': authors.map((a) => a.toJson()).toList(),
       'genres': genres.map((g) => g.toJson()).toList(),
+      'topics': topics.map((t) => t.toJson()).toList(),
       if (series != null) 'series': series!.toJson(),
       if (seriesSequence != null) 'series_sequence': seriesSequence,
       'reading_progress': readingProgress,
@@ -155,6 +164,7 @@ class Book {
     String? coverUrl,
     List<Author>? authors,
     List<Genre>? genres,
+    List<Topic>? topics,
     Series? series,
     double? seriesSequence,
     double? readingProgress,
@@ -177,6 +187,7 @@ class Book {
       coverUrl: coverUrl ?? this.coverUrl,
       authors: authors ?? this.authors,
       genres: genres ?? this.genres,
+      topics: topics ?? this.topics,
       series: series ?? this.series,
       seriesSequence: seriesSequence ?? this.seriesSequence,
       readingProgress: readingProgress ?? this.readingProgress,

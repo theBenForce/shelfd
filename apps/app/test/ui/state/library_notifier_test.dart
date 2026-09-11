@@ -23,7 +23,10 @@ void main() {
     int requestedPage = 0;
     final mockClient = MockClient((request) async {
       final uri = request.url;
-      if (uri.path == '/api/v1/authors' || uri.path == '/api/v1/genres' || uri.path == '/api/v1/series') {
+      if (uri.path == '/api/v1/authors' ||
+          uri.path == '/api/v1/genres' ||
+          uri.path == '/api/v1/topics' ||
+          uri.path == '/api/v1/series') {
         return http.Response('[]', 200, headers: {'content-type': 'application/json'});
       }
 
