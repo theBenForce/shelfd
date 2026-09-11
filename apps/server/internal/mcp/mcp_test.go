@@ -278,6 +278,7 @@ func TestMCPServer_ToolCall_SearchLibrary(t *testing.T) {
 	// Seed book & chapter with vector
 	author, _ := repo.UpsertAuthor(ctx, "Neal Stephenson")
 	genre, _ := repo.UpsertGenre(ctx, "Cyberpunk")
+	topic, _ := repo.UpsertTopic(ctx, "Virtual Reality")
 	series, _ := repo.UpsertSeries(ctx, "Metaverse", nil)
 
 	book := &repository.Book{
@@ -287,6 +288,7 @@ func TestMCPServer_ToolCall_SearchLibrary(t *testing.T) {
 	repo.CreateBook(ctx, book)
 	repo.LinkBookAuthor(ctx, book.ID, author.ID, "author")
 	repo.LinkBookGenre(ctx, book.ID, genre.ID)
+	repo.LinkBookTopic(ctx, book.ID, topic.ID)
 	seq := 1.0
 	repo.LinkBookSeries(ctx, book.ID, series.ID, &seq)
 
@@ -328,6 +330,10 @@ func TestMCPServer_ToolCall_SearchLibrary(t *testing.T) {
 	if len(resp.Result.Content) == 0 || !strings.Contains(resp.Result.Content[0].Text, "Snow Crash") {
 		t.Errorf("expected hit containing 'Snow Crash', got: %v", resp.Result.Content)
 	}
+	// Verify chaining tip trailer is removed
+	if strings.Contains(resp.Result.Content[0].Text, "read_chapter_content") {
+		t.Errorf("did not expect chaining tip trailer in search response: %s", resp.Result.Content[0].Text)
+	}
 
 	// 2. Search with author filter
 	filterCall := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_library","arguments":{"query":"pizza delivery","author":"Neal Stephenson"}}}`
@@ -340,7 +346,40 @@ func TestMCPServer_ToolCall_SearchLibrary(t *testing.T) {
 		t.Errorf("expected hit for matching author, got: %s", resp.Result.Content[0].Text)
 	}
 
-	// 3. Search with non-existent author
+	// 2b. Search with partial substring genre filter
+	partialGenreCall := `{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"search_library","arguments":{"query":"pizza delivery","genre":"Cyber"}}}`
+	req = httptest.NewRequest(http.MethodPost, "/mcp/messages", strings.NewReader(partialGenreCall))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !strings.Contains(resp.Result.Content[0].Text, "Snow Crash") {
+		t.Errorf("expected hit for partial substring genre 'Cyber', got: %s", resp.Result.Content[0].Text)
+	}
+
+	// 2c. Search with topic filter
+	topicCall := `{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"search_library","arguments":{"query":"pizza delivery","topic":"Virtual Reality"}}}`
+	req = httptest.NewRequest(http.MethodPost, "/mcp/messages", strings.NewReader(topicCall))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !strings.Contains(resp.Result.Content[0].Text, "Snow Crash") {
+		t.Errorf("expected hit for matching topic 'Virtual Reality', got: %s", resp.Result.Content[0].Text)
+	}
+
+	// 2d. Search with partial substring topic filter
+	partialTopicCall := `{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"search_library","arguments":{"query":"pizza delivery","topic":"Reality"}}}`
+	req = httptest.NewRequest(http.MethodPost, "/mcp/messages", strings.NewReader(partialTopicCall))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !strings.Contains(resp.Result.Content[0].Text, "Snow Crash") {
+		t.Errorf("expected hit for partial topic 'Reality', got: %s", resp.Result.Content[0].Text)
+	}
+
+	// 3. Search with non-existent author: falls back to searching without filter
 	noAuthorCall := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_library","arguments":{"query":"pizza delivery","author":"Nonexistent Author"}}}`
 	req = httptest.NewRequest(http.MethodPost, "/mcp/messages", strings.NewReader(noAuthorCall))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -349,6 +388,37 @@ func TestMCPServer_ToolCall_SearchLibrary(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &resp)
 	if !strings.Contains(resp.Result.Content[0].Text, "not found in library") {
 		t.Errorf("expected friendly not found message, got: %s", resp.Result.Content[0].Text)
+	}
+	if !strings.Contains(resp.Result.Content[0].Text, "Snow Crash") {
+		t.Errorf("expected search to proceed with hits despite unmatched author filter, got: %s", resp.Result.Content[0].Text)
+	}
+
+	// 3b. Search with non-existent genre: falls back to searching without filter
+	noGenreCall := `{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"search_library","arguments":{"query":"pizza delivery","genre":"Cooking"}}}`
+	req = httptest.NewRequest(http.MethodPost, "/mcp/messages", strings.NewReader(noGenreCall))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !strings.Contains(resp.Result.Content[0].Text, "Genre 'Cooking' not found in library") {
+		t.Errorf("expected fallback note for missing genre, got: %s", resp.Result.Content[0].Text)
+	}
+	if !strings.Contains(resp.Result.Content[0].Text, "Snow Crash") {
+		t.Errorf("expected search to proceed with hits despite unmatched genre filter, got: %s", resp.Result.Content[0].Text)
+	}
+
+	// 3c. Search with non-existent topic: falls back to searching without filter
+	noTopicCall := `{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"search_library","arguments":{"query":"pizza delivery","topic":"Cooking"}}}`
+	req = httptest.NewRequest(http.MethodPost, "/mcp/messages", strings.NewReader(noTopicCall))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !strings.Contains(resp.Result.Content[0].Text, "Topic 'Cooking' not found in library") {
+		t.Errorf("expected fallback note for missing topic, got: %s", resp.Result.Content[0].Text)
+	}
+	if !strings.Contains(resp.Result.Content[0].Text, "Snow Crash") {
+		t.Errorf("expected search to proceed with hits despite unmatched topic filter, got: %s", resp.Result.Content[0].Text)
 	}
 
 	// 4. Missing query
@@ -379,6 +449,8 @@ func TestMCPServer_ToolCall_GetBookMetadata(t *testing.T) {
 	repo.CreateBook(ctx, book)
 	author, _ := repo.UpsertAuthor(ctx, "Neal Stephenson")
 	repo.LinkBookAuthor(ctx, book.ID, author.ID, "author")
+	topic, _ := repo.UpsertTopic(ctx, "Cybernetics")
+	repo.LinkBookTopic(ctx, book.ID, topic.ID)
 
 	chTitle := "Prologue"
 	repo.CreateChapter(ctx, &repository.Chapter{
@@ -405,8 +477,8 @@ func TestMCPServer_ToolCall_GetBookMetadata(t *testing.T) {
 		t.Fatalf("unexpected error: %v", resp.Result.Content)
 	}
 	text := resp.Result.Content[0].Text
-	if !strings.Contains(text, "Snow Crash") || !strings.Contains(text, "Neal Stephenson") || !strings.Contains(text, "Prologue") {
-		t.Errorf("expected metadata text to contain title, author, and TOC, got: %s", text)
+	if !strings.Contains(text, "Snow Crash") || !strings.Contains(text, "Neal Stephenson") || !strings.Contains(text, "Prologue") || !strings.Contains(text, "Cybernetics") {
+		t.Errorf("expected metadata text to contain title, author, TOC, and topic, got: %s", text)
 	}
 
 	// 2. Non-existent book ID

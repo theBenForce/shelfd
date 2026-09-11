@@ -191,6 +191,10 @@ func (r *SQLiteStorageEngine) ListBooks(ctx context.Context, filter BookFilter) 
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?)")
 		args = append(args, *filter.GenreID)
 	}
+	if filter.TopicID != nil {
+		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?)")
+		args = append(args, *filter.TopicID)
+	}
 	if filter.Search != nil && strings.TrimSpace(*filter.Search) != "" {
 		conditions = append(conditions, "(LOWER(b.title) LIKE ? OR LOWER(b.description) LIKE ?)")
 		term := "%" + strings.ToLower(strings.TrimSpace(*filter.Search)) + "%"
@@ -293,9 +297,16 @@ func (r *SQLiteStorageEngine) GetAuthorByID(ctx context.Context, id string) (*Au
 }
 
 func (r *SQLiteStorageEngine) GetAuthorByName(ctx context.Context, name string) (*Author, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return nil, ErrNotFound
+	}
 	a := &Author{}
 	var photoURL sql.NullString
-	err := r.db.QueryRowContext(ctx, "SELECT id, name, photo_url, created_at FROM authors WHERE name = ? COLLATE NOCASE", strings.TrimSpace(name)).Scan(&a.ID, &a.Name, &photoURL, &a.CreatedAt)
+	err := r.db.QueryRowContext(ctx, "SELECT id, name, photo_url, created_at FROM authors WHERE name = ? COLLATE NOCASE", cleanName).Scan(&a.ID, &a.Name, &photoURL, &a.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = r.db.QueryRowContext(ctx, "SELECT id, name, photo_url, created_at FROM authors WHERE name LIKE ? ORDER BY LENGTH(name) ASC LIMIT 1", "%"+cleanName+"%").Scan(&a.ID, &a.Name, &photoURL, &a.CreatedAt)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -372,8 +383,15 @@ func (r *SQLiteStorageEngine) GetGenreByID(ctx context.Context, id string) (*Gen
 }
 
 func (r *SQLiteStorageEngine) GetGenreByName(ctx context.Context, name string) (*Genre, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return nil, ErrNotFound
+	}
 	g := &Genre{}
-	err := r.db.QueryRowContext(ctx, "SELECT id, name, created_at FROM genres WHERE name = ? COLLATE NOCASE", strings.TrimSpace(name)).Scan(&g.ID, &g.Name, &g.CreatedAt)
+	err := r.db.QueryRowContext(ctx, "SELECT id, name, created_at FROM genres WHERE name = ? COLLATE NOCASE", cleanName).Scan(&g.ID, &g.Name, &g.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = r.db.QueryRowContext(ctx, "SELECT id, name, created_at FROM genres WHERE name LIKE ? ORDER BY LENGTH(name) ASC LIMIT 1", "%"+cleanName+"%").Scan(&g.ID, &g.Name, &g.CreatedAt)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -399,6 +417,77 @@ func (r *SQLiteStorageEngine) ListGenres(ctx context.Context) ([]*Genre, error) 
 		genres = append(genres, g)
 	}
 	return genres, rows.Err()
+}
+
+// --- Topics ---
+
+func (r *SQLiteStorageEngine) UpsertTopic(ctx context.Context, name string) (*Topic, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return nil, fmt.Errorf("topic name cannot be empty")
+	}
+
+	query := `
+		INSERT INTO topics (id, name, created_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(name) DO UPDATE SET name = excluded.name
+		RETURNING id, name, created_at
+	`
+	t := &Topic{}
+	err := r.db.QueryRowContext(ctx, query, uuid.NewString(), trimmed).Scan(&t.ID, &t.Name, &t.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("upserting topic: %w", err)
+	}
+	return t, nil
+}
+
+func (r *SQLiteStorageEngine) GetTopicByID(ctx context.Context, id string) (*Topic, error) {
+	t := &Topic{}
+	err := r.db.QueryRowContext(ctx, "SELECT id, name, created_at FROM topics WHERE id = ?", id).Scan(&t.ID, &t.Name, &t.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying topic by id: %w", err)
+	}
+	return t, nil
+}
+
+func (r *SQLiteStorageEngine) GetTopicByName(ctx context.Context, name string) (*Topic, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return nil, ErrNotFound
+	}
+	t := &Topic{}
+	err := r.db.QueryRowContext(ctx, "SELECT id, name, created_at FROM topics WHERE name = ? COLLATE NOCASE", cleanName).Scan(&t.ID, &t.Name, &t.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = r.db.QueryRowContext(ctx, "SELECT id, name, created_at FROM topics WHERE name LIKE ? ORDER BY LENGTH(name) ASC LIMIT 1", "%"+cleanName+"%").Scan(&t.ID, &t.Name, &t.CreatedAt)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying topic by name: %w", err)
+	}
+	return t, nil
+}
+
+func (r *SQLiteStorageEngine) ListTopics(ctx context.Context) ([]*Topic, error) {
+	rows, err := r.db.QueryContext(ctx, "SELECT id, name, created_at FROM topics ORDER BY name COLLATE NOCASE ASC")
+	if err != nil {
+		return nil, fmt.Errorf("listing topics: %w", err)
+	}
+	defer rows.Close()
+
+	var topics []*Topic
+	for rows.Next() {
+		t := &Topic{}
+		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning topic: %w", err)
+		}
+		topics = append(topics, t)
+	}
+	return topics, rows.Err()
 }
 
 // --- Series ---
@@ -436,8 +525,15 @@ func (r *SQLiteStorageEngine) GetSeriesByID(ctx context.Context, id string) (*Se
 }
 
 func (r *SQLiteStorageEngine) GetSeriesByName(ctx context.Context, name string) (*Series, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return nil, ErrNotFound
+	}
 	s := &Series{}
-	err := r.db.QueryRowContext(ctx, "SELECT id, name, description, created_at FROM series WHERE name = ? COLLATE NOCASE", strings.TrimSpace(name)).Scan(&s.ID, &s.Name, &s.Description, &s.CreatedAt)
+	err := r.db.QueryRowContext(ctx, "SELECT id, name, description, created_at FROM series WHERE name = ? COLLATE NOCASE", cleanName).Scan(&s.ID, &s.Name, &s.Description, &s.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = r.db.QueryRowContext(ctx, "SELECT id, name, description, created_at FROM series WHERE name LIKE ? ORDER BY LENGTH(name) ASC LIMIT 1", "%"+cleanName+"%").Scan(&s.ID, &s.Name, &s.Description, &s.CreatedAt)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -572,6 +668,72 @@ func (r *SQLiteStorageEngine) GetBookGenres(ctx context.Context, bookID string) 
 		genres = append(genres, g)
 	}
 	return genres, rows.Err()
+}
+
+func (r *SQLiteStorageEngine) UnlinkBookGenre(ctx context.Context, bookID, genreID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM book_genres WHERE book_id = ? AND genre_id = ?", bookID, genreID)
+	if err != nil {
+		return fmt.Errorf("unlinking book genre: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) LinkBookTopic(ctx context.Context, bookID, topicID string) error {
+	query := `
+		INSERT INTO book_topics (book_id, topic_id, created_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(book_id, topic_id) DO NOTHING
+	`
+	_, err := r.db.ExecContext(ctx, query, bookID, topicID)
+	if err != nil {
+		return fmt.Errorf("linking book topic: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) UnlinkBookTopic(ctx context.Context, bookID, topicID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM book_topics WHERE book_id = ? AND topic_id = ?", bookID, topicID)
+	if err != nil {
+		return fmt.Errorf("unlinking book topic: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) GetBookTopics(ctx context.Context, bookID string) ([]*Topic, error) {
+	query := `
+		SELECT t.id, t.name, t.created_at
+		FROM topics t
+		JOIN book_topics bt ON bt.topic_id = t.id
+		WHERE bt.book_id = ?
+		ORDER BY t.name COLLATE NOCASE ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, bookID)
+	if err != nil {
+		return nil, fmt.Errorf("getting book topics: %w", err)
+	}
+	defer rows.Close()
+
+	var topics []*Topic
+	for rows.Next() {
+		t := &Topic{}
+		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning book topic: %w", err)
+		}
+		topics = append(topics, t)
+	}
+	if topics == nil {
+		topics = []*Topic{}
+	}
+	return topics, rows.Err()
+}
+
+func (r *SQLiteStorageEngine) PruneOrphanedGenres(ctx context.Context) (int, error) {
+	res, err := r.db.ExecContext(ctx, "DELETE FROM genres WHERE id NOT IN (SELECT DISTINCT genre_id FROM book_genres)")
+	if err != nil {
+		return 0, fmt.Errorf("pruning orphaned genres: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 func (r *SQLiteStorageEngine) GetBookSeries(ctx context.Context, bookID string) ([]*BookSeriesDetail, error) {
@@ -919,6 +1081,10 @@ func (r *SQLiteStorageEngine) CountBooks(ctx context.Context, filter BookFilter)
 	if filter.GenreID != nil {
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?)")
 		args = append(args, *filter.GenreID)
+	}
+	if filter.TopicID != nil {
+		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?)")
+		args = append(args, *filter.TopicID)
 	}
 	if filter.SeriesID != nil {
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_series WHERE series_id = ?)")
@@ -1680,7 +1846,7 @@ func (r *SQLiteStorageEngine) SearchVectorParagraphs(ctx context.Context, queryE
 		limit = 20
 	}
 	k := limit
-	if filter.AuthorID != nil || filter.GenreID != nil || filter.SeriesID != nil || filter.BookID != nil {
+	if filter.AuthorID != nil || filter.GenreID != nil || filter.TopicID != nil || filter.SeriesID != nil || filter.BookID != nil {
 		if k < 100 {
 			k = 100
 		}
@@ -1697,6 +1863,10 @@ func (r *SQLiteStorageEngine) SearchVectorParagraphs(ctx context.Context, queryE
 	genreID := ""
 	if filter.GenreID != nil {
 		genreID = *filter.GenreID
+	}
+	topicID := ""
+	if filter.TopicID != nil {
+		topicID = *filter.TopicID
 	}
 	seriesID := ""
 	if filter.SeriesID != nil {
@@ -1726,6 +1896,7 @@ func (r *SQLiteStorageEngine) SearchVectorParagraphs(ctx context.Context, queryE
 		  AND (? = '' OR b.id = ?)
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?))
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
 		ORDER BY distance ASC
 		LIMIT ?
@@ -1736,6 +1907,7 @@ func (r *SQLiteStorageEngine) SearchVectorParagraphs(ctx context.Context, queryE
 		bookID, bookID,
 		authorID, authorID,
 		genreID, genreID,
+		topicID, topicID,
 		seriesID, seriesID,
 		limit,
 	)
@@ -1794,6 +1966,10 @@ func (r *SQLiteStorageEngine) SearchFTSParagraphs(ctx context.Context, queryText
 	if filter.GenreID != nil {
 		genreID = *filter.GenreID
 	}
+	topicID := ""
+	if filter.TopicID != nil {
+		topicID = *filter.TopicID
+	}
 	seriesID := ""
 	if filter.SeriesID != nil {
 		seriesID = *filter.SeriesID
@@ -1827,6 +2003,7 @@ func (r *SQLiteStorageEngine) SearchFTSParagraphs(ctx context.Context, queryText
 		  AND (? = '' OR b.id = ?)
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?))
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
 		ORDER BY rank ASC
 		LIMIT ?
@@ -1837,6 +2014,7 @@ func (r *SQLiteStorageEngine) SearchFTSParagraphs(ctx context.Context, queryText
 		bookID, bookID,
 		authorID, authorID,
 		genreID, genreID,
+		topicID, topicID,
 		seriesID, seriesID,
 		limit,
 	)

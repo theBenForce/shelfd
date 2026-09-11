@@ -41,6 +41,8 @@ func TestRunMigrations(t *testing.T) {
 		"vec_paragraphs",
 		"bookmarks",
 		"highlights",
+		"topics",
+		"book_topics",
 		"schema_migrations",
 	}
 

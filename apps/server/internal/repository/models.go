@@ -35,8 +35,15 @@ type Author struct {
 	CreatedAt time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
-// Genre represents a subject, category, or tag.
+// Genre represents a literary form or broad genre category.
 type Genre struct {
+	ID        string    `json:"id" bun:"id,pk"`
+	Name      string    `json:"name" bun:"name,notnull"`
+	CreatedAt time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+}
+
+// Topic represents a specific subject, theme, or concept.
+type Topic struct {
 	ID        string    `json:"id" bun:"id,pk"`
 	Name      string    `json:"name" bun:"name,notnull"`
 	CreatedAt time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
@@ -63,6 +70,12 @@ type BookAuthor struct {
 type BookGenre struct {
 	BookID  string `json:"book_id" bun:"book_id,pk"`
 	GenreID string `json:"genre_id" bun:"genre_id,pk"`
+}
+
+// BookTopic links a book to a topic.
+type BookTopic struct {
+	BookID  string `json:"book_id" bun:"book_id,pk"`
+	TopicID string `json:"topic_id" bun:"topic_id,pk"`
 }
 
 // BookSeries links a book to a series with an optional sequence number (e.g. 1.0, 2.5).
@@ -127,6 +140,7 @@ type APIToken struct {
 type BookFilter struct {
 	AuthorID  *string
 	GenreID   *string
+	TopicID   *string
 	SeriesID  *string
 	Search    *string
 	Limit     int
@@ -176,6 +190,7 @@ type SearchFilter struct {
 	BookID   *string
 	AuthorID *string
 	GenreID  *string
+	TopicID  *string
 	SeriesID *string
 	Limit    int
 }

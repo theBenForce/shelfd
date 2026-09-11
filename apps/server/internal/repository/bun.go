@@ -119,6 +119,9 @@ func (r *BunStorageEngine) applyBookFilter(q *bun.SelectQuery, filter BookFilter
 	if filter.GenreID != nil {
 		q = q.Where("id IN (SELECT book_id FROM book_genres WHERE genre_id = ?)", *filter.GenreID)
 	}
+	if filter.TopicID != nil {
+		q = q.Where("id IN (SELECT book_id FROM book_topics WHERE topic_id = ?)", *filter.TopicID)
+	}
 	if filter.SeriesID != nil {
 		q = q.Where("id IN (SELECT book_id FROM book_series WHERE series_id = ?)", *filter.SeriesID)
 	}
@@ -219,8 +222,15 @@ func (r *BunStorageEngine) GetAuthorByID(ctx context.Context, id string) (*Autho
 }
 
 func (r *BunStorageEngine) GetAuthorByName(ctx context.Context, name string) (*Author, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return nil, ErrNotFound
+	}
 	author := new(Author)
-	err := r.db.NewSelect().Model(author).Where("LOWER(name) = LOWER(?)", strings.TrimSpace(name)).Limit(1).Scan(ctx)
+	err := r.db.NewSelect().Model(author).Where("LOWER(name) = LOWER(?)", cleanName).Limit(1).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = r.db.NewSelect().Model(author).Where("LOWER(name) LIKE LOWER(?)", "%"+cleanName+"%").OrderExpr("LENGTH(name) ASC").Limit(1).Scan(ctx)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -296,8 +306,15 @@ func (r *BunStorageEngine) GetGenreByID(ctx context.Context, id string) (*Genre,
 }
 
 func (r *BunStorageEngine) GetGenreByName(ctx context.Context, name string) (*Genre, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return nil, ErrNotFound
+	}
 	genre := new(Genre)
-	err := r.db.NewSelect().Model(genre).Where("LOWER(name) = LOWER(?)", strings.TrimSpace(name)).Limit(1).Scan(ctx)
+	err := r.db.NewSelect().Model(genre).Where("LOWER(name) = LOWER(?)", cleanName).Limit(1).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = r.db.NewSelect().Model(genre).Where("LOWER(name) LIKE LOWER(?)", "%"+cleanName+"%").OrderExpr("LENGTH(name) ASC").Limit(1).Scan(ctx)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -317,6 +334,83 @@ func (r *BunStorageEngine) ListGenres(ctx context.Context) ([]*Genre, error) {
 		genres = []*Genre{}
 	}
 	return genres, nil
+}
+
+// --- Topics ---
+
+func (r *BunStorageEngine) UpsertTopic(ctx context.Context, name string) (*Topic, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return nil, fmt.Errorf("topic name cannot be empty")
+	}
+
+	topic := new(Topic)
+	err := r.db.NewSelect().Model(topic).Where("LOWER(name) = LOWER(?)", cleanName).Limit(1).Scan(ctx)
+	if err == nil {
+		return topic, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("looking up topic: %w", err)
+	}
+
+	topic = &Topic{
+		ID:        ulid.New(),
+		Name:      cleanName,
+		CreatedAt: time.Now().UTC(),
+	}
+
+	_, err = r.db.NewInsert().Model(topic).Exec(ctx)
+	if err != nil {
+		err2 := r.db.NewSelect().Model(topic).Where("LOWER(name) = LOWER(?)", cleanName).Limit(1).Scan(ctx)
+		if err2 == nil {
+			return topic, nil
+		}
+		return nil, fmt.Errorf("inserting topic: %w", err)
+	}
+	return topic, nil
+}
+
+func (r *BunStorageEngine) GetTopicByID(ctx context.Context, id string) (*Topic, error) {
+	topic := new(Topic)
+	err := r.db.NewSelect().Model(topic).Where("id = ?", id).Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting topic by ID: %w", err)
+	}
+	return topic, nil
+}
+
+func (r *BunStorageEngine) GetTopicByName(ctx context.Context, name string) (*Topic, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return nil, ErrNotFound
+	}
+	topic := new(Topic)
+	err := r.db.NewSelect().Model(topic).Where("LOWER(name) = LOWER(?)", cleanName).Limit(1).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = r.db.NewSelect().Model(topic).Where("LOWER(name) LIKE LOWER(?)", "%"+cleanName+"%").OrderExpr("LENGTH(name) ASC").Limit(1).Scan(ctx)
+	}
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting topic by name: %w", err)
+	}
+	return topic, nil
+}
+
+func (r *BunStorageEngine) ListTopics(ctx context.Context) ([]*Topic, error) {
+	var topics []*Topic
+	err := r.db.NewSelect().Model(&topics).Order("name ASC").Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing topics: %w", err)
+	}
+	if topics == nil {
+		topics = []*Topic{}
+	}
+	return topics, nil
 }
 
 // --- Series ---
@@ -371,8 +465,15 @@ func (r *BunStorageEngine) GetSeriesByID(ctx context.Context, id string) (*Serie
 }
 
 func (r *BunStorageEngine) GetSeriesByName(ctx context.Context, name string) (*Series, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return nil, ErrNotFound
+	}
 	series := new(Series)
-	err := r.db.NewSelect().Model(series).Where("LOWER(name) = LOWER(?)", strings.TrimSpace(name)).Limit(1).Scan(ctx)
+	err := r.db.NewSelect().Model(series).Where("LOWER(name) = LOWER(?)", cleanName).Limit(1).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = r.db.NewSelect().Model(series).Where("LOWER(name) LIKE LOWER(?)", "%"+cleanName+"%").OrderExpr("LENGTH(name) ASC").Limit(1).Scan(ctx)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -476,6 +577,66 @@ func (r *BunStorageEngine) GetBookGenres(ctx context.Context, bookID string) ([]
 		genres = []*Genre{}
 	}
 	return genres, nil
+}
+
+func (r *BunStorageEngine) UnlinkBookGenre(ctx context.Context, bookID, genreID string) error {
+	_, err := r.db.NewDelete().Model((*BookGenre)(nil)).
+		Where("book_id = ? AND genre_id = ?", bookID, genreID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("unlinking book genre: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) LinkBookTopic(ctx context.Context, bookID, topicID string) error {
+	bt := &BookTopic{BookID: bookID, TopicID: topicID}
+	_, err := r.db.NewInsert().Model(bt).
+		On("CONFLICT (book_id, topic_id) DO NOTHING").
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("linking book topic: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) UnlinkBookTopic(ctx context.Context, bookID, topicID string) error {
+	_, err := r.db.NewDelete().Model((*BookTopic)(nil)).
+		Where("book_id = ? AND topic_id = ?", bookID, topicID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("unlinking book topic: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) GetBookTopics(ctx context.Context, bookID string) ([]*Topic, error) {
+	var topics []*Topic
+	err := r.db.NewSelect().
+		TableExpr("topics AS t").
+		ColumnExpr("t.id, t.name, t.created_at").
+		Join("JOIN book_topics AS bt ON t.id = bt.topic_id").
+		Where("bt.book_id = ?", bookID).
+		Order("t.name ASC").
+		Scan(ctx, &topics)
+	if err != nil {
+		return nil, fmt.Errorf("getting book topics: %w", err)
+	}
+	if topics == nil {
+		topics = []*Topic{}
+	}
+	return topics, nil
+}
+
+func (r *BunStorageEngine) PruneOrphanedGenres(ctx context.Context) (int, error) {
+	res, err := r.db.NewDelete().Model((*Genre)(nil)).
+		Where("id NOT IN (SELECT DISTINCT genre_id FROM book_genres)").
+		Exec(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("pruning orphaned genres: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 func (r *BunStorageEngine) GetBookSeries(ctx context.Context, bookID string) ([]*BookSeriesDetail, error) {
@@ -901,6 +1062,10 @@ func (r *BunStorageEngine) SearchVectorParagraphs(ctx context.Context, queryEmbe
 	if filter.GenreID != nil {
 		genreID = *filter.GenreID
 	}
+	topicID := ""
+	if filter.TopicID != nil {
+		topicID = *filter.TopicID
+	}
 	seriesID := ""
 	if filter.SeriesID != nil {
 		seriesID = *filter.SeriesID
@@ -930,6 +1095,7 @@ func (r *BunStorageEngine) SearchVectorParagraphs(ctx context.Context, queryEmbe
 			WHERE (? = '' OR b.id = ?)
 			  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
 			  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
+			  AND (? = '' OR b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?))
 			  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
 			ORDER BY distance ASC
 			LIMIT ?
@@ -939,6 +1105,7 @@ func (r *BunStorageEngine) SearchVectorParagraphs(ctx context.Context, queryEmbe
 			bookID, bookID,
 			authorID, authorID,
 			genreID, genreID,
+			topicID, topicID,
 			seriesID, seriesID,
 			limit,
 		)
@@ -983,7 +1150,7 @@ func (r *BunStorageEngine) SearchVectorParagraphs(ctx context.Context, queryEmbe
 	}
 
 	k := limit
-	if filter.AuthorID != nil || filter.GenreID != nil || filter.SeriesID != nil || filter.BookID != nil {
+	if filter.AuthorID != nil || filter.GenreID != nil || filter.TopicID != nil || filter.SeriesID != nil || filter.BookID != nil {
 		if k < 100 {
 			k = 100
 		}
@@ -1012,6 +1179,7 @@ func (r *BunStorageEngine) SearchVectorParagraphs(ctx context.Context, queryEmbe
 		  AND (? = '' OR b.id = ?)
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?))
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
 		ORDER BY distance ASC
 		LIMIT ?
@@ -1022,6 +1190,7 @@ func (r *BunStorageEngine) SearchVectorParagraphs(ctx context.Context, queryEmbe
 		bookID, bookID,
 		authorID, authorID,
 		genreID, genreID,
+		topicID, topicID,
 		seriesID, seriesID,
 		limit,
 	)
@@ -1077,6 +1246,10 @@ func (r *BunStorageEngine) SearchFTSParagraphs(ctx context.Context, queryText st
 	if filter.GenreID != nil {
 		genreID = *filter.GenreID
 	}
+	topicID := ""
+	if filter.TopicID != nil {
+		topicID = *filter.TopicID
+	}
 	seriesID := ""
 	if filter.SeriesID != nil {
 		seriesID = *filter.SeriesID
@@ -1110,6 +1283,7 @@ func (r *BunStorageEngine) SearchFTSParagraphs(ctx context.Context, queryText st
 			  AND (? = '' OR b.id = ?)
 			  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
 			  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
+			  AND (? = '' OR b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?))
 			  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
 			ORDER BY rank DESC
 			LIMIT ?
@@ -1119,6 +1293,7 @@ func (r *BunStorageEngine) SearchFTSParagraphs(ctx context.Context, queryText st
 			bookID, bookID,
 			authorID, authorID,
 			genreID, genreID,
+			topicID, topicID,
 			seriesID, seriesID,
 			limit,
 		)
@@ -1182,6 +1357,7 @@ func (r *BunStorageEngine) SearchFTSParagraphs(ctx context.Context, queryText st
 		  AND (? = '' OR b.id = ?)
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
+		  AND (? = '' OR b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?))
 		  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
 		ORDER BY rank ASC
 		LIMIT ?
@@ -1192,6 +1368,7 @@ func (r *BunStorageEngine) SearchFTSParagraphs(ctx context.Context, queryText st
 		bookID, bookID,
 		authorID, authorID,
 		genreID, genreID,
+		topicID, topicID,
 		seriesID, seriesID,
 		limit,
 	)

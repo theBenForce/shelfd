@@ -13,13 +13,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/shelfd/shelfd/internal/epub"
 	"github.com/shelfd/shelfd/internal/repository"
+	"github.com/shelfd/shelfd/internal/taxonomy"
 )
+
+// TaxonomyNormalizer defines the interface for normalizing book taxonomy.
+type TaxonomyNormalizer interface {
+	NormalizeBookTaxonomy(ctx context.Context, bookID string, force bool) (*taxonomy.TaxonomyResult, error)
+}
 
 // Ingester coordinates parsing EPUBs and storing their metadata in the repository.
 type Ingester struct {
-	repo       repository.StorageEngine
-	libraryDir string
-	dataDir    string
+	repo               repository.StorageEngine
+	libraryDir         string
+	dataDir            string
+	taxonomyNormalizer TaxonomyNormalizer
 }
 
 // NewIngester creates a new Ingester instance.
@@ -29,6 +36,11 @@ func NewIngester(repo repository.StorageEngine, libraryDir, dataDir string) *Ing
 		libraryDir: libraryDir,
 		dataDir:    dataDir,
 	}
+}
+
+// SetTaxonomyNormalizer configures a taxonomy normalizer for automatic topic/genre partitioning.
+func (in *Ingester) SetTaxonomyNormalizer(normalizer TaxonomyNormalizer) {
+	in.taxonomyNormalizer = normalizer
 }
 
 // SyncStatus represents the synchronization outcome for an EPUB file.
@@ -78,12 +90,18 @@ func (in *Ingester) SyncFile(ctx context.Context, fullPath, relativePath string)
 		if err != nil {
 			return nil, SyncStatusUnchanged, fmt.Errorf("updating modified book: %w", err)
 		}
+		if in.taxonomyNormalizer != nil {
+			_, _ = in.taxonomyNormalizer.NormalizeBookTaxonomy(ctx, updatedBook.ID, false)
+		}
 		return updatedBook, SyncStatusModified, nil
 	}
 
 	book, err := in.importNewBook(ctx, fullPath, relativePath, fi)
 	if err != nil {
 		return nil, SyncStatusUnchanged, err
+	}
+	if in.taxonomyNormalizer != nil {
+		_, _ = in.taxonomyNormalizer.NormalizeBookTaxonomy(ctx, book.ID, false)
 	}
 	return book, SyncStatusNew, nil
 }
