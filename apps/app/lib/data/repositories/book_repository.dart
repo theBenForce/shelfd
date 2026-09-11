@@ -147,6 +147,9 @@ class BookRepository {
   Future<Book> commitUpload(String jobId, StagedMetadata metadata) =>
       apiService.commitUploadJob(jobId, metadata);
 
+  Future<List<StagedUploadJob>> getStagedUploadJobs() =>
+      apiService.getStagedUploadJobs();
+
   Future<void> deleteUploadJob(String jobId) =>
       apiService.deleteUploadJob(jobId);
 }

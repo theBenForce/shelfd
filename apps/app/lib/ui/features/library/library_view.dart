@@ -154,11 +154,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
       title: 'Shelfd',
       subtitle: 'Connected to Homelab NAS',
       actions: [
-        IconButton(
-          icon: const Icon(Icons.upload_file_outlined),
-          tooltip: 'Upload EPUB',
-          onPressed: () => pickAndUploadEpub(context, ref),
-        ),
+        const ShelfdUploadsBadgeButton(),
         IconButton(
           icon: const Icon(Icons.refresh_rounded),
           tooltip: 'Rescan Library',

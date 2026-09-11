@@ -10,6 +10,7 @@ import 'features/reader/reader_view.dart';
 import 'features/search/search_view.dart';
 import 'features/series/series_detail_view.dart';
 import 'features/settings/settings_view.dart';
+import 'features/upload/uploads_view.dart';
 
 GoRouter createRouter({required String initialLocation, StorageService? storageService}) {
   return GoRouter(
@@ -111,6 +112,10 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
           GoRoute(
             path: '/settings',
             builder: (context, state) => const SettingsView(),
+          ),
+          GoRoute(
+            path: '/uploads',
+            builder: (context, state) => const UploadsView(),
           ),
         ],
       ),

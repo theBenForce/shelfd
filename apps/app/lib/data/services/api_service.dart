@@ -563,6 +563,21 @@ class ApiService {
     return Book.fromJson(data, baseUrl: baseUrl);
   }
 
+  Future<List<StagedUploadJob>> getStagedUploadJobs() async {
+    final response = await client.get(
+      _uri('/api/v1/books/upload/jobs?status=staged'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final jobsList = data['jobs'] as List<dynamic>? ?? [];
+    return jobsList
+        .map((j) => StagedUploadJob.fromJson(j as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<void> deleteUploadJob(String jobId) async {
     final response = await client.delete(
       _uri('/api/v1/books/upload/jobs/$jobId'),

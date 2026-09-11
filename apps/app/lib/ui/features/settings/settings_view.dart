@@ -386,6 +386,47 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
               const SizedBox(height: AppTokens.space20),
 
+              // Uploads & Ingestion Card
+              Consumer(
+                builder: (context, ref, _) {
+                  final uploadState = ref.watch(uploadProvider);
+                  return BentoCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.cloud_upload_outlined, size: 20, color: AppTokens.mutedCopy),
+                            const SizedBox(width: AppTokens.space8),
+                            Text(
+                              'Uploads & Ingestion',
+                              style: AppTypography.titleSerif(fontSize: 18),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppTokens.space12),
+                        SwitchListTile.adaptive(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            'Auto-commit uploads without review',
+                            style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: Text(
+                            'Automatically ingest dropped EPUBs into /library using extracted metadata without requiring manual approval.',
+                            style: AppTypography.captionSans(color: AppTokens.mutedCopy),
+                          ),
+                          value: uploadState.autoCommit,
+                          activeTrackColor: AppTokens.charcoalInk,
+                          onChanged: (val) => ref.read(uploadProvider.notifier).toggleAutoCommit(val),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: AppTokens.space20),
+
               // Server & Live Indexing Status Card
               Consumer(
                 builder: (context, ref, _) {

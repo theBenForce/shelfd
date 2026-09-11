@@ -241,6 +241,7 @@ type QueueStatus struct {
 	IndexedChapters int     `json:"indexed_chapters"`
 	PendingChapters int     `json:"pending_chapters"`
 	PendingUploads  int     `json:"pending_uploads"`
+	StagedUploads   int     `json:"staged_uploads"`
 	ProgressPercent float64 `json:"progress_percent"`
 	IsActive        bool    `json:"is_active"`
 	CurrentBook     string  `json:"current_book,omitempty"`

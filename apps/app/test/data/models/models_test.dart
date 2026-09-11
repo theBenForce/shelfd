@@ -178,6 +178,7 @@ void main() {
         'indexed_chapters': 40,
         'pending_chapters': 60,
         'pending_uploads': 2,
+        'staged_uploads': 0,
         'progress_percent': 40.0,
         'is_active': true,
         'current_book': 'Hyperion',
@@ -369,6 +370,47 @@ void main() {
       expect(serialized['job_id'], 'job-abc-123');
       expect(serialized['has_cover'], isTrue);
       expect((serialized['metadata'] as Map)['title'], 'Dune');
+    });
+
+    test('StagedUploadJob parses string metadata and auto-derives warnings when empty', () {
+      final jsonWithStringMeta = {
+        'id': 'job-str-999',
+        'status': 'staged',
+        'filename': 'mindful_sketching.epub',
+        'has_cover': false,
+        'warnings': <String>[],
+        'metadata': '{"title":"Mindful Sketching","authors":["Unknown"]}',
+      };
+
+      final job = StagedUploadJob.fromJson(jsonWithStringMeta);
+      expect(job.jobId, 'job-str-999');
+      expect(job.status, 'staged');
+      expect(job.filename, 'mindful_sketching.epub');
+      expect(job.metadata.title, 'Mindful Sketching');
+      expect(job.metadata.primaryAuthor, 'Unknown');
+      expect(job.warnings, contains('No author found in EPUB metadata'));
+    });
+
+    test('QueueStatus fromJson and toJson includes stagedUploads', () {
+      final json = {
+        'total_chapters': 100,
+        'indexed_chapters': 80,
+        'pending_chapters': 20,
+        'pending_uploads': 2,
+        'staged_uploads': 5,
+        'progress_percent': 80.0,
+        'is_active': true,
+      };
+
+      final status = QueueStatus.fromJson(json);
+      expect(status.totalChapters, 100);
+      expect(status.indexedChapters, 80);
+      expect(status.pendingChapters, 20);
+      expect(status.pendingUploads, 2);
+      expect(status.stagedUploads, 5);
+      expect(status.progressPercent, 80.0);
+      expect(status.isActive, isTrue);
+      expect(status.toJson()['staged_uploads'], 5);
     });
   });
 }

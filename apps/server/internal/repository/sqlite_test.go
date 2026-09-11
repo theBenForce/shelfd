@@ -945,6 +945,34 @@ func TestUploadJobs(t *testing.T) {
 		t.Fatalf("expected 3 total jobs in list, got %d", len(allJobs))
 	}
 
+	// 7b. Test ListUploadJobs with status filter and StagedUploads in queue status
+	jobStaged := &repository.UploadJob{
+		ID:         "job-staged",
+		Filename:   "staged.epub",
+		StagedPath: "/data/uploads/job-staged.epub",
+		Status:     "staged",
+	}
+	if err := repo.CreateUploadJob(ctx, jobStaged); err != nil {
+		t.Fatalf("failed to create staged job: %v", err)
+	}
+
+	stagedJobs, err := repo.ListUploadJobs(ctx, 10, "staged")
+	if err != nil {
+		t.Fatalf("failed to list staged upload jobs: %v", err)
+	}
+	if len(stagedJobs) != 1 || stagedJobs[0].ID != "job-staged" {
+		t.Fatalf("expected 1 staged job (job-staged), got %d", len(stagedJobs))
+	}
+
+	// 7c. Test GetQueueStatus includes StagedUploads
+	qStatus, err := repo.GetQueueStatus(ctx)
+	if err != nil {
+		t.Fatalf("failed to get queue status: %v", err)
+	}
+	if qStatus.StagedUploads != 1 {
+		t.Fatalf("expected 1 staged upload in queue status, got %d", qStatus.StagedUploads)
+	}
+
 	// 8. Test UpdateUploadJobCommit
 	metaJSON := `{"title":"Updated Title","author":"Updated Author"}`
 	if err := repo.UpdateUploadJobCommit(ctx, "job-3", "queued", &metaJSON); err != nil {

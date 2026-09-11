@@ -302,9 +302,13 @@ class ShelfdTopBar extends StatelessWidget implements PreferredSizeWidget {
                   ),
                 ),
                 const SizedBox(width: 4),
-                Text(
-                  subtitle!,
-                  style: AppTypography.bodySans(fontSize: 11, color: AppTokens.mutedCopy),
+                Expanded(
+                  child: Text(
+                    subtitle!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTypography.bodySans(fontSize: 11, color: AppTokens.mutedCopy),
+                  ),
                 ),
               ],
             ),
@@ -316,6 +320,27 @@ class ShelfdTopBar extends StatelessWidget implements PreferredSizeWidget {
         preferredSize: const Size.fromHeight(1),
         child: Container(color: AppTokens.crispBorder, height: 1),
       ),
+    );
+  }
+}
+
+class ShelfdUploadsBadgeButton extends ConsumerWidget {
+  const ShelfdUploadsBadgeButton({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final queue = ref.watch(queueProvider);
+    final count = queue.status?.stagedUploads ?? 0;
+    return IconButton(
+      tooltip: count > 0 ? '$count staged uploads' : 'Uploads',
+      icon: Badge(
+        isLabelVisible: count > 0,
+        label: Text('$count', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10)),
+        backgroundColor: const Color(0xFFF08C00),
+        textColor: Colors.white,
+        child: const Icon(Icons.cloud_upload_outlined, size: 22),
+      ),
+      onPressed: () => context.go('/uploads'),
     );
   }
 }
@@ -415,7 +440,7 @@ class ShelfdBottomNav extends StatelessWidget {
   }
 }
 
-class ShelfdSideNav extends StatefulWidget {
+class ShelfdSideNav extends ConsumerStatefulWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
   final String? currentPath;
@@ -436,10 +461,10 @@ class ShelfdSideNav extends StatefulWidget {
   });
 
   @override
-  State<ShelfdSideNav> createState() => _ShelfdSideNavState();
+  ConsumerState<ShelfdSideNav> createState() => _ShelfdSideNavState();
 }
 
-class _ShelfdSideNavState extends State<ShelfdSideNav> {
+class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
   bool _isLibraryExpanded = true;
 
   void _navigate(String path, int fallbackIndex) {
@@ -458,8 +483,11 @@ class _ShelfdSideNavState extends State<ShelfdSideNav> {
     final isSeries = p.startsWith('/series');
     final isAuthors = p.startsWith('/authors') || p.startsWith('/author');
     final isSearch = p.startsWith('/search') || (widget.currentPath == null && widget.currentIndex == 1);
+    final isUploads = p.startsWith('/uploads');
     final isSettings = p.startsWith('/settings') || (widget.currentPath == null && widget.currentIndex == 2);
     final isLibraryActive = isBooks || isSeries || isAuthors || (widget.currentPath == null && widget.currentIndex == 0);
+    final queueStatus = ref.watch(queueProvider).status;
+    final stagedCount = queueStatus?.stagedUploads ?? 0;
 
     return Container(
       width: AppTokens.sidebarWidth,
@@ -519,111 +547,121 @@ class _ShelfdSideNavState extends State<ShelfdSideNav> {
               ),
             ],
           ),
-          const SizedBox(height: AppTokens.space32),
+          const SizedBox(height: AppTokens.space24),
 
-          // Collapsible Library Header Item
-          _SideNavItem(
-            icon: Icons.local_library_outlined,
-            selectedIcon: Icons.local_library_rounded,
-            label: 'Library',
-            isSelected: isLibraryActive && !_isLibraryExpanded,
-            trailing: IconButton(
-              visualDensity: VisualDensity.compact,
-              icon: Icon(
-                _isLibraryExpanded ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_right_rounded,
-                size: 20,
-                color: AppTokens.mutedCopy,
+          // Scrollable Navigation Links
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Collapsible Library Header Item
+                  _SideNavItem(
+                    icon: Icons.local_library_outlined,
+                    selectedIcon: Icons.local_library_rounded,
+                    label: 'Library',
+                    isSelected: isLibraryActive && !_isLibraryExpanded,
+                    trailing: IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        _isLibraryExpanded ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_right_rounded,
+                        size: 20,
+                        color: AppTokens.mutedCopy,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _isLibraryExpanded = !_isLibraryExpanded;
+                        });
+                      },
+                    ),
+                    onTap: () {
+                      setState(() {
+                        _isLibraryExpanded = !_isLibraryExpanded;
+                      });
+                      if (_isLibraryExpanded) {
+                        _navigate('/books', 0);
+                      }
+                    },
+                  ),
+
+                  // Indented Sub-items under Library
+                  if (_isLibraryExpanded) ...[
+                    _SideNavSubItem(
+                      icon: Icons.menu_book_outlined,
+                      selectedIcon: Icons.menu_book_rounded,
+                      label: 'Books',
+                      isSelected: isBooks || (isLibraryActive && !isSeries && !isAuthors),
+                      onTap: () => _navigate('/books', 0),
+                    ),
+                    _SideNavSubItem(
+                      icon: Icons.collections_bookmark_outlined,
+                      selectedIcon: Icons.collections_bookmark_rounded,
+                      label: 'Series',
+                      isSelected: isSeries,
+                      onTap: () => _navigate('/series', 0),
+                    ),
+                    _SideNavSubItem(
+                      icon: Icons.people_outline_rounded,
+                      selectedIcon: Icons.people_rounded,
+                      label: 'Authors',
+                      isSelected: isAuthors,
+                      onTap: () => _navigate('/authors', 0),
+                    ),
+                  ],
+                  const SizedBox(height: AppTokens.space8),
+
+                  // Top-level Navigation Links
+                  _SideNavItem(
+                    icon: Icons.saved_search_outlined,
+                    selectedIcon: Icons.saved_search_rounded,
+                    label: 'Semantic Search',
+                    isSelected: isSearch,
+                    onTap: () => _navigate('/search', 1),
+                  ),
+                  const SizedBox(height: AppTokens.space8),
+                  _SideNavItem(
+                    icon: Icons.cloud_upload_outlined,
+                    selectedIcon: Icons.cloud_upload_rounded,
+                    label: 'Uploads',
+                    isSelected: isUploads,
+                    trailing: stagedCount > 0
+                        ? Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF9DB),
+                              border: Border.all(color: const Color(0xFFFFE066)),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '$stagedCount',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFFF08C00),
+                              ),
+                            ),
+                          )
+                        : null,
+                    onTap: () => _navigate('/uploads', 3),
+                  ),
+                  const SizedBox(height: AppTokens.space8),
+                  _SideNavItem(
+                    icon: Icons.settings_outlined,
+                    selectedIcon: Icons.settings_rounded,
+                    label: 'Settings',
+                    isSelected: isSettings,
+                    onTap: () => _navigate('/settings', 2),
+                  ),
+                ],
               ),
-              onPressed: () {
-                setState(() {
-                  _isLibraryExpanded = !_isLibraryExpanded;
-                });
-              },
             ),
-            onTap: () {
-              setState(() {
-                _isLibraryExpanded = !_isLibraryExpanded;
-              });
-              if (_isLibraryExpanded) {
-                _navigate('/books', 0);
-              }
-            },
           ),
 
-          // Indented Sub-items under Library
-          if (_isLibraryExpanded) ...[
-            _SideNavSubItem(
-              icon: Icons.menu_book_outlined,
-              selectedIcon: Icons.menu_book_rounded,
-              label: 'Books',
-              isSelected: isBooks || (isLibraryActive && !isSeries && !isAuthors),
-              onTap: () => _navigate('/books', 0),
-            ),
-            _SideNavSubItem(
-              icon: Icons.collections_bookmark_outlined,
-              selectedIcon: Icons.collections_bookmark_rounded,
-              label: 'Series',
-              isSelected: isSeries,
-              onTap: () => _navigate('/series', 0),
-            ),
-            _SideNavSubItem(
-              icon: Icons.people_outline_rounded,
-              selectedIcon: Icons.people_rounded,
-              label: 'Authors',
-              isSelected: isAuthors,
-              onTap: () => _navigate('/authors', 0),
-            ),
-          ],
-          const SizedBox(height: AppTokens.space8),
-
-          // Top-level Navigation Links
-          _SideNavItem(
-            icon: Icons.saved_search_outlined,
-            selectedIcon: Icons.saved_search_rounded,
-            label: 'Semantic Search',
-            isSelected: isSearch,
-            onTap: () => _navigate('/search', 1),
-          ),
-          const SizedBox(height: AppTokens.space8),
-          _SideNavItem(
-            icon: Icons.settings_outlined,
-            selectedIcon: Icons.settings_rounded,
-            label: 'Settings',
-            isSelected: isSettings,
-            onTap: () => _navigate('/settings', 2),
-          ),
-
-          const Spacer(),
+          const SizedBox(height: AppTokens.space12),
 
           // Live AI indexing queue progress card
           const _QueueStatusCard(),
           const SizedBox(height: AppTokens.space12),
-
-          // Upload EPUB Button (if callback provided)
-          if (widget.onUpload != null) ...[
-            SizedBox(
-              width: double.infinity,
-              height: 40,
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: AppTokens.boneSurface,
-                  foregroundColor: AppTokens.charcoalInk,
-                  side: const BorderSide(color: AppTokens.crispBorder),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                  ),
-                  padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
-                ),
-                onPressed: widget.onUpload,
-                icon: const Icon(Icons.upload_file_outlined, size: 18),
-                label: const Text(
-                  'Upload EPUB',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-            const SizedBox(height: AppTokens.space8),
-          ],
 
           // Rescan Library Button (if callback provided)
           if (widget.onRescan != null) ...[
