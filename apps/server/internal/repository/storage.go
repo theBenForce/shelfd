@@ -96,7 +96,7 @@ type StorageEngine interface {
 	UpdateUploadJobCommit(ctx context.Context, id string, status string, metadata *string) error
 	DeleteUploadJob(ctx context.Context, id string) error
 	GetPendingUploadJobs(ctx context.Context, limit int) ([]*UploadJob, error)
-	ListUploadJobs(ctx context.Context, limit int) ([]*UploadJob, error)
+	ListUploadJobs(ctx context.Context, limit int, status ...string) ([]*UploadJob, error)
 
 	// Queue & Background Jobs Status
 	GetQueueStatus(ctx context.Context) (*QueueStatus, error)

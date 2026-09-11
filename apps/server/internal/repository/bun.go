@@ -1647,15 +1647,18 @@ func (r *BunStorageEngine) GetPendingUploadJobs(ctx context.Context, limit int) 
 	return jobs, nil
 }
 
-func (r *BunStorageEngine) ListUploadJobs(ctx context.Context, limit int) ([]*UploadJob, error) {
+func (r *BunStorageEngine) ListUploadJobs(ctx context.Context, limit int, status ...string) ([]*UploadJob, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	var jobs []*UploadJob
-	err := r.db.NewSelect().Model(&jobs).
+	q := r.db.NewSelect().Model(&jobs).
 		Order("created_at DESC").
-		Limit(limit).
-		Scan(ctx)
+		Limit(limit)
+	if len(status) > 0 && status[0] != "" {
+		q = q.Where("status = ?", status[0])
+	}
+	err := q.Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing upload jobs: %w", err)
 	}
@@ -1711,11 +1714,19 @@ func (r *BunStorageEngine) GetQueueStatus(ctx context.Context) (*QueueStatus, er
 		return nil, fmt.Errorf("counting pending uploads: %w", err)
 	}
 
+	stagedUploads, err := r.db.NewSelect().Table("upload_jobs").
+		Where("status = ?", "staged").
+		Count(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("counting staged uploads: %w", err)
+	}
+
 	return &QueueStatus{
 		TotalChapters:   totalCount,
 		IndexedChapters: indexedParagraphs,
 		PendingChapters: pendingParagraphs,
 		PendingUploads:  pendingUploads,
+		StagedUploads:   stagedUploads,
 		ProgressPercent: progressPercent,
 		IsActive:        pendingParagraphs > 0 || pendingUploads > 0,
 	}, nil

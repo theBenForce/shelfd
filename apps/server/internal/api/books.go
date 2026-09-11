@@ -707,6 +707,7 @@ func (h *BookHandler) UploadBook(w http.ResponseWriter, r *http.Request) {
 	if h.uploadWorker != nil {
 		h.uploadWorker.Trigger()
 	}
+	h.broadcastQueueStatus(r.Context())
 
 	h.logger.Info("Enqueued book upload job", "job_id", job.ID, "filename", job.Filename, "size_bytes", header.Size)
 
@@ -893,6 +894,8 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.broadcastQueueStatus(r.Context())
+
 	h.logger.Info("Staged book upload for review", "job_id", job.ID, "filename", job.Filename, "title", title)
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -1051,6 +1054,7 @@ func (h *BookHandler) CommitUploadJob(w http.ResponseWriter, r *http.Request) {
 			Data: BuildBookListItem(r.Context(), h.repo, book),
 		})
 	}
+	h.broadcastQueueStatus(r.Context())
 
 	h.logger.Info("Committed book upload to library", "job_id", job.ID, "book_id", book.ID, "title", book.Title, "author", primaryAuthor)
 
@@ -1078,6 +1082,7 @@ func (h *BookHandler) DeleteUploadJob(w http.ResponseWriter, r *http.Request) {
 		_ = os.Remove(job.StagedPath)
 		_ = os.Remove(filepath.Join(h.dataDir, "uploads", job.ID+".cover"))
 		_ = h.repo.DeleteUploadJob(r.Context(), jobID)
+		h.broadcastQueueStatus(r.Context())
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -1127,7 +1132,8 @@ func (h *BookHandler) ListUploadJobs(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 
-	jobs, err := h.repo.ListUploadJobs(r.Context(), limit)
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	jobs, err := h.repo.ListUploadJobs(r.Context(), limit, status)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to list upload jobs: %v", err))
 		return
@@ -1141,6 +1147,27 @@ func (h *BookHandler) ListUploadJobs(w http.ResponseWriter, r *http.Request) {
 		"jobs":  jobs,
 		"total": len(jobs),
 	})
+}
+
+func (h *BookHandler) broadcastQueueStatus(ctx context.Context) {
+	if h.hub == nil {
+		return
+	}
+	status, err := h.repo.GetQueueStatus(ctx)
+	if err == nil && status != nil {
+		if h.worker != nil {
+			rt := h.worker.GetRuntimeStatus()
+			if rt.IsBusy {
+				status.IsActive = true
+				status.CurrentBook = rt.CurrentBook
+				status.CurrentChapter = rt.CurrentChapter
+			}
+		}
+		h.hub.Broadcast(events.Event{
+			Type: events.EventQueueStatus,
+			Data: status,
+		})
+	}
 }
 
 func extractIDFromPath(path, segment string) string {

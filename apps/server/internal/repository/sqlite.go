@@ -1399,17 +1399,31 @@ func (r *SQLiteStorageEngine) GetPendingUploadJobs(ctx context.Context, limit in
 	return jobs, rows.Err()
 }
 
-func (r *SQLiteStorageEngine) ListUploadJobs(ctx context.Context, limit int) ([]*UploadJob, error) {
+func (r *SQLiteStorageEngine) ListUploadJobs(ctx context.Context, limit int, status ...string) ([]*UploadJob, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	query := `
-		SELECT id, filename, staged_path, status, metadata, has_cover, book_id, error_message, created_at, updated_at
-		FROM upload_jobs
-		ORDER BY created_at DESC
-		LIMIT ?
-	`
-	rows, err := r.db.QueryContext(ctx, query, limit)
+	var query string
+	var args []any
+	if len(status) > 0 && status[0] != "" {
+		query = `
+			SELECT id, filename, staged_path, status, metadata, has_cover, book_id, error_message, created_at, updated_at
+			FROM upload_jobs
+			WHERE status = ?
+			ORDER BY created_at DESC
+			LIMIT ?
+		`
+		args = []any{status[0], limit}
+	} else {
+		query = `
+			SELECT id, filename, staged_path, status, metadata, has_cover, book_id, error_message, created_at, updated_at
+			FROM upload_jobs
+			ORDER BY created_at DESC
+			LIMIT ?
+		`
+		args = []any{limit}
+	}
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying upload jobs: %w", err)
 	}
@@ -1471,6 +1485,11 @@ func (r *SQLiteStorageEngine) GetQueueStatus(ctx context.Context) (*QueueStatus,
 	// Pending uploads
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM upload_jobs WHERE status IN ('queued', 'processing')").Scan(&status.PendingUploads); err != nil {
 		return nil, fmt.Errorf("counting pending uploads: %w", err)
+	}
+
+	// Staged uploads awaiting review
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM upload_jobs WHERE status = 'staged'").Scan(&status.StagedUploads); err != nil {
+		return nil, fmt.Errorf("counting staged uploads: %w", err)
 	}
 
 	status.IsActive = status.PendingChapters > 0 || status.PendingUploads > 0

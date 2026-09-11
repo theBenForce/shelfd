@@ -1105,6 +1105,41 @@ func TestAPI_StagedUploadAndCommit(t *testing.T) {
 		t.Errorf("expected cover length %d, got %d", len(coverData), coverRec.Body.Len())
 	}
 
+	// 2b. Test GET /api/v1/books/upload/jobs?status=staged
+	listStagedReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs?status=staged", nil)
+	listStagedReq.Header.Set("Authorization", "Bearer "+token)
+	listStagedRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(listStagedRec, listStagedReq)
+	if listStagedRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on list staged jobs, got %d", listStagedRec.Code)
+	}
+	var stagedListResp struct {
+		Jobs  []*repository.UploadJob `json:"jobs"`
+		Total int                     `json:"total"`
+	}
+	if err := json.Unmarshal(listStagedRec.Body.Bytes(), &stagedListResp); err != nil {
+		t.Fatalf("failed to unmarshal staged jobs list: %v", err)
+	}
+	if stagedListResp.Total < 1 || len(stagedListResp.Jobs) < 1 {
+		t.Fatalf("expected at least 1 staged job, got %d", stagedListResp.Total)
+	}
+
+	// 2c. Test GET /api/v1/queue/status includes staged_uploads
+	qReq := httptest.NewRequest(http.MethodGet, "/api/v1/queue/status", nil)
+	qReq.Header.Set("Authorization", "Bearer "+token)
+	qRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(qRec, qReq)
+	if qRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on queue status, got %d", qRec.Code)
+	}
+	var qStat repository.QueueStatus
+	if err := json.Unmarshal(qRec.Body.Bytes(), &qStat); err != nil {
+		t.Fatalf("failed to unmarshal queue status: %v", err)
+	}
+	if qStat.StagedUploads < 1 {
+		t.Fatalf("expected staged_uploads >= 1, got %d", qStat.StagedUploads)
+	}
+
 	// 3. Commit upload with user-edited metadata via POST /api/v1/books/upload/jobs/{id}/commit
 	series := "Earthsea Cycle"
 	seq := 1.0
