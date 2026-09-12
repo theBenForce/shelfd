@@ -928,7 +928,7 @@ func (h *BookHandler) GetUploadJobCover(w http.ResponseWriter, r *http.Request) 
 	coverPath := filepath.Join(h.dataDir, "uploads", jobID+".cover")
 	if data, err := os.ReadFile(coverPath); err == nil && len(data) > 0 {
 		w.Header().Set("Content-Type", http.DetectContentType(data))
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("Cache-Control", "no-cache")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(data)
 		return
@@ -942,7 +942,7 @@ func (h *BookHandler) GetUploadJobCover(w http.ResponseWriter, r *http.Request) 
 			if data, _, err := reader.ExtractCoverImage(); err == nil && len(data) > 0 {
 				_ = os.WriteFile(coverPath, data, 0644)
 				w.Header().Set("Content-Type", http.DetectContentType(data))
-				w.Header().Set("Cache-Control", "public, max-age=3600")
+				w.Header().Set("Cache-Control", "no-cache")
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write(data)
 				return

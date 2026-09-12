@@ -540,7 +540,8 @@ class _StagedJobCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final bookRepo = ref.watch(bookRepositoryProvider);
-    final coverVersion = ref.watch(uploadProvider.select((s) => s.coverVersions[job.jobId]));
+    final coverVersion = ref.watch(uploadProvider.select((s) => s.coverVersions[job.jobId])) ??
+        job.updatedAt?.millisecondsSinceEpoch;
     final coverUrl = job.hasCover ? bookRepo.getUploadJobCoverUrl(job.jobId, version: coverVersion) : null;
     final hasWarnings = job.warnings.isNotEmpty;
 
@@ -576,9 +577,12 @@ class _StagedJobCard extends ConsumerWidget {
                     ? Image.network(
                         coverUrl,
                         fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => const Center(
-                          child: Icon(Icons.book_outlined, size: 20, color: AppTokens.mutedCopy),
-                        ),
+                        errorBuilder: (context, error, stackTrace) {
+                          debugPrint('Cover load error: $error');
+                          return const Center(
+                            child: Icon(Icons.book_outlined, size: 20, color: AppTokens.mutedCopy),
+                          );
+                        },
                       )
                     : const Center(
                         child: Icon(Icons.book_outlined, size: 20, color: AppTokens.mutedCopy),
@@ -841,7 +845,8 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
   @override
   Widget build(BuildContext context) {
     final bookRepo = ref.watch(bookRepositoryProvider);
-    final coverVersion = ref.watch(uploadProvider.select((s) => s.coverVersions[widget.job.jobId]));
+    final coverVersion = ref.watch(uploadProvider.select((s) => s.coverVersions[widget.job.jobId])) ??
+        widget.job.updatedAt?.millisecondsSinceEpoch;
     final coverUrl = widget.job.hasCover ? bookRepo.getUploadJobCoverUrl(widget.job.jobId, version: coverVersion) : null;
 
     return Container(

@@ -521,11 +521,15 @@ class ApiService {
 
   String getUploadJobCoverUrl(String jobId, {int? version}) {
     final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
-    final url = '$cleanBase/api/v1/books/upload/jobs/$jobId/cover';
+    final params = <String>[];
     if (version != null) {
-      return '$url?v=$version';
+      params.add('v=$version');
     }
-    return url;
+    if (token != null && token!.isNotEmpty) {
+      params.add('token=$token');
+    }
+    final queryString = params.isNotEmpty ? '?${params.join('&')}' : '';
+    return '$cleanBase/api/v1/books/upload/jobs/$jobId/cover$queryString';
   }
 
   Future<void> uploadJobCover({

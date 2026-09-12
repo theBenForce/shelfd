@@ -260,7 +260,8 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
   Widget build(BuildContext context) {
     final isMobile = widget.isBottomSheet || Responsive.isMobile(context);
     final bookRepo = ref.watch(bookRepositoryProvider);
-    final coverVersion = ref.watch(uploadProvider.select((s) => s.coverVersions[widget.job.jobId]));
+    final coverVersion = ref.watch(uploadProvider.select((s) => s.coverVersions[widget.job.jobId])) ??
+        widget.job.updatedAt?.millisecondsSinceEpoch;
     final hasCover = _hasCover || widget.job.hasCover;
     final coverUrl = hasCover ? bookRepo.getUploadJobCoverUrl(widget.job.jobId, version: coverVersion) : null;
 
