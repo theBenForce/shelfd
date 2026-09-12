@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/theBenForce/shelfd/compare/v1.4.0...v1.5.0) (2026-09-12)
+
+
+### Features
+
+* authenticate media requests via cookie, allow cover replacement, and fix web folder picker ([#15](https://github.com/theBenForce/shelfd/issues/15)) ([d33388f](https://github.com/theBenForce/shelfd/commit/d33388fe50f4131b19ed14c6224d2551f8145da9))
+
 # [1.4.0](https://github.com/theBenForce/shelfd/compare/v1.3.1...v1.4.0) (2026-09-11)
 
 
