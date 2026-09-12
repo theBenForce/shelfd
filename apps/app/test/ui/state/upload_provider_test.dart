@@ -302,4 +302,77 @@ void main() {
     state = container.read(uploadProvider);
     expect(state.stagedJobs.any((j) => j.jobId == 'job-warning-2'), isFalse);
   });
+
+  test('UploadNotifier replaces job cover and increments version counter', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final storageService = StorageService(prefs);
+
+    String? uploadedCoverJobId;
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/books/upload/jobs') {
+        return http.Response(
+          jsonEncode({
+            'jobs': [
+              {
+                'job_id': 'job-cover-1',
+                'status': 'staged',
+                'filename': 'book.epub',
+                'has_cover': false,
+                'metadata': {'title': 'Book Without Cover', 'authors': ['Author']},
+              },
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (request.url.path == '/api/v1/queue/status') {
+        return http.Response(
+          jsonEncode({'pending': 0, 'processing': 0, 'staged_uploads': 1}),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (request.method == 'POST' && request.url.path == '/api/v1/books/upload/jobs/job-cover-1/cover') {
+        uploadedCoverJobId = 'job-cover-1';
+        return http.Response(
+          jsonEncode({'message': 'Cover image updated successfully', 'job_id': 'job-cover-1', 'has_cover': true}),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('Not Found', 404);
+    });
+
+    final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+    final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+    final container = ProviderContainer(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        apiServiceProvider.overrideWithValue(apiService),
+        bookRepositoryProvider.overrideWithValue(bookRepo),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final notifier = container.read(uploadProvider.notifier);
+    await notifier.loadStagedJobs();
+
+    var state = container.read(uploadProvider);
+    expect(state.stagedJobs.first.hasCover, isFalse);
+    expect(state.coverVersions['job-cover-1'], isNull);
+
+    await notifier.replaceJobCover(
+      jobId: 'job-cover-1',
+      filename: 'new_cover.jpg',
+      bytes: [1, 2, 3, 4],
+    );
+
+    expect(uploadedCoverJobId, 'job-cover-1');
+    state = container.read(uploadProvider);
+    expect(state.stagedJobs.first.hasCover, isTrue);
+    expect(state.coverVersions['job-cover-1'], 1);
+  });
 }

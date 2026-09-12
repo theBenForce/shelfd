@@ -1610,6 +1610,27 @@ func (r *BunStorageEngine) UpdateUploadJobCommit(ctx context.Context, id string,
 	return nil
 }
 
+func (r *BunStorageEngine) UpdateUploadJobCover(ctx context.Context, id string, hasCover bool) error {
+	now := time.Now().UTC()
+	res, err := r.db.NewUpdate().
+		Model((*UploadJob)(nil)).
+		Set("has_cover = ?", hasCover).
+		Set("updated_at = ?", now).
+		Where("id = ?", id).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("updating upload job cover: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *BunStorageEngine) DeleteUploadJob(ctx context.Context, id string) error {
 	res, err := r.db.NewDelete().
 		Model((*UploadJob)(nil)).

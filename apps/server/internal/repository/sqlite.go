@@ -1351,6 +1351,27 @@ func (r *SQLiteStorageEngine) UpdateUploadJobCommit(ctx context.Context, id stri
 	return nil
 }
 
+func (r *SQLiteStorageEngine) UpdateUploadJobCover(ctx context.Context, id string, hasCover bool) error {
+	now := time.Now().UTC()
+	query := `
+		UPDATE upload_jobs
+		SET has_cover = ?, updated_at = ?
+		WHERE id = ?
+	`
+	res, err := r.db.ExecContext(ctx, query, hasCover, now, id)
+	if err != nil {
+		return fmt.Errorf("updating upload job cover: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking update upload job cover result: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *SQLiteStorageEngine) DeleteUploadJob(ctx context.Context, id string) error {
 	query := `DELETE FROM upload_jobs WHERE id = ?`
 	res, err := r.db.ExecContext(ctx, query, id)

@@ -87,6 +87,17 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	http.SetCookie(w, &http.Cookie{
+		Name:     "shelfd_token",
+		Value:    token,
+		Path:     "/",
+		Expires:  expiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isSecure,
+	})
+
 	h.logger.Info("User logged in successfully", "user_id", user.ID, "username", user.Username, "remote_ip", clientIP(r))
 
 	writeJSON(w, http.StatusOK, LoginResponse{
@@ -112,6 +123,23 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+		if token != "" {
+			isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+			http.SetCookie(w, &http.Cookie{
+				Name:     "shelfd_token",
+				Value:    token,
+				Path:     "/",
+				Expires:  time.Now().Add(7 * 24 * time.Hour),
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+				Secure:   isSecure,
+			})
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user": UserResponse{
 			ID:        user.ID,
@@ -119,6 +147,25 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: user.CreatedAt,
 		},
 	})
+}
+
+func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	http.SetCookie(w, &http.Cookie{
+		Name:     "shelfd_token",
+		Value:    "",
+		Path:     "/",
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isSecure,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"message": "Logged out successfully"})
 }
 
 type ChangePasswordRequest struct {

@@ -34,6 +34,7 @@ class UploadState {
   final bool isLoadingJobs;
   final bool autoCommit;
   final String? error;
+  final Map<String, int> coverVersions;
 
   const UploadState({
     this.isUploading = false,
@@ -44,6 +45,7 @@ class UploadState {
     this.isLoadingJobs = false,
     this.autoCommit = false,
     this.error,
+    this.coverVersions = const {},
   });
 
   StagedUploadJob? get selectedJob {
@@ -71,6 +73,7 @@ class UploadState {
     bool? autoCommit,
     String? error,
     bool clearError = false,
+    Map<String, int>? coverVersions,
   }) {
     return UploadState(
       isUploading: isUploading ?? this.isUploading,
@@ -81,6 +84,7 @@ class UploadState {
       isLoadingJobs: isLoadingJobs ?? this.isLoadingJobs,
       autoCommit: autoCommit ?? this.autoCommit,
       error: clearError ? null : (error ?? this.error),
+      coverVersions: coverVersions ?? this.coverVersions,
     );
   }
 }
@@ -110,6 +114,7 @@ class UploadNotifier extends Notifier<UploadState> {
     final bookRepo = ref.read(bookRepositoryProvider);
     try {
       final jobs = await bookRepo.getStagedUploadJobs();
+      if (!ref.mounted) return;
       final currentSelected = state.selectedJobId;
       String? nextSelected = currentSelected;
       if (jobs.isNotEmpty) {
@@ -125,6 +130,7 @@ class UploadNotifier extends Notifier<UploadState> {
         isLoadingJobs: false,
       );
     } catch (e) {
+      if (!ref.mounted) return;
       state = state.copyWith(
         isLoadingJobs: false,
         error: e.toString(),
@@ -221,6 +227,7 @@ class UploadNotifier extends Notifier<UploadState> {
     final bookRepo = ref.read(bookRepositoryProvider);
     try {
       final book = await bookRepo.commitUpload(jobId, metadata);
+      if (!ref.mounted) return book;
       ref.read(libraryProvider.notifier).addBook(book);
 
       final updatedJobs = state.stagedJobs.where((j) => j.jobId != jobId).toList();
@@ -236,7 +243,9 @@ class UploadNotifier extends Notifier<UploadState> {
       ref.read(queueProvider.notifier).refresh();
       return book;
     } catch (e) {
-      state = state.copyWith(error: 'Failed to commit upload: $e');
+      if (ref.mounted) {
+        state = state.copyWith(error: 'Failed to commit upload: $e');
+      }
       return null;
     }
   }
@@ -251,6 +260,7 @@ class UploadNotifier extends Notifier<UploadState> {
 
     for (int i = 0; i < readyJobs.length; i++) {
       final job = readyJobs[i];
+      if (!ref.mounted) return committed;
       state = state.copyWith(
         uploadProgress: i / readyJobs.length,
         currentBatchStatus: 'Committing ${i + 1} of ${readyJobs.length}: ${job.metadata.title}',
@@ -258,13 +268,16 @@ class UploadNotifier extends Notifier<UploadState> {
 
       try {
         final book = await bookRepo.commitUpload(job.jobId, job.metadata);
-        ref.read(libraryProvider.notifier).addBook(book);
+        if (ref.mounted) {
+          ref.read(libraryProvider.notifier).addBook(book);
+        }
         committed++;
       } catch (e) {
         debugPrint('Error batch committing ${job.jobId}: $e');
       }
     }
 
+    if (!ref.mounted) return committed;
     state = state.copyWith(
       isUploading: false,
       clearUploadProgress: true,
@@ -272,7 +285,9 @@ class UploadNotifier extends Notifier<UploadState> {
     );
 
     await loadStagedJobs();
-    ref.read(queueProvider.notifier).refresh();
+    if (ref.mounted) {
+      ref.read(queueProvider.notifier).refresh();
+    }
     return committed;
   }
 
@@ -280,6 +295,7 @@ class UploadNotifier extends Notifier<UploadState> {
     final bookRepo = ref.read(bookRepositoryProvider);
     try {
       await bookRepo.deleteUploadJob(jobId);
+      if (!ref.mounted) return;
       final updatedJobs = state.stagedJobs.where((j) => j.jobId != jobId).toList();
       String? nextSelected;
       if (updatedJobs.isNotEmpty) {
@@ -291,7 +307,38 @@ class UploadNotifier extends Notifier<UploadState> {
       );
       ref.read(queueProvider.notifier).refresh();
     } catch (e) {
-      state = state.copyWith(error: 'Failed to discard upload: $e');
+      if (ref.mounted) {
+        state = state.copyWith(error: 'Failed to discard upload: $e');
+      }
+    }
+  }
+
+  Future<void> replaceJobCover({
+    required String jobId,
+    required String filename,
+    required List<int> bytes,
+  }) async {
+    final bookRepo = ref.read(bookRepositoryProvider);
+    await bookRepo.uploadJobCover(
+      jobId: jobId,
+      filename: filename,
+      bytes: bytes,
+    );
+    if (!ref.mounted) return;
+
+    final updatedVersions = Map<String, int>.from(state.coverVersions);
+    updatedVersions[jobId] = (updatedVersions[jobId] ?? 0) + 1;
+
+    final index = state.stagedJobs.indexWhere((j) => j.jobId == jobId);
+    if (index >= 0) {
+      final updatedJobs = List<StagedUploadJob>.from(state.stagedJobs);
+      updatedJobs[index] = updatedJobs[index].copyWith(hasCover: true);
+      state = state.copyWith(
+        stagedJobs: updatedJobs,
+        coverVersions: updatedVersions,
+      );
+    } else {
+      state = state.copyWith(coverVersions: updatedVersions);
     }
   }
 
@@ -303,6 +350,7 @@ class UploadNotifier extends Notifier<UploadState> {
         await bookRepo.deleteUploadJob(job.jobId);
       } catch (_) {}
     }
+    if (!ref.mounted) return;
     state = state.copyWith(
       isUploading: false,
       stagedJobs: const [],

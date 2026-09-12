@@ -365,4 +365,114 @@ func TestUpdateMetadata_RepairsCorruptedLine1Declaration(t *testing.T) {
 	}
 }
 
+func TestUpdateCover_ReplaceExisting(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfXML := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Test Title</dc:title>
+    <meta name="cover" content="cover-image"/>
+  </metadata>
+  <manifest>
+    <item id="cover-image" href="images/cover.jpg" media-type="image/jpeg"/>
+  </manifest>
+  <spine></spine>
+</package>`
+
+	oldCover := []byte("old-cover-data")
+	epubBytes := createTestEPUB(map[string][]byte{
+		"META-INF/container.xml": []byte(containerXML),
+		"OEBPS/content.opf":      []byte(opfXML),
+		"OEBPS/images/cover.jpg": oldCover,
+	})
+
+	tmpDir := t.TempDir()
+	tmpEPUB := filepath.Join(tmpDir, "test.epub")
+	if err := os.WriteFile(tmpEPUB, epubBytes, 0644); err != nil {
+		t.Fatalf("writing temp epub: %v", err)
+	}
+
+	newCover := []byte("brand-new-cover-image-bytes")
+	if err := epub.UpdateCover(tmpEPUB, newCover, "image/jpeg"); err != nil {
+		t.Fatalf("UpdateCover failed: %v", err)
+	}
+
+	reader, err := epub.Open(tmpEPUB)
+	if err != nil {
+		t.Fatalf("opening updated epub: %v", err)
+	}
+	defer reader.Close()
+
+	extracted, ext, err := reader.ExtractCoverImage()
+	if err != nil {
+		t.Fatalf("extracting cover: %v", err)
+	}
+	if string(extracted) != string(newCover) {
+		t.Errorf("expected %q, got %q", string(newCover), string(extracted))
+	}
+	if ext != ".jpg" {
+		t.Errorf("expected ext .jpg, got %s", ext)
+	}
+}
+
+func TestUpdateCover_InsertNew(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfXML := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>No Cover Book</dc:title>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine></spine>
+</package>`
+
+	epubBytes := createTestEPUB(map[string][]byte{
+		"META-INF/container.xml": []byte(containerXML),
+		"content.opf":            []byte(opfXML),
+		"ch1.xhtml":              []byte("<html/>"),
+	})
+
+	tmpDir := t.TempDir()
+	tmpEPUB := filepath.Join(tmpDir, "test_nocover.epub")
+	if err := os.WriteFile(tmpEPUB, epubBytes, 0644); err != nil {
+		t.Fatalf("writing temp epub: %v", err)
+	}
+
+	newCover := []byte("inserted-png-cover")
+	if err := epub.UpdateCover(tmpEPUB, newCover, "image/png"); err != nil {
+		t.Fatalf("UpdateCover failed on epub with no cover: %v", err)
+	}
+
+	reader, err := epub.Open(tmpEPUB)
+	if err != nil {
+		t.Fatalf("opening updated epub: %v", err)
+	}
+	defer reader.Close()
+
+	extracted, ext, err := reader.ExtractCoverImage()
+	if err != nil {
+		t.Fatalf("extracting cover: %v", err)
+	}
+	if string(extracted) != string(newCover) {
+		t.Errorf("expected %q, got %q", string(newCover), string(extracted))
+	}
+	if ext != ".png" {
+		t.Errorf("expected ext .png, got %s", ext)
+	}
+}
+
 

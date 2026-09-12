@@ -953,6 +953,98 @@ func (h *BookHandler) GetUploadJobCover(w http.ResponseWriter, r *http.Request) 
 	writeJSONError(w, http.StatusNotFound, "Cover image not found for staged upload")
 }
 
+// UploadJobCover handles uploading a replacement cover image for a staged upload job.
+func (h *BookHandler) UploadJobCover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	jobID := r.PathValue("id")
+	if jobID == "" {
+		jobID = extractIDFromPath(r.URL.Path, "jobs")
+	}
+	if jobID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Job ID required")
+		return
+	}
+
+	job, err := h.repo.GetUploadJob(r.Context(), jobID)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeJSONError(w, http.StatusNotFound, "Upload job not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get upload job: %v", err))
+		return
+	}
+
+	if job.Status != "staged" {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Upload job is not in 'staged' status (current status: %s)", job.Status))
+		return
+	}
+
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid form data: max 10MB cover image")
+		return
+	}
+
+	file, header, err := r.FormFile("cover")
+	if err != nil {
+		file, header, err = r.FormFile("file")
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "No image file provided (field 'cover' or 'file')")
+		return
+	}
+	defer file.Close()
+
+	coverData, err := io.ReadAll(file)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to read cover image")
+		return
+	}
+
+	contentType := http.DetectContentType(coverData)
+	if !strings.HasPrefix(contentType, "image/") {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid file format (%s): must be an image (JPEG, PNG, WebP)", contentType))
+		return
+	}
+
+	uploadsDir := filepath.Join(h.dataDir, "uploads")
+	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to access uploads directory")
+		return
+	}
+
+	coverPath := filepath.Join(uploadsDir, job.ID+".cover")
+	if err := os.WriteFile(coverPath, coverData, 0644); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to save cover image")
+		return
+	}
+
+	// Update staged EPUB if it exists
+	if job.StagedPath != "" {
+		if err := epub.UpdateCover(job.StagedPath, coverData, contentType); err != nil {
+			h.logger.Warn("Failed to update cover inside staged EPUB", "job_id", job.ID, "error", err)
+		}
+	}
+
+	// Update database record
+	if err := h.repo.UpdateUploadJobCover(r.Context(), job.ID, true); err != nil {
+		h.logger.Warn("Failed to update upload job has_cover status", "job_id", job.ID, "error", err)
+	}
+
+	h.broadcastQueueStatus(r.Context())
+	h.logger.Info("Uploaded replacement cover for staged book", "job_id", job.ID, "filename", header.Filename, "bytes", len(coverData))
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"message":   "Cover image updated successfully",
+		"job_id":    job.ID,
+		"has_cover": true,
+	})
+}
+
 // CommitUploadJob applies any edited metadata to the EPUB on disk and finalizes ingestion into /library.
 func (h *BookHandler) CommitUploadJob(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1029,6 +1121,22 @@ func (h *BookHandler) CommitUploadJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer stagedFile.Close()
+
+	// If a staged cover file exists, write it into /library/<Author>/<Title>/cover.<ext>
+	// so Audiobookshelf immediately detects it as the book cover.
+	stagedCoverPath := filepath.Join(h.dataDir, "uploads", job.ID+".cover")
+	if coverBytes, err := os.ReadFile(stagedCoverPath); err == nil && len(coverBytes) > 0 {
+		ext := ".jpg"
+		ct := http.DetectContentType(coverBytes)
+		if strings.Contains(ct, "png") {
+			ext = ".png"
+		} else if strings.Contains(ct, "webp") {
+			ext = ".webp"
+		}
+		bookDir := filepath.Join(h.libraryDir, scanner.SanitizePathSegment(primaryAuthor), scanner.SanitizePathSegment(title))
+		_ = os.MkdirAll(bookDir, 0755)
+		_ = os.WriteFile(filepath.Join(bookDir, "cover"+ext), coverBytes, 0644)
+	}
 
 	book, err := h.ingester.SaveUpload(r.Context(), primaryAuthor, title, stagedFile)
 	stagedFile.Close()

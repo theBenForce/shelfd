@@ -53,18 +53,8 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
 
   Future<void> _pickFolder() async {
     try {
-      final dirPath = await FilePicker.getDirectoryPath();
-      if (dirPath == null || dirPath.trim().isEmpty) return;
-
-      final epubs = await scanPathForEpubs(dirPath);
-      if (epubs.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No .epub files found in selected folder')),
-          );
-        }
-        return;
-      }
+      final epubs = await pickFolderForEpubs();
+      if (epubs.isEmpty) return;
 
       if (mounted) {
         await ref.read(uploadProvider.notifier).uploadEpubFiles(epubs);
@@ -550,7 +540,8 @@ class _StagedJobCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final bookRepo = ref.watch(bookRepositoryProvider);
-    final coverUrl = job.hasCover ? bookRepo.getUploadJobCoverUrl(job.jobId) : null;
+    final coverVersion = ref.watch(uploadProvider.select((s) => s.coverVersions[job.jobId]));
+    final coverUrl = job.hasCover ? bookRepo.getUploadJobCoverUrl(job.jobId, version: coverVersion) : null;
     final hasWarnings = job.warnings.isNotEmpty;
 
     return Material(
@@ -796,6 +787,49 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
     }
   }
 
+  bool _isUploadingCover = false;
+
+  Future<void> _pickAndUploadCover() async {
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
+      );
+      if (result.isEmpty) return;
+
+      final file = result.first;
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) return;
+
+      setState(() => _isUploadingCover = true);
+      await ref.read(uploadProvider.notifier).replaceJobCover(
+        jobId: widget.job.jobId,
+        filename: file.name,
+        bytes: bytes,
+      );
+
+      if (mounted) {
+        setState(() => _isUploadingCover = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cover image updated successfully'),
+            backgroundColor: AppTokens.charcoalInk,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isUploadingCover = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to upload cover: $e'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _discard() async {
     setState(() => _isDiscarding = true);
     await ref.read(uploadProvider.notifier).discardJob(widget.job.jobId);
@@ -807,7 +841,8 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
   @override
   Widget build(BuildContext context) {
     final bookRepo = ref.watch(bookRepositoryProvider);
-    final coverUrl = widget.job.hasCover ? bookRepo.getUploadJobCoverUrl(widget.job.jobId) : null;
+    final coverVersion = ref.watch(uploadProvider.select((s) => s.coverVersions[widget.job.jobId]));
+    final coverUrl = widget.job.hasCover ? bookRepo.getUploadJobCoverUrl(widget.job.jobId, version: coverVersion) : null;
 
     return Container(
       padding: const EdgeInsets.all(AppTokens.space24),
@@ -837,26 +872,74 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 64,
-                  height: 94,
-                  decoration: BoxDecoration(
-                    color: AppTokens.boneContainer,
+                Tooltip(
+                  message: 'Click to upload replacement cover',
+                  child: InkWell(
+                    onTap: _isUploadingCover ? null : _pickAndUploadCover,
                     borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                    border: Border.all(color: AppTokens.crispBorder),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: coverUrl != null
-                      ? Image.network(
-                          coverUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => const Center(
-                            child: Icon(Icons.book_outlined, size: 24, color: AppTokens.mutedCopy),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: 64,
+                          height: 94,
+                          decoration: BoxDecoration(
+                            color: AppTokens.boneContainer,
+                            borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                            border: Border.all(color: AppTokens.crispBorder),
                           ),
-                        )
-                      : const Center(
-                          child: Icon(Icons.book_outlined, size: 24, color: AppTokens.mutedCopy),
+                          clipBehavior: Clip.antiAlias,
+                          child: coverUrl != null
+                              ? Image.network(
+                                  coverUrl,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => const Center(
+                                    child: Icon(Icons.book_outlined, size: 24, color: AppTokens.mutedCopy),
+                                  ),
+                                )
+                              : const Center(
+                                  child: Icon(Icons.book_outlined, size: 24, color: AppTokens.mutedCopy),
+                                ),
                         ),
+                        if (_isUploadingCover)
+                          Container(
+                            width: 64,
+                            height: 94,
+                            decoration: BoxDecoration(
+                              color: Colors.black45,
+                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                            ),
+                            child: const Center(
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          Positioned(
+                            bottom: 4,
+                            right: 4,
+                            child: Container(
+                              padding: const EdgeInsets.all(3),
+                              decoration: BoxDecoration(
+                                color: AppTokens.charcoalInk.withValues(alpha: 0.75),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.camera_alt_outlined,
+                                size: 12,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(width: AppTokens.space16),
                 Expanded(

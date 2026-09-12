@@ -519,9 +519,38 @@ class ApiService {
     return BookChatResponse.fromJson(data);
   }
 
-  String getUploadJobCoverUrl(String jobId) {
+  String getUploadJobCoverUrl(String jobId, {int? version}) {
     final cleanBase = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
-    return '$cleanBase/api/v1/books/upload/jobs/$jobId/cover';
+    final url = '$cleanBase/api/v1/books/upload/jobs/$jobId/cover';
+    if (version != null) {
+      return '$url?v=$version';
+    }
+    return url;
+  }
+
+  Future<void> uploadJobCover({
+    required String jobId,
+    required String filename,
+    required List<int> bytes,
+  }) async {
+    final uri = _uri('/api/v1/books/upload/jobs/$jobId/cover');
+    final request = http.MultipartRequest('POST', uri);
+    if (token != null && token!.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        'cover',
+        bytes,
+        filename: filename,
+      ),
+    );
+
+    final streamedResponse = await client.send(request);
+    final response = await http.Response.fromStream(streamedResponse);
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
   }
 
   Future<StagedUploadJob> stageUploadBook({

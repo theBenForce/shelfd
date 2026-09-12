@@ -42,6 +42,12 @@ func AuthMiddleware(repo repository.StorageEngine, jwtSecret string) func(http.H
 			}
 
 			if rawToken == "" {
+				if cookie, err := r.Cookie("shelfd_token"); err == nil && cookie.Value != "" {
+					rawToken = strings.TrimSpace(cookie.Value)
+				}
+			}
+
+			if rawToken == "" {
 				rawToken = strings.TrimSpace(r.URL.Query().Get("token"))
 			}
 

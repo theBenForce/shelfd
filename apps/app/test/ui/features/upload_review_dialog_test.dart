@@ -51,6 +51,7 @@ void main() {
         ProviderScope(
           overrides: [
             bookRepositoryProvider.overrideWithValue(bookRepo),
+            storageServiceProvider.overrideWithValue(storageService),
           ],
           child: MaterialApp(
             theme: AppTheme.buildTheme(ReadingThemeMode.bone),
@@ -106,6 +107,7 @@ void main() {
         ProviderScope(
           overrides: [
             bookRepositoryProvider.overrideWithValue(bookRepo),
+            storageServiceProvider.overrideWithValue(storageService),
           ],
           child: MaterialApp(
             theme: AppTheme.buildTheme(ReadingThemeMode.bone),
@@ -166,6 +168,7 @@ void main() {
         ProviderScope(
           overrides: [
             bookRepositoryProvider.overrideWithValue(bookRepo),
+            storageServiceProvider.overrideWithValue(storageService),
           ],
           child: MaterialApp(
             theme: AppTheme.buildTheme(ReadingThemeMode.bone),
@@ -238,6 +241,7 @@ void main() {
         ProviderScope(
           overrides: [
             bookRepositoryProvider.overrideWithValue(bookRepo),
+            storageServiceProvider.overrideWithValue(storageService),
           ],
           child: MaterialApp(
             theme: AppTheme.buildTheme(ReadingThemeMode.bone),

@@ -136,7 +136,19 @@ class BookRepository {
   }) =>
       apiService.chatWithBook(bookId, message, history: history);
 
-  String getUploadJobCoverUrl(String jobId) => apiService.getUploadJobCoverUrl(jobId);
+  String getUploadJobCoverUrl(String jobId, {int? version}) =>
+      apiService.getUploadJobCoverUrl(jobId, version: version);
+
+  Future<void> uploadJobCover({
+    required String jobId,
+    required String filename,
+    required List<int> bytes,
+  }) =>
+      apiService.uploadJobCover(
+        jobId: jobId,
+        filename: filename,
+        bytes: bytes,
+      );
 
   Future<StagedUploadJob> stageUpload({
     required String filename,
