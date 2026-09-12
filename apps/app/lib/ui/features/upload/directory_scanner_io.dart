@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import '../../state/upload_provider.dart';
 
 bool isDirectoryPath(String path) {
@@ -41,4 +42,12 @@ Future<List<PickedEpubFile>> scanPathForEpubs(String path) async {
     }
   } catch (_) {}
   return results;
+}
+
+Future<List<PickedEpubFile>> pickFolderForEpubs() async {
+  final dirPath = await FilePicker.getDirectoryPath();
+  if (dirPath == null || dirPath.trim().isEmpty) {
+    return [];
+  }
+  return scanPathForEpubs(dirPath);
 }

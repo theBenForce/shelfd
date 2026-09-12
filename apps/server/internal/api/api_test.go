@@ -255,6 +255,72 @@ func TestAPI_Auth_LoginAndMe(t *testing.T) {
 	}
 }
 
+func TestAPI_AuthCookie_LoginAndMeAndLogout(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	// 1. Login sets shelfd_token cookie
+	loginBody := fmt.Sprintf(`{"username":"%s","password":"%s"}`, f.user.Username, f.password)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(loginBody))
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on login, got %d", rec.Code)
+	}
+
+	cookies := rec.Result().Cookies()
+	var authCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == "shelfd_token" {
+			authCookie = c
+			break
+		}
+	}
+	if authCookie == nil {
+		t.Fatalf("expected shelfd_token cookie to be set on login")
+	}
+	if !authCookie.HttpOnly {
+		t.Errorf("expected HttpOnly to be true on shelfd_token cookie")
+	}
+	if authCookie.Path != "/" {
+		t.Errorf("expected Path=/ on shelfd_token cookie, got %s", authCookie.Path)
+	}
+
+	// 2. Access /api/v1/auth/me using ONLY the cookie
+	meReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	meReq.AddCookie(authCookie)
+	meRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(meRec, meReq)
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /me with cookie, got %d: %s", meRec.Code, meRec.Body.String())
+	}
+
+	// 3. Logout clears the cookie
+	logoutReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	logoutReq.AddCookie(authCookie)
+	logoutRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(logoutRec, logoutReq)
+	if logoutRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on logout, got %d", logoutRec.Code)
+	}
+
+	logoutCookies := logoutRec.Result().Cookies()
+	var clearedCookie *http.Cookie
+	for _, c := range logoutCookies {
+		if c.Name == "shelfd_token" {
+			clearedCookie = c
+			break
+		}
+	}
+	if clearedCookie == nil {
+		t.Fatalf("expected shelfd_token cookie to be cleared on logout")
+	}
+	if clearedCookie.MaxAge > 0 || clearedCookie.Value != "" {
+		t.Errorf("expected cookie to be expired, got MaxAge %d, value %q", clearedCookie.MaxAge, clearedCookie.Value)
+	}
+}
+
 func TestAPI_Auth_ChangePassword(t *testing.T) {
 	f := setupAPITest(t)
 	defer f.db.Close()
@@ -677,6 +743,7 @@ func TestAPI_Books_Cover(t *testing.T) {
 	defer f.db.Close()
 	defer f.repo.Close()
 
+	token := f.loginAndGetToken(t)
 	bookID := "book-with-cover-123"
 	coversDir := filepath.Join(f.dataDir, "covers")
 	os.MkdirAll(coversDir, 0755)
@@ -684,8 +751,17 @@ func TestAPI_Books_Cover(t *testing.T) {
 	coverPath := filepath.Join(coversDir, bookID+".jpg")
 	os.WriteFile(coverPath, []byte("fake-jpeg-data"), 0644)
 
-	// Cover endpoint is public for <img> tags
+	// Unauthenticated request should return 401
+	unauthReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/books/%s/cover", bookID), nil)
+	unauthRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(unauthRec, unauthReq)
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated cover, got %d", unauthRec.Code)
+	}
+
+	// Cover endpoint authenticated via cookie
 	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/books/%s/cover", bookID), nil)
+	req.AddCookie(&http.Cookie{Name: "shelfd_token", Value: token})
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
 
@@ -699,8 +775,9 @@ func TestAPI_Books_Cover(t *testing.T) {
 		t.Errorf("expected Cache-Control public, got %s", rec.Header().Get("Cache-Control"))
 	}
 
-	// Missing cover
+	// Missing cover (authenticated)
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/books/missing-book/cover", nil)
+	req.AddCookie(&http.Cookie{Name: "shelfd_token", Value: token})
 	rec = httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -791,6 +868,7 @@ func TestAPI_GetBookCover(t *testing.T) {
 	defer f.repo.Close()
 
 	ctx := context.Background()
+	token := f.loginAndGetToken(t)
 
 	// 1. Book with JPEG cover in libraryDir
 	book1 := &repository.Book{
@@ -808,7 +886,17 @@ func TestAPI_GetBookCover(t *testing.T) {
 	jpegData := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46}
 	os.WriteFile(filepath.Join(book1CoverDir, "cover.jpg"), jpegData, 0644)
 
+	// 1a. Unauthenticated request should fail with 401
+	unauthReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-cov-1/cover", nil)
+	unauthRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(unauthRec, unauthReq)
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated cover, got %d", unauthRec.Code)
+	}
+
+	// 1b. Authenticated with shelfd_token cookie
 	req1 := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-cov-1/cover", nil)
+	req1.AddCookie(&http.Cookie{Name: "shelfd_token", Value: token})
 	rec1 := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec1, req1)
 
@@ -822,7 +910,7 @@ func TestAPI_GetBookCover(t *testing.T) {
 		t.Errorf("served cover bytes mismatch")
 	}
 
-	// 2. Book with PNG cover in libraryDir
+	// 2. Book with PNG cover in libraryDir, authenticated via ?token= query parameter
 	book2 := &repository.Book{
 		ID:        "book-cov-2",
 		Title:     "Story of Your Life",
@@ -838,18 +926,18 @@ func TestAPI_GetBookCover(t *testing.T) {
 	pngData := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
 	os.WriteFile(filepath.Join(book2CoverDir, "cover.png"), pngData, 0644)
 
-	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-cov-2/cover", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-cov-2/cover?token="+token, nil)
 	rec2 := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec2, req2)
 
 	if rec2.Code != http.StatusOK {
-		t.Fatalf("expected 200 for library PNG cover, got %d: %s", rec2.Code, rec2.Body.String())
+		t.Fatalf("expected 200 for library PNG cover via query token, got %d: %s", rec2.Code, rec2.Body.String())
 	}
 	if ct := rec2.Header().Get("Content-Type"); ct != "image/png" {
 		t.Errorf("expected Content-Type image/png, got %s", ct)
 	}
 
-	// 3. Book with fallback cover in dataDir
+	// 3. Book with fallback cover in dataDir, authenticated via Authorization header
 	book3 := &repository.Book{
 		ID:        "book-cov-3",
 		Title:     "Fallback Book",
@@ -865,6 +953,7 @@ func TestAPI_GetBookCover(t *testing.T) {
 	os.WriteFile(filepath.Join(dataCoverDir, "book-cov-3.jpg"), jpegData, 0644)
 
 	req3 := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-cov-3/cover", nil)
+	req3.Header.Set("Authorization", "Bearer "+token)
 	rec3 := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec3, req3)
 
@@ -872,8 +961,9 @@ func TestAPI_GetBookCover(t *testing.T) {
 		t.Fatalf("expected 200 for data fallback cover, got %d", rec3.Code)
 	}
 
-	// 4. Non-existent cover
+	// 4. Non-existent cover (authenticated)
 	req4 := httptest.NewRequest(http.MethodGet, "/api/v1/books/nonexistent/cover", nil)
+	req4.AddCookie(&http.Cookie{Name: "shelfd_token", Value: token})
 	rec4 := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec4, req4)
 
@@ -1127,9 +1217,17 @@ func TestAPI_StagedUploadAndCommit(t *testing.T) {
 		t.Errorf("expected warnings for missing author")
 	}
 
-	// 2. Fetch cover preview via GET /api/v1/books/upload/jobs/{id}/cover
+	// 2. Unauthenticated cover preview should fail with 401
+	unauthCoverReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/"+stageResp.JobID+"/cover", nil)
+	unauthCoverRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(unauthCoverRec, unauthCoverReq)
+	if unauthCoverRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on unauthenticated cover preview, got %d", unauthCoverRec.Code)
+	}
+
+	// 2b. Authenticated cover preview via shelfd_token cookie
 	coverReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/"+stageResp.JobID+"/cover", nil)
-	coverReq.Header.Set("Authorization", "Bearer "+token)
+	coverReq.AddCookie(&http.Cookie{Name: "shelfd_token", Value: token})
 	coverRec := httptest.NewRecorder()
 	f.handler.ServeHTTP(coverRec, coverReq)
 
@@ -1138,6 +1236,36 @@ func TestAPI_StagedUploadAndCommit(t *testing.T) {
 	}
 	if coverRec.Body.Len() != len(coverData) {
 		t.Errorf("expected cover length %d, got %d", len(coverData), coverRec.Body.Len())
+	}
+
+	// 2c. Upload replacement cover image via POST /api/v1/books/upload/jobs/{id}/cover
+	replCoverData := []byte("\x89PNG\r\n\x1a\nreplacement-png-cover-bytes-for-staged-upload")
+	replBody := new(bytes.Buffer)
+	replMpw := multipart.NewWriter(replBody)
+	replPart, _ := replMpw.CreateFormFile("cover", "replacement.png")
+	replPart.Write(replCoverData)
+	replMpw.Close()
+
+	uploadCoverReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/jobs/"+stageResp.JobID+"/cover", replBody)
+	uploadCoverReq.Header.Set("Authorization", "Bearer "+token)
+	uploadCoverReq.Header.Set("Content-Type", replMpw.FormDataContentType())
+	uploadCoverRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(uploadCoverRec, uploadCoverReq)
+
+	if uploadCoverRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on cover upload, got %d: %s", uploadCoverRec.Code, uploadCoverRec.Body.String())
+	}
+
+	// 2d. Verify updated cover preview returns replacement cover
+	coverReq2 := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/"+stageResp.JobID+"/cover", nil)
+	coverReq2.AddCookie(&http.Cookie{Name: "shelfd_token", Value: token})
+	coverRec2 := httptest.NewRecorder()
+	f.handler.ServeHTTP(coverRec2, coverReq2)
+	if coverRec2.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on updated cover preview, got %d", coverRec2.Code)
+	}
+	if !bytes.Equal(coverRec2.Body.Bytes(), replCoverData) {
+		t.Errorf("expected replacement cover bytes, got %q", coverRec2.Body.Bytes())
 	}
 
 	// 2b. Test GET /api/v1/books/upload/jobs?status=staged
@@ -1237,6 +1365,14 @@ func TestAPI_StagedUploadAndCommit(t *testing.T) {
 	}
 	if parsed.Series == nil || parsed.Series.Name != "Earthsea Cycle" {
 		t.Errorf("expected updated series inside EPUB, got %+v", parsed.Series)
+	}
+
+	// 5b. Verify committed book has cover.png in library book folder
+	libCoverPath := filepath.Join(f.libDir, "Ursula K. Le Guin", "A Wizard of Earthsea", "cover.png")
+	if data, err := os.ReadFile(libCoverPath); err != nil {
+		t.Fatalf("expected cover.png in library book folder, not found: %v", err)
+	} else if !bytes.Equal(data, replCoverData) {
+		t.Errorf("expected library cover.png to match replacement cover bytes")
 	}
 
 	// 6. Verify staged file was removed from dataDir/uploads
@@ -1834,6 +1970,7 @@ func TestRequestLoggerMiddleware(t *testing.T) {
 func TestAuthorPhotoServingAndUpload(t *testing.T) {
 	f := setupAPITest(t)
 	ctx := context.Background()
+	token := f.loginAndGetToken(t)
 
 	// 1. Create an author and book
 	author, err := f.repo.UpsertAuthor(ctx, "Neil Gaiman")
@@ -1853,8 +1990,18 @@ func TestAuthorPhotoServingAndUpload(t *testing.T) {
 		t.Fatalf("failed to write author.jpg: %v", err)
 	}
 
-	// 3. Test GET /api/v1/authors/{id}/photo (public endpoint)
+	// 3. Test GET /api/v1/authors/{id}/photo
+	// 3a. Unauthenticated should fail with 401
+	unauthReq := httptest.NewRequest(http.MethodGet, "/api/v1/authors/"+author.ID+"/photo", nil)
+	unauthRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(unauthRec, unauthReq)
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on unauthenticated author photo, got %d", unauthRec.Code)
+	}
+
+	// 3b. Authenticated with cookie
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/authors/"+author.ID+"/photo", nil)
+	req.AddCookie(&http.Cookie{Name: "shelfd_token", Value: token})
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
 
@@ -1869,7 +2016,6 @@ func TestAuthorPhotoServingAndUpload(t *testing.T) {
 	}
 
 	// 4. Test GET /api/v1/authors lists author with photo_url
-	token := f.loginAndGetToken(t)
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/authors", nil)
 	listReq.Header.Set("Authorization", "Bearer "+token)
 	listRec := httptest.NewRecorder()

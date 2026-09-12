@@ -183,6 +183,260 @@ func UpdateMetadata(epubPath string, update MetadataUpdate) error {
 	return nil
 }
 
+// UpdateCover replaces or inserts the cover image in an EPUB archive.
+func UpdateCover(epubPath string, coverData []byte, mediaType string) error {
+	cleanPath := filepath.Clean(epubPath)
+	zr, err := zip.OpenReader(cleanPath)
+	if err != nil {
+		return fmt.Errorf("opening epub archive: %w", err)
+	}
+	defer zr.Close()
+
+	for _, f := range zr.File {
+		if err := validateZipEntry(f.Name); err != nil {
+			return err
+		}
+	}
+
+	var containerFile *zip.File
+	for _, f := range zr.File {
+		if strings.TrimPrefix(path.Clean(strings.ReplaceAll(f.Name, "\\", "/")), "/") == "META-INF/container.xml" {
+			containerFile = f
+			break
+		}
+	}
+	if containerFile == nil {
+		return fmt.Errorf("META-INF/container.xml not found")
+	}
+
+	containerData, err := readZipFile(containerFile)
+	if err != nil {
+		return fmt.Errorf("reading container.xml: %w", err)
+	}
+
+	rootPath, err := parseContainerXML(containerData)
+	if err != nil {
+		return fmt.Errorf("parsing container.xml: %w", err)
+	}
+
+	var opfFile *zip.File
+	for _, f := range zr.File {
+		if f.Name == rootPath {
+			opfFile = f
+			break
+		}
+	}
+	if opfFile == nil {
+		return fmt.Errorf("package file not found at %s", rootPath)
+	}
+
+	opfData, err := readZipFile(opfFile)
+	if err != nil {
+		return fmt.Errorf("reading package file: %w", err)
+	}
+
+	parsedOPF, err := parseOPF(opfData)
+	if err != nil {
+		return fmt.Errorf("parsing opf package: %w", err)
+	}
+
+	rootBase := path.Dir(rootPath)
+	if rootBase == "." {
+		rootBase = ""
+	}
+
+	existingCoverHref := findCoverHref(parsedOPF)
+	fullCoverPath := ""
+	if existingCoverHref != "" {
+		if rootBase != "" {
+			fullCoverPath = path.Join(rootBase, existingCoverHref)
+		} else {
+			fullCoverPath = existingCoverHref
+		}
+	} else {
+		coverFilename := "cover.jpg"
+		if strings.Contains(mediaType, "png") {
+			coverFilename = "cover.png"
+		} else if strings.Contains(mediaType, "webp") {
+			coverFilename = "cover.webp"
+		}
+		if rootBase != "" {
+			fullCoverPath = path.Join(rootBase, coverFilename)
+			existingCoverHref = coverFilename
+		} else {
+			fullCoverPath = coverFilename
+			existingCoverHref = coverFilename
+		}
+	}
+	cleanFullCoverPath := strings.TrimPrefix(path.Clean(strings.ReplaceAll(fullCoverPath, "\\", "/")), "/")
+
+	tmpPath := cleanPath + ".tmp"
+	tmpFile, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("creating temp epub file: %w", err)
+	}
+	defer func() {
+		tmpFile.Close()
+		_ = os.Remove(tmpPath)
+	}()
+
+	zw := zip.NewWriter(tmpFile)
+
+	mimetypeHeader := &zip.FileHeader{
+		Name:     "mimetype",
+		Method:   zip.Store,
+		Modified: time.Now(),
+	}
+	mw, err := zw.CreateHeader(mimetypeHeader)
+	if err != nil {
+		return fmt.Errorf("creating mimetype entry: %w", err)
+	}
+	if _, err := mw.Write([]byte("application/epub+zip")); err != nil {
+		return fmt.Errorf("writing mimetype entry: %w", err)
+	}
+
+	coverWritten := false
+	cleanRootPath := strings.TrimPrefix(path.Clean(strings.ReplaceAll(rootPath, "\\", "/")), "/")
+
+	for _, entry := range zr.File {
+		if entry.Name == "mimetype" || entry.Name == "" {
+			continue
+		}
+		entryClean := strings.TrimPrefix(path.Clean(strings.ReplaceAll(entry.Name, "\\", "/")), "/")
+
+		if entry.Name == rootPath || entryClean == cleanRootPath {
+			updatedOPF := opfData
+			if findCoverHref(parsedOPF) == "" {
+				updatedOPF = injectCoverIntoOPF(opfData, existingCoverHref, mediaType)
+			}
+			h := &zip.FileHeader{
+				Name:     rootPath,
+				Method:   zip.Deflate,
+				Modified: time.Now(),
+			}
+			w, err := zw.CreateHeader(h)
+			if err != nil {
+				return fmt.Errorf("creating opf entry in new zip: %w", err)
+			}
+			if _, err := w.Write(updatedOPF); err != nil {
+				return fmt.Errorf("writing opf entry: %w", err)
+			}
+			continue
+		}
+
+		if entryClean == cleanFullCoverPath {
+			h := &zip.FileHeader{
+				Name:     entry.Name,
+				Method:   zip.Deflate,
+				Modified: time.Now(),
+			}
+			w, err := zw.CreateHeader(h)
+			if err != nil {
+				return fmt.Errorf("creating cover entry in new zip: %w", err)
+			}
+			if _, err := w.Write(coverData); err != nil {
+				return fmt.Errorf("writing replacement cover entry: %w", err)
+			}
+			coverWritten = true
+			continue
+		}
+
+		h := &zip.FileHeader{
+			Name:     entry.Name,
+			Method:   entry.Method,
+			Modified: entry.Modified,
+		}
+		w, err := zw.CreateHeader(h)
+		if err != nil {
+			return fmt.Errorf("creating entry %s in new zip: %w", entry.Name, err)
+		}
+		rc, err := entry.Open()
+		if err != nil {
+			return fmt.Errorf("opening entry %s from source zip: %w", entry.Name, err)
+		}
+		_, err = io.Copy(w, rc)
+		rc.Close()
+		if err != nil {
+			return fmt.Errorf("copying entry %s: %w", entry.Name, err)
+		}
+	}
+
+	if !coverWritten {
+		h := &zip.FileHeader{
+			Name:     fullCoverPath,
+			Method:   zip.Deflate,
+			Modified: time.Now(),
+		}
+		w, err := zw.CreateHeader(h)
+		if err != nil {
+			return fmt.Errorf("creating cover entry in new zip: %w", err)
+		}
+		if _, err := w.Write(coverData); err != nil {
+			return fmt.Errorf("writing cover entry: %w", err)
+		}
+	}
+
+	if err := zw.Close(); err != nil {
+		return fmt.Errorf("closing zip writer: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, cleanPath); err != nil {
+		return fmt.Errorf("replacing original epub file: %w", err)
+	}
+
+	return nil
+}
+
+func findCoverHref(opf *opfPackage) string {
+	for _, item := range opf.Manifest.Items {
+		if strings.Contains(item.Properties, "cover-image") {
+			return item.Href
+		}
+	}
+	for _, m := range opf.Metadata.Metas {
+		if m.Name == "cover" && m.Content != "" {
+			coverID := m.Content
+			for _, item := range opf.Manifest.Items {
+				if item.ID == coverID {
+					return item.Href
+				}
+			}
+			break
+		}
+	}
+	for _, item := range opf.Manifest.Items {
+		if strings.HasPrefix(item.MediaType, "image/") {
+			idLower := strings.ToLower(item.ID)
+			hrefLower := strings.ToLower(item.Href)
+			if strings.Contains(idLower, "cover") || strings.Contains(hrefLower, "cover") {
+				return item.Href
+			}
+		}
+	}
+	return ""
+}
+
+func injectCoverIntoOPF(rawOPF []byte, coverHref, mediaType string) []byte {
+	if mediaType == "" {
+		mediaType = "image/jpeg"
+	}
+	manifestEnd := bytes.Index(bytes.ToLower(rawOPF), []byte("</manifest>"))
+	if manifestEnd != -1 {
+		itemStr := fmt.Sprintf("    <item id=\"cover-image\" href=\"%s\" media-type=\"%s\" properties=\"cover-image\"/>\n", coverHref, mediaType)
+		rawOPF = append(rawOPF[:manifestEnd], append([]byte(itemStr), rawOPF[manifestEnd:]...)...)
+	}
+
+	metaEnd := bytes.Index(bytes.ToLower(rawOPF), []byte("</metadata>"))
+	if metaEnd != -1 {
+		metaStr := "    <meta name=\"cover\" content=\"cover-image\"/>\n"
+		rawOPF = append(rawOPF[:metaEnd], append([]byte(metaStr), rawOPF[metaEnd:]...)...)
+	}
+	return rawOPF
+}
+
 func buildUpdatedOPF(rawOPF []byte, parsed *opfPackage, update MetadataUpdate) ([]byte, error) {
 	// Sanitize corrupted preambles before <package if present
 	if pkgIdx := findRootElement(rawOPF, "package"); pkgIdx > 0 {

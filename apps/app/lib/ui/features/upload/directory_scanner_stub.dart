@@ -7,3 +7,7 @@ Future<List<PickedEpubFile>> scanPathForEpubs(String path) async {
 bool isDirectoryPath(String path) {
   return false;
 }
+
+Future<List<PickedEpubFile>> pickFolderForEpubs() async {
+  return [];
+}

@@ -108,6 +108,7 @@ class StagedUploadJob {
   final bool hasCover;
   final List<String> warnings;
   final DateTime? createdAt;
+  final DateTime? updatedAt;
 
   const StagedUploadJob({
     required this.jobId,
@@ -117,6 +118,7 @@ class StagedUploadJob {
     this.hasCover = false,
     this.warnings = const [],
     this.createdAt,
+    this.updatedAt,
   });
 
   factory StagedUploadJob.fromJson(Map<String, dynamic> json) {
@@ -139,6 +141,11 @@ class StagedUploadJob {
       created = DateTime.tryParse(json['created_at'].toString());
     }
 
+    DateTime? updated;
+    if (json['updated_at'] != null) {
+      updated = DateTime.tryParse(json['updated_at'].toString());
+    }
+
     final metadata = StagedMetadata.fromJson(metaJson);
     final warnings = rawWarnings.map((w) => w.toString()).toList();
     if (warnings.isEmpty) {
@@ -159,6 +166,7 @@ class StagedUploadJob {
       hasCover: json['has_cover'] as bool? ?? false,
       warnings: warnings,
       createdAt: created,
+      updatedAt: updated,
     );
   }
 
@@ -170,6 +178,7 @@ class StagedUploadJob {
     bool? hasCover,
     List<String>? warnings,
     DateTime? createdAt,
+    DateTime? updatedAt,
   }) {
     return StagedUploadJob(
       jobId: jobId ?? this.jobId,
@@ -179,6 +188,7 @@ class StagedUploadJob {
       hasCover: hasCover ?? this.hasCover,
       warnings: warnings ?? this.warnings,
       createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 

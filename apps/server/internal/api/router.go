@@ -51,12 +51,9 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	// Public routes
 	mux.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
 	mux.HandleFunc("GET /api/v1/server/connect-info", connHandler.GetConnectInfo)
-	mux.HandleFunc("GET /api/v1/books/{id}/cover", bookHandler.GetBookCover)
-	mux.HandleFunc("GET /api/v1/books/{id}/assets/{path...}", bookHandler.GetBookAsset)
-	mux.HandleFunc("GET /api/v1/books/{id}/chapters/{index}/html", bookHandler.GetChapterHTML)
-	mux.HandleFunc("GET /api/v1/authors/{id}/photo", taxHandler.GetAuthorPhoto)
 
 	// Protected routes
+	mux.Handle("POST /api/v1/auth/logout", auth(http.HandlerFunc(authHandler.Logout)))
 	mux.Handle("GET /api/v1/auth/me", auth(http.HandlerFunc(authHandler.Me)))
 	mux.Handle("POST /api/v1/auth/change-password", auth(http.HandlerFunc(authHandler.ChangePassword)))
 	mux.Handle("POST /api/v1/auth/tokens", auth(http.HandlerFunc(authHandler.CreateToken)))
@@ -69,9 +66,13 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/books/upload/jobs", auth(http.HandlerFunc(bookHandler.ListUploadJobs)))
 	mux.Handle("GET /api/v1/books/upload/jobs/{id}", auth(http.HandlerFunc(bookHandler.GetUploadJob)))
 	mux.Handle("GET /api/v1/books/upload/jobs/{id}/cover", auth(http.HandlerFunc(bookHandler.GetUploadJobCover)))
+	mux.Handle("POST /api/v1/books/upload/jobs/{id}/cover", auth(http.HandlerFunc(bookHandler.UploadJobCover)))
 	mux.Handle("POST /api/v1/books/upload/jobs/{id}/commit", auth(http.HandlerFunc(bookHandler.CommitUploadJob)))
 	mux.Handle("DELETE /api/v1/books/upload/jobs/{id}", auth(http.HandlerFunc(bookHandler.DeleteUploadJob)))
 	mux.Handle("GET /api/v1/books/{id}", auth(http.HandlerFunc(bookHandler.GetBook)))
+	mux.Handle("GET /api/v1/books/{id}/cover", auth(http.HandlerFunc(bookHandler.GetBookCover)))
+	mux.Handle("GET /api/v1/books/{id}/assets/{path...}", auth(http.HandlerFunc(bookHandler.GetBookAsset)))
+	mux.Handle("GET /api/v1/books/{id}/chapters/{index}/html", auth(http.HandlerFunc(bookHandler.GetChapterHTML)))
 	mux.Handle("POST /api/v1/books/{id}/reparse", auth(http.HandlerFunc(bookHandler.ReparseBook)))
 	mux.Handle("POST /api/v1/books/{id}/chat", auth(http.HandlerFunc(bookHandler.ChatBook)))
 	mux.Handle("GET /api/v1/books/{id}/chapters/{index}", auth(http.HandlerFunc(bookHandler.GetChapter)))
@@ -90,6 +91,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/search", auth(http.HandlerFunc(bookHandler.SearchLibrary)))
 
 	mux.Handle("GET /api/v1/authors", auth(http.HandlerFunc(taxHandler.ListAuthors)))
+	mux.Handle("GET /api/v1/authors/{id}/photo", auth(http.HandlerFunc(taxHandler.GetAuthorPhoto)))
 	mux.Handle("POST /api/v1/authors/{id}/photo", auth(http.HandlerFunc(taxHandler.UploadAuthorPhoto)))
 	mux.Handle("GET /api/v1/genres", auth(http.HandlerFunc(taxHandler.ListGenres)))
 	mux.Handle("GET /api/v1/topics", auth(http.HandlerFunc(taxHandler.ListTopics)))

@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/models/book.dart';
@@ -76,11 +77,14 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
 
   bool _isSaving = false;
   bool _isDiscarding = false;
+  bool _isUploadingCover = false;
+  bool _hasCover = false;
   String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
+    _hasCover = widget.job.hasCover;
     final m = widget.job.metadata;
     _titleController = TextEditingController(text: m.title);
     _authorController = TextEditingController(
@@ -208,11 +212,58 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
     }
   }
 
+  Future<void> _pickAndUploadCover() async {
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
+      );
+      if (result.isEmpty) return;
+
+      final file = result.first;
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) return;
+
+      setState(() => _isUploadingCover = true);
+      await ref.read(uploadProvider.notifier).replaceJobCover(
+        jobId: widget.job.jobId,
+        filename: file.name,
+        bytes: bytes,
+      );
+
+      if (mounted) {
+        setState(() {
+          _isUploadingCover = false;
+          _hasCover = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cover image updated successfully'),
+            backgroundColor: AppTokens.charcoalInk,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isUploadingCover = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to upload cover: $e'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isMobile = widget.isBottomSheet || Responsive.isMobile(context);
     final bookRepo = ref.watch(bookRepositoryProvider);
-    final coverUrl = widget.job.hasCover ? bookRepo.getUploadJobCoverUrl(widget.job.jobId) : null;
+    final coverVersion = ref.watch(uploadProvider.select((s) => s.coverVersions[widget.job.jobId])) ??
+        widget.job.updatedAt?.millisecondsSinceEpoch;
+    final hasCover = _hasCover || widget.job.hasCover;
+    final coverUrl = hasCover ? bookRepo.getUploadJobCoverUrl(widget.job.jobId, version: coverVersion) : null;
 
     final header = Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -263,21 +314,76 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Cover card
-        Container(
-          height: isMobile ? 160 : 260,
-          decoration: BoxDecoration(
-            color: AppTokens.boneContainer,
+        Tooltip(
+          message: 'Click to upload replacement cover',
+          child: InkWell(
+            onTap: _isUploadingCover ? null : _pickAndUploadCover,
             borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-            border: Border.all(color: AppTokens.crispBorder),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  height: isMobile ? 160 : 260,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: AppTokens.boneContainer,
+                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                    border: Border.all(color: AppTokens.crispBorder),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: coverUrl != null
+                      ? Image.network(
+                          coverUrl,
+                          fit: BoxFit.contain,
+                          errorBuilder: (ctx, err, stack) => _CoverPlaceholder(title: widget.job.metadata.title),
+                        )
+                      : _CoverPlaceholder(title: widget.job.metadata.title),
+                ),
+                if (_isUploadingCover)
+                  Container(
+                    height: isMobile ? 160 : 260,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: Colors.black45,
+                      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                    ),
+                    child: const Center(
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Positioned(
+                    bottom: 8,
+                    right: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTokens.charcoalInk.withValues(alpha: 0.8),
+                        borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.camera_alt_outlined, size: 14, color: Colors.white),
+                          SizedBox(width: 4),
+                          Text(
+                            'Change',
+                            style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
-          clipBehavior: Clip.antiAlias,
-          child: coverUrl != null
-              ? Image.network(
-                  coverUrl,
-                  fit: BoxFit.contain,
-                  errorBuilder: (ctx, err, stack) => _CoverPlaceholder(title: widget.job.metadata.title),
-                )
-              : _CoverPlaceholder(title: widget.job.metadata.title),
         ),
         const SizedBox(height: AppTokens.space12),
 
