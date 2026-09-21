@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/theBenForce/shelfd/compare/v1.5.0...v1.5.1) (2026-09-21)
+
+
+### Performance Improvements
+
+* **server:** optimize unindexed paragraph queries and add worker backoff ([#27](https://github.com/theBenForce/shelfd/issues/27)) ([d2f56c3](https://github.com/theBenForce/shelfd/commit/d2f56c37933913337d2289dd319adff9888192b5))
+
 # [1.5.0](https://github.com/theBenForce/shelfd/compare/v1.4.0...v1.5.0) (2026-09-12)
 
 
