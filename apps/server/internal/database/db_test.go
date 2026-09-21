@@ -2,8 +2,10 @@ package database_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/shelfd/shelfd/internal/database"
 )
@@ -70,6 +72,29 @@ func TestEnsureVectorDimensions(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("expected 0, got %d", count)
+	}
+}
+
+func TestPostgresReadTimeout(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		dsn = "postgres://shelfd:shelfd_password@localhost:5432/shelfd?sslmode=disable"
+	}
+
+	bunDB, err := database.OpenBunPostgres(dsn)
+	if err != nil {
+		t.Skipf("skipping postgres test: %v", err)
+		return
+	}
+	defer bunDB.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Queries taking > 10s should succeed under a valid context deadline rather than aborting
+	// on pgdriver's default 10s socket ReadTimeout.
+	if _, err := bunDB.ExecContext(ctx, "SELECT pg_sleep(11)"); err != nil {
+		t.Fatalf("query taking >10s failed: %v", err)
 	}
 }
 
