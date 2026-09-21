@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
@@ -53,7 +54,19 @@ func OpenBunPostgres(dsn string) (*bun.DB, error) {
 		return nil, fmt.Errorf("postgres dsn cannot be empty")
 	}
 
-	connector := pgdriver.NewConnector(pgdriver.WithDSN(dsn))
+	connector := pgdriver.NewConnector(
+		pgdriver.WithTimeout(0),
+		pgdriver.WithDialTimeout(5*time.Second),
+		pgdriver.WithDSN(dsn),
+		func(conf *pgdriver.Config) {
+			if conf.ReadTimeout < 0 {
+				conf.ReadTimeout = 0
+			}
+			if conf.WriteTimeout < 0 {
+				conf.WriteTimeout = 0
+			}
+		},
+	)
 	sqldb := sql.OpenDB(connector)
 
 	sqldb.SetMaxOpenConns(25)
