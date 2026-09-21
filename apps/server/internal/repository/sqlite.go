@@ -1513,12 +1513,7 @@ func (r *SQLiteStorageEngine) GetQueueStatus(ctx context.Context) (*QueueStatus,
 	}
 
 	if totalParagraphs > 0 {
-		query := `
-			SELECT COUNT(*)
-			FROM paragraphs p
-			LEFT JOIN vec_paragraphs v ON p.id = v.paragraph_id
-			WHERE v.paragraph_id IS NULL
-		`
+		query := `SELECT COUNT(*) FROM paragraphs WHERE is_embedded = 0`
 		if err := r.db.QueryRowContext(ctx, query).Scan(&pendingParagraphs); err != nil {
 			return nil, fmt.Errorf("counting pending paragraphs: %w", err)
 		}
@@ -1831,11 +1826,10 @@ func (r *SQLiteStorageEngine) GetUnindexedParagraphs(ctx context.Context, limit 
 		limit = 50
 	}
 	query := `
-		SELECT p.id, p.book_id, p.chapter_id, p.chapter_index, p.start_paragraph, p.end_paragraph, p.content, p.created_at
-		FROM paragraphs p
-		LEFT JOIN vec_paragraphs v ON p.id = v.paragraph_id
-		WHERE v.paragraph_id IS NULL
-		ORDER BY p.created_at ASC, p.chapter_index ASC, p.start_paragraph ASC
+		SELECT id, book_id, chapter_id, chapter_index, start_paragraph, end_paragraph, content, created_at
+		FROM paragraphs
+		WHERE is_embedded = 0
+		ORDER BY created_at ASC, chapter_index ASC, start_paragraph ASC
 		LIMIT ?
 	`
 	rows, err := r.db.QueryContext(ctx, query, limit)
@@ -1889,6 +1883,12 @@ func (r *SQLiteStorageEngine) InsertParagraphVectors(ctx context.Context, items 
 	}
 	defer insStmt.Close()
 
+	updStmt, err := tx.PrepareContext(ctx, "UPDATE paragraphs SET is_embedded = 1 WHERE id = ?")
+	if err != nil {
+		return fmt.Errorf("preparing update stmt: %w", err)
+	}
+	defer updStmt.Close()
+
 	for _, item := range items {
 		blob, err := sqlite_vec.SerializeFloat32(item.Embedding)
 		if err != nil {
@@ -1901,6 +1901,10 @@ func (r *SQLiteStorageEngine) InsertParagraphVectors(ctx context.Context, items 
 
 		if _, err := insStmt.ExecContext(ctx, item.ParagraphID, blob); err != nil {
 			return fmt.Errorf("inserting paragraph vector: %w", err)
+		}
+
+		if _, err := updStmt.ExecContext(ctx, item.ParagraphID); err != nil {
+			return fmt.Errorf("updating paragraph is_embedded: %w", err)
 		}
 	}
 

@@ -106,12 +106,39 @@ func TestPostgresStorageEngine(t *testing.T) {
 		t.Fatalf("failed to create paragraph on postgres: %v", err)
 	}
 
+	// Verify paragraph is initially unindexed
+	unindexedBefore, err := repo.GetUnindexedParagraphs(ctx, 10)
+	if err != nil {
+		t.Fatalf("failed to get unindexed paragraphs: %v", err)
+	}
+	found := false
+	for _, u := range unindexedBefore {
+		if u.ID == para.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected created paragraph to be in unindexed list")
+	}
+
 	// 5. Insert pgvector embedding (256d)
 	vec := make([]float32, 256)
 	vec[0] = 0.5
 	vec[1] = 0.5
 	if err := repo.InsertParagraphVector(ctx, para.ID, vec); err != nil {
 		t.Fatalf("failed to insert pgvector: %v", err)
+	}
+
+	// Verify paragraph is no longer unindexed after inserting vector
+	unindexedAfter, err := repo.GetUnindexedParagraphs(ctx, 50)
+	if err != nil {
+		t.Fatalf("failed to get unindexed paragraphs after vector insert: %v", err)
+	}
+	for _, u := range unindexedAfter {
+		if u.ID == para.ID {
+			t.Fatalf("expected paragraph %s to be indexed, but was in unindexed list", para.ID)
+		}
 	}
 
 	// 6. Test Vector KNN Search
