@@ -163,6 +163,7 @@ type Paragraph struct {
 	StartParagraph int       `json:"start_paragraph" bun:"start_paragraph,notnull"`
 	EndParagraph   int       `json:"end_paragraph" bun:"end_paragraph,notnull"`
 	Content        string    `json:"content" bun:"content,notnull"`
+	IsEmbedded     bool      `json:"is_embedded" bun:"is_embedded,notnull,default:false"`
 	CreatedAt      time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 

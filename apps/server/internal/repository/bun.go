@@ -916,13 +916,11 @@ func (r *BunStorageEngine) GetUnindexedParagraphs(ctx context.Context, limit int
 	}
 	var paras []*Paragraph
 	err := r.db.NewSelect().
-		TableExpr("paragraphs AS p").
-		ColumnExpr("p.id, p.book_id, p.chapter_id, p.chapter_index, p.start_paragraph, p.end_paragraph, p.content, p.created_at").
-		Join("LEFT JOIN vec_paragraphs AS v ON p.id = v.paragraph_id").
-		Where("v.paragraph_id IS NULL").
-		OrderExpr("p.created_at ASC, p.chapter_index ASC, p.start_paragraph ASC").
+		Model(&paras).
+		Where("is_embedded = ?", false).
+		OrderExpr("created_at ASC, chapter_index ASC, start_paragraph ASC").
 		Limit(limit).
-		Scan(ctx, &paras)
+		Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("getting unindexed paragraphs: %w", err)
 	}
@@ -1044,23 +1042,34 @@ func (r *BunStorageEngine) InsertParagraphVectors(ctx context.Context, items []P
 				return fmt.Errorf("inserting postgres paragraph vector %s: %w", item.ParagraphID, err)
 			}
 		}
-		return tx.Commit()
+	} else {
+		// SQLite
+		delQuery := "DELETE FROM vec_paragraphs WHERE paragraph_id = ?"
+		insQuery := "INSERT INTO vec_paragraphs (paragraph_id, embedding) VALUES (?, ?)"
+		for _, item := range items {
+			blob, err := sqlite_vec.SerializeFloat32(item.Embedding)
+			if err != nil {
+				return fmt.Errorf("serializing embedding for %s: %w", item.ParagraphID, err)
+			}
+			if _, err := tx.ExecContext(ctx, delQuery, item.ParagraphID); err != nil {
+				return fmt.Errorf("deleting sqlite paragraph vector %s: %w", item.ParagraphID, err)
+			}
+			if _, err := tx.ExecContext(ctx, insQuery, item.ParagraphID, blob); err != nil {
+				return fmt.Errorf("inserting sqlite paragraph vector %s: %w", item.ParagraphID, err)
+			}
+		}
 	}
 
-	// SQLite
-	delQuery := "DELETE FROM vec_paragraphs WHERE paragraph_id = ?"
-	insQuery := "INSERT INTO vec_paragraphs (paragraph_id, embedding) VALUES (?, ?)"
-	for _, item := range items {
-		blob, err := sqlite_vec.SerializeFloat32(item.Embedding)
-		if err != nil {
-			return fmt.Errorf("serializing embedding for %s: %w", item.ParagraphID, err)
-		}
-		if _, err := tx.ExecContext(ctx, delQuery, item.ParagraphID); err != nil {
-			return fmt.Errorf("deleting sqlite paragraph vector %s: %w", item.ParagraphID, err)
-		}
-		if _, err := tx.ExecContext(ctx, insQuery, item.ParagraphID, blob); err != nil {
-			return fmt.Errorf("inserting sqlite paragraph vector %s: %w", item.ParagraphID, err)
-		}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ParagraphID
+	}
+	if _, err := tx.NewUpdate().
+		Model((*Paragraph)(nil)).
+		Set("is_embedded = ?", true).
+		Where("id IN (?)", bun.In(ids)).
+		Exec(ctx); err != nil {
+		return fmt.Errorf("updating paragraphs is_embedded: %w", err)
 	}
 
 	return tx.Commit()
@@ -1728,9 +1737,8 @@ func (r *BunStorageEngine) GetQueueStatus(ctx context.Context) (*QueueStatus, er
 
 	if totalParagraphs > 0 {
 		pending, err := r.db.NewSelect().
-			TableExpr("paragraphs AS p").
-			Join("LEFT JOIN vec_paragraphs AS v ON p.id = v.paragraph_id").
-			Where("v.paragraph_id IS NULL").
+			Table("paragraphs").
+			Where("is_embedded = ?", false).
 			Count(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("counting pending paragraphs: %w", err)

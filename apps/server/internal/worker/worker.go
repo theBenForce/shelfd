@@ -203,7 +203,9 @@ func (w *Worker) Start(ctx context.Context) {
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
-		ticker := time.NewTicker(w.pollInterval)
+		maxIdleInterval := 60 * time.Second
+		currentInterval := w.pollInterval
+		ticker := time.NewTicker(currentInterval)
 		defer ticker.Stop()
 
 		for {
@@ -213,24 +215,38 @@ func (w *Worker) Start(ctx context.Context) {
 			case <-w.stopCh:
 				return
 			case <-ticker.C:
-				w.processDrain(ctx)
+				processed := w.processDrain(ctx)
+				if processed > 0 {
+					currentInterval = w.pollInterval
+				} else {
+					currentInterval = currentInterval * 2
+					if currentInterval > maxIdleInterval {
+						currentInterval = maxIdleInterval
+					}
+				}
+				ticker.Reset(currentInterval)
 			case <-w.notifyCh:
+				currentInterval = w.pollInterval
+				ticker.Reset(currentInterval)
 				w.processDrain(ctx)
 			}
 		}
 	}()
 }
 
-func (w *Worker) processDrain(ctx context.Context) {
+func (w *Worker) processDrain(ctx context.Context) int {
+	total := 0
 	for {
 		if ctx.Err() != nil {
-			return
+			return total
 		}
 		count, err := w.ProcessBatch(ctx)
 		if err != nil || count == 0 {
 			break
 		}
+		total += count
 	}
+	return total
 }
 
 // Stop stops the background worker and waits for active routines to finish.

@@ -104,14 +104,22 @@ func (h *QueueHandler) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		hubCh = ch
 	}
 
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
+	keepaliveTicker := time.NewTicker(15 * time.Second)
+	defer keepaliveTicker.Stop()
+
+	fallbackTicker := time.NewTicker(30 * time.Second)
+	defer fallbackTicker.Stop()
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ticker.C:
+		case <-keepaliveTicker.C:
+			if _, err := fmt.Fprintf(w, ": keepalive\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-fallbackTicker.C:
 			if err := sendStatus(); err != nil {
 				return
 			}
