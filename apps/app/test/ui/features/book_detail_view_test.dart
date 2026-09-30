@@ -282,6 +282,45 @@ void main() {
     // Bookmark button remains
     expect(find.byIcon(Icons.bookmark_add_outlined), findsOneWidget);
   });
+
+  testWidgets('BookDetailView opens Edit Book Metadata modal and displays form fields', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookDetailProvider('book-42').overrideWith(() => _MockBookDetailNotifier(testBook)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const BookDetailView(bookId: 'book-42'),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Tap Edit Metadata button
+    final editBtn = find.text('Edit Metadata');
+    expect(editBtn, findsWidgets);
+    await tester.tap(editBtn.first);
+    await tester.pumpAndSettle();
+
+    // Verify modal elements are displayed
+    expect(find.text('Edit Book Metadata'), findsOneWidget);
+    expect(find.text('Save & Sync EPUB'), findsOneWidget);
+    expect(find.byKey(const Key('edit_book_title_field')), findsOneWidget);
+    expect(find.byKey(const Key('edit_book_authors_field')), findsOneWidget);
+    expect(find.byKey(const Key('edit_book_series_field')), findsOneWidget);
+    expect(find.byKey(const Key('edit_book_sequence_field')), findsOneWidget);
+  });
 }
 
 class _MockBookDetailNotifier extends BookDetailNotifier {

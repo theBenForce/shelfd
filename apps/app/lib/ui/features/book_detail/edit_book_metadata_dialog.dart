@@ -719,7 +719,9 @@ class _FieldLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 4,
         children: [
           Text(
             label,
@@ -731,16 +733,14 @@ class _FieldLabel extends StatelessWidget {
           ),
           if (isRequired)
             const Text(
-              ' *',
+              '*',
               style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
             ),
-          if (hint != null) ...[
-            const SizedBox(width: 6),
+          if (hint != null)
             Text(
               '($hint)',
               style: AppTypography.bodySans(fontSize: 11, color: AppTokens.mutedCopy),
             ),
-          ],
         ],
       ),
     );
