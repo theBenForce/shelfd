@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/theBenForce/shelfd/compare/v1.6.0...v1.7.0) (2026-09-30)
+
+
+### Features
+
+* book metadata editor with EPUB in-place sync and database updates ([#30](https://github.com/theBenForce/shelfd/issues/30)) ([028ab5c](https://github.com/theBenForce/shelfd/commit/028ab5c6f5f3c70e60c55ecd4c791ba24c3ca54e))
+
 # [1.6.0](https://github.com/theBenForce/shelfd/compare/v1.5.2...v1.6.0) (2026-09-30)
 
 
