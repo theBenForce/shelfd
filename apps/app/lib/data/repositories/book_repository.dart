@@ -186,4 +186,43 @@ class BookRepository {
 
   Future<void> deleteUploadJob(String jobId) =>
       apiService.deleteUploadJob(jobId);
+
+  Future<Book> updateBookMetadata(
+    String bookId, {
+    required String title,
+    List<String>? authors,
+    String? series,
+    double? sequenceNumber,
+    String? description,
+    String? publisher,
+    String? language,
+    List<String>? genres,
+    List<String>? topics,
+  }) async {
+    final book = await apiService.updateBookMetadata(
+      bookId,
+      title: title,
+      authors: authors,
+      series: series,
+      sequenceNumber: sequenceNumber,
+      description: description,
+      publisher: publisher,
+      language: language,
+      genres: genres,
+      topics: topics,
+    );
+    final progress = storageService.getReadingProgress(book.id);
+    return book.copyWith(readingProgress: progress);
+  }
+
+  Future<void> uploadBookCover({
+    required String bookId,
+    required String filename,
+    required List<int> bytes,
+  }) =>
+      apiService.uploadBookCover(
+        bookId: bookId,
+        filename: filename,
+        bytes: bytes,
+      );
 }

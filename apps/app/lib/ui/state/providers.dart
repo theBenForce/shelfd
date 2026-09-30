@@ -1061,6 +1061,48 @@ class BookDetailNotifier extends Notifier<BookDetailState> {
       debugPrint('removeHighlight error: $e');
     }
   }
+
+  Future<Book> updateMetadata({
+    required String title,
+    List<String>? authors,
+    String? series,
+    double? sequenceNumber,
+    String? description,
+    String? publisher,
+    String? language,
+    List<String>? genres,
+    List<String>? topics,
+  }) async {
+    final repo = ref.read(bookRepositoryProvider);
+    final updated = await repo.updateBookMetadata(
+      bookId,
+      title: title,
+      authors: authors,
+      series: series,
+      sequenceNumber: sequenceNumber,
+      description: description,
+      publisher: publisher,
+      language: language,
+      genres: genres,
+      topics: topics,
+    );
+    state = state.copyWith(book: updated);
+    ref.read(libraryProvider.notifier).updateBook(updated);
+    return updated;
+  }
+
+  Future<void> uploadCover({
+    required String filename,
+    required List<int> bytes,
+  }) async {
+    final repo = ref.read(bookRepositoryProvider);
+    await repo.uploadBookCover(
+      bookId: bookId,
+      filename: filename,
+      bytes: bytes,
+    );
+    await loadBook();
+  }
 }
 
 final bookDetailProvider =

@@ -626,6 +626,46 @@ func (r *BunStorageEngine) LinkBookTopic(ctx context.Context, bookID, topicID st
 	return nil
 }
 
+func (r *BunStorageEngine) ClearBookAuthors(ctx context.Context, bookID string) error {
+	_, err := r.db.NewDelete().Model((*BookAuthor)(nil)).
+		Where("book_id = ?", bookID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("clearing book authors: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) ClearBookGenres(ctx context.Context, bookID string) error {
+	_, err := r.db.NewDelete().Model((*BookGenre)(nil)).
+		Where("book_id = ?", bookID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("clearing book genres: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) ClearBookTopics(ctx context.Context, bookID string) error {
+	_, err := r.db.NewDelete().Model((*BookTopic)(nil)).
+		Where("book_id = ?", bookID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("clearing book topics: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) ClearBookSeries(ctx context.Context, bookID string) error {
+	_, err := r.db.NewDelete().Model((*BookSeries)(nil)).
+		Where("book_id = ?", bookID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("clearing book series: %w", err)
+	}
+	return nil
+}
+
 func (r *BunStorageEngine) UnlinkBookTopic(ctx context.Context, bookID, topicID string) error {
 	_, err := r.db.NewDelete().Model((*BookTopic)(nil)).
 		Where("book_id = ? AND topic_id = ?", bookID, topicID).

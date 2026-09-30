@@ -13,6 +13,7 @@ import '../../core/shared_layout.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
+import 'edit_book_metadata_dialog.dart';
 
 class BookDetailView extends ConsumerStatefulWidget {
   final String bookId;
@@ -269,6 +270,12 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           style: AppTypography.titleSerif(fontSize: 18, fontWeight: FontWeight.w600),
         ),
         actions: [
+          IconButton(
+            key: const Key('edit_metadata_appbar_button'),
+            icon: const Icon(Icons.edit_note_rounded, color: AppTokens.charcoalInk),
+            tooltip: 'Edit Metadata',
+            onPressed: () => showEditBookMetadataModal(context, book),
+          ),
           IconButton(
             icon: _isDownloading
                 ? const SizedBox(
@@ -554,6 +561,27 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
               onPressed: _isDownloading ? null : () => _downloadEpub(book),
+            ),
+          ),
+          const SizedBox(height: AppTokens.space8),
+          SizedBox(
+            width: double.infinity,
+            height: AppTokens.minTouchTarget,
+            child: OutlinedButton.icon(
+              key: const Key('edit_metadata_sidebar_button'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTokens.charcoalInk,
+                side: const BorderSide(color: AppTokens.crispBorder),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                ),
+              ),
+              icon: const Icon(Icons.edit_note_rounded, size: 20),
+              label: const Text(
+                'Edit Metadata',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onPressed: () => showEditBookMetadataModal(context, book),
             ),
           ),
           const SizedBox(height: AppTokens.space20),
