@@ -785,6 +785,119 @@ func TestAPI_Books_Cover(t *testing.T) {
 	}
 }
 
+func TestAPI_Books_UpdateMetadataAndCover(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	ctx := context.Background()
+	token := f.loginAndGetToken(t)
+
+	// Create an EPUB on disk
+	bookDir := filepath.Join(f.libDir, "Original Author", "Original Title")
+	os.MkdirAll(bookDir, 0755)
+	epubPath := filepath.Join(bookDir, "Original Title.epub")
+
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	m, _ := zw.Create("mimetype")
+	m.Write([]byte("application/epub+zip"))
+	w, _ := zw.Create("META-INF/container.xml")
+	w.Write([]byte(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`))
+	opf, _ := zw.Create("content.opf")
+	opf.Write([]byte(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Original Title</dc:title><dc:creator>Original Author</dc:creator></metadata><manifest><item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>`))
+	ch1, _ := zw.Create("ch1.xhtml")
+	ch1.Write([]byte(`<html><body><h1>Original Chapter</h1></body></html>`))
+	zw.Close()
+	os.WriteFile(epubPath, buf.Bytes(), 0644)
+
+	relPath := filepath.Join("Original Author", "Original Title", "Original Title.epub")
+	book, err := f.ingester.IngestFile(ctx, epubPath, relPath)
+	if err != nil {
+		t.Fatalf("IngestFile: %v", err)
+	}
+
+	// 1. Update metadata via PUT /api/v1/books/{id}/metadata
+	updatePayload := `{
+		"title": "Updated Title",
+		"authors": ["Author One", "Author Two"],
+		"series": "Galactic Chronicles",
+		"sequence_number": 3.5,
+		"description": "An updated epic space saga.",
+		"publisher": "Orbit Books",
+		"language": "en",
+		"genres": ["Sci-Fi", "Space Opera"],
+		"topics": ["Artificial Intelligence"]
+	}`
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/books/%s/metadata", book.ID), strings.NewReader(updatePayload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on update metadata, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var updatedResp api.BookDetailResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &updatedResp); err != nil {
+		t.Fatalf("unmarshal updated response: %v", err)
+	}
+
+	if updatedResp.Title != "Updated Title" {
+		t.Errorf("expected Title 'Updated Title', got '%s'", updatedResp.Title)
+	}
+	if len(updatedResp.Authors) != 2 {
+		t.Errorf("expected 2 authors, got %d", len(updatedResp.Authors))
+	}
+	if len(updatedResp.Genres) != 2 {
+		t.Errorf("expected 2 genres, got %d", len(updatedResp.Genres))
+	}
+	if len(updatedResp.Series) != 1 || updatedResp.Series[0].Name != "Galactic Chronicles" || updatedResp.Series[0].SequenceNumber == nil || *updatedResp.Series[0].SequenceNumber != 3.5 {
+		t.Errorf("expected series Galactic Chronicles #3.5, got %v", updatedResp.Series)
+	}
+
+	// 2. Verify EPUB file on disk was modified with new title and authors
+	epubReader, err := epub.Open(epubPath)
+	if err != nil {
+		t.Fatalf("opening updated epub: %v", err)
+	}
+	parsed, err := epubReader.ParseBook()
+	epubReader.Close()
+	if err != nil {
+		t.Fatalf("parsing updated epub: %v", err)
+	}
+	if parsed.Title != "Updated Title" {
+		t.Errorf("expected EPUB title 'Updated Title', got '%s'", parsed.Title)
+	}
+	if len(parsed.Authors) != 2 {
+		t.Errorf("expected 2 authors in EPUB, got %d", len(parsed.Authors))
+	}
+
+	// 3. Upload cover via POST /api/v1/books/{id}/cover
+	pngHeader := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+	bodyBuf := new(bytes.Buffer)
+	mpw := multipart.NewWriter(bodyBuf)
+	part, _ := mpw.CreateFormFile("cover", "cover.png")
+	part.Write(pngHeader)
+	mpw.Close()
+
+	coverReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/books/%s/cover", book.ID), bodyBuf)
+	coverReq.Header.Set("Authorization", "Bearer "+token)
+	coverReq.Header.Set("Content-Type", mpw.FormDataContentType())
+	coverRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(coverRec, coverReq)
+
+	if coverRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on cover upload, got %d: %s", coverRec.Code, coverRec.Body.String())
+	}
+
+	// Verify cover file was written
+	coverFile := filepath.Join(bookDir, "cover.png")
+	if _, err := os.Stat(coverFile); os.IsNotExist(err) {
+		t.Errorf("expected cover file to be written at %s", coverFile)
+	}
+}
+
 func TestAPI_Taxonomy(t *testing.T) {
 	f := setupAPITest(t)
 	defer f.db.Close()

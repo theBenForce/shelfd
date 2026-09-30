@@ -43,9 +43,13 @@ type StorageEngine interface {
 	LinkBookAuthor(ctx context.Context, bookID, authorID, role string) error
 	LinkBookGenre(ctx context.Context, bookID, genreID string) error
 	UnlinkBookGenre(ctx context.Context, bookID, genreID string) error
+	ClearBookAuthors(ctx context.Context, bookID string) error
+	ClearBookGenres(ctx context.Context, bookID string) error
 	LinkBookTopic(ctx context.Context, bookID, topicID string) error
 	UnlinkBookTopic(ctx context.Context, bookID, topicID string) error
+	ClearBookTopics(ctx context.Context, bookID string) error
 	LinkBookSeries(ctx context.Context, bookID, seriesID string, sequenceNumber *float64) error
+	ClearBookSeries(ctx context.Context, bookID string) error
 	GetBookAuthors(ctx context.Context, bookID string) ([]*Author, error)
 	GetBookGenres(ctx context.Context, bookID string) ([]*Genre, error)
 	GetBookTopics(ctx context.Context, bookID string) ([]*Topic, error)

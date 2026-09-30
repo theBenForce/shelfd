@@ -717,6 +717,38 @@ func (r *SQLiteStorageEngine) LinkBookTopic(ctx context.Context, bookID, topicID
 	return nil
 }
 
+func (r *SQLiteStorageEngine) ClearBookAuthors(ctx context.Context, bookID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM book_authors WHERE book_id = ?", bookID)
+	if err != nil {
+		return fmt.Errorf("clearing book authors: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) ClearBookGenres(ctx context.Context, bookID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM book_genres WHERE book_id = ?", bookID)
+	if err != nil {
+		return fmt.Errorf("clearing book genres: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) ClearBookTopics(ctx context.Context, bookID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM book_topics WHERE book_id = ?", bookID)
+	if err != nil {
+		return fmt.Errorf("clearing book topics: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) ClearBookSeries(ctx context.Context, bookID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM book_series WHERE book_id = ?", bookID)
+	if err != nil {
+		return fmt.Errorf("clearing book series: %w", err)
+	}
+	return nil
+}
+
 func (r *SQLiteStorageEngine) UnlinkBookTopic(ctx context.Context, bookID, topicID string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM book_topics WHERE book_id = ? AND topic_id = ?", bookID, topicID)
 	if err != nil {

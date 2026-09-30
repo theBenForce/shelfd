@@ -1829,4 +1829,312 @@ func (h *BookHandler) SearchLibrary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, hits)
 }
 
+// UpdateBookMetadataRequest defines the payload for modifying existing book metadata.
+type UpdateBookMetadataRequest struct {
+	Title          string   `json:"title"`
+	Authors        []string `json:"authors,omitempty"`
+	Author         string   `json:"author,omitempty"`
+	Series         *string  `json:"series,omitempty"`
+	SequenceNumber *float64 `json:"sequence_number,omitempty"`
+	Description    *string  `json:"description,omitempty"`
+	Publisher      *string  `json:"publisher,omitempty"`
+	Language       *string  `json:"language,omitempty"`
+	Genres         []string `json:"genres,omitempty"`
+	Topics         []string `json:"topics,omitempty"`
+}
+
+// UpdateBookMetadata handles updating an existing book's metadata in the database and in-place in its EPUB file.
+func (h *BookHandler) UpdateBookMetadata(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPatch {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book: %v", err))
+		return
+	}
+
+	var req UpdateBookMetadataRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON request body: %v", err))
+		return
+	}
+
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book title is required")
+		return
+	}
+
+	authors := req.Authors
+	if len(authors) == 0 && strings.TrimSpace(req.Author) != "" {
+		authors = []string{strings.TrimSpace(req.Author)}
+	}
+	if len(authors) == 0 {
+		authors = []string{"Unknown"}
+	}
+
+	// 1. Update EPUB package metadata on disk if the file exists
+	epubPath := h.resolveBookFilePath(book)
+	if epubPath != "" {
+		update := epub.MetadataUpdate{
+			Title:          title,
+			Authors:        authors,
+			Series:         req.Series,
+			SequenceNumber: req.SequenceNumber,
+			Description:    req.Description,
+			Publisher:      req.Publisher,
+			Language:       req.Language,
+			Genres:         req.Genres,
+		}
+		if err := epub.UpdateMetadata(epubPath, update); err != nil {
+			h.logger.Warn("Failed to update EPUB file metadata on disk", "book_id", book.ID, "file_path", epubPath, "error", err)
+		} else {
+			// Update file size and modtime
+			if fi, err := os.Stat(epubPath); err == nil {
+				size := fi.Size()
+				modTime := fi.ModTime().UTC().Truncate(time.Second)
+				book.FileSizeBytes = &size
+				book.FileModifiedAt = &modTime
+			}
+		}
+	}
+
+	// 2. Update DB book entity
+	book.Title = title
+	book.Description = req.Description
+	book.Publisher = req.Publisher
+	book.Language = req.Language
+
+	if err := h.repo.UpdateBook(r.Context(), book); err != nil {
+		h.logger.Error("Failed to update book in database", "book_id", book.ID, "error", err)
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to update book: %v", err))
+		return
+	}
+
+	// 3. Update junction tables: authors
+	_ = h.repo.ClearBookAuthors(r.Context(), book.ID)
+	for _, a := range authors {
+		trimmedName := strings.TrimSpace(a)
+		if trimmedName == "" {
+			continue
+		}
+		authorEntity, err := h.repo.UpsertAuthor(r.Context(), trimmedName)
+		if err == nil {
+			_ = h.repo.LinkBookAuthor(r.Context(), book.ID, authorEntity.ID, "author")
+		}
+	}
+
+	// 4. Update junction tables: genres
+	_ = h.repo.ClearBookGenres(r.Context(), book.ID)
+	for _, g := range req.Genres {
+		trimmedGenre := strings.TrimSpace(g)
+		if trimmedGenre == "" {
+			continue
+		}
+		genreEntity, err := h.repo.UpsertGenre(r.Context(), trimmedGenre)
+		if err == nil {
+			_ = h.repo.LinkBookGenre(r.Context(), book.ID, genreEntity.ID)
+		}
+	}
+
+	// 5. Update junction tables: topics
+	if len(req.Topics) > 0 {
+		_ = h.repo.ClearBookTopics(r.Context(), book.ID)
+		for _, t := range req.Topics {
+			trimmedTopic := strings.TrimSpace(t)
+			if trimmedTopic == "" {
+				continue
+			}
+			topicEntity, err := h.repo.UpsertTopic(r.Context(), trimmedTopic)
+			if err == nil {
+				_ = h.repo.LinkBookTopic(r.Context(), book.ID, topicEntity.ID)
+			}
+		}
+	}
+
+	// 6. Update junction tables: series
+	_ = h.repo.ClearBookSeries(r.Context(), book.ID)
+	if req.Series != nil && strings.TrimSpace(*req.Series) != "" {
+		seriesName := scanner.CleanSeriesName(strings.TrimSpace(*req.Series))
+		seriesEntity, err := h.repo.UpsertSeries(r.Context(), seriesName, nil)
+		if err == nil {
+			_ = h.repo.LinkBookSeries(r.Context(), book.ID, seriesEntity.ID, req.SequenceNumber)
+		}
+	}
+
+	// Broadcast updated book event
+	item := BuildBookListItem(r.Context(), h.repo, book)
+	if h.hub != nil {
+		h.hub.Broadcast(events.Event{
+			Type: events.EventBookUpdated,
+			Data: item,
+		})
+	}
+
+	// Return updated BookDetailResponse
+	authorsList, _ := h.repo.GetBookAuthors(r.Context(), book.ID)
+	genresList, _ := h.repo.GetBookGenres(r.Context(), book.ID)
+	topicsList, _ := h.repo.GetBookTopics(r.Context(), book.ID)
+	seriesList, _ := h.repo.GetBookSeries(r.Context(), book.ID)
+	spine, _ := h.repo.GetBookSpine(r.Context(), book.ID)
+	chapters, _ := h.repo.GetChaptersByBookID(r.Context(), book.ID)
+	for _, c := range chapters {
+		c.ContentPlain = ""
+	}
+	bookmarks, _ := h.repo.ListBookmarksByBookID(r.Context(), book.ID)
+	highlights, _ := h.repo.ListHighlightsByBookID(r.Context(), book.ID)
+
+	resp := BookDetailResponse{
+		BookListItem: BookListItem{
+			ID:                       book.ID,
+			Title:                    book.Title,
+			Description:              book.Description,
+			Language:                 book.Language,
+			Publisher:                book.Publisher,
+			Identifier:               book.Identifier,
+			FilePath:                 book.FilePath,
+			CoverPath:                book.CoverPath,
+			FileSizeBytes:            book.FileSizeBytes,
+			FileModifiedAt:           book.FileModifiedAt,
+			PublishedDate:            book.PublishedDate,
+			Layout:                   book.Layout,
+			RenditionSpread:          book.RenditionSpread,
+			RenditionOrientation:     book.RenditionOrientation,
+			PageProgressionDirection: book.PageProgressionDirection,
+			Authors:                  authorsList,
+			Genres:                   genresList,
+			Topics:                   topicsList,
+			Series:                   seriesList,
+		},
+		Spine:      spine,
+		Chapters:   chapters,
+		Bookmarks:  bookmarks,
+		Highlights: highlights,
+	}
+
+	h.logger.Info("Updated book metadata", "book_id", book.ID, "title", book.Title)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// UploadBookCover handles uploading a replacement cover image for an existing book in the library.
+func (h *BookHandler) UploadBookCover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book: %v", err))
+		return
+	}
+
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid form data: max 10MB cover image")
+		return
+	}
+
+	file, _, err := r.FormFile("cover")
+	if err != nil {
+		file, _, err = r.FormFile("file")
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "No image file provided (field 'cover' or 'file')")
+		return
+	}
+	defer file.Close()
+
+	coverData, err := io.ReadAll(file)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to read cover image")
+		return
+	}
+
+	contentType := http.DetectContentType(coverData)
+	if !strings.HasPrefix(contentType, "image/") {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid file format (%s): must be an image (JPEG, PNG, WebP)", contentType))
+		return
+	}
+
+	ext := ".jpg"
+	if strings.Contains(contentType, "png") {
+		ext = ".png"
+	} else if strings.Contains(contentType, "webp") {
+		ext = ".webp"
+	}
+
+	// 1. Save cover file adjacent to EPUB in book directory for Audiobookshelf compatibility
+	epubPath := h.resolveBookFilePath(book)
+	var relCoverPath string
+	if epubPath != "" {
+		bookDir := filepath.Dir(epubPath)
+		coverFilename := "cover" + ext
+		fullCoverPath := filepath.Join(bookDir, coverFilename)
+		if err := os.WriteFile(fullCoverPath, coverData, 0644); err == nil {
+			if strings.HasPrefix(fullCoverPath, h.libraryDir) {
+				relCoverPath, _ = filepath.Rel(h.libraryDir, fullCoverPath)
+			}
+		}
+
+		// Update internal EPUB cover
+		if err := epub.UpdateCover(epubPath, coverData, contentType); err != nil {
+			h.logger.Warn("Failed to update EPUB embedded cover", "book_id", book.ID, "error", err)
+		}
+	}
+
+	// 2. Fallback save in private dataDir/covers/<bookID>.<ext>
+	if relCoverPath == "" {
+		coversDir := filepath.Join(h.dataDir, "covers")
+		_ = os.MkdirAll(coversDir, 0755)
+		fullCoverPath := filepath.Join(coversDir, bookID+ext)
+		_ = os.WriteFile(fullCoverPath, coverData, 0644)
+		relCoverPath = filepath.Join("covers", bookID+ext)
+	}
+
+	book.CoverPath = &relCoverPath
+	_ = h.repo.UpdateBook(r.Context(), book)
+
+	if h.hub != nil {
+		h.hub.Broadcast(events.Event{
+			Type: events.EventBookUpdated,
+			Data: BuildBookListItem(r.Context(), h.repo, book),
+		})
+	}
+
+	h.logger.Info("Updated book cover", "book_id", book.ID, "cover_path", relCoverPath)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":     "success",
+		"cover_path": relCoverPath,
+	})
+}
+
 

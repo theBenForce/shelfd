@@ -673,4 +673,63 @@ class ApiService {
       throw ApiException(response.statusCode, response.body);
     }
   }
+
+  Future<Book> updateBookMetadata(
+    String bookId, {
+    required String title,
+    List<String>? authors,
+    String? series,
+    double? sequenceNumber,
+    String? description,
+    String? publisher,
+    String? language,
+    List<String>? genres,
+    List<String>? topics,
+  }) async {
+    final response = await client.put(
+      _uri('/api/v1/books/$bookId/metadata'),
+      headers: _headers(),
+      body: jsonEncode({
+        'title': title,
+        if (authors != null) 'authors': authors,
+        if (series != null && series.isNotEmpty) 'series': series,
+        if (sequenceNumber != null) 'sequence_number': sequenceNumber,
+        if (description != null) 'description': description,
+        if (publisher != null) 'publisher': publisher,
+        if (language != null) 'language': language,
+        if (genres != null) 'genres': genres,
+        if (topics != null) 'topics': topics,
+      }),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return Book.fromJson(data, baseUrl: baseUrl);
+  }
+
+  Future<void> uploadBookCover({
+    required String bookId,
+    required String filename,
+    required List<int> bytes,
+  }) async {
+    final uri = _uri('/api/v1/books/$bookId/cover');
+    final request = http.MultipartRequest('POST', uri);
+    if (token != null && token!.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        'cover',
+        bytes,
+        filename: filename,
+      ),
+    );
+
+    final streamedResponse = await client.send(request);
+    final response = await http.Response.fromStream(streamedResponse);
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+  }
 }
