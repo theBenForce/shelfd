@@ -70,6 +70,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("POST /api/v1/books/upload/jobs/{id}/commit", auth(http.HandlerFunc(bookHandler.CommitUploadJob)))
 	mux.Handle("DELETE /api/v1/books/upload/jobs/{id}", auth(http.HandlerFunc(bookHandler.DeleteUploadJob)))
 	mux.Handle("GET /api/v1/books/{id}", auth(http.HandlerFunc(bookHandler.GetBook)))
+	mux.Handle("GET /api/v1/books/{id}/download", auth(http.HandlerFunc(bookHandler.DownloadBook)))
 	mux.Handle("GET /api/v1/books/{id}/cover", auth(http.HandlerFunc(bookHandler.GetBookCover)))
 	mux.Handle("GET /api/v1/books/{id}/assets/{path...}", auth(http.HandlerFunc(bookHandler.GetBookAsset)))
 	mux.Handle("GET /api/v1/books/{id}/chapters/{index}/html", auth(http.HandlerFunc(bookHandler.GetChapterHTML)))

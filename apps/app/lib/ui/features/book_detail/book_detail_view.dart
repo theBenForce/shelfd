@@ -6,6 +6,7 @@ import '../../../data/models/book.dart';
 import '../../../data/models/book_chat.dart';
 import '../../../data/models/bookmark.dart';
 import '../../../data/models/highlight.dart';
+import '../../core/file_saver/file_saver.dart';
 import '../../core/html_text.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
@@ -25,6 +26,7 @@ class BookDetailView extends ConsumerStatefulWidget {
 class _BookDetailViewState extends ConsumerState<BookDetailView> {
   int _selectedTabIndex = 0;
   String _annotationFilter = 'all'; // 'all', 'highlights', 'bookmarks'
+  bool _isDownloading = false;
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _chatScrollController = ScrollController();
 
@@ -118,6 +120,50 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         ],
       ),
     );
+  }
+
+  Future<void> _downloadEpub(Book book) async {
+    if (_isDownloading) return;
+    setState(() {
+      _isDownloading = true;
+    });
+
+    try {
+      final repo = ref.read(bookRepositoryProvider);
+      final bytes = await repo.downloadBookEpub(book.id);
+      final rawTitle = book.title.trim();
+      final sanitized = rawTitle.replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '_').trim();
+      final cleanTitle = sanitized.isNotEmpty ? sanitized : 'book';
+      final fileName = '$cleanTitle.epub';
+
+      final saved = await saveDownloadedFile(bytes, fileName);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              saved ? 'Downloaded $fileName' : 'Download canceled',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to download EPUB: $e'),
+            backgroundColor: Colors.red.shade800,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+        });
+      }
+    }
   }
 
   Color _highlightColor(String colorName) {
@@ -223,6 +269,20 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           style: AppTypography.titleSerif(fontSize: 18, fontWeight: FontWeight.w600),
         ),
         actions: [
+          IconButton(
+            icon: _isDownloading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppTokens.charcoalInk,
+                    ),
+                  )
+                : const Icon(Icons.download_rounded, color: AppTokens.charcoalInk),
+            tooltip: 'Download EPUB',
+            onPressed: _isDownloading ? null : () => _downloadEpub(book),
+          ),
           IconButton(
             icon: const Icon(Icons.bookmark_add_outlined, color: AppTokens.charcoalInk),
             tooltip: 'Add Bookmark',
@@ -465,6 +525,35 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
               onPressed: () => context.go('/books/${book.id}/read'),
+            ),
+          ),
+          const SizedBox(height: AppTokens.space8),
+          SizedBox(
+            width: double.infinity,
+            height: AppTokens.minTouchTarget,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTokens.charcoalInk,
+                side: const BorderSide(color: AppTokens.crispBorder),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                ),
+              ),
+              icon: _isDownloading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppTokens.charcoalInk,
+                      ),
+                    )
+                  : const Icon(Icons.download_rounded, size: 20),
+              label: Text(
+                _isDownloading ? 'Downloading...' : 'Download EPUB',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onPressed: _isDownloading ? null : () => _downloadEpub(book),
             ),
           ),
           const SizedBox(height: AppTokens.space20),

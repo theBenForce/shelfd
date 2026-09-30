@@ -242,6 +242,24 @@ class ApiService {
     return Book.fromJson(data, baseUrl: baseUrl);
   }
 
+  String getBookDownloadUrl(String bookId) {
+    if (token != null && token!.isNotEmpty) {
+      return _uri('/api/v1/books/$bookId/download', {'token': token!}).toString();
+    }
+    return _uri('/api/v1/books/$bookId/download').toString();
+  }
+
+  Future<List<int>> downloadBookEpub(String bookId) async {
+    final response = await client.get(
+      _uri('/api/v1/books/$bookId/download'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    return response.bodyBytes;
+  }
+
   Future<Chapter> getChapter(String bookId, dynamic chapterIdentifier) async {
     final response = await client.get(
       _uri('/api/v1/books/$bookId/chapters/$chapterIdentifier'),

@@ -540,5 +540,32 @@ void main() {
       final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
       await expectLater(apiService.deleteUploadJob('job-xyz-789'), completes);
     });
+
+    test('getBookDownloadUrl returns formatted URL with token', () {
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', token: 'test-token');
+      final url = apiService.getBookDownloadUrl('book-123');
+      expect(url, 'http://localhost:8080/api/v1/books/book-123/download?token=test-token');
+    });
+
+    test('downloadBookEpub returns bytes on success', () async {
+      final epubBytes = [0x50, 0x4B, 0x03, 0x04, 0x01, 0x02];
+      final mockClient = MockClient((request) async {
+        expect(request.method, 'GET');
+        expect(request.url.path, '/api/v1/books/book-123/download');
+        expect(request.headers['authorization'], 'Bearer test-token');
+        return http.Response.bytes(
+          epubBytes,
+          200,
+          headers: {
+            'content-type': 'application/epub+zip',
+            'content-disposition': 'attachment; filename="test.epub"',
+          },
+        );
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', token: 'test-token', client: mockClient);
+      final bytes = await apiService.downloadBookEpub('book-123');
+      expect(bytes, epubBytes);
+    });
   });
 }
