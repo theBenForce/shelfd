@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/theBenForce/shelfd/compare/v1.5.2...v1.6.0) (2026-09-30)
+
+
+### Features
+
+* **book-detail:** add EPUB download button on book details view ([#29](https://github.com/theBenForce/shelfd/issues/29)) ([7281cb9](https://github.com/theBenForce/shelfd/commit/7281cb92b42dcb4253f6af0f8cc351a63d75e00d))
+
 ## [1.5.2](https://github.com/theBenForce/shelfd/compare/v1.5.1...v1.5.2) (2026-09-21)
 
 
