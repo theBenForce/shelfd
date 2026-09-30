@@ -972,6 +972,96 @@ func TestAPI_GetBookCover(t *testing.T) {
 	}
 }
 
+func TestAPI_DownloadBook(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	ctx := context.Background()
+	token := f.loginAndGetToken(t)
+
+	// 1. Create a book in libraryDir
+	epubData := []byte("PK\x03\x04mock-epub-content-for-testing")
+	book1Dir := filepath.Join(f.libDir, "Stanislaw Lem", "Solaris")
+	if err := os.MkdirAll(book1Dir, 0755); err != nil {
+		t.Fatalf("failed to create book directory: %v", err)
+	}
+	epubPath := filepath.Join(book1Dir, "Solaris.epub")
+	if err := os.WriteFile(epubPath, epubData, 0644); err != nil {
+		t.Fatalf("failed to write epub file: %v", err)
+	}
+
+	book1 := &repository.Book{
+		ID:       "book-dl-1",
+		Title:    "Solaris: The Novel?",
+		FilePath: "Stanislaw Lem/Solaris/Solaris.epub",
+	}
+	if err := f.repo.CreateBook(ctx, book1); err != nil {
+		t.Fatalf("CreateBook failed: %v", err)
+	}
+
+	// 1a. Unauthenticated request fails with 401
+	unauthReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-dl-1/download", nil)
+	unauthRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(unauthRec, unauthReq)
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated download, got %d", unauthRec.Code)
+	}
+
+	// 1b. Authenticated request with Bearer token header
+	req1 := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-dl-1/download", nil)
+	req1.Header.Set("Authorization", "Bearer "+token)
+	rec1 := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec1, req1)
+
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("expected 200 for download, got %d: %s", rec1.Code, rec1.Body.String())
+	}
+	if ct := rec1.Header().Get("Content-Type"); ct != "application/epub+zip" {
+		t.Errorf("expected Content-Type application/epub+zip, got %q", ct)
+	}
+	if cd := rec1.Header().Get("Content-Disposition"); cd != `attachment; filename="Solaris_ The Novel.epub"` {
+		t.Errorf("expected sanitized Content-Disposition attachment header, got %q", cd)
+	}
+	if !bytes.Equal(rec1.Body.Bytes(), epubData) {
+		t.Errorf("expected served epub bytes to match disk content, got %s", rec1.Body.String())
+	}
+
+	// 2. Authenticated request via ?token= query param
+	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-dl-1/download?token="+token, nil)
+	rec2 := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200 for query token download, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	// 3. Non-existent book ID returns 404
+	req3 := httptest.NewRequest(http.MethodGet, "/api/v1/books/nonexistent-id/download", nil)
+	req3.Header.Set("Authorization", "Bearer "+token)
+	rec3 := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for nonexistent book download, got %d", rec3.Code)
+	}
+
+	// 4. Book exists in DB but file missing from disk returns 404
+	bookMissing := &repository.Book{
+		ID:       "book-dl-missing",
+		Title:    "Missing Book",
+		FilePath: "nonexistent/path/missing.epub",
+	}
+	if err := f.repo.CreateBook(ctx, bookMissing); err != nil {
+		t.Fatalf("CreateBook failed: %v", err)
+	}
+	req4 := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-dl-missing/download", nil)
+	req4.Header.Set("Authorization", "Bearer "+token)
+	rec4 := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec4, req4)
+	if rec4.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing disk file download, got %d", rec4.Code)
+	}
+}
+
 func TestAPI_UploadBook(t *testing.T) {
 	f := setupAPITest(t)
 	defer f.db.Close()

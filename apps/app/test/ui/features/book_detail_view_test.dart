@@ -95,6 +95,8 @@ void main() {
     expect(find.text('Reading Progress'), findsOneWidget);
     expect(find.text('65%'), findsOneWidget);
     expect(find.text('Resume Reading'), findsOneWidget);
+    expect(find.text('Download EPUB'), findsOneWidget);
+    expect(find.byTooltip('Download EPUB'), findsOneWidget);
 
     // Verify Tabs
     expect(find.text('Overview'), findsOneWidget);

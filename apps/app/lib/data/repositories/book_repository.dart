@@ -93,6 +93,10 @@ class BookRepository {
     return book.copyWith(readingProgress: progress);
   }
 
+  String getBookDownloadUrl(String bookId) => apiService.getBookDownloadUrl(bookId);
+
+  Future<List<int>> downloadBookEpub(String bookId) => apiService.downloadBookEpub(bookId);
+
   Future<List<Author>> getAuthors() => apiService.getAuthors();
   Future<List<Genre>> getGenres() => apiService.getGenres();
   Future<List<Topic>> getTopics() => apiService.getTopics();

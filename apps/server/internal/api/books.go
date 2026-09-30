@@ -521,6 +521,62 @@ func (h *BookHandler) resolveBookFilePath(b *repository.Book) string {
 	return ""
 }
 
+func sanitizeDownloadFilename(name string) string {
+	name = strings.TrimSpace(name)
+	invalidChars := regexp.MustCompile(`[\\/:*?"<>|\x00-\x1f]`)
+	cleaned := invalidChars.ReplaceAllString(name, "_")
+	cleaned = strings.TrimSpace(cleaned)
+	cleaned = strings.Trim(cleaned, "._")
+	return cleaned
+}
+
+func (h *BookHandler) DownloadBook(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book: %v", err))
+		return
+	}
+
+	filePath := h.resolveBookFilePath(book)
+	if filePath == "" {
+		writeJSONError(w, http.StatusNotFound, "Book file not found on disk")
+		return
+	}
+
+	cleanTitle := sanitizeDownloadFilename(book.Title)
+	if cleanTitle == "" {
+		cleanTitle = sanitizeDownloadFilename(book.ID)
+		if cleanTitle == "" {
+			cleanTitle = "book"
+		}
+	}
+	filename := fmt.Sprintf("%s.epub", cleanTitle)
+
+	w.Header().Set("Content-Type", "application/epub+zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("Cache-Control", "private, no-transform")
+
+	http.ServeFile(w, r, filePath)
+}
+
 func (h *BookHandler) GetBookAsset(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
