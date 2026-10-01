@@ -60,6 +60,7 @@ type opfItem struct {
 }
 
 type opfSpine struct {
+	TOC                      string       `xml:"toc,attr"`
 	PageProgressionDirection string       `xml:"page-progression-direction,attr"`
 	Itemrefs                 []opfItemref `xml:"itemref"`
 }

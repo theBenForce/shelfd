@@ -109,6 +109,13 @@ func (r *Reader) ExtractChapters() ([]*ParsedChapter, error) {
 		manifestMap[item.ID] = item
 	}
 
+	tocMap := r.loadTOCMap()
+
+	var bookTitle string
+	if parsedBook, err := r.ParseBook(); err == nil && parsedBook != nil {
+		bookTitle = parsedBook.Title
+	}
+
 	isPrePaginated := r.IsPrePaginated()
 	var chapters []*ParsedChapter
 	chapterIndex := 0
@@ -171,7 +178,11 @@ func (r *Reader) ExtractChapters() ([]*ParsedChapter, error) {
 			}
 		}
 
-		title, plaintext := extractTextFromHTML(rawHTMLStr)
+		title, plaintext := extractTextFromHTMLWithContext(rawHTMLStr, bookTitle, fullPath)
+		if tocTitle := matchTOCTitle(tocMap, fullPath, item.Href); tocTitle != nil {
+			title = tocTitle
+		}
+
 		if !isPrePaginated && strings.TrimSpace(plaintext) == "" {
 			continue
 		}
@@ -412,13 +423,17 @@ img, svg {
 }
 
 func extractTextFromHTML(raw string) (*string, string) {
+	return extractTextFromHTMLWithContext(raw, "", "")
+}
+
+func extractTextFromHTMLWithContext(raw, bookTitle, fileName string) (*string, string) {
 	doc, err := nethtml.Parse(strings.NewReader(raw))
 	if err != nil {
 		// Fallback to basic string extraction on malformed HTML
 		return nil, strings.TrimSpace(raw)
 	}
 
-	title := extractChapterTitle(doc)
+	title := extractChapterTitle(doc, bookTitle, fileName)
 	var blocks []string
 	collectBlocks(doc, &blocks, false)
 
@@ -429,8 +444,8 @@ func extractTextFromHTML(raw string) (*string, string) {
 	return title, result
 }
 
-func extractChapterTitle(doc *nethtml.Node) *string {
-	var h1Title, h2Title, h3Title, docTitle string
+func extractChapterTitle(doc *nethtml.Node, bookTitle, fileName string) *string {
+	var h1Title, h2Title, h3Title, h4Title, docTitle string
 
 	var walk func(*nethtml.Node)
 	walk = func(n *nethtml.Node) {
@@ -452,6 +467,10 @@ func extractChapterTitle(doc *nethtml.Node) *string {
 				if h3Title == "" {
 					h3Title = cleanInlineText(collectNodeText(n))
 				}
+			case atom.H4:
+				if h4Title == "" {
+					h4Title = cleanInlineText(collectNodeText(n))
+				}
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -469,10 +488,35 @@ func extractChapterTitle(doc *nethtml.Node) *string {
 	if h3Title != "" {
 		return &h3Title
 	}
-	if docTitle != "" {
+	if h4Title != "" {
+		return &h4Title
+	}
+	if docTitle != "" && !isUnusableDocTitle(docTitle, bookTitle, fileName) {
 		return &docTitle
 	}
 	return nil
+}
+
+func isUnusableDocTitle(docTitle, bookTitle, fileName string) bool {
+	cleanDoc := strings.TrimSpace(docTitle)
+	if cleanDoc == "" {
+		return true
+	}
+	if bookTitle != "" && strings.EqualFold(cleanDoc, strings.TrimSpace(bookTitle)) {
+		return true
+	}
+	if fileName != "" {
+		cleanFile := path.Base(fileName)
+		fileStem := strings.TrimSuffix(cleanFile, path.Ext(cleanFile))
+		if strings.EqualFold(cleanDoc, cleanFile) || strings.EqualFold(cleanDoc, fileStem) {
+			return true
+		}
+	}
+	lower := strings.ToLower(cleanDoc)
+	if strings.HasSuffix(lower, ".xhtml") || strings.HasSuffix(lower, ".html") || strings.HasSuffix(lower, ".xml") || strings.HasSuffix(lower, ".htm") {
+		return true
+	}
+	return false
 }
 
 func collectBlocks(n *nethtml.Node, blocks *[]string, inBlockquote bool) {
