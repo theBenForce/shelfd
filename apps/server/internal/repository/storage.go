@@ -115,6 +115,7 @@ type StorageEngine interface {
 	CreateHighlight(ctx context.Context, highlight *Highlight) error
 	ListHighlightsByBookID(ctx context.Context, bookID string) ([]*Highlight, error)
 	DeleteHighlight(ctx context.Context, id string) error
+	TransferBookmarksAndHighlights(ctx context.Context, fromBookID, toBookID string) error
 
 	// OAuth 2.0
 	CreateOAuthClient(ctx context.Context, client *OAuthClient) error

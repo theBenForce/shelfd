@@ -24,6 +24,9 @@ class AppShell extends ConsumerWidget {
     if (location.startsWith('/uploads')) {
       return 5;
     }
+    if (location.startsWith('/utilities')) {
+      return 6;
+    }
     if (location.startsWith('/settings')) {
       return 4;
     }
@@ -43,6 +46,8 @@ class AppShell extends ConsumerWidget {
       context.go('/settings');
     } else if (index == 5) {
       context.go('/uploads');
+    } else if (index == 6) {
+      context.go('/utilities');
     }
   }
 

@@ -19,6 +19,7 @@ import '../../data/services/api_service.dart';
 import '../../data/services/storage_service.dart';
 import '../core/theme.dart';
 import '../features/library/library_query_parser.dart';
+export 'duplicate_books_provider.dart';
 export 'upload_provider.dart';
 
 /// Resolves the default server URL based on the runtime platform and environment.
