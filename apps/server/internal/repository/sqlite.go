@@ -1742,6 +1742,18 @@ func (r *SQLiteStorageEngine) DeleteHighlight(ctx context.Context, id string) er
 	return nil
 }
 
+func (r *SQLiteStorageEngine) TransferBookmarksAndHighlights(ctx context.Context, fromBookID, toBookID string) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE bookmarks SET book_id = ? WHERE book_id = ?", toBookID, fromBookID)
+	if err != nil {
+		return fmt.Errorf("transferring bookmarks: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx, "UPDATE highlights SET book_id = ? WHERE book_id = ?", toBookID, fromBookID)
+	if err != nil {
+		return fmt.Errorf("transferring highlights: %w", err)
+	}
+	return nil
+}
+
 // --- Paragraphs & Passage Retrieval ---
 
 func (r *SQLiteStorageEngine) CreateParagraphs(ctx context.Context, paragraphs []*Paragraph) error {

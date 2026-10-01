@@ -2,6 +2,7 @@ import '../models/author.dart';
 import '../models/book.dart';
 import '../models/book_chat.dart';
 import '../models/bookmark.dart';
+import '../models/duplicate_group.dart';
 import '../models/genre.dart';
 import '../models/highlight.dart';
 import '../models/paginated_books.dart';
@@ -225,4 +226,21 @@ class BookRepository {
         filename: filename,
         bytes: bytes,
       );
+
+  Future<DuplicateScanResult> getDuplicateBooks() =>
+      apiService.getDuplicateBooks();
+
+  Future<Book> mergeBooks({
+    required String primaryBookId,
+    required List<String> duplicateBookIds,
+    MergeOptions? options,
+  }) async {
+    final book = await apiService.mergeBooks(
+      primaryBookId: primaryBookId,
+      duplicateBookIds: duplicateBookIds,
+      options: options,
+    );
+    final progress = storageService.getReadingProgress(book.id);
+    return book.copyWith(readingProgress: progress);
+  }
 }

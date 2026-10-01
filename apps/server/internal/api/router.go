@@ -45,6 +45,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, cfg.Hub, logger)
 	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version, cfg.DefaultUsername)
 	queueHandler := NewQueueHandler(cfg.Repo, cfg.Worker, cfg.UploadWorker, cfg.Hub)
+	utilHandler := NewUtilityHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
 
 	auth := AuthMiddleware(cfg.Repo, cfg.JWTSecret)
 
@@ -102,6 +103,9 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	mux.Handle("GET /api/v1/queue/status", auth(http.HandlerFunc(queueHandler.GetStatus)))
 	mux.Handle("GET /api/v1/queue/events", auth(http.HandlerFunc(queueHandler.StreamEvents)))
+
+	mux.Handle("GET /api/v1/utilities/duplicates", auth(http.HandlerFunc(utilHandler.FindDuplicates)))
+	mux.Handle("POST /api/v1/utilities/merge-books", auth(http.HandlerFunc(utilHandler.MergeBooks)))
 
 	mux.Handle("POST /api/v1/library/scan", auth(http.HandlerFunc(libHandler.Scan)))
 

@@ -6,6 +6,7 @@ import '../models/book_chat.dart';
 import '../models/bookmark.dart';
 import '../models/chapter.dart';
 import '../models/connect_info.dart';
+import '../models/duplicate_group.dart';
 import '../models/genre.dart';
 import '../models/highlight.dart';
 import '../models/queue_status.dart';
@@ -731,5 +732,39 @@ class ApiService {
     if (response.statusCode >= 400) {
       throw ApiException(response.statusCode, response.body);
     }
+  }
+
+  Future<DuplicateScanResult> getDuplicateBooks() async {
+    final response = await client.get(
+      _uri('/api/v1/utilities/duplicates'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return DuplicateScanResult.fromJson(data);
+  }
+
+  Future<Book> mergeBooks({
+    required String primaryBookId,
+    required List<String> duplicateBookIds,
+    MergeOptions? options,
+  }) async {
+    final response = await client.post(
+      _uri('/api/v1/utilities/merge-books'),
+      headers: _headers(),
+      body: jsonEncode({
+        'primary_book_id': primaryBookId,
+        'duplicate_book_ids': duplicateBookIds,
+        if (options != null) 'options': options.toJson(),
+      }),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final bookData = data['book'] as Map<String, dynamic>? ?? data;
+    return Book.fromJson(bookData, baseUrl: baseUrl);
   }
 }

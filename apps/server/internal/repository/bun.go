@@ -1919,6 +1919,18 @@ func (r *BunStorageEngine) DeleteHighlight(ctx context.Context, id string) error
 	return nil
 }
 
+func (r *BunStorageEngine) TransferBookmarksAndHighlights(ctx context.Context, fromBookID, toBookID string) error {
+	_, err := r.db.NewUpdate().Model((*Bookmark)(nil)).Set("book_id = ?", toBookID).Where("book_id = ?", fromBookID).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("transferring bookmarks: %w", err)
+	}
+	_, err = r.db.NewUpdate().Model((*Highlight)(nil)).Set("book_id = ?", toBookID).Where("book_id = ?", fromBookID).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("transferring highlights: %w", err)
+	}
+	return nil
+}
+
 // --- OAuth 2.0 ---
 
 func (r *BunStorageEngine) CreateOAuthClient(ctx context.Context, client *OAuthClient) error {

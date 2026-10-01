@@ -488,6 +488,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
     final isTopics = p.startsWith('/topics') || p.startsWith('/topic');
     final isSearch = p.startsWith('/search') || (widget.currentPath == null && widget.currentIndex == 1);
     final isUploads = p.startsWith('/uploads');
+    final isUtilities = p.startsWith('/utilities');
     final isSettings = p.startsWith('/settings') || (widget.currentPath == null && widget.currentIndex == 2);
     final isLibraryActive = isBooks || isSeries || isAuthors || isGenres || isTopics || (widget.currentPath == null && widget.currentIndex == 0);
     final queueStatus = ref.watch(queueProvider).status;
@@ -661,6 +662,14 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                           )
                         : null,
                     onTap: () => _navigate('/uploads', 3),
+                  ),
+                  const SizedBox(height: AppTokens.space8),
+                  _SideNavItem(
+                    icon: Icons.handyman_outlined,
+                    selectedIcon: Icons.handyman_rounded,
+                    label: 'Utilities',
+                    isSelected: isUtilities,
+                    onTap: () => _navigate('/utilities', 6),
                   ),
                   const SizedBox(height: AppTokens.space8),
                   _SideNavItem(
