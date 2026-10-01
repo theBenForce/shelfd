@@ -658,6 +658,194 @@ func TestFixedLayoutDetection(t *testing.T) {
 	}
 }
 
+func TestExtractChapters_EPUB2_NCX_TOC(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfXML := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Potty Training in 3 Days</dc:title>
+    <dc:creator>Brandi Brucks</dc:creator>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="ch1" href="text/step1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="text/step2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="ch1"/>
+    <itemref idref="ch2"/>
+  </spine>
+</package>`
+
+	ncxXML := `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="np1" playOrder="1">
+      <navLabel><text>Step 1: Timing is Everything</text></navLabel>
+      <content src="text/step1.xhtml"/>
+    </navPoint>
+    <navPoint id="np2" playOrder="2">
+      <navLabel><text>Step 2: The Three Days</text></navLabel>
+      <content src="text/step2.xhtml"/>
+    </navPoint>
+  </navMap>
+</ncx>`
+
+	ch1HTML := `<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Potty Training in 3 Days</title></head>
+  <body>
+    <p class="chapter-title">timing is everything</p>
+    <p>Body text of step 1.</p>
+  </body>
+</html>`
+
+	ch2HTML := `<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Potty Training in 3 Days</title></head>
+  <body>
+    <p class="chapter-title">the three days</p>
+    <p>Body text of step 2.</p>
+  </body>
+</html>`
+
+	epubBytes := createTestEPUB(map[string][]byte{
+		"META-INF/container.xml": []byte(containerXML),
+		"OEBPS/content.opf":      []byte(opfXML),
+		"OEBPS/toc.ncx":          []byte(ncxXML),
+		"OEBPS/text/step1.xhtml": []byte(ch1HTML),
+		"OEBPS/text/step2.xhtml": []byte(ch2HTML),
+	})
+
+	zr, err := zip.NewReader(bytes.NewReader(epubBytes), int64(len(epubBytes)))
+	if err != nil {
+		t.Fatalf("zip new reader error: %v", err)
+	}
+
+	reader, err := epub.NewReader(zr)
+	if err != nil {
+		t.Fatalf("epub new reader error: %v", err)
+	}
+
+	chapters, err := reader.ExtractChapters()
+	if err != nil {
+		t.Fatalf("ExtractChapters error: %v", err)
+	}
+
+	if len(chapters) != 2 {
+		t.Fatalf("expected 2 chapters, got %d", len(chapters))
+	}
+
+	if chapters[0].Title == nil || *chapters[0].Title != "Step 1: Timing is Everything" {
+		t.Errorf("expected chapter 0 title 'Step 1: Timing is Everything', got %v", chapters[0].Title)
+	}
+	if chapters[1].Title == nil || *chapters[1].Title != "Step 2: The Three Days" {
+		t.Errorf("expected chapter 1 title 'Step 2: The Three Days', got %v", chapters[1].Title)
+	}
+}
+
+func TestExtractChapters_EPUB3_NAV_TOC(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OPS/package.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfXML := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Asperger's Syndrome For Dummies</dc:title>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="flast" href="03_9780470660874-flast.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch1" href="06_9780470660874-ch01.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="flast"/>
+    <itemref idref="ch1"/>
+  </spine>
+</package>`
+
+	navHTML := `<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+  <head><title>Navigation</title></head>
+  <body>
+    <nav epub:type="toc" id="toc">
+      <h1>Table of Contents</h1>
+      <ol>
+        <li><a href="03_9780470660874-flast.xhtml">Foreword</a></li>
+        <li>
+          <a href="06_9780470660874-ch01.xhtml#section1">Chapter 1: Looking at Autism</a>
+          <ol>
+            <li><a href="06_9780470660874-ch01.xhtml#sec1-1">What is Autism?</a></li>
+          </ol>
+        </li>
+      </ol>
+    </nav>
+  </body>
+</html>`
+
+	flastHTML := `<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>03_9780470660874-flast</title></head>
+  <body>
+    <div class="heading">Foreword</div>
+    <p>Foreword body text.</p>
+  </body>
+</html>`
+
+	ch1HTML := `<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>06_9780470660874-ch01</title></head>
+  <body>
+    <div class="chapter">Chapter 1: Looking at Autism</div>
+    <p>Chapter 1 body text.</p>
+  </body>
+</html>`
+
+	epubBytes := createTestEPUB(map[string][]byte{
+		"META-INF/container.xml":            []byte(containerXML),
+		"OPS/package.opf":                   []byte(opfXML),
+		"OPS/nav.xhtml":                     []byte(navHTML),
+		"OPS/03_9780470660874-flast.xhtml": []byte(flastHTML),
+		"OPS/06_9780470660874-ch01.xhtml":  []byte(ch1HTML),
+	})
+
+	zr, err := zip.NewReader(bytes.NewReader(epubBytes), int64(len(epubBytes)))
+	if err != nil {
+		t.Fatalf("zip new reader error: %v", err)
+	}
+
+	reader, err := epub.NewReader(zr)
+	if err != nil {
+		t.Fatalf("epub new reader error: %v", err)
+	}
+
+	chapters, err := reader.ExtractChapters()
+	if err != nil {
+		t.Fatalf("ExtractChapters error: %v", err)
+	}
+
+	if len(chapters) != 2 {
+		t.Fatalf("expected 2 chapters, got %d", len(chapters))
+	}
+
+	if chapters[0].Title == nil || *chapters[0].Title != "Foreword" {
+		t.Errorf("expected chapter 0 title 'Foreword', got %v", chapters[0].Title)
+	}
+	if chapters[1].Title == nil || *chapters[1].Title != "Chapter 1: Looking at Autism" {
+		t.Errorf("expected chapter 1 title 'Chapter 1: Looking at Autism', got %v", chapters[1].Title)
+	}
+}
+
 func TestExtractPageDimensions_SVGViewBox(t *testing.T) {
 	svgHTML := `<!DOCTYPE html><html><head><title>Page</title></head><body>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="100%" height="100%">
