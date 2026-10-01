@@ -846,6 +846,141 @@ func TestExtractChapters_EPUB3_NAV_TOC(t *testing.T) {
 	}
 }
 
+func TestExtractChapters_FallbackFiltersBookTitleAndFilenameDocTitles(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfXML := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Self Published Guide</dc:title>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="ch2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch3" href="ch3.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+    <itemref idref="ch2"/>
+    <itemref idref="ch3"/>
+  </spine>
+</package>`
+
+	// ch1: title matches book title, no heading in body -> Title should be nil
+	ch1HTML := `<html><head><title>Self Published Guide</title></head><body><p>Intro text</p></body></html>`
+	// ch2: title matches filename, body has h2 -> Title should be the h2
+	ch2HTML := `<html><head><title>ch2.xhtml</title></head><body><h2>Real Chapter Heading</h2><p>Content</p></body></html>`
+	// ch3: title is a valid unique section title -> Title should be the docTitle
+	ch3HTML := `<html><head><title>Custom Section Name</title></head><body><p>Content</p></body></html>`
+
+	epubBytes := createTestEPUB(map[string][]byte{
+		"META-INF/container.xml": []byte(containerXML),
+		"content.opf":            []byte(opfXML),
+		"ch1.xhtml":              []byte(ch1HTML),
+		"ch2.xhtml":              []byte(ch2HTML),
+		"ch3.xhtml":              []byte(ch3HTML),
+	})
+
+	zr, err := zip.NewReader(bytes.NewReader(epubBytes), int64(len(epubBytes)))
+	if err != nil {
+		t.Fatalf("zip new reader error: %v", err)
+	}
+
+	reader, err := epub.NewReader(zr)
+	if err != nil {
+		t.Fatalf("epub new reader error: %v", err)
+	}
+
+	chapters, err := reader.ExtractChapters()
+	if err != nil {
+		t.Fatalf("ExtractChapters error: %v", err)
+	}
+
+	if len(chapters) != 3 {
+		t.Fatalf("expected 3 chapters, got %d", len(chapters))
+	}
+
+	if chapters[0].Title != nil {
+		t.Errorf("expected chapter 0 title to be nil (not book title), got %s", *chapters[0].Title)
+	}
+	if chapters[1].Title == nil || *chapters[1].Title != "Real Chapter Heading" {
+		t.Errorf("expected chapter 1 title 'Real Chapter Heading', got %v", chapters[1].Title)
+	}
+	if chapters[2].Title == nil || *chapters[2].Title != "Custom Section Name" {
+		t.Errorf("expected chapter 2 title 'Custom Section Name', got %v", chapters[2].Title)
+	}
+}
+
+func TestExtractChapters_URLEncodedAndNestedTOC(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfXML := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Nested Book</dc:title>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="ch1" href="text/Chapter%201.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="ch1"/>
+  </spine>
+</package>`
+
+	ncxXML := `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="np1" playOrder="1">
+      <navLabel><text>Chapter 1: The Adventure Begins</text></navLabel>
+      <content src="text/Chapter%201.xhtml#start"/>
+    </navPoint>
+  </navMap>
+</ncx>`
+
+	ch1HTML := `<html><head><title>Nested Book</title></head><body><p>Adventure text.</p></body></html>`
+
+	epubBytes := createTestEPUB(map[string][]byte{
+		"META-INF/container.xml":        []byte(containerXML),
+		"OEBPS/content.opf":             []byte(opfXML),
+		"OEBPS/toc.ncx":                 []byte(ncxXML),
+		"OEBPS/text/Chapter 1.xhtml":    []byte(ch1HTML),
+	})
+
+	zr, err := zip.NewReader(bytes.NewReader(epubBytes), int64(len(epubBytes)))
+	if err != nil {
+		t.Fatalf("zip new reader error: %v", err)
+	}
+
+	reader, err := epub.NewReader(zr)
+	if err != nil {
+		t.Fatalf("epub new reader error: %v", err)
+	}
+
+	chapters, err := reader.ExtractChapters()
+	if err != nil {
+		t.Fatalf("ExtractChapters error: %v", err)
+	}
+
+	if len(chapters) != 1 {
+		t.Fatalf("expected 1 chapter, got %d", len(chapters))
+	}
+
+	if chapters[0].Title == nil || *chapters[0].Title != "Chapter 1: The Adventure Begins" {
+		t.Errorf("expected chapter 0 title 'Chapter 1: The Adventure Begins', got %v", chapters[0].Title)
+	}
+}
+
 func TestExtractPageDimensions_SVGViewBox(t *testing.T) {
 	svgHTML := `<!DOCTYPE html><html><head><title>Page</title></head><body>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="100%" height="100%">

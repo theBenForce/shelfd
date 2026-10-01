@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -188,9 +189,16 @@ func (r *Reader) ReadEntry(name string) ([]byte, error) {
 
 func (r *Reader) findFile(name string) *zip.File {
 	normalized := strings.TrimPrefix(path.Clean(strings.ReplaceAll(name, "\\", "/")), "/")
+	unescaped, _ := url.PathUnescape(normalized)
 	for _, f := range r.zip.File {
-		if strings.TrimPrefix(path.Clean(strings.ReplaceAll(f.Name, "\\", "/")), "/") == normalized {
+		fNorm := strings.TrimPrefix(path.Clean(strings.ReplaceAll(f.Name, "\\", "/")), "/")
+		if fNorm == normalized || (unescaped != "" && fNorm == unescaped) {
 			return f
+		}
+		if fUnescaped, err := url.PathUnescape(fNorm); err == nil && fUnescaped != "" {
+			if fUnescaped == normalized || (unescaped != "" && fUnescaped == unescaped) {
+				return f
+			}
 		}
 	}
 	return nil
