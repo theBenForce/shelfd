@@ -137,9 +137,24 @@ func (r *BunStorageEngine) applyBookFilter(q *bun.SelectQuery, filter BookFilter
 	if filter.SeriesID != nil {
 		q = q.Where("id IN (SELECT book_id FROM book_series WHERE series_id = ?)", *filter.SeriesID)
 	}
+	if filter.Title != nil && strings.TrimSpace(*filter.Title) != "" {
+		term := "%" + strings.ToLower(strings.TrimSpace(*filter.Title)) + "%"
+		q = q.Where("LOWER(title) LIKE ?", term)
+	}
+	if filter.ISBN != nil && strings.TrimSpace(*filter.ISBN) != "" {
+		clean := CleanISBNTerm(*filter.ISBN)
+		term := "%" + clean + "%"
+		q = q.Where("(LOWER(identifier) LIKE ? OR REPLACE(REPLACE(LOWER(identifier), '-', ''), ' ', '') LIKE ?)", term, term)
+	}
 	if filter.Search != nil && strings.TrimSpace(*filter.Search) != "" {
 		term := "%" + strings.ToLower(strings.TrimSpace(*filter.Search)) + "%"
-		q = q.Where("(LOWER(title) LIKE ? OR LOWER(description) LIKE ?)", term, term)
+		clean := CleanISBNTerm(*filter.Search)
+		if clean != "" && clean != strings.ToLower(strings.TrimSpace(*filter.Search)) {
+			cleanTerm := "%" + clean + "%"
+			q = q.Where("(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(identifier) LIKE ? OR REPLACE(REPLACE(LOWER(identifier), '-', ''), ' ', '') LIKE ?)", term, term, term, cleanTerm)
+		} else {
+			q = q.Where("(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(identifier) LIKE ?)", term, term, term)
+		}
 	}
 	return q
 }

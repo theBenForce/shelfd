@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -510,7 +511,7 @@ func (h *OAuthHandler) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	allowedURIs := strings.Fields(client.RedirectURIs)
 	isAllowed := false
 	for _, u := range allowedURIs {
-		if strings.EqualFold(u, redirectURI) {
+		if matchesRedirectURI(u, redirectURI) {
 			isAllowed = true
 			break
 		}
@@ -709,7 +710,7 @@ func (h *OAuthHandler) HandleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if codeRecord.RedirectURI != redirectURI {
+	if !matchesRedirectURI(codeRecord.RedirectURI, redirectURI) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "Redirect URI mismatch")
 		return
 	}
@@ -783,4 +784,41 @@ func writeOAuthError(w http.ResponseWriter, status int, errCode, errDesc string)
 		"error":             errCode,
 		"error_description": errDesc,
 	})
+}
+
+func isLoopbackHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "localhost" || h == "127.0.0.1" || h == "::1" || h == "[::1]" {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return false
+}
+
+func matchesRedirectURI(registeredURI, requestURI string) bool {
+	if strings.EqualFold(registeredURI, requestURI) {
+		return true
+	}
+
+	uReg, err1 := url.Parse(registeredURI)
+	uReq, err2 := url.Parse(requestURI)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+
+	if !strings.EqualFold(uReg.Scheme, uReq.Scheme) {
+		return false
+	}
+
+	if uReg.Path != uReq.Path {
+		return false
+	}
+
+	if isLoopbackHost(uReg.Hostname()) && isLoopbackHost(uReq.Hostname()) {
+		return true
+	}
+
+	return strings.EqualFold(uReg.Host, uReq.Host)
 }

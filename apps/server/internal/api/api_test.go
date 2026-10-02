@@ -4,13 +4,16 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2527,6 +2530,227 @@ func TestQueueHandler_StreamEvents_Realtime(t *testing.T) {
 	}
 	if !strings.Contains(body, "Neuromancer") {
 		t.Errorf("expected Neuromancer payload in SSE feed, got:\n%s", body)
+	}
+}
+
+func TestCLIWorkflow_OAuthSearchAndUpload(t *testing.T) {
+	f := setupAPITest(t)
+
+	// Combine OAuth routes and /api/v1/ routes on root mux exactly as main.go does
+	rootMux := http.NewServeMux()
+	oauthHandler := api.NewOAuthHandler(f.repo)
+	oauthHandler.RegisterRoutes(rootMux)
+	rootMux.Handle("/api/v1/", f.handler)
+
+	// 1. Dynamic Client Registration for CLI
+	regPayload := `{"client_name":"Shelfd CLI","redirect_uris":["http://127.0.0.1/callback"]}`
+	reqReg := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(regPayload))
+	recReg := httptest.NewRecorder()
+	rootMux.ServeHTTP(recReg, reqReg)
+
+	if recReg.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created on register, got %d: %s", recReg.Code, recReg.Body.String())
+	}
+	var regResp api.RegisterResponse
+	_ = json.NewDecoder(recReg.Body).Decode(&regResp)
+	clientID := regResp.ClientID
+
+	// 2. PKCE Authorization on ephemeral loopback port
+	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	sha := sha256.Sum256([]byte(codeVerifier))
+	codeChallenge := base64.RawURLEncoding.EncodeToString(sha[:])
+
+	form := url.Values{
+		"action":                {"authorize"},
+		"username":              {f.user.Username},
+		"password":              {f.password},
+		"client_id":             {clientID},
+		"redirect_uri":          {"http://127.0.0.1:49876/callback"},
+		"state":                 {"random_state_123"},
+		"code_challenge":        {codeChallenge},
+		"code_challenge_method": {"S256"},
+		"scope":                 {"library read write"},
+	}
+
+	reqAuth := httptest.NewRequest(http.MethodPost, "/oauth/authorize", strings.NewReader(form.Encode()))
+	reqAuth.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recAuth := httptest.NewRecorder()
+	rootMux.ServeHTTP(recAuth, reqAuth)
+
+	if recAuth.Code != http.StatusFound {
+		t.Fatalf("expected 302 Found on authorize, got %d: %s", recAuth.Code, recAuth.Body.String())
+	}
+
+	parsedLocation, err := url.Parse(recAuth.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("failed to parse redirect location: %v", err)
+	}
+	authCode := parsedLocation.Query().Get("code")
+
+	// 3. Exchange code for access token
+	tokenForm := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {authCode},
+		"client_id":     {clientID},
+		"redirect_uri":  {"http://127.0.0.1:49876/callback"},
+		"code_verifier": {codeVerifier},
+	}
+	reqToken := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+	reqToken.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recToken := httptest.NewRecorder()
+	rootMux.ServeHTTP(recToken, reqToken)
+
+	if recToken.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on token exchange, got %d: %s", recToken.Code, recToken.Body.String())
+	}
+	var tokenResp api.TokenResponse
+	_ = json.NewDecoder(recToken.Body).Decode(&tokenResp)
+	accessToken := tokenResp.AccessToken
+	if !strings.HasPrefix(accessToken, "shelfd_") {
+		t.Fatalf("expected access token to start with shelfd_, got %s", accessToken)
+	}
+
+	// 4. Seed books into repository
+	author1, _ := f.repo.UpsertAuthor(context.Background(), "Frank Herbert")
+	author2, _ := f.repo.UpsertAuthor(context.Background(), "Isaac Asimov")
+
+	isbn1 := "urn:isbn:9780441569595"
+	book1 := &repository.Book{
+		Title:      "Dune",
+		Identifier: &isbn1,
+		FilePath:   "Frank Herbert/Dune/Dune.epub",
+	}
+	_ = f.repo.CreateBook(context.Background(), book1)
+	_ = f.repo.LinkBookAuthor(context.Background(), book1.ID, author1.ID, "author")
+
+	isbn2 := "urn:isbn:9780553293357"
+	book2 := &repository.Book{
+		Title:      "Foundation",
+		Identifier: &isbn2,
+		FilePath:   "Isaac Asimov/Foundation/Foundation.epub",
+	}
+	_ = f.repo.CreateBook(context.Background(), book2)
+	_ = f.repo.LinkBookAuthor(context.Background(), book2.ID, author2.ID, "author")
+
+	// 5. Test REST API searches with Bearer token
+	testSearches := []struct {
+		name          string
+		queryURL      string
+		expectedCount int
+		expectedTitle string
+	}{
+		{
+			name:          "Search by title query param",
+			queryURL:      "/api/v1/books?title=Dune",
+			expectedCount: 1,
+			expectedTitle: "Dune",
+		},
+		{
+			name:          "Search by author query param",
+			queryURL:      "/api/v1/books?author=Isaac+Asimov",
+			expectedCount: 1,
+			expectedTitle: "Foundation",
+		},
+		{
+			name:          "Search by hyphenated ISBN param",
+			queryURL:      "/api/v1/books?isbn=978-0441-569595",
+			expectedCount: 1,
+			expectedTitle: "Dune",
+		},
+		{
+			name:          "Search by tokenized ISBN",
+			queryURL:      "/api/v1/books?search=isbn:9780553293357",
+			expectedCount: 1,
+			expectedTitle: "Foundation",
+		},
+		{
+			name:          "Broad search matching ISBN",
+			queryURL:      "/api/v1/books?search=978-0441-569595",
+			expectedCount: 1,
+			expectedTitle: "Dune",
+		},
+	}
+
+	for _, tc := range testSearches {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.queryURL, nil)
+			req.Header.Set("Authorization", "Bearer "+accessToken)
+			rec := httptest.NewRecorder()
+			rootMux.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+			}
+			var listResp struct {
+				Books []api.BookListItem `json:"books"`
+				Total int                `json:"total"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &listResp); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if listResp.Total != tc.expectedCount || len(listResp.Books) != tc.expectedCount {
+				t.Fatalf("expected %d books, got total=%d len=%d", tc.expectedCount, listResp.Total, len(listResp.Books))
+			}
+			if listResp.Books[0].Title != tc.expectedTitle {
+				t.Errorf("expected title %q, got %q", tc.expectedTitle, listResp.Books[0].Title)
+			}
+		})
+	}
+
+	// 6. Test File Upload via POST /api/v1/books/upload with Bearer token
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	mimetype, _ := zw.Create("mimetype")
+	mimetype.Write([]byte("application/epub+zip"))
+	container, _ := zw.Create("META-INF/container.xml")
+	container.Write([]byte(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`))
+	opf, _ := zw.Create("OEBPS/content.opf")
+	opf.Write([]byte(`<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Rendezvous with Rama</dc:title>
+    <dc:creator>Arthur C. Clarke</dc:creator>
+    <dc:identifier>urn:isbn:9780575077331</dc:identifier>
+  </metadata>
+  <manifest><item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine><itemref idref="ch1"/></spine>
+</package>`))
+	ch1, _ := zw.Create("OEBPS/ch1.xhtml")
+	ch1.Write([]byte(`<!DOCTYPE html><html><body><p>The space probe was launched.</p></body></html>`))
+	zw.Close()
+
+	body := &bytes.Buffer{}
+	mpw := multipart.NewWriter(body)
+	part, _ := mpw.CreateFormFile("file", "rama.epub")
+	part.Write(buf.Bytes())
+	mpw.Close()
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload", body)
+	uploadReq.Header.Set("Authorization", "Bearer "+accessToken)
+	uploadReq.Header.Set("Content-Type", mpw.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	rootMux.ServeHTTP(uploadRec, uploadReq)
+
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted on upload, got %d: %s", uploadRec.Code, uploadRec.Body.String())
+	}
+	var uploadResp struct {
+		JobID  string `json:"job_id"`
+		Status string `json:"status"`
+	}
+	_ = json.Unmarshal(uploadRec.Body.Bytes(), &uploadResp)
+	if uploadResp.JobID == "" || uploadResp.Status != "queued" {
+		t.Fatalf("unexpected upload response: %+v", uploadResp)
+	}
+
+	// 7. Query job status using the same Bearer token
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/"+uploadResp.JobID, nil)
+	statusReq.Header.Set("Authorization", "Bearer "+accessToken)
+	statusRec := httptest.NewRecorder()
+	rootMux.ServeHTTP(statusRec, statusReq)
+
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on job status query, got %d: %s", statusRec.Code, statusRec.Body.String())
 	}
 }
 

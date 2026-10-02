@@ -207,9 +207,11 @@ func TestBookCRUDAndFiltering(t *testing.T) {
 	desc := "Classic cyberpunk novel"
 	size := int64(450000)
 	modTime := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	isbn1 := "urn:isbn:9780441569595"
 	book1 := &repository.Book{
 		Title:          "Neuromancer",
 		Description:    &desc,
+		Identifier:     &isbn1,
 		FilePath:       "William Gibson/Neuromancer/Neuromancer.epub",
 		FileSizeBytes:  &size,
 		FileModifiedAt: &modTime,
@@ -303,6 +305,26 @@ func TestBookCRUDAndFiltering(t *testing.T) {
 	booksByGenreName, err := repo.ListBooks(ctx, repository.BookFilter{GenreName: &genreNameQuery})
 	if err != nil || len(booksByGenreName) != 1 || booksByGenreName[0].ID != book1.ID {
 		t.Fatalf("expected 1 book matching genreName 'cyberpunk', got %v (err: %v)", booksByGenreName, err)
+	}
+
+	// Filter by Title
+	titleQuery := "neuromancer"
+	booksByTitle, err := repo.ListBooks(ctx, repository.BookFilter{Title: &titleQuery})
+	if err != nil || len(booksByTitle) != 1 || booksByTitle[0].ID != book1.ID {
+		t.Fatalf("expected 1 book matching title 'neuromancer', got %v (err: %v)", booksByTitle, err)
+	}
+
+	// Filter by ISBN with hyphens
+	isbnWithHyphens := "978-0441-569595"
+	booksByISBN, err := repo.ListBooks(ctx, repository.BookFilter{ISBN: &isbnWithHyphens})
+	if err != nil || len(booksByISBN) != 1 || booksByISBN[0].ID != book1.ID {
+		t.Fatalf("expected 1 book matching ISBN '978-0441-569595', got %v (err: %v)", booksByISBN, err)
+	}
+
+	// Filter by Search containing ISBN
+	booksBySearchISBN, err := repo.ListBooks(ctx, repository.BookFilter{Search: &isbnWithHyphens})
+	if err != nil || len(booksBySearchISBN) != 1 || booksBySearchISBN[0].ID != book1.ID {
+		t.Fatalf("expected 1 book matching Search with ISBN, got %v (err: %v)", booksBySearchISBN, err)
 	}
 
 	// Pagination

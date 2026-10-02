@@ -371,4 +371,113 @@ func TestOAuthProtectedResourceDiscovery(t *testing.T) {
 	}
 }
 
+func TestOAuthLoopbackRedirectURIs_RFC8252(t *testing.T) {
+	fix := setupAPITest(t)
+	mux := http.NewServeMux()
+	oauthHandler := api.NewOAuthHandler(fix.repo)
+	oauthHandler.RegisterRoutes(mux)
+
+	// 1. Dynamically register CLI client with loopback redirect URI without fixed port
+	regPayload := `{"client_name":"CLI Reader","redirect_uris":["http://127.0.0.1/callback"]}`
+	reqReg := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(regPayload))
+	recReg := httptest.NewRecorder()
+	mux.ServeHTTP(recReg, reqReg)
+
+	if recReg.Code != http.StatusCreated {
+		t.Fatalf("expected status 201 on register, got %d: %s", recReg.Code, recReg.Body.String())
+	}
+
+	var regResp api.RegisterResponse
+	_ = json.NewDecoder(recReg.Body).Decode(&regResp)
+	clientID := regResp.ClientID
+
+	// 2. GET /oauth/authorize with ephemeral port http://127.0.0.1:49152/callback
+	authURL := fmt.Sprintf("/oauth/authorize?response_type=code&client_id=%s&redirect_uri=%s&state=state123",
+		url.QueryEscape(clientID),
+		url.QueryEscape("http://127.0.0.1:49152/callback"),
+	)
+	reqAuthGet := httptest.NewRequest(http.MethodGet, authURL, nil)
+	recAuthGet := httptest.NewRecorder()
+	mux.ServeHTTP(recAuthGet, reqAuthGet)
+
+	if recAuthGet.Code != http.StatusOK {
+		t.Fatalf("expected status 200 on GET /oauth/authorize with loopback port, got %d: %s", recAuthGet.Code, recAuthGet.Body.String())
+	}
+
+	// 3. POST /oauth/authorize to approve
+	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	sha := sha256.Sum256([]byte(codeVerifier))
+	codeChallenge := base64.RawURLEncoding.EncodeToString(sha[:])
+
+	form := url.Values{
+		"action":                {"authorize"},
+		"username":              {fix.user.Username},
+		"password":              {fix.password},
+		"client_id":             {clientID},
+		"redirect_uri":          {"http://127.0.0.1:49152/callback"},
+		"state":                 {"state123"},
+		"code_challenge":        {codeChallenge},
+		"code_challenge_method": {"S256"},
+		"scope":                 {"mcp"},
+	}
+
+	reqAuthPost := httptest.NewRequest(http.MethodPost, "/oauth/authorize", strings.NewReader(form.Encode()))
+	reqAuthPost.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recAuthPost := httptest.NewRecorder()
+	mux.ServeHTTP(recAuthPost, reqAuthPost)
+
+	if recAuthPost.Code != http.StatusFound {
+		t.Fatalf("expected status 302 on approve, got %d: %s", recAuthPost.Code, recAuthPost.Body.String())
+	}
+
+	redirectLocation := recAuthPost.Header().Get("Location")
+	parsedRedirect, err := url.Parse(redirectLocation)
+	if err != nil {
+		t.Fatalf("failed to parse redirect location: %v", err)
+	}
+
+	authCode := parsedRedirect.Query().Get("code")
+	if !strings.HasPrefix(authCode, "code_") {
+		t.Fatalf("expected code starting with 'code_', got '%s'", authCode)
+	}
+
+	// 4. Exchange code for token with ephemeral port
+	tokenForm := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {authCode},
+		"client_id":     {clientID},
+		"redirect_uri":  {"http://127.0.0.1:49152/callback"},
+		"code_verifier": {codeVerifier},
+	}
+	reqToken := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(tokenForm.Encode()))
+	reqToken.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recToken := httptest.NewRecorder()
+	mux.ServeHTTP(recToken, reqToken)
+
+	if recToken.Code != http.StatusOK {
+		t.Fatalf("expected status 200 on token exchange, got %d: %s", recToken.Code, recToken.Body.String())
+	}
+
+	var tokenResp api.TokenResponse
+	if err := json.NewDecoder(recToken.Body).Decode(&tokenResp); err != nil {
+		t.Fatalf("failed to decode TokenResponse: %v", err)
+	}
+	if !strings.HasPrefix(tokenResp.AccessToken, "shelfd_") {
+		t.Errorf("expected access token starting with shelfd_, got %s", tokenResp.AccessToken)
+	}
+
+	// 5. Test rejection of non-loopback redirect URI mismatch
+	badAuthURL := fmt.Sprintf("/oauth/authorize?response_type=code&client_id=%s&redirect_uri=%s",
+		url.QueryEscape(clientID),
+		url.QueryEscape("https://malicious.test/callback"),
+	)
+	reqBadAuth := httptest.NewRequest(http.MethodGet, badAuthURL, nil)
+	recBadAuth := httptest.NewRecorder()
+	mux.ServeHTTP(recBadAuth, reqBadAuth)
+
+	if recBadAuth.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400 for unauthorized non-loopback redirect, got %d", recBadAuth.Code)
+	}
+}
+
 

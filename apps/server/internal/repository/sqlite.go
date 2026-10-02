@@ -207,10 +207,27 @@ func (r *SQLiteStorageEngine) ListBooks(ctx context.Context, filter BookFilter) 
 		conditions = append(conditions, "b.id IN (SELECT bt.book_id FROM book_topics bt JOIN topics t ON t.id = bt.topic_id WHERE LOWER(t.name) LIKE ?)")
 		args = append(args, "%"+strings.ToLower(strings.TrimSpace(*filter.TopicName))+"%")
 	}
-	if filter.Search != nil && strings.TrimSpace(*filter.Search) != "" {
-		conditions = append(conditions, "(LOWER(b.title) LIKE ? OR LOWER(b.description) LIKE ?)")
-		term := "%" + strings.ToLower(strings.TrimSpace(*filter.Search)) + "%"
+	if filter.Title != nil && strings.TrimSpace(*filter.Title) != "" {
+		conditions = append(conditions, "LOWER(b.title) LIKE ?")
+		args = append(args, "%"+strings.ToLower(strings.TrimSpace(*filter.Title))+"%")
+	}
+	if filter.ISBN != nil && strings.TrimSpace(*filter.ISBN) != "" {
+		clean := CleanISBNTerm(*filter.ISBN)
+		term := "%" + clean + "%"
+		conditions = append(conditions, "(LOWER(b.identifier) LIKE ? OR REPLACE(REPLACE(LOWER(b.identifier), '-', ''), ' ', '') LIKE ?)")
 		args = append(args, term, term)
+	}
+	if filter.Search != nil && strings.TrimSpace(*filter.Search) != "" {
+		term := "%" + strings.ToLower(strings.TrimSpace(*filter.Search)) + "%"
+		clean := CleanISBNTerm(*filter.Search)
+		if clean != "" && clean != strings.ToLower(strings.TrimSpace(*filter.Search)) {
+			cleanTerm := "%" + clean + "%"
+			conditions = append(conditions, "(LOWER(b.title) LIKE ? OR LOWER(b.description) LIKE ? OR LOWER(b.identifier) LIKE ? OR REPLACE(REPLACE(LOWER(b.identifier), '-', ''), ' ', '') LIKE ?)")
+			args = append(args, term, term, term, cleanTerm)
+		} else {
+			conditions = append(conditions, "(LOWER(b.title) LIKE ? OR LOWER(b.description) LIKE ? OR LOWER(b.identifier) LIKE ?)")
+			args = append(args, term, term, term)
+		}
 	}
 
 	query := `
@@ -1160,10 +1177,27 @@ func (r *SQLiteStorageEngine) CountBooks(ctx context.Context, filter BookFilter)
 		conditions = append(conditions, "b.id IN (SELECT book_id FROM book_series WHERE series_id = ?)")
 		args = append(args, *filter.SeriesID)
 	}
-	if filter.Search != nil && strings.TrimSpace(*filter.Search) != "" {
-		conditions = append(conditions, "(LOWER(b.title) LIKE ? OR LOWER(b.description) LIKE ?)")
-		term := "%" + strings.ToLower(strings.TrimSpace(*filter.Search)) + "%"
+	if filter.Title != nil && strings.TrimSpace(*filter.Title) != "" {
+		conditions = append(conditions, "LOWER(b.title) LIKE ?")
+		args = append(args, "%"+strings.ToLower(strings.TrimSpace(*filter.Title))+"%")
+	}
+	if filter.ISBN != nil && strings.TrimSpace(*filter.ISBN) != "" {
+		clean := CleanISBNTerm(*filter.ISBN)
+		term := "%" + clean + "%"
+		conditions = append(conditions, "(LOWER(b.identifier) LIKE ? OR REPLACE(REPLACE(LOWER(b.identifier), '-', ''), ' ', '') LIKE ?)")
 		args = append(args, term, term)
+	}
+	if filter.Search != nil && strings.TrimSpace(*filter.Search) != "" {
+		term := "%" + strings.ToLower(strings.TrimSpace(*filter.Search)) + "%"
+		clean := CleanISBNTerm(*filter.Search)
+		if clean != "" && clean != strings.ToLower(strings.TrimSpace(*filter.Search)) {
+			cleanTerm := "%" + clean + "%"
+			conditions = append(conditions, "(LOWER(b.title) LIKE ? OR LOWER(b.description) LIKE ? OR LOWER(b.identifier) LIKE ? OR REPLACE(REPLACE(LOWER(b.identifier), '-', ''), ' ', '') LIKE ?)")
+			args = append(args, term, term, term, cleanTerm)
+		} else {
+			conditions = append(conditions, "(LOWER(b.title) LIKE ? OR LOWER(b.description) LIKE ? OR LOWER(b.identifier) LIKE ?)")
+			args = append(args, term, term, term)
+		}
 	}
 
 	query := "SELECT COUNT(*) FROM books b"

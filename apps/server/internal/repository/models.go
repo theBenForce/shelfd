@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -148,10 +149,29 @@ type BookFilter struct {
 	TopicName  *string
 	SeriesID   *string
 	Search     *string
+	Title      *string
+	ISBN       *string
 	Limit      int
 	Offset     int
 	SortBy     string
 	SortOrder  string
+}
+
+func CleanISBNTerm(term string) string {
+	s := strings.ToLower(strings.TrimSpace(term))
+	s = strings.TrimPrefix(s, "urn:isbn:")
+	s = strings.TrimPrefix(s, "urn:uuid:")
+	s = strings.TrimPrefix(s, "isbn-13:")
+	s = strings.TrimPrefix(s, "isbn-10:")
+	s = strings.TrimPrefix(s, "isbn:")
+
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // Paragraph represents a consolidated text passage within a chapter.
