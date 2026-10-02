@@ -146,10 +146,10 @@ type BookChatResponse struct {
 	Citations []BookCitation `json:"citations"`
 }
 
-var tokenRe = regexp.MustCompile(`(?i)\b(author|genre|topic):\s*(?:"([^"]*)"|(\S+))`)
+var tokenRe = regexp.MustCompile(`(?i)\b(author|genre|topic|isbn|title):\s*(?:"([^"]*)"|(\S+))`)
 var spaceRe = regexp.MustCompile(`\s+`)
 
-func parseBookSearchTokens(input string) (cleanSearch string, author *string, genre *string, topic *string) {
+func parseBookSearchTokens(input string) (cleanSearch string, author *string, genre *string, topic *string, isbn *string, title *string) {
 	matches := tokenRe.FindAllStringSubmatch(input, -1)
 	for _, m := range matches {
 		tag := strings.ToLower(m[1])
@@ -166,12 +166,16 @@ func parseBookSearchTokens(input string) (cleanSearch string, author *string, ge
 				genre = &val
 			case "topic":
 				topic = &val
+			case "isbn":
+				isbn = &val
+			case "title":
+				title = &val
 			}
 		}
 	}
 	clean := tokenRe.ReplaceAllString(input, " ")
 	clean = strings.TrimSpace(spaceRe.ReplaceAllString(clean, " "))
-	return clean, author, genre, topic
+	return clean, author, genre, topic, isbn, title
 }
 
 func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
@@ -207,11 +211,17 @@ func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
 	} else if topicName := strings.TrimSpace(q.Get("topic_name")); topicName != "" {
 		filter.TopicName = &topicName
 	}
+	if title := strings.TrimSpace(q.Get("title")); title != "" {
+		filter.Title = &title
+	}
+	if isbn := strings.TrimSpace(q.Get("isbn")); isbn != "" {
+		filter.ISBN = &isbn
+	}
 	if seriesID := strings.TrimSpace(q.Get("series_id")); seriesID != "" {
 		filter.SeriesID = &seriesID
 	}
 	if rawSearch := strings.TrimSpace(q.Get("search")); rawSearch != "" {
-		cleanSearch, parsedAuthor, parsedGenre, parsedTopic := parseBookSearchTokens(rawSearch)
+		cleanSearch, parsedAuthor, parsedGenre, parsedTopic, parsedISBN, parsedTitle := parseBookSearchTokens(rawSearch)
 		if cleanSearch != "" {
 			filter.Search = &cleanSearch
 		}
@@ -223,6 +233,12 @@ func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
 		}
 		if filter.TopicName == nil && parsedTopic != nil {
 			filter.TopicName = parsedTopic
+		}
+		if filter.ISBN == nil && parsedISBN != nil {
+			filter.ISBN = parsedISBN
+		}
+		if filter.Title == nil && parsedTitle != nil {
+			filter.Title = parsedTitle
 		}
 	}
 	if sortBy := strings.TrimSpace(q.Get("sort_by")); sortBy != "" {
