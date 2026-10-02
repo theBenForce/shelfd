@@ -1,3 +1,16 @@
+# [1.8.0](https://github.com/theBenForce/shelfd/compare/v1.7.0...v1.8.0) (2026-10-02)
+
+
+### Bug Fixes
+
+* **epub:** parse toc ncx and nav documents for chapter titles ([#31](https://github.com/theBenForce/shelfd/issues/31)) ([fb7760d](https://github.com/theBenForce/shelfd/commit/fb7760dffc172138dd191a8dc8d53caa16657190))
+
+
+### Features
+
+* **api:** add CLI OAuth flow support with title and ISBN search ([#33](https://github.com/theBenForce/shelfd/issues/33)) ([3567b53](https://github.com/theBenForce/shelfd/commit/3567b531a982e21fb6c6ef6f5726df8d8046a1e0))
+* **utilities:** add utilities page with duplicate books detection and merge ([#32](https://github.com/theBenForce/shelfd/issues/32)) ([ac8d4f2](https://github.com/theBenForce/shelfd/commit/ac8d4f20d75b4700d4f6cbe2d83dcb4f7fb50647))
+
 # [1.7.0](https://github.com/theBenForce/shelfd/compare/v1.6.0...v1.7.0) (2026-09-30)
 
 
