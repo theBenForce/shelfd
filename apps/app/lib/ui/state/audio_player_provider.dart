@@ -460,8 +460,35 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     });
   }
 
+  void setSleepTimerDuration(Duration? duration) {
+    if (duration == null) {
+      setSleepTimer(SleepTimerOption.none);
+    } else if (duration.inMinutes == 5) {
+      setSleepTimer(SleepTimerOption.min5);
+    } else if (duration.inMinutes == 10) {
+      setSleepTimer(SleepTimerOption.min10);
+    } else if (duration.inMinutes == 15) {
+      setSleepTimer(SleepTimerOption.min15);
+    } else if (duration.inMinutes == 30) {
+      setSleepTimer(SleepTimerOption.min30);
+    } else if (duration.inMinutes == 45) {
+      setSleepTimer(SleepTimerOption.min45);
+    } else if (duration.inMinutes == 60) {
+      setSleepTimer(SleepTimerOption.min60);
+    } else {
+      setSleepTimer(SleepTimerOption.endOfChapter);
+    }
+  }
+
   void cancelSleepTimer() {
     setSleepTimer(SleepTimerOption.none);
+  }
+
+  Future<void> stop() async {
+    _syncTimer?.cancel();
+    _sleepTimerTicker?.cancel();
+    await _engine.stop();
+    state = const AudioPlayerState();
   }
 
   void _startPeriodicSync() {

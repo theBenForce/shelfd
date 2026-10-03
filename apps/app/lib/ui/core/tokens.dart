@@ -54,4 +54,15 @@ class AppTokens {
   // Status & Match Badges
   static const Color matchBadgeBg = Color(0xFFEDF3EC);
   static const Color matchBadgeText = Color(0xFF346538);
+
+  // Stitch Audiobook Obsidian & Amber Palette
+  static const Color obsidianBackground = Color(0xFF141315);
+  static const Color obsidianContainer = Color(0xFF1C1B1D);
+  static const Color obsidianSurface = Color(0xFF201F21);
+  static const Color obsidianElevated = Color(0xFF2B292C);
+  static const Color obsidianBorder = Color(0xFF2E2C30);
+  static const Color amberAccent = Color(0xFFE5A967);
+  static const Color amberGlow = Color(0xFFFFC589);
+  static const Color terracottaAccent = Color(0xFFD97736);
+  static const Color antiqueCream = Color(0xFFF3C99D);
 }
