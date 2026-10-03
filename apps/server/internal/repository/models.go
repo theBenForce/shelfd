@@ -265,6 +265,7 @@ type UploadJob struct {
 
 // AudioChapter represents a chapter marker with timestamp offsets in an audiobook.
 type AudioChapter struct {
+	bun.BaseModel  `bun:"table:audio_chapters"`
 	ID             string    `json:"id" bun:"id,pk"`
 	BookID         string    `json:"book_id" bun:"book_id,notnull"`
 	ChapterIndex   int       `json:"chapter_index" bun:"chapter_index,notnull"`
@@ -276,17 +277,31 @@ type AudioChapter struct {
 
 // BookFile represents an associated physical file (epub, audiobook, pdf, cover, etc.) linked to a book.
 type BookFile struct {
-	ID             string     `json:"id" bun:"id,pk"`
-	BookID         string     `json:"book_id" bun:"book_id,notnull"`
-	FileType       string     `json:"file_type" bun:"file_type,notnull"`
-	FilePath       string     `json:"file_path" bun:"file_path,notnull"`
-	FileSizeBytes  *int64     `json:"file_size_bytes,omitempty" bun:"file_size_bytes"`
-	DurationSeconds *float64  `json:"duration_seconds,omitempty" bun:"duration_seconds"`
-	BitrateKbps    *int       `json:"bitrate_kbps,omitempty" bun:"bitrate_kbps"`
-	PageCount      *int       `json:"page_count,omitempty" bun:"page_count"`
-	MimeType       *string    `json:"mime_type,omitempty" bun:"mime_type"`
-	FileModifiedAt *time.Time `json:"file_modified_at,omitempty" bun:"file_modified_at"`
-	CreatedAt      time.Time  `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+	bun.BaseModel   `bun:"table:book_files"`
+	ID              string     `json:"id" bun:"id,pk"`
+	BookID          string     `json:"book_id" bun:"book_id,notnull"`
+	FileType        string     `json:"file_type" bun:"file_type,notnull"`
+	FilePath        string     `json:"file_path" bun:"file_path,notnull"`
+	FileSizeBytes   *int64     `json:"file_size_bytes,omitempty" bun:"file_size_bytes"`
+	DurationSeconds *float64   `json:"duration_seconds,omitempty" bun:"duration_seconds"`
+	BitrateKbps     *int       `json:"bitrate_kbps,omitempty" bun:"bitrate_kbps"`
+	PageCount       *int       `json:"page_count,omitempty" bun:"page_count"`
+	MimeType        *string    `json:"mime_type,omitempty" bun:"mime_type"`
+	FileModifiedAt  *time.Time `json:"file_modified_at,omitempty" bun:"file_modified_at"`
+	CreatedAt       time.Time  `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+}
+
+// AudiobookProgress represents user listening progress on an audiobook.
+type AudiobookProgress struct {
+	bun.BaseModel   `bun:"table:audiobook_progress"`
+	ID              string    `json:"id" bun:"id,pk"`
+	BookID          string    `json:"book_id" bun:"book_id,notnull"`
+	UserID          string    `json:"user_id" bun:"user_id,notnull,default:''"`
+	PositionSeconds float64   `json:"position_seconds" bun:"position_seconds,notnull"`
+	Speed           float64   `json:"speed" bun:"speed,notnull,default:1.0"`
+	IsCompleted     bool      `json:"is_completed" bun:"is_completed,notnull,default:false"`
+	CreatedAt       time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+	UpdatedAt       time.Time `json:"updated_at" bun:"updated_at,nullzero,default:current_timestamp"`
 }
 
 // QueueStatus represents the aggregate state of background processing jobs.

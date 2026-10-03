@@ -2093,6 +2093,18 @@ func (r *BunStorageEngine) GetBookFilesByBookID(ctx context.Context, bookID stri
 	return files, nil
 }
 
+func (r *BunStorageEngine) GetBookFileByID(ctx context.Context, id string) (*BookFile, error) {
+	file := new(BookFile)
+	err := r.db.NewSelect().Model(file).Where("id = ?", id).Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting book file by ID: %w", err)
+	}
+	return file, nil
+}
+
 func (r *BunStorageEngine) DeleteBookFilesByBookID(ctx context.Context, bookID string) error {
 	_, err := r.db.NewDelete().Model((*BookFile)(nil)).
 		Where("book_id = ?", bookID).
@@ -2102,5 +2114,55 @@ func (r *BunStorageEngine) DeleteBookFilesByBookID(ctx context.Context, bookID s
 	}
 	return nil
 }
+
+// --- Audiobook Progress ---
+
+func (r *BunStorageEngine) UpsertAudiobookProgress(ctx context.Context, progress *AudiobookProgress) error {
+	if progress.ID == "" {
+		progress.ID = ulid.New()
+	}
+	now := time.Now().UTC()
+	if progress.CreatedAt.IsZero() {
+		progress.CreatedAt = now
+	}
+	progress.UpdatedAt = now
+
+	q := r.db.NewInsert().Model(progress)
+	if r.isPG() {
+		q = q.On("CONFLICT (book_id, user_id) DO UPDATE SET position_seconds = EXCLUDED.position_seconds, speed = EXCLUDED.speed, is_completed = EXCLUDED.is_completed, updated_at = EXCLUDED.updated_at")
+	} else {
+		q = q.On("CONFLICT (book_id, user_id) DO UPDATE SET position_seconds = excluded.position_seconds, speed = excluded.speed, is_completed = excluded.is_completed, updated_at = excluded.updated_at")
+	}
+	_, err := q.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("upserting audiobook progress: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) GetAudiobookProgress(ctx context.Context, bookID string, userID string) (*AudiobookProgress, error) {
+	progress := new(AudiobookProgress)
+	err := r.db.NewSelect().Model(progress).
+		Where("book_id = ? AND user_id = ?", bookID, userID).
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting audiobook progress: %w", err)
+	}
+	return progress, nil
+}
+
+func (r *BunStorageEngine) DeleteAudiobookProgress(ctx context.Context, bookID string, userID string) error {
+	_, err := r.db.NewDelete().Model((*AudiobookProgress)(nil)).
+		Where("book_id = ? AND user_id = ?", bookID, userID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("deleting audiobook progress: %w", err)
+	}
+	return nil
+}
+
 
 
