@@ -101,9 +101,41 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
 
     _titleController.addListener(_onTextChanged);
     _authorController.addListener(_onTextChanged);
+    _seriesController.addListener(_onTextChanged);
+    _sequenceController.addListener(_onTextChanged);
+    _genresController.addListener(_onTextChanged);
+    _publisherController.addListener(_onTextChanged);
+    _languageController.addListener(_onTextChanged);
+    _descriptionController.addListener(_onTextChanged);
   }
 
   void _onTextChanged() {
+    final authorsList = _authorController.text
+        .split(',')
+        .map((a) => a.trim())
+        .where((a) => a.isNotEmpty)
+        .toList();
+
+    final genresList = _genresController.text
+        .split(',')
+        .map((g) => g.trim())
+        .where((g) => g.isNotEmpty)
+        .toList();
+
+    final seq = double.tryParse(_sequenceController.text.trim());
+
+    final update = widget.job.metadata.copyWith(
+      title: _titleController.text.trim().isNotEmpty ? _titleController.text.trim() : 'Untitled',
+      authors: authorsList.isNotEmpty ? authorsList : ['Unknown'],
+      series: _seriesController.text.trim().isNotEmpty ? _seriesController.text.trim() : null,
+      sequenceNumber: seq,
+      genres: genresList,
+      publisher: _publisherController.text.trim().isNotEmpty ? _publisherController.text.trim() : null,
+      language: _languageController.text.trim().isNotEmpty ? _languageController.text.trim() : null,
+      description: _descriptionController.text.trim().isNotEmpty ? _descriptionController.text.trim() : null,
+    );
+
+    ref.read(uploadProvider.notifier).updateStagedMetadata(widget.job.jobId, update);
     setState(() {});
   }
 
@@ -111,6 +143,12 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
   void dispose() {
     _titleController.removeListener(_onTextChanged);
     _authorController.removeListener(_onTextChanged);
+    _seriesController.removeListener(_onTextChanged);
+    _sequenceController.removeListener(_onTextChanged);
+    _genresController.removeListener(_onTextChanged);
+    _publisherController.removeListener(_onTextChanged);
+    _languageController.removeListener(_onTextChanged);
+    _descriptionController.removeListener(_onTextChanged);
     _titleController.dispose();
     _authorController.dispose();
     _seriesController.dispose();
@@ -139,6 +177,29 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
     return authorText.isEmpty || authorText.toLowerCase() == 'unknown';
   }
 
+  bool get _isDuplicateWarning {
+    final libraryBooks = ref.read(libraryProvider).books;
+    final currentTitle = _titleController.text.trim().toLowerCase();
+    final rawAuthor = _authorController.text.trim().toLowerCase();
+    final primaryAuthor = rawAuthor.isNotEmpty ? rawAuthor.split(',').first.trim() : 'unknown';
+
+    final matchesLibrary = libraryBooks.any((b) =>
+        b.title.trim().toLowerCase() == currentTitle &&
+        (b.authors.isEmpty
+            ? primaryAuthor == 'unknown'
+            : b.authors.any((a) => a.name.trim().toLowerCase() == primaryAuthor)));
+
+    if (matchesLibrary) return true;
+
+    final initialTitle = widget.job.metadata.title.trim().toLowerCase();
+    final initialAuthor = widget.job.metadata.primaryAuthor.trim().toLowerCase();
+    if (widget.job.isDuplicate && currentTitle == initialTitle && primaryAuthor == initialAuthor) {
+      return true;
+    }
+
+    return false;
+  }
+
   Future<void> _discard() async {
     setState(() {
       _isDiscarding = true;
@@ -163,6 +224,32 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
   Future<void> _commit() async {
     if (!_formKey.currentState!.validate()) {
       return;
+    }
+
+    if (_isDuplicateWarning) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Book Already Exists'),
+          content: Text(
+            'A book titled "${_titleController.text.trim()}" already exists in your library. Do you want to proceed with uploading and replacing it?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Upload Anyway'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) {
+        return;
+      }
     }
 
     setState(() {
@@ -465,6 +552,49 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
               ],
             ),
           ),
+
+        // Amber warning if duplicate book
+        if (_isDuplicateWarning) ...[
+          if (_hasMissingAuthorWarning) const SizedBox(height: AppTokens.space8),
+          Container(
+            padding: const EdgeInsets.all(AppTokens.space12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF4E6),
+              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+              border: Border.all(color: const Color(0xFFFFD8A8)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD9480F)),
+                const SizedBox(width: AppTokens.space8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Duplicate Book Detected',
+                        style: AppTypography.bodySans(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFB13600),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'A book with this title and author already exists in your library. Saving will prompt to confirm overwriting.',
+                        style: AppTypography.bodySans(
+                          fontSize: 11,
+                          color: const Color(0xFF8F2A00),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
 
         const SizedBox(height: AppTokens.space12),
 
