@@ -1,9 +1,12 @@
+import 'audiobook.dart';
 import 'author.dart';
 import 'bookmark.dart';
 import 'genre.dart';
 import 'highlight.dart';
 import 'series.dart';
 import 'topic.dart';
+
+export 'audiobook.dart';
 
 class Book {
   final String id;
@@ -27,6 +30,11 @@ class Book {
   final String? renditionSpread;
   final String? renditionOrientation;
   final String? pageProgressionDirection;
+  final String bookType;
+  final double? durationSeconds;
+  final int? bitrateKbps;
+  final List<BookFile> files;
+  final List<AudioChapter> audioChapters;
 
   const Book({
     required this.id,
@@ -50,9 +58,15 @@ class Book {
     this.renditionSpread,
     this.renditionOrientation,
     this.pageProgressionDirection,
+    this.bookType = 'ebook',
+    this.durationSeconds,
+    this.bitrateKbps,
+    this.files = const [],
+    this.audioChapters = const [],
   });
 
   bool get isFixedLayout => layout == 'pre-paginated';
+  bool get isAudiobook => bookType == 'audiobook';
 
   String get authorDisplay {
     if (authors.isEmpty) return 'Unknown Author';
@@ -65,6 +79,8 @@ class Book {
     final rawTopics = json['topics'] as List<dynamic>? ?? [];
     final rawBookmarks = json['bookmarks'] as List<dynamic>? ?? [];
     final rawHighlights = json['highlights'] as List<dynamic>? ?? [];
+    final rawFiles = json['files'] as List<dynamic>? ?? [];
+    final rawAudioChapters = json['audio_chapters'] as List<dynamic>? ?? [];
 
     Series? seriesObj;
     double? seqNum;
@@ -128,6 +144,17 @@ class Book {
       renditionSpread: json['rendition_spread'] as String?,
       renditionOrientation: json['rendition_orientation'] as String?,
       pageProgressionDirection: json['page_progression_direction'] as String?,
+      bookType: json['book_type'] as String? ?? 'ebook',
+      durationSeconds: (json['duration_seconds'] as num?)?.toDouble(),
+      bitrateKbps: (json['bitrate_kbps'] as num?)?.toInt(),
+      files: rawFiles
+          .whereType<Map<String, dynamic>>()
+          .map((f) => BookFile.fromJson(f))
+          .toList(),
+      audioChapters: rawAudioChapters
+          .whereType<Map<String, dynamic>>()
+          .map((c) => AudioChapter.fromJson(c))
+          .toList(),
     );
   }
 
@@ -154,6 +181,11 @@ class Book {
       if (renditionSpread != null) 'rendition_spread': renditionSpread,
       if (renditionOrientation != null) 'rendition_orientation': renditionOrientation,
       if (pageProgressionDirection != null) 'page_progression_direction': pageProgressionDirection,
+      'book_type': bookType,
+      if (durationSeconds != null) 'duration_seconds': durationSeconds,
+      if (bitrateKbps != null) 'bitrate_kbps': bitrateKbps,
+      if (files.isNotEmpty) 'files': files.map((f) => f.toJson()).toList(),
+      if (audioChapters.isNotEmpty) 'audio_chapters': audioChapters.map((c) => c.toJson()).toList(),
     };
   }
 
@@ -179,6 +211,11 @@ class Book {
     String? renditionSpread,
     String? renditionOrientation,
     String? pageProgressionDirection,
+    String? bookType,
+    double? durationSeconds,
+    int? bitrateKbps,
+    List<BookFile>? files,
+    List<AudioChapter>? audioChapters,
   }) {
     return Book(
       id: id ?? this.id,
@@ -202,6 +239,11 @@ class Book {
       renditionSpread: renditionSpread ?? this.renditionSpread,
       renditionOrientation: renditionOrientation ?? this.renditionOrientation,
       pageProgressionDirection: pageProgressionDirection ?? this.pageProgressionDirection,
+      bookType: bookType ?? this.bookType,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
+      bitrateKbps: bitrateKbps ?? this.bitrateKbps,
+      files: files ?? this.files,
+      audioChapters: audioChapters ?? this.audioChapters,
     );
   }
 }

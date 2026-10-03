@@ -15,6 +15,8 @@ class StorageService {
   static const _keyFontFamily = 'shelfd_font_family';
   static const _keyAutoCommitUploads = 'shelfd_auto_commit_uploads';
   static const _prefixProgress = 'shelfd_progress_';
+  static const _prefixAudioProgress = 'shelfd_audio_progress_';
+  static const _prefixAudioSpeed = 'shelfd_audio_speed_';
   static const _prefixChapter = 'shelfd_chapter_';
   static const _prefixHighlights = 'shelfd_highlights_';
 
@@ -64,6 +66,23 @@ class StorageService {
 
   Future<void> saveReadingProgress(String bookId, double progress) async {
     await _prefs.setDouble('$_prefixProgress$bookId', progress);
+  }
+
+  // Audiobook progress & speed
+  double getAudiobookProgress(String bookId) {
+    return _prefs.getDouble('$_prefixAudioProgress$bookId') ?? 0.0;
+  }
+
+  Future<void> saveAudiobookProgress(String bookId, double positionSeconds) async {
+    await _prefs.setDouble('$_prefixAudioProgress$bookId', positionSeconds);
+  }
+
+  double getAudiobookSpeed(String bookId) {
+    return _prefs.getDouble('$_prefixAudioSpeed$bookId') ?? 1.0;
+  }
+
+  Future<void> saveAudiobookSpeed(String bookId, double speed) async {
+    await _prefs.setDouble('$_prefixAudioSpeed$bookId', speed);
   }
 
   // Offline chapter caching
