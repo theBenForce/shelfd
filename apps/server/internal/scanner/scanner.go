@@ -3,20 +3,62 @@ package scanner
 import (
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-// DiscoveredFile represents an EPUB discovered during library scanning.
+// Supported format mappings
+var (
+	EbookExtensions = map[string]string{
+		".epub": "epub",
+	}
+	AudioExtensions = map[string]string{
+		".m4b":  "audiobook",
+		".m4a":  "audiobook",
+		".mp3":  "audiobook",
+		".flac": "audiobook",
+	}
+	DocumentExtensions = map[string]string{
+		".pdf": "pdf",
+	}
+	CoverExtensions = map[string]string{
+		".jpg":  "cover",
+		".jpeg": "cover",
+		".png":  "cover",
+		".webp": "cover",
+	}
+)
+
+// DetectFileType returns the normalized file_type and whether the file is a primary catalog item.
+func DetectFileType(fileName string) (fileType string, isPrimary bool) {
+	ext := strings.ToLower(filepath.Ext(fileName))
+	if t, ok := EbookExtensions[ext]; ok {
+		return t, true
+	}
+	if t, ok := AudioExtensions[ext]; ok {
+		return t, true
+	}
+	if t, ok := DocumentExtensions[ext]; ok {
+		return t, true
+	}
+	if t, ok := CoverExtensions[ext]; ok {
+		return t, false
+	}
+	return "other", false
+}
+
+// DiscoveredFile represents a media file discovered during library scanning.
 type DiscoveredFile struct {
 	FullPath     string
 	RelativePath string
 	ModTime      time.Time
 	SizeBytes    int64
+	FileType     string
 }
 
-// Scanner crawls the library directory for EPUB files without mutating sidecars.
+// Scanner crawls the library directory for media files without mutating sidecars.
 type Scanner struct {
 	libraryDir string
 }
@@ -26,8 +68,8 @@ func NewScanner(libraryDir string) *Scanner {
 	return &Scanner{libraryDir: libraryDir}
 }
 
-// Scan walks the library directory and returns all found EPUB files.
-// It strictly ignores hidden files and non-EPUB files (never mutating Audiobookshelf assets).
+// Scan walks the library directory and returns all primary media files (.epub, .m4b, .mp3, .m4a, .flac, .pdf).
+// It strictly ignores hidden files (e.g. .metadata.json, .DS_Store) without mutating Audiobookshelf sidecars.
 func (s *Scanner) Scan() ([]DiscoveredFile, error) {
 	var discovered []DiscoveredFile
 
@@ -49,8 +91,8 @@ func (s *Scanner) Scan() ([]DiscoveredFile, error) {
 			return nil
 		}
 
-		// Only process .epub files
-		if !strings.EqualFold(filepath.Ext(d.Name()), ".epub") {
+		fileType, isPrimary := DetectFileType(d.Name())
+		if !isPrimary {
 			return nil
 		}
 
@@ -69,6 +111,7 @@ func (s *Scanner) Scan() ([]DiscoveredFile, error) {
 			RelativePath: relPath,
 			ModTime:      info.ModTime(),
 			SizeBytes:    info.Size(),
+			FileType:     fileType,
 		})
 
 		return nil
@@ -80,3 +123,38 @@ func (s *Scanner) Scan() ([]DiscoveredFile, error) {
 
 	return discovered, nil
 }
+
+// ScanBookDirectory scans a specific book directory and returns all associated physical files.
+func (s *Scanner) ScanBookDirectory(bookDirFullPath string) ([]DiscoveredFile, error) {
+	entries, err := os.ReadDir(bookDirFullPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading book directory %s: %w", bookDirFullPath, err)
+	}
+
+	var files []DiscoveredFile
+	for _, entry := range entries {
+		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		path := filepath.Join(bookDirFullPath, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		fileType, _ := DetectFileType(entry.Name())
+		relPath, err := filepath.Rel(s.libraryDir, path)
+		if err != nil {
+			relPath = entry.Name()
+		}
+
+		files = append(files, DiscoveredFile{
+			FullPath:     path,
+			RelativePath: relPath,
+			ModTime:      info.ModTime(),
+			SizeBytes:    info.Size(),
+			FileType:     fileType,
+		})
+	}
+	return files, nil
+}
+

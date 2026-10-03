@@ -2009,3 +2009,98 @@ func (r *BunStorageEngine) DeleteOAuthCode(ctx context.Context, codeStr string) 
 	return nil
 }
 
+// --- Audio Chapters ---
+
+func (r *BunStorageEngine) CreateAudioChapters(ctx context.Context, chapters []*AudioChapter) error {
+	if len(chapters) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	for _, ch := range chapters {
+		if ch.ID == "" {
+			ch.ID = ulid.New()
+		}
+		if ch.CreatedAt.IsZero() {
+			ch.CreatedAt = now
+		}
+	}
+	_, err := r.db.NewInsert().Model(&chapters).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating audio chapters: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) GetAudioChaptersByBookID(ctx context.Context, bookID string) ([]*AudioChapter, error) {
+	var chapters []*AudioChapter
+	err := r.db.NewSelect().Model(&chapters).
+		Where("book_id = ?", bookID).
+		Order("chapter_index ASC").
+		Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting audio chapters by book ID: %w", err)
+	}
+	if chapters == nil {
+		chapters = []*AudioChapter{}
+	}
+	return chapters, nil
+}
+
+func (r *BunStorageEngine) DeleteAudioChaptersByBookID(ctx context.Context, bookID string) error {
+	_, err := r.db.NewDelete().Model((*AudioChapter)(nil)).
+		Where("book_id = ?", bookID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("deleting audio chapters by book ID: %w", err)
+	}
+	return nil
+}
+
+// --- Book Files ---
+
+func (r *BunStorageEngine) CreateBookFiles(ctx context.Context, files []*BookFile) error {
+	if len(files) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	for _, f := range files {
+		if f.ID == "" {
+			f.ID = ulid.New()
+		}
+		if f.CreatedAt.IsZero() {
+			f.CreatedAt = now
+		}
+	}
+	_, err := r.db.NewInsert().Model(&files).Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating book files: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) GetBookFilesByBookID(ctx context.Context, bookID string) ([]*BookFile, error) {
+	var files []*BookFile
+	err := r.db.NewSelect().Model(&files).
+		Where("book_id = ?", bookID).
+		Order("created_at ASC").
+		Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting book files by book ID: %w", err)
+	}
+	if files == nil {
+		files = []*BookFile{}
+	}
+	return files, nil
+}
+
+func (r *BunStorageEngine) DeleteBookFilesByBookID(ctx context.Context, bookID string) error {
+	_, err := r.db.NewDelete().Model((*BookFile)(nil)).
+		Where("book_id = ?", bookID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("deleting book files by book ID: %w", err)
+	}
+	return nil
+}
+
+

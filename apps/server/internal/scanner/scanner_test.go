@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,8 +91,8 @@ func TestScannerAudiobookshelfCoexistence(t *testing.T) {
 		t.Fatalf("scanner.Scan() error: %v", err)
 	}
 
-	if len(discovered) != 1 {
-		t.Fatalf("expected exactly 1 discovered epub, got %d: %v", len(discovered), discovered)
+	if len(discovered) != 2 {
+		t.Fatalf("expected exactly 2 discovered media files (epub + m4b), got %d: %v", len(discovered), discovered)
 	}
 
 	expectedRel := filepath.Join("Frank Herbert", "Dune", "Dune.epub")
@@ -585,3 +586,88 @@ func TestIngesterAuthorDirectoryFallback(t *testing.T) {
 		t.Fatalf("expected fallback author 'Ezra Klein', got: %+v", authors)
 	}
 }
+
+func TestAudiobookIngestionAndBookFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open in-memory sqlite: %v", err)
+	}
+	defer db.Close()
+
+	if err := database.RunMigrations(context.Background(), db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	repo := repository.NewSQLiteStorageEngine(db)
+	defer repo.Close()
+
+	libraryDir := filepath.Join(tmpDir, "library")
+	dataDir := filepath.Join(tmpDir, "data")
+	bookDir := filepath.Join(libraryDir, "Andy Weir", "Project Hail Mary")
+	if err := os.MkdirAll(bookDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Create dummy MP3 with ID3 tag (size 127 bytes)
+	id3Header := []byte("ID3\x03\x00\x00\x00\x00\x00\x7f")
+	// TIT2: Project Hail Mary (1 byte encoding + 17 bytes text = 18 = 0x12)
+	tit2 := []byte("TIT2\x00\x00\x00\x12\x00\x00\x00Project Hail Mary")
+	// TPE1: Andy Weir (1 byte encoding + 9 bytes text = 10 = 0x0a)
+	tpe1 := []byte("TPE1\x00\x00\x00\x0a\x00\x00\x00Andy Weir")
+	// TLEN: 3600000 ms (1 hour) (1 byte encoding + 7 bytes text = 8 = 0x08)
+	tlen := []byte("TLEN\x00\x00\x00\x08\x00\x00\x003600000")
+	var mp3Data []byte
+	mp3Data = append(mp3Data, id3Header...)
+	mp3Data = append(mp3Data, tit2...)
+	mp3Data = append(mp3Data, tpe1...)
+	mp3Data = append(mp3Data, tlen...)
+	mp3Data = append(mp3Data, make([]byte, 1024)...)
+
+	audioPath := filepath.Join(bookDir, "Project Hail Mary.mp3")
+	if err := os.WriteFile(audioPath, mp3Data, 0644); err != nil {
+		t.Fatalf("write audio file: %v", err)
+	}
+
+	// Also place a companion cover image and pdf
+	coverPath := filepath.Join(bookDir, "cover.jpg")
+	_ = os.WriteFile(coverPath, []byte("fake cover bytes"), 0644)
+	pdfPath := filepath.Join(bookDir, "Project Hail Mary.pdf")
+	_ = os.WriteFile(pdfPath, []byte("%PDF-1.4 fake"), 0644)
+
+	ingester := scanner.NewIngester(repo, libraryDir, dataDir)
+	relPath := filepath.Join("Andy Weir", "Project Hail Mary", "Project Hail Mary.mp3")
+	book, err := ingester.IngestFile(context.Background(), audioPath, relPath)
+	if err != nil {
+		t.Fatalf("IngestFile audiobook failed: %v", err)
+	}
+
+	if book.BookType != "audiobook" {
+		t.Errorf("expected book_type 'audiobook', got '%s'", book.BookType)
+	}
+	if book.DurationSeconds == nil || *book.DurationSeconds != 3600.0 {
+		t.Errorf("expected duration 3600, got %v", book.DurationSeconds)
+	}
+	if book.Title != "Project Hail Mary" {
+		t.Errorf("expected title 'Project Hail Mary', got '%s'", book.Title)
+	}
+
+	// Verify no paragraphs were generated (vector embeddings bypassed)
+	paras, err := repo.GetParagraphsByBookID(context.Background(), book.ID)
+	if err != nil {
+		t.Fatalf("GetParagraphsByBookID failed: %v", err)
+	}
+	if len(paras) != 0 {
+		t.Errorf("expected 0 paragraphs for audiobook, got %d", len(paras))
+	}
+
+	// Verify book_files populated
+	files, err := repo.GetBookFilesByBookID(context.Background(), book.ID)
+	if err != nil {
+		t.Fatalf("GetBookFilesByBookID failed: %v", err)
+	}
+	if len(files) != 3 {
+		t.Fatalf("expected 3 book files (mp3, pdf, cover), got %d: %+v", len(files), files)
+	}
+}
+
