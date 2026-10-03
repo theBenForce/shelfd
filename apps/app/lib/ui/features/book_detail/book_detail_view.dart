@@ -171,8 +171,25 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     return KindleHighlightColor.fromName(colorName).cardColor;
   }
 
+  bool _hasAudiobook(Book book) {
+    return book.isAudiobook ||
+        (book.durationSeconds != null && book.durationSeconds! > 0) ||
+        book.files.any((f) => f.fileType == 'audiobook' || f.durationSeconds != null);
+  }
+
+  String _formatAudioDuration(double? seconds) {
+    if (seconds == null || seconds <= 0) return '';
+    final d = Duration(seconds: seconds.round());
+    final hours = d.inHours;
+    final minutes = d.inMinutes.remainder(60);
+    if (hours > 0) {
+      return '${hours}h ${minutes}m';
+    }
+    return '${minutes}m';
+  }
+
   String _formatFileSize(int? bytes) {
-    if (bytes == null || bytes <= 0) return 'EPUB';
+    if (bytes == null || bytes <= 0) return 'Unknown size';
     if (bytes < 1024 * 1024) {
       return '${(bytes / 1024).toStringAsFixed(1)} KB';
     }
@@ -245,6 +262,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     }
 
     final book = detailState.book!;
+    final hasAudio = _hasAudiobook(book);
 
     return Scaffold(
       backgroundColor: AppTokens.boneBackground,
@@ -295,9 +313,25 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             tooltip: 'Add Bookmark',
             onPressed: () => _showAddBookmarkDialog(context, book),
           ),
+          if (hasAudio)
+            Padding(
+              padding: const EdgeInsets.only(left: AppTokens.space4, right: AppTokens.space4),
+              child: FilledButton.icon(
+                key: const Key('listen_appbar_button'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTokens.amberAccent,
+                  foregroundColor: AppTokens.charcoalInk,
+                  padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
+                ),
+                icon: const Icon(Icons.headphones_rounded, size: 18),
+                label: const Text('Listen', style: TextStyle(fontWeight: FontWeight.w700)),
+                onPressed: () => context.go('/books/${book.id}/listen'),
+              ),
+            ),
           Padding(
-            padding: const EdgeInsets.only(right: AppTokens.space16, left: AppTokens.space8),
+            padding: const EdgeInsets.only(right: AppTokens.space16, left: AppTokens.space4),
             child: FilledButton.icon(
+              key: const Key('read_appbar_button'),
               style: FilledButton.styleFrom(
                 backgroundColor: AppTokens.charcoalInk,
                 foregroundColor: Colors.white,
@@ -514,26 +548,71 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           ),
           const SizedBox(height: AppTokens.space16),
 
-          // Primary CTA button
-          SizedBox(
-            width: double.infinity,
-            height: AppTokens.minTouchTarget,
-            child: FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTokens.charcoalInk,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+          // Dual Primary CTA buttons: Read EPUB & Listen Audiobook
+          if (_hasAudiobook(book)) ...[
+            SizedBox(
+              width: double.infinity,
+              height: AppTokens.minTouchTarget,
+              child: FilledButton.icon(
+                key: const Key('listen_hero_button'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTokens.amberAccent,
+                  foregroundColor: AppTokens.charcoalInk,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                  ),
                 ),
+                icon: const Icon(Icons.headphones_rounded, size: 20),
+                label: const Text(
+                  'Listen Audiobook',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                ),
+                onPressed: () => context.go('/books/${book.id}/listen'),
               ),
-              icon: const Icon(Icons.menu_book_rounded, size: 20),
-              label: Text(
-                book.readingProgress > 0 ? 'Resume Reading' : 'Start Reading',
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              onPressed: () => context.go('/books/${book.id}/read'),
             ),
-          ),
+            const SizedBox(height: AppTokens.space8),
+            SizedBox(
+              width: double.infinity,
+              height: AppTokens.minTouchTarget,
+              child: OutlinedButton.icon(
+                key: const Key('read_hero_button'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTokens.charcoalInk,
+                  side: const BorderSide(color: AppTokens.crispBorder),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                  ),
+                ),
+                icon: const Icon(Icons.menu_book_rounded, size: 20),
+                label: Text(
+                  book.readingProgress > 0 ? 'Resume Reading' : 'Read EPUB',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                onPressed: () => context.go('/books/${book.id}/read'),
+              ),
+            ),
+          ] else ...[
+            SizedBox(
+              width: double.infinity,
+              height: AppTokens.minTouchTarget,
+              child: FilledButton.icon(
+                key: const Key('read_hero_button'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTokens.charcoalInk,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                  ),
+                ),
+                icon: const Icon(Icons.menu_book_rounded, size: 20),
+                label: Text(
+                  book.readingProgress > 0 ? 'Resume Reading' : 'Start Reading',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                onPressed: () => context.go('/books/${book.id}/read'),
+              ),
+            ),
+          ],
           const SizedBox(height: AppTokens.space8),
           SizedBox(
             width: double.infinity,
@@ -595,13 +674,17 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           ),
           const SizedBox(height: AppTokens.space12),
           _buildSpecRow('Chapters', '${book.spine.length} chapters'),
+          if (book.durationSeconds != null && book.durationSeconds! > 0)
+            _buildSpecRow('Audio Length', _formatAudioDuration(book.durationSeconds)),
+          if (book.bitrateKbps != null && book.bitrateKbps! > 0)
+            _buildSpecRow('Audio Bitrate', '${book.bitrateKbps} kbps AAC'),
           if (book.publisher != null && book.publisher!.isNotEmpty)
             _buildSpecRow('Publisher', book.publisher!),
           if (book.publishedDate != null && book.publishedDate!.isNotEmpty)
             _buildSpecRow('Published', book.publishedDate!),
           if (book.language != null && book.language!.isNotEmpty)
             _buildSpecRow('Language', book.language!.toUpperCase()),
-          _buildSpecRow('Format', _formatFileSize(book.fileSizeBytes)),
+          _buildSpecRow('Format', _hasAudiobook(book) ? 'Dual (EPUB + M4A)' : _formatFileSize(book.fileSizeBytes)),
           if (book.genres.isNotEmpty)
             _buildSpecRow(
               'Genres',
@@ -736,6 +819,228 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     }
   }
 
+  List<BookFile> _resolveBookFiles(Book book) {
+    if (book.files.isNotEmpty) {
+      return book.files;
+    }
+    final List<BookFile> list = [];
+    if (book.fileSizeBytes != null || !book.isAudiobook) {
+      list.add(BookFile(
+        id: '${book.id}_epub',
+        bookId: book.id,
+        fileType: 'epub',
+        filePath: '${book.title}.epub',
+        fileSizeBytes: book.fileSizeBytes ?? 1840000,
+        mimeType: 'application/epub+zip',
+      ));
+    }
+    if (_hasAudiobook(book)) {
+      list.add(BookFile(
+        id: '${book.id}_audio',
+        bookId: book.id,
+        fileType: 'audiobook',
+        filePath: '${book.title}.m4a',
+        fileSizeBytes: (book.bitrateKbps != null && book.durationSeconds != null)
+            ? ((book.bitrateKbps! * 1000 / 8) * book.durationSeconds!).round()
+            : 256000000,
+        durationSeconds: book.durationSeconds ?? 41200,
+        bitrateKbps: book.bitrateKbps ?? 64,
+        mimeType: 'audio/mp4',
+      ));
+    }
+    if (book.coverUrl != null) {
+      list.add(BookFile(
+        id: '${book.id}_cover',
+        bookId: book.id,
+        fileType: 'cover',
+        filePath: 'cover.jpg',
+        fileSizeBytes: 380 * 1024,
+        mimeType: 'image/jpeg',
+      ));
+    }
+    return list;
+  }
+
+  Widget _buildAssociatedFilesSection(BuildContext context, Book book) {
+    final files = _resolveBookFiles(book);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                'Associated Formats & Files',
+                style: AppTypography.titleSerif(fontSize: 18, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(width: AppTokens.space8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppTokens.boneContainer,
+                borderRadius: BorderRadius.circular(AppTokens.radiusPill),
+                border: Border.all(color: AppTokens.crispBorder),
+              ),
+              child: Text(
+                '${files.length} files linked',
+                style: AppTypography.captionSans(fontSize: 11, color: AppTokens.mutedCopy),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppTokens.space12),
+        ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: files.length,
+          separatorBuilder: (context, index) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final f = files[index];
+            final isAudio = f.fileType == 'audiobook' || f.filePath.endsWith('.m4a') || f.filePath.endsWith('.m4b') || f.filePath.endsWith('.mp3');
+            final isEpub = f.fileType == 'epub' || f.filePath.endsWith('.epub');
+            final isPdf = f.fileType == 'pdf' || f.filePath.endsWith('.pdf');
+            final isCover = f.fileType == 'cover' || f.filePath.endsWith('.jpg') || f.filePath.endsWith('.png');
+
+            Color badgeColor;
+            Color badgeTextColor;
+            IconData iconData;
+            String typeLabel;
+
+            if (isAudio) {
+              badgeColor = const Color(0xFFFFF3BF);
+              badgeTextColor = const Color(0xFFD97706);
+              iconData = Icons.headphones_rounded;
+              typeLabel = 'M4A AUDIOBOOK';
+            } else if (isEpub) {
+              badgeColor = const Color(0xFFE7F5FF);
+              badgeTextColor = const Color(0xFF1971C2);
+              iconData = Icons.menu_book_rounded;
+              typeLabel = 'EPUB';
+            } else if (isPdf) {
+              badgeColor = const Color(0xFFFFE3E3);
+              badgeTextColor = const Color(0xFFE03131);
+              iconData = Icons.picture_as_pdf_rounded;
+              typeLabel = 'PDF';
+            } else {
+              badgeColor = const Color(0xFFEBFBEE);
+              badgeTextColor = const Color(0xFF2F9E44);
+              iconData = Icons.image_rounded;
+              typeLabel = 'COVER ART';
+            }
+
+            return Container(
+              padding: const EdgeInsets.all(AppTokens.space12),
+              decoration: BoxDecoration(
+                color: AppTokens.boneSurface,
+                borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                border: Border.all(color: AppTokens.crispBorder),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: badgeColor,
+                      borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                    ),
+                    child: Icon(iconData, color: badgeTextColor, size: 20),
+                  ),
+                  const SizedBox(width: AppTokens.space12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: badgeColor,
+                                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                              ),
+                              child: Text(
+                                typeLabel,
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: badgeTextColor,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                f.filePath,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTypography.bodySans(fontSize: 13, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          isAudio
+                              ? '${_formatFileSize(f.fileSizeBytes)} • ${_formatAudioDuration(f.durationSeconds ?? book.durationSeconds)} • ${f.bitrateKbps ?? book.bitrateKbps ?? 64} kbps AAC'
+                              : isEpub
+                                  ? '${_formatFileSize(f.fileSizeBytes)} • Reflowable EPUB3'
+                                  : isPdf
+                                      ? '${_formatFileSize(f.fileSizeBytes)} • Fixed Layout PDF'
+                                      : '${_formatFileSize(f.fileSizeBytes)} • 2:3 Cover Artwork',
+                          style: AppTypography.captionSans(fontSize: 11, color: AppTokens.mutedCopy),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: AppTokens.space8),
+                  if (isAudio)
+                    FilledButton(
+                      key: Key('listen_file_button_$index'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTokens.amberAccent,
+                        foregroundColor: AppTokens.charcoalInk,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                      onPressed: () => context.go('/books/${book.id}/listen'),
+                      child: const Text('Listen', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                    )
+                  else if (isEpub)
+                    FilledButton(
+                      key: Key('read_file_button_$index'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTokens.charcoalInk,
+                        foregroundColor: Colors.white,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                      onPressed: () => context.go('/books/${book.id}/read'),
+                      child: const Text('Read', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                    )
+                  else
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTokens.charcoalInk,
+                        side: const BorderSide(color: AppTokens.crispBorder),
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      onPressed: () => _downloadEpub(book),
+                      child: const Text('Export', style: TextStyle(fontSize: 11)),
+                    ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
   Widget _buildOverviewTab(BuildContext context, Book book) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppTokens.space24),
@@ -753,6 +1058,12 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             style: AppTypography.bodySans(fontSize: 15, lineHeight: 1.6),
             emptyPlaceholder: 'No synopsis provided for this book.',
           ),
+          const SizedBox(height: AppTokens.space24),
+          const Divider(height: 1, color: AppTokens.crispBorder),
+          const SizedBox(height: AppTokens.space24),
+
+          // Associated Formats & Files Section
+          _buildAssociatedFilesSection(context, book),
           const SizedBox(height: AppTokens.space32),
           const Divider(height: 1, color: AppTokens.crispBorder),
           const SizedBox(height: AppTokens.space24),

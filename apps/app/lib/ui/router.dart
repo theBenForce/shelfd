@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../data/services/storage_service.dart';
 import 'core/app_shell.dart';
+import 'features/audiobook/audiobook_player_view.dart';
 import 'features/authors/author_detail_view.dart';
 import 'features/book_detail/book_detail_view.dart';
 import 'features/connect/connect_view.dart';
@@ -138,6 +139,15 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
       ),
 
       // Reader fullscreen routes (outside ShellRoute for distraction-free reading)
+      GoRoute(
+        path: '/books/:bookId/listen',
+        builder: (context, state) {
+          final bookId = state.pathParameters['bookId'] ?? '';
+          return AudiobookPlayerView(
+            bookId: bookId,
+          );
+        },
+      ),
       GoRoute(
         path: '/books/:bookId/read',
         builder: (context, state) {

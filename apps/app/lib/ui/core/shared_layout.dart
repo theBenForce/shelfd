@@ -6,6 +6,7 @@ import '../../data/models/book.dart';
 import '../../data/models/genre.dart';
 import '../../data/models/series.dart';
 import '../../data/models/topic.dart';
+import '../features/audiobook/widgets/mini_player_bar.dart';
 import '../state/providers.dart';
 import 'responsive.dart';
 import 'tokens.dart';
@@ -1118,7 +1119,12 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
               isRescanning: isRescanning,
             ),
             Expanded(
-              child: body,
+              child: Column(
+                children: [
+                  Expanded(child: body),
+                  const MiniPlayerBar(),
+                ],
+              ),
             ),
           ],
         ),
@@ -1127,7 +1133,12 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
 
     return Scaffold(
       appBar: appBar,
-      body: body,
+      body: Column(
+        children: [
+          Expanded(child: body),
+          const MiniPlayerBar(),
+        ],
+      ),
       bottomNavigationBar: ShelfdBottomNav(
         currentIndex: currentIndex,
         onTap: onNavTap,
