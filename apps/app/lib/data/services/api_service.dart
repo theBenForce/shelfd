@@ -243,6 +243,67 @@ class ApiService {
     return Book.fromJson(data, baseUrl: baseUrl);
   }
 
+  String getAudioStreamUrl(String bookId) {
+    if (token != null && token!.isNotEmpty) {
+      return _uri('/api/v1/audiobooks/$bookId/stream', {'token': token!}).toString();
+    }
+    return _uri('/api/v1/audiobooks/$bookId/stream').toString();
+  }
+
+  String getBookFileStreamUrl(String bookId, String fileId) {
+    if (token != null && token!.isNotEmpty) {
+      return _uri('/api/v1/books/$bookId/files/$fileId/stream', {'token': token!}).toString();
+    }
+    return _uri('/api/v1/books/$bookId/files/$fileId/stream').toString();
+  }
+
+  Future<List<AudioChapter>> getAudioChapters(String bookId) async {
+    final response = await client.get(_uri('/api/v1/audiobooks/$bookId/chapters'), headers: _headers());
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as List<dynamic>? ?? [];
+    return data.whereType<Map<String, dynamic>>().map((c) => AudioChapter.fromJson(c)).toList();
+  }
+
+  Future<AudiobookProgress> getAudiobookProgress(String bookId) async {
+    final response = await client.get(_uri('/api/v1/audiobooks/$bookId/progress'), headers: _headers());
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return AudiobookProgress.fromJson(data);
+  }
+
+  Future<AudiobookProgress> saveAudiobookProgress(
+    String bookId, {
+    required double positionSeconds,
+    double speed = 1.0,
+    bool isCompleted = false,
+  }) async {
+    final response = await client.post(
+      _uri('/api/v1/audiobooks/$bookId/progress'),
+      headers: _headers(),
+      body: jsonEncode({
+        'position_seconds': positionSeconds,
+        'speed': speed,
+        'is_completed': isCompleted,
+      }),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return AudiobookProgress.fromJson(data);
+  }
+
+  Future<void> deleteAudiobookProgress(String bookId) async {
+    final response = await client.delete(_uri('/api/v1/audiobooks/$bookId/progress'), headers: _headers());
+    if (response.statusCode >= 400 && response.statusCode != 404) {
+      throw ApiException(response.statusCode, response.body);
+    }
+  }
+
   String getBookDownloadUrl(String bookId) {
     if (token != null && token!.isNotEmpty) {
       return _uri('/api/v1/books/$bookId/download', {'token': token!}).toString();

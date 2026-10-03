@@ -45,6 +45,8 @@ dependencies:
   desktop_drop: ^0.8.4
   file_picker: ^12.2.0
   web: ^1.1.1
+  just_audio: ^0.9.40
+  audio_session: ^0.1.21
 
 dev_dependencies:
   flutter_test:

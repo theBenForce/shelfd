@@ -13,12 +13,15 @@ import '../../data/models/series.dart';
 import '../../data/models/topic.dart';
 import '../../data/models/user.dart';
 import '../../data/repositories/auth_repository.dart';
+import '../../data/repositories/audio_repository.dart';
 import '../../data/repositories/book_repository.dart';
 import '../../data/repositories/reader_repository.dart';
 import '../../data/services/api_service.dart';
 import '../../data/services/storage_service.dart';
 import '../core/theme.dart';
 import '../features/library/library_query_parser.dart';
+export 'audio_player_provider.dart';
+export 'audio_player_state.dart';
 export 'duplicate_books_provider.dart';
 export 'upload_provider.dart';
 
@@ -69,6 +72,13 @@ final bookRepositoryProvider = Provider<BookRepository>((ref) {
 
 final readerRepositoryProvider = Provider<ReaderRepository>((ref) {
   return ReaderRepository(
+    apiService: ref.watch(apiServiceProvider),
+    storageService: ref.watch(storageServiceProvider),
+  );
+});
+
+final audioRepositoryProvider = Provider<AudioRepository>((ref) {
+  return AudioRepository(
     apiService: ref.watch(apiServiceProvider),
     storageService: ref.watch(storageServiceProvider),
   );
