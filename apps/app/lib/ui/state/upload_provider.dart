@@ -155,9 +155,25 @@ class UploadNotifier extends Notifier<UploadState> {
       if (metadata.title == 'Untitled' || metadata.title.isEmpty) {
         newWarnings.add('No title found in EPUB metadata');
       }
+
+      // Check duplicate against library state
+      final libraryBooks = ref.read(libraryProvider).books;
+      final targetTitle = metadata.title.trim().toLowerCase();
+      final targetAuthor = metadata.primaryAuthor.trim().toLowerCase();
+      final isDuplicate = libraryBooks.any((b) =>
+          b.title.trim().toLowerCase() == targetTitle &&
+          (b.authors.isEmpty
+              ? targetAuthor == 'unknown'
+              : b.authors.any((a) => a.name.trim().toLowerCase() == targetAuthor)));
+
+      if (isDuplicate) {
+        newWarnings.add('Book already exists in library');
+      }
+
       updatedJobs[index] = current.copyWith(
-        metadata: metadata,
+        metadata: metadata.copyWith(isDuplicate: isDuplicate),
         warnings: newWarnings,
+        isDuplicate: isDuplicate,
       );
       state = state.copyWith(stagedJobs: updatedJobs);
     }
@@ -200,7 +216,10 @@ class UploadNotifier extends Notifier<UploadState> {
         final staged = await bookRepo.stageUpload(filename: file.name, bytes: bytes);
         successCount++;
 
-        if (autoCommit) {
+        final isDup = staged.isDuplicate ||
+            staged.warnings.any((w) => w.toLowerCase().contains('already exists'));
+
+        if (autoCommit && !isDup) {
           state = state.copyWith(
             currentBatchStatus: 'Auto-committing $currentNum of $total: ${staged.metadata.title}',
           );

@@ -1382,6 +1382,120 @@ func TestAPI_StagedUploadAndCommit(t *testing.T) {
 	}
 }
 
+func TestAPI_StagedUpload_DuplicateDetection(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+
+	// 1. Create and stage first EPUB
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	m, _ := zw.Create("mimetype")
+	m.Write([]byte("application/epub+zip"))
+	w, _ := zw.Create("META-INF/container.xml")
+	w.Write([]byte(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`))
+	opf, _ := zw.Create("content.opf")
+	opf.Write([]byte(`<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Dune</dc:title>
+    <dc:creator>Frank Herbert</dc:creator>
+  </metadata>
+  <manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine><itemref idref="c1"/></spine>
+</package>`))
+	ch1, _ := zw.Create("c1.xhtml")
+	ch1.Write([]byte(`<html><body><p>A beginning is the time for taking the most delicate care...</p></body></html>`))
+	zw.Close()
+
+	body := &bytes.Buffer{}
+	mpw := multipart.NewWriter(body)
+	part, _ := mpw.CreateFormFile("file", "dune.epub")
+	part.Write(buf.Bytes())
+	mpw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/stage", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", mpw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on first stage, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var stage1 struct {
+		JobID       string   `json:"job_id"`
+		IsDuplicate bool     `json:"is_duplicate"`
+		Warnings    []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &stage1); err != nil {
+		t.Fatalf("failed to unmarshal stage1 response: %v", err)
+	}
+	if stage1.IsDuplicate {
+		t.Errorf("expected first upload not to be marked as duplicate")
+	}
+
+	// Commit first upload into library
+	commitPayload := map[string]any{
+		"title":   "Dune",
+		"author":  "Frank Herbert",
+		"authors": []string{"Frank Herbert"},
+	}
+	commitBody, _ := json.Marshal(commitPayload)
+	commitReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/jobs/"+stage1.JobID+"/commit", bytes.NewReader(commitBody))
+	commitReq.Header.Set("Authorization", "Bearer "+token)
+	commitReq.Header.Set("Content-Type", "application/json")
+	commitRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(commitRec, commitReq)
+
+	if commitRec.Code != http.StatusCreated && commitRec.Code != http.StatusOK {
+		t.Fatalf("expected 201 Created on commit, got %d: %s", commitRec.Code, commitRec.Body.String())
+	}
+
+	// 2. Now stage the same EPUB again
+	body2 := &bytes.Buffer{}
+	mpw2 := multipart.NewWriter(body2)
+	part2, _ := mpw2.CreateFormFile("file", "dune-duplicate.epub")
+	part2.Write(buf.Bytes())
+	mpw2.Close()
+
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/stage", body2)
+	req2.Header.Set("Authorization", "Bearer "+token)
+	req2.Header.Set("Content-Type", mpw2.FormDataContentType())
+	rec2 := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on duplicate stage, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	var stage2 struct {
+		JobID       string   `json:"job_id"`
+		IsDuplicate bool     `json:"is_duplicate"`
+		Warnings    []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &stage2); err != nil {
+		t.Fatalf("failed to unmarshal stage2 response: %v", err)
+	}
+
+	if !stage2.IsDuplicate {
+		t.Errorf("expected duplicate upload to be marked is_duplicate = true")
+	}
+	foundWarning := false
+	for _, w := range stage2.Warnings {
+		if w == "Book already exists in library" {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Errorf("expected 'Book already exists in library' warning, got %+v", stage2.Warnings)
+	}
+}
+
 func TestAPI_StagedUploadAndCancel(t *testing.T) {
 	f := setupAPITest(t)
 	defer f.db.Close()

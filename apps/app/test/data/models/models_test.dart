@@ -391,6 +391,33 @@ void main() {
       expect(job.warnings, contains('No author found in EPUB metadata'));
     });
 
+    test('StagedUploadJob and StagedMetadata duplicate flag detection and serialization', () {
+      final dupJson = {
+        'job_id': 'job-dup-1',
+        'status': 'staged',
+        'filename': 'dune_copy.epub',
+        'is_duplicate': true,
+        'warnings': ['Book already exists in library'],
+        'metadata': {
+          'title': 'Dune',
+          'authors': ['Frank Herbert'],
+          'is_duplicate': true,
+        },
+      };
+
+      final job = StagedUploadJob.fromJson(dupJson);
+      expect(job.isDuplicate, isTrue);
+      expect(job.metadata.isDuplicate, isTrue);
+      expect(job.warnings, contains('Book already exists in library'));
+      expect(job.toJson()['is_duplicate'], isTrue);
+      expect((job.toJson()['metadata'] as Map)['is_duplicate'], isTrue);
+
+      // Verify copyWith preserves and modifies isDuplicate
+      final nonDup = job.copyWith(isDuplicate: false, metadata: job.metadata.copyWith(isDuplicate: false));
+      expect(nonDup.isDuplicate, isFalse);
+      expect(nonDup.metadata.isDuplicate, isFalse);
+    });
+
     test('QueueStatus fromJson and toJson includes stagedUploads', () {
       final json = {
         'total_chapters': 100,

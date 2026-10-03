@@ -276,6 +276,183 @@ void main() {
       // Modal should be closed
       expect(find.text('Review Staged EPUB'), findsNothing);
     });
+
+    testWidgets('shows duplicate warning banner and confirms before committing duplicate', (tester) async {
+      bool commitCalled = false;
+      final mockClient = MockClient((request) async {
+        if (request.method == 'POST' && request.url.path == '/api/v1/books/upload/jobs/job-dup-1/commit') {
+          commitCalled = true;
+          return http.Response(
+            jsonEncode({
+              'id': 'book-dup-1',
+              'title': 'Dune',
+              'authors': [{'id': 'a1', 'name': 'Frank Herbert'}],
+            }),
+            201,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+      final stagedJob = StagedUploadJob(
+        jobId: 'job-dup-1',
+        status: 'staged',
+        filename: 'dune_dup.epub',
+        isDuplicate: true,
+        warnings: const ['Book already exists in library'],
+        metadata: const StagedMetadata(
+          title: 'Dune',
+          authors: ['Frank Herbert'],
+          isDuplicate: true,
+        ),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            bookRepositoryProvider.overrideWithValue(bookRepo),
+            storageServiceProvider.overrideWithValue(storageService),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () => showUploadReviewModal(context, stagedJob),
+                  child: const Text('Open Modal'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // Open the modal
+      await tester.tap(find.text('Open Modal'));
+      await tester.pumpAndSettle();
+
+      // Duplicate warning banner should be visible
+      expect(find.text('Duplicate Book Detected'), findsOneWidget);
+      expect(
+        find.text('A book with this title and author already exists in your library. Saving will prompt to confirm overwriting.'),
+        findsOneWidget,
+      );
+
+      // Tap Save & Add to Library
+      await tester.tap(find.text('Save & Add to Library'));
+      await tester.pumpAndSettle();
+
+      // Confirmation dialog should appear
+      expect(find.text('Book Already Exists'), findsOneWidget);
+      expect(
+        find.text('A book titled "Dune" already exists in your library. Do you want to proceed with uploading and replacing it?'),
+        findsOneWidget,
+      );
+      expect(find.text('Cancel'), findsOneWidget);
+      expect(find.text('Upload Anyway'), findsOneWidget);
+
+      // Tap Cancel -> Should NOT commit
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(commitCalled, isFalse);
+      expect(find.text('Review Staged EPUB'), findsOneWidget);
+
+      // Tap Save & Add to Library again
+      await tester.tap(find.text('Save & Add to Library'));
+      await tester.pumpAndSettle();
+
+      // Tap Upload Anyway -> Should commit and close modal
+      await tester.tap(find.text('Upload Anyway'));
+      await tester.pumpAndSettle();
+      expect(commitCalled, isTrue);
+      expect(find.text('Review Staged EPUB'), findsNothing);
+    });
+
+    testWidgets('editing title to non-duplicate clears duplicate warning and commits without confirmation', (tester) async {
+      bool commitCalled = false;
+      String? committedTitle;
+      final mockClient = MockClient((request) async {
+        if (request.method == 'POST' && request.url.path == '/api/v1/books/upload/jobs/job-dup-2/commit') {
+          commitCalled = true;
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          committedTitle = body['title'] as String?;
+          return http.Response(
+            jsonEncode({
+              'id': 'book-dup-2',
+              'title': committedTitle,
+              'authors': [{'id': 'a1', 'name': 'Frank Herbert'}],
+            }),
+            201,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+      final stagedJob = StagedUploadJob(
+        jobId: 'job-dup-2',
+        status: 'staged',
+        filename: 'dune_dup2.epub',
+        isDuplicate: true,
+        warnings: const ['Book already exists in library'],
+        metadata: const StagedMetadata(
+          title: 'Dune',
+          authors: ['Frank Herbert'],
+          isDuplicate: true,
+        ),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            bookRepositoryProvider.overrideWithValue(bookRepo),
+            storageServiceProvider.overrideWithValue(storageService),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () => showUploadReviewModal(context, stagedJob),
+                  child: const Text('Open Modal'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Modal'));
+      await tester.pumpAndSettle();
+
+      // Initially duplicate warning is visible
+      expect(find.text('Duplicate Book Detected'), findsOneWidget);
+
+      // Edit title to a new non-duplicate title
+      final titleField = find.widgetWithText(TextFormField, 'Title *');
+      await tester.enterText(titleField, 'Dune: Chapterhouse');
+      await tester.pumpAndSettle();
+
+      // Duplicate warning should now be gone!
+      expect(find.text('Duplicate Book Detected'), findsNothing);
+
+      // Tap Save & Add to Library
+      await tester.tap(find.text('Save & Add to Library'));
+      await tester.pumpAndSettle();
+
+      // Should commit directly without confirmation dialog
+      expect(find.text('Book Already Exists'), findsNothing);
+      expect(commitCalled, isTrue);
+      expect(committedTitle, 'Dune: Chapterhouse');
+      expect(find.text('Review Staged EPUB'), findsNothing);
+    });
   });
 
   group('ShelfdDropTarget Tests', () {
