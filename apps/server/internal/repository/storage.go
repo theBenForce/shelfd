@@ -67,6 +67,16 @@ type StorageEngine interface {
 	UpdateChapter(ctx context.Context, chapter *Chapter) error
 	GetUnindexedChapters(ctx context.Context, limit int) ([]*Chapter, error)
 
+	// Audio Chapters
+	CreateAudioChapters(ctx context.Context, chapters []*AudioChapter) error
+	GetAudioChaptersByBookID(ctx context.Context, bookID string) ([]*AudioChapter, error)
+	DeleteAudioChaptersByBookID(ctx context.Context, bookID string) error
+
+	// Book Files
+	CreateBookFiles(ctx context.Context, files []*BookFile) error
+	GetBookFilesByBookID(ctx context.Context, bookID string) ([]*BookFile, error)
+	DeleteBookFilesByBookID(ctx context.Context, bookID string) error
+
 	// Paragraphs
 	CreateParagraphs(ctx context.Context, paragraphs []*Paragraph) error
 	GetParagraphsByBookID(ctx context.Context, bookID string) ([]*Paragraph, error)

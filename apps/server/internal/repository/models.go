@@ -24,6 +24,8 @@ type Book struct {
 	RenditionSpread string    `json:"rendition_spread" bun:"rendition_spread,default:'auto'"`
 	RenditionOrientation string `json:"rendition_orientation" bun:"rendition_orientation,default:'auto'"`
 	PageProgressionDirection string `json:"page_progression_direction" bun:"page_progression_direction,default:'ltr'"`
+	BookType       string     `json:"book_type" bun:"book_type,default:'ebook'"`
+	DurationSeconds *float64  `json:"duration_seconds,omitempty" bun:"duration_seconds"`
 	CreatedAt      time.Time  `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
@@ -259,6 +261,32 @@ type UploadJob struct {
 	ErrorMessage *string   `json:"error_message,omitempty" bun:"error_message"`
 	CreatedAt    time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 	UpdatedAt    time.Time `json:"updated_at" bun:"updated_at,nullzero,default:current_timestamp"`
+}
+
+// AudioChapter represents a chapter marker with timestamp offsets in an audiobook.
+type AudioChapter struct {
+	ID             string    `json:"id" bun:"id,pk"`
+	BookID         string    `json:"book_id" bun:"book_id,notnull"`
+	ChapterIndex   int       `json:"chapter_index" bun:"chapter_index,notnull"`
+	Title          string    `json:"title" bun:"title,notnull"`
+	StartOffsetSec float64   `json:"start_offset_sec" bun:"start_offset_sec,notnull"`
+	DurationSec    float64   `json:"duration_sec" bun:"duration_sec,notnull"`
+	CreatedAt      time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+}
+
+// BookFile represents an associated physical file (epub, audiobook, pdf, cover, etc.) linked to a book.
+type BookFile struct {
+	ID             string     `json:"id" bun:"id,pk"`
+	BookID         string     `json:"book_id" bun:"book_id,notnull"`
+	FileType       string     `json:"file_type" bun:"file_type,notnull"`
+	FilePath       string     `json:"file_path" bun:"file_path,notnull"`
+	FileSizeBytes  *int64     `json:"file_size_bytes,omitempty" bun:"file_size_bytes"`
+	DurationSeconds *float64  `json:"duration_seconds,omitempty" bun:"duration_seconds"`
+	BitrateKbps    *int       `json:"bitrate_kbps,omitempty" bun:"bitrate_kbps"`
+	PageCount      *int       `json:"page_count,omitempty" bun:"page_count"`
+	MimeType       *string    `json:"mime_type,omitempty" bun:"mime_type"`
+	FileModifiedAt *time.Time `json:"file_modified_at,omitempty" bun:"file_modified_at"`
+	CreatedAt      time.Time  `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
 // QueueStatus represents the aggregate state of background processing jobs.

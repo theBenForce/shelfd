@@ -44,6 +44,9 @@ func (r *SQLiteStorageEngine) CreateBook(ctx context.Context, b *Book) error {
 		b.CreatedAt = time.Now().UTC()
 	}
 
+	if b.BookType == "" {
+		b.BookType = "ebook"
+	}
 	if b.Layout == "" {
 		b.Layout = "reflowable"
 	}
@@ -58,13 +61,14 @@ func (r *SQLiteStorageEngine) CreateBook(ctx context.Context, b *Book) error {
 	}
 
 	query := `
-		INSERT INTO books (id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, layout, rendition_spread, rendition_orientation, page_progression_direction, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO books (id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, layout, rendition_spread, rendition_orientation, page_progression_direction, book_type, duration_seconds, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		b.ID, b.Title, b.Description, b.Language, b.Publisher, b.Identifier,
 		b.FilePath, b.CoverPath, b.FileSizeBytes, b.FileModifiedAt, b.PublishedDate,
-		b.Layout, b.RenditionSpread, b.RenditionOrientation, b.PageProgressionDirection, b.CreatedAt,
+		b.Layout, b.RenditionSpread, b.RenditionOrientation, b.PageProgressionDirection,
+		b.BookType, b.DurationSeconds, b.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("creating book: %w", err)
@@ -74,7 +78,7 @@ func (r *SQLiteStorageEngine) CreateBook(ctx context.Context, b *Book) error {
 
 func (r *SQLiteStorageEngine) GetBookByID(ctx context.Context, id string) (*Book, error) {
 	query := `
-		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, layout, rendition_spread, rendition_orientation, page_progression_direction, created_at
+		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, layout, rendition_spread, rendition_orientation, page_progression_direction, book_type, duration_seconds, created_at
 		FROM books WHERE id = ?
 	`
 	b := &Book{}
@@ -82,7 +86,8 @@ func (r *SQLiteStorageEngine) GetBookByID(ctx context.Context, id string) (*Book
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&b.ID, &b.Title, &b.Description, &b.Language, &b.Publisher, &b.Identifier,
 		&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate,
-		&b.Layout, &b.RenditionSpread, &b.RenditionOrientation, &b.PageProgressionDirection, &b.CreatedAt,
+		&b.Layout, &b.RenditionSpread, &b.RenditionOrientation, &b.PageProgressionDirection,
+		&b.BookType, &b.DurationSeconds, &b.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -98,7 +103,7 @@ func (r *SQLiteStorageEngine) GetBookByID(ctx context.Context, id string) (*Book
 
 func (r *SQLiteStorageEngine) GetBookByFilePath(ctx context.Context, filePath string) (*Book, error) {
 	query := `
-		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, layout, rendition_spread, rendition_orientation, page_progression_direction, created_at
+		SELECT id, title, description, language, publisher, identifier, file_path, cover_path, file_size_bytes, file_modified_at, published_date, layout, rendition_spread, rendition_orientation, page_progression_direction, book_type, duration_seconds, created_at
 		FROM books WHERE file_path = ?
 	`
 	b := &Book{}
@@ -106,7 +111,8 @@ func (r *SQLiteStorageEngine) GetBookByFilePath(ctx context.Context, filePath st
 	err := r.db.QueryRowContext(ctx, query, filePath).Scan(
 		&b.ID, &b.Title, &b.Description, &b.Language, &b.Publisher, &b.Identifier,
 		&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate,
-		&b.Layout, &b.RenditionSpread, &b.RenditionOrientation, &b.PageProgressionDirection, &b.CreatedAt,
+		&b.Layout, &b.RenditionSpread, &b.RenditionOrientation, &b.PageProgressionDirection,
+		&b.BookType, &b.DurationSeconds, &b.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -121,6 +127,9 @@ func (r *SQLiteStorageEngine) GetBookByFilePath(ctx context.Context, filePath st
 }
 
 func (r *SQLiteStorageEngine) UpdateBook(ctx context.Context, b *Book) error {
+	if b.BookType == "" {
+		b.BookType = "ebook"
+	}
 	if b.Layout == "" {
 		b.Layout = "reflowable"
 	}
@@ -138,13 +147,15 @@ func (r *SQLiteStorageEngine) UpdateBook(ctx context.Context, b *Book) error {
 		UPDATE books
 		SET title = ?, description = ?, language = ?, publisher = ?, identifier = ?,
 		    file_path = ?, cover_path = ?, file_size_bytes = ?, file_modified_at = ?, published_date = ?,
-		    layout = ?, rendition_spread = ?, rendition_orientation = ?, page_progression_direction = ?
+		    layout = ?, rendition_spread = ?, rendition_orientation = ?, page_progression_direction = ?,
+		    book_type = ?, duration_seconds = ?
 		WHERE id = ?
 	`
 	res, err := r.db.ExecContext(ctx, query,
 		b.Title, b.Description, b.Language, b.Publisher, b.Identifier,
 		b.FilePath, b.CoverPath, b.FileSizeBytes, b.FileModifiedAt, b.PublishedDate,
-		b.Layout, b.RenditionSpread, b.RenditionOrientation, b.PageProgressionDirection, b.ID,
+		b.Layout, b.RenditionSpread, b.RenditionOrientation, b.PageProgressionDirection,
+		b.BookType, b.DurationSeconds, b.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating book: %w", err)
@@ -231,7 +242,7 @@ func (r *SQLiteStorageEngine) ListBooks(ctx context.Context, filter BookFilter) 
 	}
 
 	query := `
-		SELECT b.id, b.title, b.description, b.language, b.publisher, b.identifier, b.file_path, b.cover_path, b.file_size_bytes, b.file_modified_at, b.published_date, b.layout, b.rendition_spread, b.rendition_orientation, b.page_progression_direction, b.created_at
+		SELECT b.id, b.title, b.description, b.language, b.publisher, b.identifier, b.file_path, b.cover_path, b.file_size_bytes, b.file_modified_at, b.published_date, b.layout, b.rendition_spread, b.rendition_orientation, b.page_progression_direction, b.book_type, b.duration_seconds, b.created_at
 		FROM books b
 	` + joins
 	if len(conditions) > 0 {
@@ -271,7 +282,8 @@ func (r *SQLiteStorageEngine) ListBooks(ctx context.Context, filter BookFilter) 
 		err := rows.Scan(
 			&b.ID, &b.Title, &b.Description, &b.Language, &b.Publisher, &b.Identifier,
 			&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate,
-			&b.Layout, &b.RenditionSpread, &b.RenditionOrientation, &b.PageProgressionDirection, &b.CreatedAt,
+			&b.Layout, &b.RenditionSpread, &b.RenditionOrientation, &b.PageProgressionDirection,
+			&b.BookType, &b.DurationSeconds, &b.CreatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning book row: %w", err)
@@ -2352,6 +2364,159 @@ func (r *SQLiteStorageEngine) DeleteOAuthCode(ctx context.Context, codeStr strin
 	}
 	return nil
 }
+
+// --- Audio Chapters ---
+
+func (r *SQLiteStorageEngine) CreateAudioChapters(ctx context.Context, chapters []*AudioChapter) error {
+	if len(chapters) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("starting tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO audio_chapters (id, book_id, chapter_index, title, start_offset_sec, duration_sec, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("preparing audio chapter insert: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now().UTC()
+	for _, ch := range chapters {
+		if ch.ID == "" {
+			ch.ID = ulid.New()
+		}
+		if ch.CreatedAt.IsZero() {
+			ch.CreatedAt = now
+		}
+		if _, err := stmt.ExecContext(ctx, ch.ID, ch.BookID, ch.ChapterIndex, ch.Title, ch.StartOffsetSec, ch.DurationSec, ch.CreatedAt); err != nil {
+			return fmt.Errorf("inserting audio chapter: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *SQLiteStorageEngine) GetAudioChaptersByBookID(ctx context.Context, bookID string) ([]*AudioChapter, error) {
+	query := `
+		SELECT id, book_id, chapter_index, title, start_offset_sec, duration_sec, created_at
+		FROM audio_chapters
+		WHERE book_id = ?
+		ORDER BY chapter_index ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, bookID)
+	if err != nil {
+		return nil, fmt.Errorf("querying audio chapters: %w", err)
+	}
+	defer rows.Close()
+
+	var chapters []*AudioChapter
+	for rows.Next() {
+		ch := &AudioChapter{}
+		if err := rows.Scan(&ch.ID, &ch.BookID, &ch.ChapterIndex, &ch.Title, &ch.StartOffsetSec, &ch.DurationSec, &ch.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning audio chapter: %w", err)
+		}
+		chapters = append(chapters, ch)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating audio chapters: %w", err)
+	}
+	if chapters == nil {
+		chapters = []*AudioChapter{}
+	}
+	return chapters, nil
+}
+
+func (r *SQLiteStorageEngine) DeleteAudioChaptersByBookID(ctx context.Context, bookID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM audio_chapters WHERE book_id = ?", bookID)
+	if err != nil {
+		return fmt.Errorf("deleting audio chapters: %w", err)
+	}
+	return nil
+}
+
+// --- Book Files ---
+
+func (r *SQLiteStorageEngine) CreateBookFiles(ctx context.Context, files []*BookFile) error {
+	if len(files) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("starting tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO book_files (id, book_id, file_type, file_path, file_size_bytes, duration_seconds, bitrate_kbps, page_count, mime_type, file_modified_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("preparing book file insert: %w", err)
+	}
+	defer stmt.Close()
+
+	now := time.Now().UTC()
+	for _, f := range files {
+		if f.ID == "" {
+			f.ID = ulid.New()
+		}
+		if f.CreatedAt.IsZero() {
+			f.CreatedAt = now
+		}
+		if _, err := stmt.ExecContext(ctx, f.ID, f.BookID, f.FileType, f.FilePath, f.FileSizeBytes, f.DurationSeconds, f.BitrateKbps, f.PageCount, f.MimeType, f.FileModifiedAt, f.CreatedAt); err != nil {
+			return fmt.Errorf("inserting book file: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *SQLiteStorageEngine) GetBookFilesByBookID(ctx context.Context, bookID string) ([]*BookFile, error) {
+	query := `
+		SELECT id, book_id, file_type, file_path, file_size_bytes, duration_seconds, bitrate_kbps, page_count, mime_type, file_modified_at, created_at
+		FROM book_files
+		WHERE book_id = ?
+		ORDER BY created_at ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, bookID)
+	if err != nil {
+		return nil, fmt.Errorf("querying book files: %w", err)
+	}
+	defer rows.Close()
+
+	var files []*BookFile
+	for rows.Next() {
+		f := &BookFile{}
+		var fileModAt sql.NullTime
+		if err := rows.Scan(&f.ID, &f.BookID, &f.FileType, &f.FilePath, &f.FileSizeBytes, &f.DurationSeconds, &f.BitrateKbps, &f.PageCount, &f.MimeType, &fileModAt, &f.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning book file: %w", err)
+		}
+		if fileModAt.Valid {
+			f.FileModifiedAt = &fileModAt.Time
+		}
+		files = append(files, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating book files: %w", err)
+	}
+	if files == nil {
+		files = []*BookFile{}
+	}
+	return files, nil
+}
+
+func (r *SQLiteStorageEngine) DeleteBookFilesByBookID(ctx context.Context, bookID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM book_files WHERE book_id = ?", bookID)
+	if err != nil {
+		return fmt.Errorf("deleting book files: %w", err)
+	}
+	return nil
+}
+
 
 
 

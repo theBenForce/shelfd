@@ -1785,3 +1785,109 @@ func TestGenreUnlinkingAndPruning(t *testing.T) {
 	}
 }
 
+func TestAudioChaptersAndBookFiles(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupTestDB(t)
+	defer repo.Close()
+
+	dur := 1234.56
+	book := &repository.Book{
+		ID:              "book-audio-test",
+		Title:           "Audiobook Test",
+		FilePath:        "Author/Title/Title.m4b",
+		BookType:        "audiobook",
+		DurationSeconds: &dur,
+	}
+	if err := repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("create book: %v", err)
+	}
+
+	// 1. Audio Chapters
+	chapters := []*repository.AudioChapter{
+		{
+			BookID:         book.ID,
+			ChapterIndex:   0,
+			Title:          "Opening Credits",
+			StartOffsetSec: 0,
+			DurationSec:    60,
+		},
+		{
+			BookID:         book.ID,
+			ChapterIndex:   1,
+			Title:          "Chapter 1",
+			StartOffsetSec: 60,
+			DurationSec:    1174.56,
+		},
+	}
+	if err := repo.CreateAudioChapters(ctx, chapters); err != nil {
+		t.Fatalf("create audio chapters: %v", err)
+	}
+
+	fetchedChapters, err := repo.GetAudioChaptersByBookID(ctx, book.ID)
+	if err != nil {
+		t.Fatalf("get audio chapters: %v", err)
+	}
+	if len(fetchedChapters) != 2 {
+		t.Fatalf("expected 2 audio chapters, got %d", len(fetchedChapters))
+	}
+	if fetchedChapters[0].Title != "Opening Credits" || fetchedChapters[1].Title != "Chapter 1" {
+		t.Errorf("unexpected chapter titles: %+v", fetchedChapters)
+	}
+
+	// 2. Book Files
+	sizeAudio := int64(50000000)
+	mimeAudio := "audio/mp4"
+	sizeCover := int64(100000)
+	mimeCover := "image/jpeg"
+	files := []*repository.BookFile{
+		{
+			BookID:          book.ID,
+			FileType:        "m4b",
+			FilePath:        "Author/Title/Title.m4b",
+			FileSizeBytes:   &sizeAudio,
+			DurationSeconds: &dur,
+			MimeType:        &mimeAudio,
+		},
+		{
+			BookID:        book.ID,
+			FileType:      "cover",
+			FilePath:      "Author/Title/cover.jpg",
+			FileSizeBytes: &sizeCover,
+			MimeType:      &mimeCover,
+		},
+	}
+	if err := repo.CreateBookFiles(ctx, files); err != nil {
+		t.Fatalf("create book files: %v", err)
+	}
+
+	fetchedFiles, err := repo.GetBookFilesByBookID(ctx, book.ID)
+	if err != nil {
+		t.Fatalf("get book files: %v", err)
+	}
+	if len(fetchedFiles) != 2 {
+		t.Fatalf("expected 2 book files, got %d", len(fetchedFiles))
+	}
+
+	// 3. Test Cascade Delete
+	if err := repo.DeleteBook(ctx, book.ID); err != nil {
+		t.Fatalf("delete book: %v", err)
+	}
+
+	cascadedChapters, err := repo.GetAudioChaptersByBookID(ctx, book.ID)
+	if err != nil {
+		t.Fatalf("get chapters after delete: %v", err)
+	}
+	if len(cascadedChapters) != 0 {
+		t.Errorf("expected 0 audio chapters after cascade delete, got %d", len(cascadedChapters))
+	}
+
+	cascadedFiles, err := repo.GetBookFilesByBookID(ctx, book.ID)
+	if err != nil {
+		t.Fatalf("get files after delete: %v", err)
+	}
+	if len(cascadedFiles) != 0 {
+		t.Errorf("expected 0 book files after cascade delete, got %d", len(cascadedFiles))
+	}
+}
+
+
