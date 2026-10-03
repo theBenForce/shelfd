@@ -1868,7 +1868,48 @@ func TestAudioChaptersAndBookFiles(t *testing.T) {
 		t.Fatalf("expected 2 book files, got %d", len(fetchedFiles))
 	}
 
-	// 3. Test Cascade Delete
+	singleFile, err := repo.GetBookFileByID(ctx, fetchedFiles[0].ID)
+	if err != nil {
+		t.Fatalf("get book file by id: %v", err)
+	}
+	if singleFile.FilePath != fetchedFiles[0].FilePath {
+		t.Errorf("unexpected file path: %s vs %s", singleFile.FilePath, fetchedFiles[0].FilePath)
+	}
+
+	// 3. Audiobook Progress
+	progress := &repository.AudiobookProgress{
+		BookID:          book.ID,
+		PositionSeconds: 1245.5,
+		Speed:           1.25,
+		IsCompleted:     false,
+	}
+	if err := repo.UpsertAudiobookProgress(ctx, progress); err != nil {
+		t.Fatalf("upsert audiobook progress: %v", err)
+	}
+
+	fetchedProgress, err := repo.GetAudiobookProgress(ctx, book.ID, "")
+	if err != nil {
+		t.Fatalf("get audiobook progress: %v", err)
+	}
+	if fetchedProgress.PositionSeconds != 1245.5 || fetchedProgress.Speed != 1.25 {
+		t.Errorf("unexpected fetched progress: %+v", fetchedProgress)
+	}
+
+	// Update progress
+	progress.PositionSeconds = 2500.0
+	progress.IsCompleted = true
+	if err := repo.UpsertAudiobookProgress(ctx, progress); err != nil {
+		t.Fatalf("update audiobook progress: %v", err)
+	}
+	updatedProgress, err := repo.GetAudiobookProgress(ctx, book.ID, "")
+	if err != nil {
+		t.Fatalf("get updated progress: %v", err)
+	}
+	if updatedProgress.PositionSeconds != 2500.0 || !updatedProgress.IsCompleted {
+		t.Errorf("unexpected updated progress: %+v", updatedProgress)
+	}
+
+	// 4. Test Cascade Delete
 	if err := repo.DeleteBook(ctx, book.ID); err != nil {
 		t.Fatalf("delete book: %v", err)
 	}

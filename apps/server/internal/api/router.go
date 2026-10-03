@@ -46,6 +46,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version, cfg.DefaultUsername)
 	queueHandler := NewQueueHandler(cfg.Repo, cfg.Worker, cfg.UploadWorker, cfg.Hub)
 	utilHandler := NewUtilityHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
+	audioHandler := NewAudiobookHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, logger)
 
 	auth := AuthMiddleware(cfg.Repo, cfg.JWTSecret)
 
@@ -81,6 +82,16 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("POST /api/v1/books/{id}/chat", auth(http.HandlerFunc(bookHandler.ChatBook)))
 	mux.Handle("GET /api/v1/books/{id}/chapters/{index}", auth(http.HandlerFunc(bookHandler.GetChapter)))
 	mux.Handle("GET /api/v1/chapters/{id}", auth(http.HandlerFunc(bookHandler.GetChapterDirect)))
+
+	// Audiobook streaming & management
+	mux.Handle("GET /api/v1/audiobooks/{id}/stream", auth(http.HandlerFunc(audioHandler.StreamAudio)))
+	mux.Handle("HEAD /api/v1/audiobooks/{id}/stream", auth(http.HandlerFunc(audioHandler.StreamAudio)))
+	mux.Handle("GET /api/v1/audiobooks/{id}/chapters", auth(http.HandlerFunc(audioHandler.GetChapters)))
+	mux.Handle("GET /api/v1/audiobooks/{id}/progress", auth(http.HandlerFunc(audioHandler.GetProgress)))
+	mux.Handle("POST /api/v1/audiobooks/{id}/progress", auth(http.HandlerFunc(audioHandler.UpdateProgress)))
+	mux.Handle("DELETE /api/v1/audiobooks/{id}/progress", auth(http.HandlerFunc(audioHandler.DeleteProgress)))
+	mux.Handle("GET /api/v1/books/{id}/files/{fileId}/stream", auth(http.HandlerFunc(audioHandler.StreamBookFile)))
+	mux.Handle("HEAD /api/v1/books/{id}/files/{fileId}/stream", auth(http.HandlerFunc(audioHandler.StreamBookFile)))
 
 	mux.Handle("GET /api/v1/books/{id}/bookmarks", auth(http.HandlerFunc(bookHandler.ListBookmarks)))
 	mux.Handle("POST /api/v1/books/{id}/bookmarks", auth(http.HandlerFunc(bookHandler.CreateBookmark)))

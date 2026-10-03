@@ -2509,10 +2509,104 @@ func (r *SQLiteStorageEngine) GetBookFilesByBookID(ctx context.Context, bookID s
 	return files, nil
 }
 
+func (r *SQLiteStorageEngine) GetBookFileByID(ctx context.Context, id string) (*BookFile, error) {
+	query := `
+		SELECT id, book_id, file_type, file_path, file_size_bytes, duration_seconds, bitrate_kbps, page_count, mime_type, file_modified_at, created_at
+		FROM book_files
+		WHERE id = ?
+	`
+	f := &BookFile{}
+	var fileModAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, query, id).Scan(&f.ID, &f.BookID, &f.FileType, &f.FilePath, &f.FileSizeBytes, &f.DurationSeconds, &f.BitrateKbps, &f.PageCount, &f.MimeType, &fileModAt, &f.CreatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting book file by ID: %w", err)
+	}
+	if fileModAt.Valid {
+		f.FileModifiedAt = &fileModAt.Time
+	}
+	return f, nil
+}
+
 func (r *SQLiteStorageEngine) DeleteBookFilesByBookID(ctx context.Context, bookID string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM book_files WHERE book_id = ?", bookID)
 	if err != nil {
 		return fmt.Errorf("deleting book files: %w", err)
+	}
+	return nil
+}
+
+// --- Audiobook Progress ---
+
+func (r *SQLiteStorageEngine) UpsertAudiobookProgress(ctx context.Context, progress *AudiobookProgress) error {
+	if progress.ID == "" {
+		progress.ID = ulid.New()
+	}
+	now := time.Now().UTC()
+	if progress.CreatedAt.IsZero() {
+		progress.CreatedAt = now
+	}
+	progress.UpdatedAt = now
+
+	query := `
+		INSERT INTO audiobook_progress (id, book_id, user_id, position_seconds, speed, is_completed, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (book_id, user_id) DO UPDATE SET
+			position_seconds = excluded.position_seconds,
+			speed = excluded.speed,
+			is_completed = excluded.is_completed,
+			updated_at = excluded.updated_at
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		progress.ID,
+		progress.BookID,
+		progress.UserID,
+		progress.PositionSeconds,
+		progress.Speed,
+		progress.IsCompleted,
+		progress.CreatedAt,
+		progress.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upserting audiobook progress: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) GetAudiobookProgress(ctx context.Context, bookID string, userID string) (*AudiobookProgress, error) {
+	query := `
+		SELECT id, book_id, user_id, position_seconds, speed, is_completed, created_at, updated_at
+		FROM audiobook_progress
+		WHERE book_id = ? AND user_id = ?
+	`
+
+	p := &AudiobookProgress{}
+	err := r.db.QueryRowContext(ctx, query, bookID, userID).Scan(
+		&p.ID,
+		&p.BookID,
+		&p.UserID,
+		&p.PositionSeconds,
+		&p.Speed,
+		&p.IsCompleted,
+		&p.CreatedAt,
+		&p.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting audiobook progress: %w", err)
+	}
+	return p, nil
+}
+
+func (r *SQLiteStorageEngine) DeleteAudiobookProgress(ctx context.Context, bookID string, userID string) error {
+	query := `DELETE FROM audiobook_progress WHERE book_id = ? AND user_id = ?`
+	_, err := r.db.ExecContext(ctx, query, bookID, userID)
+	if err != nil {
+		return fmt.Errorf("deleting audiobook progress: %w", err)
 	}
 	return nil
 }

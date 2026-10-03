@@ -66,21 +66,23 @@ func NewBookHandler(
 }
 
 type BookListItem struct {
-	ID             string                         `json:"id"`
-	Title          string                         `json:"title"`
-	Description    *string                        `json:"description,omitempty"`
-	Language       *string                        `json:"language,omitempty"`
-	Publisher      *string                        `json:"publisher,omitempty"`
-	Identifier     *string                        `json:"identifier,omitempty"`
-	FilePath       string                         `json:"file_path"`
-	CoverPath      *string                        `json:"cover_path,omitempty"`
-	FileSizeBytes  *int64                         `json:"file_size_bytes,omitempty"`
-	FileModifiedAt *time.Time                     `json:"file_modified_at,omitempty"`
+	ID                       string                         `json:"id"`
+	Title                    string                         `json:"title"`
+	Description              *string                        `json:"description,omitempty"`
+	Language                 *string                        `json:"language,omitempty"`
+	Publisher                *string                        `json:"publisher,omitempty"`
+	Identifier               *string                        `json:"identifier,omitempty"`
+	FilePath                 string                         `json:"file_path"`
+	CoverPath                *string                        `json:"cover_path,omitempty"`
+	FileSizeBytes            *int64                         `json:"file_size_bytes,omitempty"`
+	FileModifiedAt           *time.Time                     `json:"file_modified_at,omitempty"`
 	PublishedDate            *string                        `json:"published_date,omitempty"`
 	Layout                   string                         `json:"layout"`
 	RenditionSpread          string                         `json:"rendition_spread"`
 	RenditionOrientation     string                         `json:"rendition_orientation"`
 	PageProgressionDirection string                         `json:"page_progression_direction"`
+	BookType                 string                         `json:"book_type,omitempty"`
+	DurationSeconds          *float64                       `json:"duration_seconds,omitempty"`
 	Authors                  []*repository.Author           `json:"authors"`
 	Genres                   []*repository.Genre            `json:"genres"`
 	Topics                   []*repository.Topic            `json:"topics"`
@@ -89,10 +91,12 @@ type BookListItem struct {
 
 type BookDetailResponse struct {
 	BookListItem
-	Spine      []*repository.SpineItem   `json:"spine"`
-	Chapters   []*repository.Chapter     `json:"chapters"`
-	Bookmarks  []*repository.Bookmark    `json:"bookmarks"`
-	Highlights []*repository.Highlight   `json:"highlights"`
+	Spine         []*repository.SpineItem   `json:"spine"`
+	Chapters      []*repository.Chapter     `json:"chapters"`
+	Bookmarks     []*repository.Bookmark    `json:"bookmarks"`
+	Highlights    []*repository.Highlight   `json:"highlights"`
+	Files         []*repository.BookFile    `json:"files"`
+	AudioChapters []*repository.AudioChapter `json:"audio_chapters,omitempty"`
 }
 
 // BuildBookListItem loads relational metadata for a book and constructs a BookListItem DTO.
@@ -118,6 +122,8 @@ func BuildBookListItem(ctx context.Context, repo repository.StorageEngine, b *re
 		RenditionSpread:          b.RenditionSpread,
 		RenditionOrientation:     b.RenditionOrientation,
 		PageProgressionDirection: b.PageProgressionDirection,
+		BookType:                 b.BookType,
+		DurationSeconds:          b.DurationSeconds,
 		Authors:                  authors,
 		Genres:                   genres,
 		Topics:                   topics,
@@ -329,6 +335,7 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 
 	authors, _ := h.repo.GetBookAuthors(r.Context(), book.ID)
 	genres, _ := h.repo.GetBookGenres(r.Context(), book.ID)
+	topics, _ := h.repo.GetBookTopics(r.Context(), book.ID)
 	seriesList, _ := h.repo.GetBookSeries(r.Context(), book.ID)
 	spine, _ := h.repo.GetBookSpine(r.Context(), book.ID)
 	chapters, _ := h.repo.GetChaptersByBookID(r.Context(), book.ID)
@@ -338,6 +345,8 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 	}
 	bookmarks, _ := h.repo.ListBookmarksByBookID(r.Context(), book.ID)
 	highlights, _ := h.repo.ListHighlightsByBookID(r.Context(), book.ID)
+	files, _ := h.repo.GetBookFilesByBookID(r.Context(), book.ID)
+	audioChapters, _ := h.repo.GetAudioChaptersByBookID(r.Context(), book.ID)
 
 	writeJSON(w, http.StatusOK, BookDetailResponse{
 		BookListItem: BookListItem{
@@ -356,14 +365,19 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 			RenditionSpread:          book.RenditionSpread,
 			RenditionOrientation:     book.RenditionOrientation,
 			PageProgressionDirection: book.PageProgressionDirection,
+			BookType:                 book.BookType,
+			DurationSeconds:          book.DurationSeconds,
 			Authors:                  authors,
 			Genres:                   genres,
+			Topics:                   topics,
 			Series:                   seriesList,
 		},
-		Spine:      spine,
-		Chapters:   chapters,
-		Bookmarks:  bookmarks,
-		Highlights: highlights,
+		Spine:         spine,
+		Chapters:      chapters,
+		Bookmarks:     bookmarks,
+		Highlights:    highlights,
+		Files:         files,
+		AudioChapters: audioChapters,
 	})
 }
 
