@@ -1,3 +1,13 @@
+# [1.9.0](https://github.com/theBenForce/shelfd/compare/v1.8.0...v1.9.0) (2026-10-03)
+
+
+### Features
+
+* **app:** add audiobook player core state and audio repository ([#41](https://github.com/theBenForce/shelfd/issues/41)) ([1b7cc3a](https://github.com/theBenForce/shelfd/commit/1b7cc3a2289635c90fc7121b25ac120b9fc7a045))
+* **app:** add audiobook player ui and associated files section ([#42](https://github.com/theBenForce/shelfd/issues/42)) ([739f667](https://github.com/theBenForce/shelfd/commit/739f66786bd7472c96bfa329f2d294019e5218aa))
+* **server:** add media format schema and audio metadata scanner ([#38](https://github.com/theBenForce/shelfd/issues/38)) ([221ae27](https://github.com/theBenForce/shelfd/commit/221ae27eb3edcc5e64a2406413d6db9af56bdce6))
+* **server:** implement audio streaming and progress sync APIs ([#39](https://github.com/theBenForce/shelfd/issues/39)) ([2dc2e82](https://github.com/theBenForce/shelfd/commit/2dc2e82071cb4a8fde3f994ef0a572d6dc681c56))
+
 # [1.8.0](https://github.com/theBenForce/shelfd/compare/v1.7.0...v1.8.0) (2026-10-02)
 
 
