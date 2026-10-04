@@ -323,7 +323,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                   foregroundColor: AppTokens.charcoalInk,
                   padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
                 ),
-                icon: const Icon(Icons.headphones_rounded, size: 18),
+                icon: const Icon(Icons.headphones, size: 18),
                 label: const Text('Listen', style: TextStyle(fontWeight: FontWeight.w700)),
                 onPressed: () => context.go('/books/${book.id}/listen'),
               ),
@@ -562,7 +562,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                     borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                   ),
                 ),
-                icon: const Icon(Icons.headphones_rounded, size: 20),
+                icon: const Icon(Icons.headphones, size: 20),
                 label: const Text(
                   'Listen Audiobook',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
@@ -912,23 +912,23 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             if (isAudio) {
               badgeColor = const Color(0xFFFFF3BF);
               badgeTextColor = const Color(0xFFD97706);
-              iconData = Icons.headphones_rounded;
+              iconData = Icons.headphones;
               typeLabel = 'M4A AUDIOBOOK';
             } else if (isEpub) {
               badgeColor = const Color(0xFFE7F5FF);
               badgeTextColor = const Color(0xFF1971C2);
-              iconData = Icons.menu_book_rounded;
+              iconData = Icons.menu_book;
               typeLabel = 'EPUB';
             } else if (isPdf) {
               badgeColor = const Color(0xFFFFE3E3);
               badgeTextColor = const Color(0xFFE03131);
-              iconData = Icons.picture_as_pdf_rounded;
+              iconData = Icons.picture_as_pdf;
               typeLabel = 'PDF';
             } else {
               badgeColor = const Color(0xFFEBFBEE);
               badgeTextColor = const Color(0xFF2F9E44);
-              iconData = Icons.image_rounded;
-              typeLabel = 'COVER ART';
+              iconData = Icons.image;
+              typeLabel = 'IMAGE';
             }
 
             return Container(

@@ -1,11 +1,16 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/audiobook.dart';
+import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/repositories/audio_repository.dart';
 import 'package:shelf/data/services/api_service.dart';
 import 'package:shelf/data/services/storage_service.dart';
+import 'package:shelf/ui/core/theme.dart';
+import 'package:shelf/ui/features/audiobook/audiobook_player_view.dart';
+import 'package:shelf/ui/features/audiobook/widgets/mini_player_bar.dart';
 import 'package:shelf/ui/state/audio_player_provider.dart';
 import 'package:shelf/ui/state/audio_player_state.dart';
 import 'package:shelf/ui/state/providers.dart';
@@ -403,4 +408,151 @@ void main() {
       expect(state.volume, 1.0);
     });
   });
+
+  group('Audiobook UI Widget Tests', () {
+    late SharedPreferences prefs;
+    late StorageService storageService;
+    late MockApiService apiService;
+    late AudioRepository repository;
+
+    final audiobook = Book(
+      id: 'audio-1',
+      title: 'Dune: Special Edition',
+      authors: const [Author(id: 'auth-1', name: 'Frank Herbert')],
+      bookType: 'audiobook',
+      durationSeconds: 7200.0,
+      files: const [
+        BookFile(
+          id: 'f1',
+          bookId: 'audio-1',
+          filePath: 'dune.m4a',
+          fileType: 'audio',
+          durationSeconds: 7200.0,
+        ),
+      ],
+      audioChapters: const [
+        AudioChapter(
+          id: 'ch1',
+          bookId: 'audio-1',
+          title: 'Part 1: Dune',
+          startOffsetSec: 0.0,
+          durationSec: 3600.0,
+          chapterIndex: 0,
+        ),
+      ],
+    );
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      prefs = await SharedPreferences.getInstance();
+      storageService = StorageService(prefs);
+      apiService = MockApiService();
+      apiService.mockChapters = audiobook.audioChapters;
+      repository = AudioRepository(
+        apiService: apiService,
+        storageService: storageService,
+      );
+    });
+
+    testWidgets('AudiobookPlayerView renders standard Material Icons correctly', (tester) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final container = ProviderContainer(
+        overrides: [
+          apiServiceProvider.overrideWithValue(apiService),
+          storageServiceProvider.overrideWithValue(storageService),
+          audioRepositoryProvider.overrideWithValue(repository),
+          bookDetailProvider('audio-1').overrideWith(
+            () => _MockAudioBookDetailNotifier(audiobook),
+          ),
+        ],
+      );
+
+      await container.read(audioPlayerProvider.notifier).loadBook(audiobook);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+            home: const AudiobookPlayerView(bookId: 'audio-1'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Verify all essential controls and standard icons are rendered
+      expect(find.byKey(const Key('audio_player_back_button')), findsOneWidget);
+      expect(find.byIcon(Icons.keyboard_arrow_down), findsOneWidget);
+
+      expect(find.byKey(const Key('audio_player_chapters_menu_button')), findsOneWidget);
+      expect(find.byIcon(Icons.format_list_bulleted), findsOneWidget);
+
+      expect(find.byKey(const Key('audio_player_skip_back_button')), findsOneWidget);
+      expect(find.byIcon(Icons.replay_10), findsOneWidget);
+
+      expect(find.byKey(const Key('audio_player_play_pause_button')), findsOneWidget);
+      expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+
+      expect(find.byKey(const Key('audio_player_skip_forward_button')), findsOneWidget);
+      expect(find.byIcon(Icons.forward_30), findsOneWidget);
+
+      expect(find.byKey(const Key('audio_player_speed_button')), findsOneWidget);
+      expect(find.byIcon(Icons.speed), findsOneWidget);
+
+      expect(find.byKey(const Key('audio_player_sleep_timer_button')), findsOneWidget);
+      expect(find.byIcon(Icons.bedtime), findsOneWidget);
+
+      expect(find.byKey(const Key('audio_player_add_bookmark_button')), findsOneWidget);
+      expect(find.byIcon(Icons.bookmark_add_outlined), findsOneWidget);
+    });
+
+    testWidgets('MiniPlayerBar renders standard Material Icons correctly', (tester) async {
+      final container = ProviderContainer(
+        overrides: [
+          apiServiceProvider.overrideWithValue(apiService),
+          storageServiceProvider.overrideWithValue(storageService),
+          audioRepositoryProvider.overrideWithValue(repository),
+        ],
+      );
+
+      await container.read(audioPlayerProvider.notifier).loadBook(audiobook);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+            home: const Scaffold(
+              bottomNavigationBar: MiniPlayerBar(),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byIcon(Icons.headphones), findsOneWidget);
+      expect(find.byKey(const Key('mini_player_skip_30')), findsOneWidget);
+      expect(find.byIcon(Icons.forward_30), findsOneWidget);
+      expect(find.byKey(const Key('mini_player_play_pause')), findsOneWidget);
+      expect(find.byIcon(Icons.play_circle_filled), findsOneWidget);
+      expect(find.byKey(const Key('mini_player_close')), findsOneWidget);
+      expect(find.byIcon(Icons.close), findsOneWidget);
+    });
+  });
+}
+
+class _MockAudioBookDetailNotifier extends BookDetailNotifier {
+  final Book mockBook;
+  _MockAudioBookDetailNotifier(this.mockBook) : super('audio-1');
+
+  @override
+  BookDetailState build() {
+    return BookDetailState(book: mockBook, isLoading: false);
+  }
 }

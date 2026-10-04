@@ -157,7 +157,7 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
           key: const Key('audio_player_back_button'),
-          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white, size: 28),
+          icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 28),
           tooltip: 'Minimize Player',
           onPressed: () {
             if (context.canPop()) {
@@ -192,7 +192,7 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
         actions: [
           IconButton(
             key: const Key('audio_player_chapters_menu_button'),
-            icon: const Icon(Icons.format_list_bulleted_rounded, color: Colors.white),
+            icon: const Icon(Icons.format_list_bulleted, color: Colors.white),
             tooltip: 'Chapters & Bookmarks',
             onPressed: () => _showChapterDrawer(context, book),
           ),
@@ -294,7 +294,7 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                         IconButton(
                           key: const Key('audio_player_skip_back_button'),
                           iconSize: 36,
-                          icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
+                          icon: const Icon(Icons.replay_10, color: Colors.white),
                           tooltip: 'Skip backward 15 seconds',
                           onPressed: () => playerNotifier.skipBackward(),
                         ),
@@ -333,8 +333,8 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                                   color: AppTokens.charcoalInk,
                                   icon: Icon(
                                     playerState.isPlaying
-                                        ? Icons.pause_rounded
-                                        : Icons.play_arrow_rounded,
+                                        ? Icons.pause
+                                        : Icons.play_arrow,
                                   ),
                                   onPressed: () => playerNotifier.togglePlayPause(),
                                 ),
@@ -345,7 +345,7 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                         IconButton(
                           key: const Key('audio_player_skip_forward_button'),
                           iconSize: 36,
-                          icon: const Icon(Icons.forward_30_rounded, color: Colors.white),
+                          icon: const Icon(Icons.forward_30, color: Colors.white),
                           tooltip: 'Skip forward 30 seconds',
                           onPressed: () => playerNotifier.skipForward(),
                         ),
@@ -370,7 +370,7 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                                 borderRadius: BorderRadius.circular(AppTokens.radiusPill),
                               ),
                             ),
-                            icon: const Icon(Icons.speed_rounded, size: 16),
+                            icon: const Icon(Icons.speed, size: 16),
                             label: Text(
                               '${playerState.speed.toStringAsFixed(playerState.speed.truncateToDouble() == playerState.speed ? 0 : 2)}x',
                               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
@@ -392,8 +392,8 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                             ),
                             icon: Icon(
                               playerState.sleepTimerRemaining != null
-                                  ? Icons.bedtime_rounded
-                                  : Icons.bedtime_outlined,
+                                  ? Icons.bedtime
+                                  : Icons.bedtime,
                               size: 16,
                             ),
                             label: Text(
@@ -432,7 +432,7 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.headphones_rounded, size: 54, color: AppTokens.amberAccent),
+            const Icon(Icons.headphones, size: 54, color: AppTokens.amberAccent),
             const SizedBox(height: AppTokens.space12),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16),
