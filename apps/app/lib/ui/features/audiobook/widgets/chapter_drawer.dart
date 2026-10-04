@@ -227,7 +227,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                   _tabChip(
                     2,
                     widget.sleepTimerRemaining != null
-                        ? '${_formatDuration(widget.sleepTimerRemaining!)}'
+                        ? _formatDuration(widget.sleepTimerRemaining!)
                         : 'Timer',
                     Icons.bedtime,
                   ),

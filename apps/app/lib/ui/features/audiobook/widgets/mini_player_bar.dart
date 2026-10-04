@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/tokens.dart';
 import '../../../core/typography.dart';
-import '../../../state/audio_player_state.dart';
 import '../../../state/providers.dart';
 
 /// Floating mini-player bar docked directly above the navigation bar

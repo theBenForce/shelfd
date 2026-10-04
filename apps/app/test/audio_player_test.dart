@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:shelf/data/models/audiobook.dart';
 import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/repositories/audio_repository.dart';
@@ -11,8 +10,6 @@ import 'package:shelf/data/services/storage_service.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/audiobook/audiobook_player_view.dart';
 import 'package:shelf/ui/features/audiobook/widgets/mini_player_bar.dart';
-import 'package:shelf/ui/state/audio_player_provider.dart';
-import 'package:shelf/ui/state/audio_player_state.dart';
 import 'package:shelf/ui/state/providers.dart';
 
 class MockApiService extends ApiService {

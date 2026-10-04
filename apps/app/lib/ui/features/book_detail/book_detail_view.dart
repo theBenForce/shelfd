@@ -902,7 +902,6 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             final isAudio = f.fileType == 'audiobook' || f.filePath.endsWith('.m4a') || f.filePath.endsWith('.m4b') || f.filePath.endsWith('.mp3');
             final isEpub = f.fileType == 'epub' || f.filePath.endsWith('.epub');
             final isPdf = f.fileType == 'pdf' || f.filePath.endsWith('.pdf');
-            final isCover = f.fileType == 'cover' || f.filePath.endsWith('.jpg') || f.filePath.endsWith('.png');
 
             Color badgeColor;
             Color badgeTextColor;
