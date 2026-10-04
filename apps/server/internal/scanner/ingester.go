@@ -7,8 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/shelfd/shelfd/internal/audio"
@@ -16,6 +19,37 @@ import (
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/taxonomy"
 )
+
+func naturalLess(s1, s2 string) bool {
+	i, j := 0, 0
+	r1, r2 := []rune(s1), []rune(s2)
+	for i < len(r1) && j < len(r2) {
+		if unicode.IsDigit(r1[i]) && unicode.IsDigit(r2[j]) {
+			start1 := i
+			for i < len(r1) && unicode.IsDigit(r1[i]) {
+				i++
+			}
+			start2 := j
+			for j < len(r2) && unicode.IsDigit(r2[j]) {
+				j++
+			}
+			n1, _ := strconv.ParseUint(string(r1[start1:i]), 10, 64)
+			n2, _ := strconv.ParseUint(string(r2[start2:j]), 10, 64)
+			if n1 != n2 {
+				return n1 < n2
+			}
+		} else {
+			c1 := unicode.ToLower(r1[i])
+			c2 := unicode.ToLower(r2[j])
+			if c1 != c2 {
+				return c1 < c2
+			}
+			i++
+			j++
+		}
+	}
+	return len(r1) < len(r2)
+}
 
 // TaxonomyNormalizer defines the interface for normalizing book taxonomy.
 type TaxonomyNormalizer interface {
@@ -105,6 +139,29 @@ func (in *Ingester) SyncFile(ctx context.Context, fullPath, relativePath string)
 			_, _ = in.taxonomyNormalizer.NormalizeBookTaxonomy(ctx, updatedBook.ID, false)
 		}
 		return updatedBook, SyncStatusModified, nil
+	}
+
+	// Check if another file in the same directory already created a Book record
+	bookDirRel := filepath.Dir(relativePath)
+	dirBook, err := in.repo.GetBookByDirectory(ctx, bookDirRel)
+	if err == nil && dirBook != nil {
+		// If the new file is an EPUB and the directory was previously tracked under an audiobook file, upgrade primary file to EPUB
+		if fileType == "epub" && dirBook.BookType == "audiobook" {
+			dirBook.FilePath = relativePath
+			dirBook.FileSizeBytes = &sizeBytes
+			dirBook.FileModifiedAt = &modTime
+			dirBook.BookType = "ebook"
+			updatedBook, err := in.updateModifiedBook(ctx, dirBook, fullPath, relativePath, fi)
+			if err == nil {
+				_ = in.syncBookFiles(ctx, updatedBook.ID, fullPath)
+				if in.taxonomyNormalizer != nil {
+					_, _ = in.taxonomyNormalizer.NormalizeBookTaxonomy(ctx, updatedBook.ID, false)
+				}
+				return updatedBook, SyncStatusModified, nil
+			}
+		}
+		_ = in.syncBookFiles(ctx, dirBook.ID, fullPath)
+		return dirBook, SyncStatusUnchanged, nil
 	}
 
 	var book *repository.Book
@@ -523,6 +580,11 @@ func resolveAuthors(parsedAuthors []epub.ParsedAuthor, relativePath string) []ep
 	return nil
 }
 
+type audioTrackCandidate struct {
+	file DiscoveredFile
+	meta *audio.Metadata
+}
+
 func (in *Ingester) importNewAudiobook(ctx context.Context, fullPath, relativePath string, fi os.FileInfo) (*repository.Book, error) {
 	meta, err := audio.ExtractMetadata(fullPath)
 	if err != nil {
@@ -533,9 +595,17 @@ func (in *Ingester) importNewAudiobook(ctx context.Context, fullPath, relativePa
 	modTime := fi.ModTime().UTC().Truncate(time.Second)
 	bookID := uuid.NewString()
 
-	title := meta.Title
+	title := meta.Album
 	if title == "" {
-		// Fallback to filename without extension
+		title = meta.Title
+	}
+	if title == "" || title == meta.TrackTitle {
+		parts := strings.Split(filepath.ToSlash(filepath.Dir(relativePath)), "/")
+		if len(parts) >= 1 && parts[len(parts)-1] != "." && parts[len(parts)-1] != "" && !strings.EqualFold(parts[len(parts)-1], "audiobooks") {
+			title = parts[len(parts)-1]
+		}
+	}
+	if title == "" {
 		title = strings.TrimSuffix(filepath.Base(fullPath), filepath.Ext(fullPath))
 	}
 
@@ -590,23 +660,6 @@ func (in *Ingester) importNewAudiobook(ctx context.Context, fullPath, relativePa
 		}
 	}
 
-	// Insert Audio Chapters
-	if len(meta.Chapters) > 0 {
-		var audioChapters []*repository.AudioChapter
-		for i, ch := range meta.Chapters {
-			audioChapters = append(audioChapters, &repository.AudioChapter{
-				BookID:         book.ID,
-				ChapterIndex:   i + 1,
-				Title:          ch.Title,
-				StartOffsetSec: ch.StartOffsetSec,
-				DurationSec:    ch.DurationSec,
-			})
-		}
-		if err := in.repo.CreateAudioChapters(ctx, audioChapters); err != nil {
-			return nil, fmt.Errorf("creating audio chapters: %w", err)
-		}
-	}
-
 	return book, nil
 }
 
@@ -619,7 +672,9 @@ func (in *Ingester) updateModifiedAudiobook(ctx context.Context, book *repositor
 	sizeBytes := fi.Size()
 	modTime := fi.ModTime().UTC().Truncate(time.Second)
 
-	if meta.Title != "" {
+	if meta.Album != "" {
+		book.Title = meta.Album
+	} else if meta.Title != "" && book.Title == "" {
 		book.Title = meta.Title
 	}
 	book.FileSizeBytes = &sizeBytes
@@ -644,22 +699,6 @@ func (in *Ingester) updateModifiedAudiobook(ctx context.Context, book *repositor
 
 	if err := in.repo.UpdateBook(ctx, book); err != nil {
 		return nil, fmt.Errorf("updating audiobook in database: %w", err)
-	}
-
-	// Re-insert Audio Chapters
-	_ = in.repo.DeleteAudioChaptersByBookID(ctx, book.ID)
-	if len(meta.Chapters) > 0 {
-		var audioChapters []*repository.AudioChapter
-		for i, ch := range meta.Chapters {
-			audioChapters = append(audioChapters, &repository.AudioChapter{
-				BookID:         book.ID,
-				ChapterIndex:   i + 1,
-				Title:          ch.Title,
-				StartOffsetSec: ch.StartOffsetSec,
-				DurationSec:    ch.DurationSec,
-			})
-		}
-		_ = in.repo.CreateAudioChapters(ctx, audioChapters)
 	}
 
 	return book, nil
@@ -718,8 +757,56 @@ func (in *Ingester) syncBookFiles(ctx context.Context, bookID, bookFullPath stri
 		return err
 	}
 
-	var bookFiles []*repository.BookFile
+	var audioTracks []audioTrackCandidate
+	var nonAudioFiles []DiscoveredFile
+
 	for _, f := range discovered {
+		if f.FileType == "audiobook" {
+			meta, err := audio.ExtractMetadata(f.FullPath)
+			if err != nil {
+				meta = &audio.Metadata{
+					Title: strings.TrimSuffix(filepath.Base(f.FullPath), filepath.Ext(f.FullPath)),
+				}
+			}
+			audioTracks = append(audioTracks, audioTrackCandidate{
+				file: f,
+				meta: meta,
+			})
+		} else {
+			nonAudioFiles = append(nonAudioFiles, f)
+		}
+	}
+
+	// Sort audio tracks by DiscNumber, TrackNumber, and Natural Filename
+	sort.SliceStable(audioTracks, func(i, j int) bool {
+		t1, t2 := audioTracks[i], audioTracks[j]
+		if t1.meta.DiscNumber != t2.meta.DiscNumber {
+			return t1.meta.DiscNumber < t2.meta.DiscNumber
+		}
+		if t1.meta.TrackNumber != t2.meta.TrackNumber && t1.meta.TrackNumber > 0 && t2.meta.TrackNumber > 0 {
+			return t1.meta.TrackNumber < t2.meta.TrackNumber
+		}
+		return naturalLess(filepath.Base(t1.file.FullPath), filepath.Base(t2.file.FullPath))
+	})
+
+	// Sort non-audio files (EPUB first, then others by natural name)
+	sort.SliceStable(nonAudioFiles, func(i, j int) bool {
+		f1, f2 := nonAudioFiles[i], nonAudioFiles[j]
+		if f1.FileType == "epub" && f2.FileType != "epub" {
+			return true
+		}
+		if f1.FileType != "epub" && f2.FileType == "epub" {
+			return false
+		}
+		return naturalLess(filepath.Base(f1.FullPath), filepath.Base(f2.FullPath))
+	})
+
+	var bookFiles []*repository.BookFile
+	var audioChapters []*repository.AudioChapter
+	var totalAudioDuration float64 = 0.0
+
+	// Add non-audio companion files
+	for _, f := range nonAudioFiles {
 		size := f.SizeBytes
 		mod := f.ModTime
 		bf := &repository.BookFile{
@@ -729,21 +816,96 @@ func (in *Ingester) syncBookFiles(ctx context.Context, bookID, bookFullPath stri
 			FileSizeBytes:  &size,
 			FileModifiedAt: &mod,
 		}
+		bookFiles = append(bookFiles, bf)
+	}
 
-		if f.FileType == "audiobook" {
-			if meta, err := audio.ExtractMetadata(f.FullPath); err == nil {
-				dur := meta.DurationSeconds
-				bf.DurationSeconds = &dur
-				if meta.BitrateKbps > 0 {
-					br := meta.BitrateKbps
-					bf.BitrateKbps = &br
+	// Add audio tracks and build combined chapter index
+	for _, at := range audioTracks {
+		f := at.file
+		meta := at.meta
+		size := f.SizeBytes
+		mod := f.ModTime
+		dur := meta.DurationSeconds
+		bf := &repository.BookFile{
+			BookID:          bookID,
+			FileType:        f.FileType,
+			FilePath:        f.RelativePath,
+			FileSizeBytes:   &size,
+			FileModifiedAt:  &mod,
+			DurationSeconds: &dur,
+		}
+		if meta.BitrateKbps > 0 {
+			br := meta.BitrateKbps
+			bf.BitrateKbps = &br
+		}
+		bookFiles = append(bookFiles, bf)
+
+		trackStartOffset := totalAudioDuration
+		if len(meta.Chapters) > 1 {
+			for _, ch := range meta.Chapters {
+				audioChapters = append(audioChapters, &repository.AudioChapter{
+					BookID:         bookID,
+					ChapterIndex:   len(audioChapters) + 1,
+					Title:          ch.Title,
+					StartOffsetSec: trackStartOffset + ch.StartOffsetSec,
+					DurationSec:    ch.DurationSec,
+				})
+			}
+		} else {
+			chTitle := meta.TrackTitle
+			if chTitle == "" {
+				chTitle = meta.Title
+			}
+			if chTitle == "" || chTitle == meta.Album {
+				chTitle = strings.TrimSuffix(filepath.Base(f.FullPath), filepath.Ext(f.FullPath))
+			}
+			audioChapters = append(audioChapters, &repository.AudioChapter{
+				BookID:         bookID,
+				ChapterIndex:   len(audioChapters) + 1,
+				Title:          chTitle,
+				StartOffsetSec: trackStartOffset,
+				DurationSec:    dur,
+			})
+		}
+		totalAudioDuration += dur
+	}
+
+	// Update Book total duration and Title if appropriate
+	book, err := in.repo.GetBookByID(ctx, bookID)
+	if err == nil && book != nil {
+		changed := false
+		if totalAudioDuration > 0 && (book.DurationSeconds == nil || *book.DurationSeconds != totalAudioDuration) {
+			book.DurationSeconds = &totalAudioDuration
+			changed = true
+		}
+
+		if book.BookType == "audiobook" && len(audioTracks) > 0 {
+			firstMeta := audioTracks[0].meta
+			dirName := filepath.Base(bookDirFull)
+			// If book title was set to track 1 title or placeholder, fix to album or folder name
+			if book.Title == "" || (firstMeta != nil && (book.Title == firstMeta.TrackTitle || strings.HasPrefix(book.Title, "1.") || strings.HasPrefix(book.Title, "01"))) {
+				if firstMeta != nil && firstMeta.Album != "" {
+					book.Title = firstMeta.Album
+					changed = true
+				} else if dirName != "." && dirName != "" && !strings.EqualFold(dirName, "audiobooks") {
+					book.Title = dirName
+					changed = true
 				}
 			}
 		}
 
-		bookFiles = append(bookFiles, bf)
+		if changed {
+			_ = in.repo.UpdateBook(ctx, book)
+		}
 	}
 
+	// Update audio chapters in DB
+	_ = in.repo.DeleteAudioChaptersByBookID(ctx, bookID)
+	if len(audioChapters) > 0 {
+		_ = in.repo.CreateAudioChapters(ctx, audioChapters)
+	}
+
+	// Update book files in DB
 	_ = in.repo.DeleteBookFilesByBookID(ctx, bookID)
 	if len(bookFiles) > 0 {
 		return in.repo.CreateBookFiles(ctx, bookFiles)

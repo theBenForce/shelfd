@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -78,6 +79,27 @@ func (r *BunStorageEngine) GetBookByFilePath(ctx context.Context, filePath strin
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("getting book by file path: %w", err)
+	}
+	return book, nil
+}
+
+func (r *BunStorageEngine) GetBookByDirectory(ctx context.Context, dirRelPath string) (*Book, error) {
+	if dirRelPath == "" || dirRelPath == "." {
+		return nil, ErrNotFound
+	}
+	dirSlash := filepath.ToSlash(dirRelPath)
+	pattern := dirSlash + "/%"
+	book := new(Book)
+	err := r.db.NewSelect().Model(book).
+		Where("file_path LIKE ?", pattern).
+		OrderExpr("CASE WHEN file_path LIKE '%.epub' THEN 0 ELSE 1 END, created_at ASC").
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting book by directory: %w", err)
 	}
 	return book, nil
 }

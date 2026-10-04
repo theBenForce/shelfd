@@ -15,7 +15,12 @@ import (
 // Metadata represents extracted audio file metadata and chapter bookmarks.
 type Metadata struct {
 	Title           string
+	Album           string
+	TrackTitle      string
+	TrackNumber     int
+	DiscNumber      int
 	Author          string
+	AlbumArtist     string
 	Narrator        string
 	Description     string
 	PublishedDate   string
@@ -149,7 +154,7 @@ func parseMoov(r *bytes.Reader, size int64, meta *Metadata) {
 		boxSize := int64(binary.BigEndian.Uint32(header[0:4]))
 		boxType := string(header[4:8])
 
-		if boxSize < 8 {
+		if boxSize < 8 || boxSize-8 > int64(r.Len()) {
 			break
 		}
 
@@ -198,7 +203,7 @@ func parseUdta(r *bytes.Reader, size int64, meta *Metadata) {
 
 		boxSize := int64(binary.BigEndian.Uint32(header[0:4]))
 		boxType := string(header[4:8])
-		if boxSize < 8 {
+		if boxSize < 8 || boxSize-8 > int64(r.Len()) {
 			break
 		}
 
@@ -233,7 +238,7 @@ func parseMeta(r *bytes.Reader, size int64, meta *Metadata) {
 
 		boxSize := int64(binary.BigEndian.Uint32(header[0:4]))
 		boxType := string(header[4:8])
-		if boxSize < 8 {
+		if boxSize < 8 || boxSize-8 > int64(r.Len()) {
 			break
 		}
 
@@ -262,7 +267,7 @@ func parseIlst(r *bytes.Reader, size int64, meta *Metadata) {
 
 		boxSize := int64(binary.BigEndian.Uint32(header[0:4]))
 		boxType := string(header[4:8])
-		if boxSize < 8 {
+		if boxSize < 8 || boxSize-8 > int64(r.Len()) {
 			break
 		}
 
@@ -275,20 +280,32 @@ func parseIlst(r *bytes.Reader, size int64, meta *Metadata) {
 
 		switch boxType {
 		case "\xa9nam", "titl":
-			if meta.Title == "" {
-				meta.Title = textVal
+			if meta.TrackTitle == "" {
+				meta.TrackTitle = textVal
+			}
+		case "\xa9alb":
+			if meta.Album == "" {
+				meta.Album = textVal
 			}
 		case "\xa9ART", "\xa9wrt", "\xa9aut", "auth":
 			if meta.Author == "" {
 				meta.Author = textVal
 			}
+		case "aART":
+			if meta.AlbumArtist == "" {
+				meta.AlbumArtist = textVal
+			}
 		case "\xa9nrt":
 			if meta.Narrator == "" {
 				meta.Narrator = textVal
 			}
-		case "\xa9alb":
-			if meta.Title == "" {
-				meta.Title = textVal
+		case "trkn":
+			if len(dataVal) >= 4 {
+				meta.TrackNumber = int(binary.BigEndian.Uint16(dataVal[2:4]))
+			}
+		case "disk":
+			if len(dataVal) >= 4 {
+				meta.DiscNumber = int(binary.BigEndian.Uint16(dataVal[2:4]))
 			}
 		case "\xa9day":
 			meta.PublishedDate = textVal
@@ -308,6 +325,15 @@ func parseIlst(r *bytes.Reader, size int64, meta *Metadata) {
 				}
 			}
 		}
+	}
+
+	if meta.Album != "" {
+		meta.Title = meta.Album
+	} else if meta.Title == "" {
+		meta.Title = meta.TrackTitle
+	}
+	if meta.Author == "" && meta.AlbumArtist != "" {
+		meta.Author = meta.AlbumArtist
 	}
 }
 
@@ -479,20 +505,43 @@ func parseID3Frames(data []byte, version byte, meta *Metadata) {
 
 		switch frameID {
 		case "TIT2":
-			if meta.Title == "" {
-				meta.Title = textVal
+			if meta.TrackTitle == "" {
+				meta.TrackTitle = textVal
+			}
+		case "TALB":
+			if meta.Album == "" {
+				meta.Album = textVal
 			}
 		case "TPE1":
 			if meta.Author == "" {
 				meta.Author = textVal
 			}
-		case "TPE2", "TCOM":
+		case "TPE2":
+			if meta.AlbumArtist == "" {
+				meta.AlbumArtist = textVal
+			}
 			if meta.Narrator == "" {
 				meta.Narrator = textVal
 			}
-		case "TALB":
-			if meta.Title == "" {
-				meta.Title = textVal
+		case "TCOM":
+			if meta.Narrator == "" {
+				meta.Narrator = textVal
+			}
+		case "TRCK":
+			// E.g. "1" or "1/21"
+			parts := strings.Split(textVal, "/")
+			if len(parts) > 0 {
+				if num, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
+					meta.TrackNumber = num
+				}
+			}
+		case "TPOS":
+			// E.g. "1" or "1/2"
+			parts := strings.Split(textVal, "/")
+			if len(parts) > 0 {
+				if num, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
+					meta.DiscNumber = num
+				}
 			}
 		case "TDRC", "TYER":
 			meta.PublishedDate = textVal
@@ -509,6 +558,15 @@ func parseID3Frames(data []byte, version byte, meta *Metadata) {
 		case "CHAP":
 			parseCHAPFrame(frameData, meta)
 		}
+	}
+
+	if meta.Album != "" {
+		meta.Title = meta.Album
+	} else if meta.Title == "" {
+		meta.Title = meta.TrackTitle
+	}
+	if meta.Author == "" && meta.AlbumArtist != "" {
+		meta.Author = meta.AlbumArtist
 	}
 }
 

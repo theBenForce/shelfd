@@ -321,6 +321,66 @@ void main() {
     expect(find.byKey(const Key('edit_book_series_field')), findsOneWidget);
     expect(find.byKey(const Key('edit_book_sequence_field')), findsOneWidget);
   });
+
+  testWidgets('BookDetailView correctly renders multi-file audiobook with tracks and aggregate format', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final hobbitMultiAudiobook = Book(
+      id: 'the-hobbit-id',
+      title: 'The Hobbit',
+      synopsis: 'In a hole in the ground there lived a hobbit.',
+      authors: const [Author(id: 'auth-tolkien', name: 'J.R.R. Tolkien')],
+      bookType: 'audiobook',
+      durationSeconds: 42300.0, // 11h 45m
+      audioChapters: const [
+        AudioChapter(id: 'c-1', bookId: 'the-hobbit-id', chapterIndex: 1, title: '1. An Unexpected Party', startOffsetSec: 0, durationSec: 8400),
+        AudioChapter(id: 'c-2', bookId: 'the-hobbit-id', chapterIndex: 2, title: '2. Roast Mutton', startOffsetSec: 8400, durationSec: 4560),
+      ],
+      files: const [
+        BookFile(id: 'f-1', bookId: 'the-hobbit-id', fileType: 'audiobook', filePath: '01 - An Unexpected Party.m4a', fileSizeBytes: 50000000, durationSeconds: 8400),
+        BookFile(id: 'f-2', bookId: 'the-hobbit-id', fileType: 'audiobook', filePath: '02 - Roast Mutton.m4a', fileSizeBytes: 30000000, durationSeconds: 4560),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookDetailProvider('the-hobbit-id').overrideWith(() => _MockBookDetailNotifier(hobbitMultiAudiobook)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const BookDetailView(bookId: 'the-hobbit-id'),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Verify Title is The Hobbit, not track title
+    expect(find.text('The Hobbit'), findsWidgets);
+    expect(find.text('J.R.R. Tolkien'), findsOneWidget);
+
+    // Verify Chapters shows 2 chapters
+    expect(find.text('2 chapters'), findsOneWidget);
+
+    // Verify Audio Length displays aggregated time
+    expect(find.text('11h 45m'), findsOneWidget);
+
+    // Verify Format displays Multi-file Audiobook
+    expect(find.text('Multi-file Audiobook (2 files)'), findsOneWidget);
+
+    // Verify Table of Contents displays tracks
+    expect(find.text('2 tracks'), findsOneWidget);
+    expect(find.text('1. An Unexpected Party'), findsWidgets);
+    expect(find.text('2. Roast Mutton'), findsWidgets);
+  });
 }
 
 class _MockBookDetailNotifier extends BookDetailNotifier {

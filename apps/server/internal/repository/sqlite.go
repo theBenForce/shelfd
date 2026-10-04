@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -119,6 +120,41 @@ func (r *SQLiteStorageEngine) GetBookByFilePath(ctx context.Context, filePath st
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying book by file path: %w", err)
+	}
+	if fileModAt.Valid {
+		b.FileModifiedAt = &fileModAt.Time
+	}
+	return b, nil
+}
+
+func (r *SQLiteStorageEngine) GetBookByDirectory(ctx context.Context, dirRelPath string) (*Book, error) {
+	if dirRelPath == "" || dirRelPath == "." {
+		return nil, ErrNotFound
+	}
+	dirSlash := filepath.ToSlash(dirRelPath)
+	dirSlashPrefix := dirSlash + "/%"
+	dirBackslashPrefix := filepath.FromSlash(dirSlash) + "\\%"
+
+	query := `
+		SELECT b.id, b.title, b.description, b.language, b.publisher, b.identifier, b.file_path, b.cover_path, b.file_size_bytes, b.file_modified_at, b.published_date, b.layout, b.rendition_spread, b.rendition_orientation, b.page_progression_direction, b.book_type, b.duration_seconds, b.created_at
+		FROM books b
+		WHERE b.file_path LIKE ? OR b.file_path LIKE ?
+		ORDER BY CASE WHEN b.file_path LIKE '%.epub' THEN 0 ELSE 1 END, b.created_at ASC
+		LIMIT 1
+	`
+	b := &Book{}
+	var fileModAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, query, dirSlashPrefix, dirBackslashPrefix).Scan(
+		&b.ID, &b.Title, &b.Description, &b.Language, &b.Publisher, &b.Identifier,
+		&b.FilePath, &b.CoverPath, &b.FileSizeBytes, &fileModAt, &b.PublishedDate,
+		&b.Layout, &b.RenditionSpread, &b.RenditionOrientation, &b.PageProgressionDirection,
+		&b.BookType, &b.DurationSeconds, &b.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("querying book by directory: %w", err)
 	}
 	if fileModAt.Valid {
 		b.FileModifiedAt = &fileModAt.Time
