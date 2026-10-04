@@ -173,9 +173,9 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                               widget.book.coverUrl!,
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) =>
-                                  const Icon(Icons.headphones_rounded, color: AppTokens.amberAccent, size: 24),
+                                  const Icon(Icons.headphones, color: AppTokens.amberAccent, size: 24),
                             )
-                          : const Icon(Icons.headphones_rounded, color: AppTokens.amberAccent, size: 24),
+                          : const Icon(Icons.headphones, color: AppTokens.amberAccent, size: 24),
                     ),
                   ),
                   const SizedBox(width: AppTokens.space12),
@@ -206,7 +206,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                    icon: const Icon(Icons.close, color: Colors.white70),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
@@ -220,16 +220,16 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
               padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16, vertical: AppTokens.space12),
               child: Row(
                 children: [
-                  _tabChip(0, 'Chapters (${widget.chapters.length})', Icons.format_list_bulleted_rounded),
+                  _tabChip(0, 'Chapters (${widget.chapters.length})', Icons.format_list_bulleted),
                   const SizedBox(width: AppTokens.space8),
-                  _tabChip(1, 'Bookmarks (${widget.book.bookmarks.length})', Icons.bookmark_outline_rounded),
+                  _tabChip(1, 'Bookmarks (${widget.book.bookmarks.length})', Icons.bookmark_outline),
                   const SizedBox(width: AppTokens.space8),
                   _tabChip(
                     2,
                     widget.sleepTimerRemaining != null
-                        ? '${_formatDuration(widget.sleepTimerRemaining!)}'
+                        ? _formatDuration(widget.sleepTimerRemaining!)
                         : 'Timer',
-                    Icons.bedtime_outlined,
+                    Icons.bedtime,
                   ),
                 ],
               ),
@@ -361,7 +361,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                 else if (isCompleted)
                   const Padding(
                     padding: EdgeInsets.only(right: 10),
-                    child: Icon(Icons.check_circle_rounded, color: AppTokens.amberAccent, size: 18),
+                    child: Icon(Icons.check_circle, color: AppTokens.amberAccent, size: 18),
                   )
                 else
                   Padding(
@@ -468,7 +468,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                       borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                       side: const BorderSide(color: AppTokens.obsidianBorder),
                     ),
-                    leading: const Icon(Icons.bookmark_rounded, color: AppTokens.amberAccent),
+                    leading: const Icon(Icons.bookmark, color: AppTokens.amberAccent),
                     title: Text(
                       bm.title,
                       style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
@@ -477,7 +477,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                       'Position: ${_formatDuration(targetPos)}',
                       style: const TextStyle(color: Colors.white54, fontSize: 12),
                     ),
-                    trailing: const Icon(Icons.play_circle_outline_rounded, color: AppTokens.amberAccent),
+                    trailing: const Icon(Icons.play_circle_outline, color: AppTokens.amberAccent),
                     onTap: () {
                       widget.onSeekToPosition(targetPos);
                       Navigator.of(context).pop();
@@ -523,7 +523,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
               ),
             ),
             leading: Icon(
-              dur == null ? Icons.timer_off_outlined : Icons.bedtime_outlined,
+              dur == null ? Icons.timer_off : Icons.bedtime,
               color: isSelected ? AppTokens.amberAccent : Colors.white60,
             ),
             title: Text(
@@ -535,7 +535,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
               ),
             ),
             trailing: isSelected
-                ? const Icon(Icons.check_rounded, color: AppTokens.amberAccent)
+                ? const Icon(Icons.check, color: AppTokens.amberAccent)
                 : null,
             onTap: () {
               widget.onSetSleepTimer(dur);

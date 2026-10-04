@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/tokens.dart';
 import '../../../core/typography.dart';
-import '../../../state/audio_player_state.dart';
 import '../../../state/providers.dart';
 
 /// Floating mini-player bar docked directly above the navigation bar
@@ -71,9 +70,9 @@ class MiniPlayerBar extends ConsumerWidget {
                               book.coverUrl!,
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) =>
-                                  const Icon(Icons.headphones_rounded, color: AppTokens.amberAccent, size: 20),
+                                  const Icon(Icons.headphones, color: AppTokens.amberAccent, size: 20),
                             )
-                          : const Icon(Icons.headphones_rounded, color: AppTokens.amberAccent, size: 20),
+                          : const Icon(Icons.headphones, color: AppTokens.amberAccent, size: 20),
                     ),
                   ),
                   const SizedBox(width: AppTokens.space12),
@@ -114,7 +113,7 @@ class MiniPlayerBar extends ConsumerWidget {
                     iconSize: 22,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                    icon: const Icon(Icons.forward_30_rounded, color: Colors.white70),
+                    icon: const Icon(Icons.forward_30, color: Colors.white70),
                     tooltip: 'Skip forward 30 seconds',
                     onPressed: () => playerNotifier.skipForward(),
                   ),
@@ -127,8 +126,8 @@ class MiniPlayerBar extends ConsumerWidget {
                     constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                     icon: Icon(
                       playerState.isPlaying
-                          ? Icons.pause_circle_filled_rounded
-                          : Icons.play_circle_filled_rounded,
+                          ? Icons.pause_circle_filled
+                          : Icons.play_circle_filled,
                       color: AppTokens.amberAccent,
                     ),
                     onPressed: () => playerNotifier.togglePlayPause(),
@@ -140,7 +139,7 @@ class MiniPlayerBar extends ConsumerWidget {
                     iconSize: 18,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    icon: const Icon(Icons.close_rounded, color: Colors.white38),
+                    icon: const Icon(Icons.close, color: Colors.white38),
                     tooltip: 'Close player',
                     onPressed: () => playerNotifier.stop(),
                   ),
