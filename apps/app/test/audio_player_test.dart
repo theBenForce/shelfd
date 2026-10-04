@@ -411,6 +411,7 @@ void main() {
     late StorageService storageService;
     late MockApiService apiService;
     late AudioRepository repository;
+    late SimulatedAudioPlayerEngine engine;
 
     final audiobook = Book(
       id: 'audio-1',
@@ -449,10 +450,15 @@ void main() {
         apiService: apiService,
         storageService: storageService,
       );
+      engine = SimulatedAudioPlayerEngine(initialDuration: const Duration(seconds: 7200));
+    });
+
+    tearDown(() {
+      engine.dispose();
     });
 
     testWidgets('AudiobookPlayerView renders standard Material Icons correctly', (tester) async {
-      tester.view.physicalSize = const Size(400, 800);
+      tester.view.physicalSize = const Size(800, 1000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() {
         tester.view.resetPhysicalSize();
@@ -461,14 +467,17 @@ void main() {
 
       final container = ProviderContainer(
         overrides: [
-          apiServiceProvider.overrideWithValue(apiService),
+          sharedPreferencesProvider.overrideWithValue(prefs),
           storageServiceProvider.overrideWithValue(storageService),
+          apiServiceProvider.overrideWithValue(apiService),
           audioRepositoryProvider.overrideWithValue(repository),
+          audioPlayerEngineProvider.overrideWithValue(engine),
           bookDetailProvider('audio-1').overrideWith(
             () => _MockAudioBookDetailNotifier(audiobook),
           ),
         ],
       );
+      addTearDown(() => container.dispose());
 
       await container.read(audioPlayerProvider.notifier).loadBook(audiobook);
 
@@ -512,11 +521,14 @@ void main() {
     testWidgets('MiniPlayerBar renders standard Material Icons correctly', (tester) async {
       final container = ProviderContainer(
         overrides: [
-          apiServiceProvider.overrideWithValue(apiService),
+          sharedPreferencesProvider.overrideWithValue(prefs),
           storageServiceProvider.overrideWithValue(storageService),
+          apiServiceProvider.overrideWithValue(apiService),
           audioRepositoryProvider.overrideWithValue(repository),
+          audioPlayerEngineProvider.overrideWithValue(engine),
         ],
       );
+      addTearDown(() => container.dispose());
 
       await container.read(audioPlayerProvider.notifier).loadBook(audiobook);
 
