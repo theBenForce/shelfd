@@ -1,3 +1,10 @@
+## [1.10.1](https://github.com/theBenForce/shelfd/compare/v1.10.0...v1.10.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **scanner,repo:** normalize author names and fix multi-file audiobook title resolution ([#47](https://github.com/theBenForce/shelfd/issues/47)) ([88f0ba4](https://github.com/theBenForce/shelfd/commit/88f0ba4f58c71afc2b9f4c5dc6242268f3220287))
+
 # [1.10.0](https://github.com/theBenForce/shelfd/compare/v1.9.0...v1.10.0) (2026-10-04)
 
 
