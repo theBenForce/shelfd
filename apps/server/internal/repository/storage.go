@@ -10,6 +10,7 @@ type StorageEngine interface {
 	CreateBook(ctx context.Context, book *Book) error
 	GetBookByID(ctx context.Context, id string) (*Book, error)
 	GetBookByFilePath(ctx context.Context, filePath string) (*Book, error)
+	GetBookByDirectory(ctx context.Context, dirRelPath string) (*Book, error)
 	UpdateBook(ctx context.Context, book *Book) error
 	DeleteBook(ctx context.Context, id string) error
 	ListBooks(ctx context.Context, filter BookFilter) ([]*Book, error)

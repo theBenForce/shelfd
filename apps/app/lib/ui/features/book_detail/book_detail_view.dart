@@ -196,6 +196,43 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
+  String _formatChapterCount(Book book) {
+    if (book.spine.isNotEmpty) {
+      return '${book.spine.length} chapters';
+    }
+    if (book.audioChapters.isNotEmpty) {
+      return '${book.audioChapters.length} chapters';
+    }
+    final audioFilesCount = book.files.where((f) => f.fileType == 'audiobook' || f.filePath.endsWith('.m4a') || f.filePath.endsWith('.m4b') || f.filePath.endsWith('.mp3')).length;
+    if (audioFilesCount > 0) {
+      return '$audioFilesCount chapters';
+    }
+    return '0 chapters';
+  }
+
+  String _formatBookFormat(Book book) {
+    final hasEpub = book.spine.isNotEmpty || !book.isAudiobook || book.files.any((f) => f.fileType == 'epub' || f.filePath.endsWith('.epub'));
+    final hasAudio = _hasAudiobook(book);
+    final audioFiles = book.files.where((f) => f.fileType == 'audiobook' || f.filePath.endsWith('.m4a') || f.filePath.endsWith('.m4b') || f.filePath.endsWith('.mp3')).toList();
+
+    if (hasEpub && hasAudio) {
+      if (audioFiles.length > 1) {
+        return 'Dual (EPUB + ${audioFiles.length} Audio Files)';
+      }
+      return 'Dual (EPUB + M4A)';
+    } else if (hasAudio) {
+      if (audioFiles.length > 1) {
+        return 'Multi-file Audiobook (${audioFiles.length} files)';
+      }
+      if (book.files.isNotEmpty && book.files.first.filePath.endsWith('.m4b')) {
+        return 'M4B Audiobook';
+      }
+      return 'M4A Audiobook';
+    } else {
+      return _formatFileSize(book.fileSizeBytes);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final detailState = ref.watch(bookDetailProvider(widget.bookId));
@@ -673,7 +710,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: AppTokens.space12),
-          _buildSpecRow('Chapters', '${book.spine.length} chapters'),
+          _buildSpecRow('Chapters', _formatChapterCount(book)),
           if (book.durationSeconds != null && book.durationSeconds! > 0)
             _buildSpecRow('Audio Length', _formatAudioDuration(book.durationSeconds)),
           if (book.bitrateKbps != null && book.bitrateKbps! > 0)
@@ -684,7 +721,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             _buildSpecRow('Published', book.publishedDate!),
           if (book.language != null && book.language!.isNotEmpty)
             _buildSpecRow('Language', book.language!.toUpperCase()),
-          _buildSpecRow('Format', _hasAudiobook(book) ? 'Dual (EPUB + M4A)' : _formatFileSize(book.fileSizeBytes)),
+          _buildSpecRow('Format', _formatBookFormat(book)),
           if (book.genres.isNotEmpty)
             _buildSpecRow(
               'Genres',
@@ -1076,18 +1113,22 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 style: AppTypography.titleSerif(fontSize: 18, fontWeight: FontWeight.w600),
               ),
               Text(
-                '${book.spine.length} items',
+                book.spine.isNotEmpty
+                    ? '${book.spine.length} items'
+                    : book.audioChapters.isNotEmpty
+                        ? '${book.audioChapters.length} tracks'
+                        : '0 items',
                 style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
               ),
             ],
           ),
           const SizedBox(height: AppTokens.space16),
-          if (book.spine.isEmpty)
+          if (book.spine.isEmpty && book.audioChapters.isEmpty)
             Text(
               'No chapters cataloged.',
               style: AppTypography.bodySans(fontSize: 14, color: AppTokens.mutedCopy),
             )
-          else
+          else if (book.spine.isNotEmpty)
             ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -1126,6 +1167,40 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                   ),
                   onTap: () {
                     context.go('/books/${book.id}/read/${item.chapterIndex}');
+                  },
+                );
+              },
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: book.audioChapters.length,
+              separatorBuilder: (context, index) =>
+                  const Divider(height: 1, color: AppTokens.crispBorder),
+              itemBuilder: (context, index) {
+                final item = book.audioChapters[index];
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: AppTokens.space8,
+                    vertical: AppTokens.space4,
+                  ),
+                  leading: const Icon(Icons.headphones_rounded, size: 18, color: AppTokens.charcoalInk),
+                  title: Text(
+                    item.title,
+                    style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w500),
+                  ),
+                  subtitle: Text(
+                    _formatAudioDuration(item.durationSec),
+                    style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
+                  ),
+                  trailing: const Icon(
+                    Icons.play_arrow_rounded,
+                    size: 20,
+                    color: AppTokens.mutedCopy,
+                  ),
+                  onTap: () {
+                    context.go('/books/${book.id}/listen');
                   },
                 );
               },
