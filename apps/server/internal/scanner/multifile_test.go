@@ -193,3 +193,80 @@ func TestMultiFileAudiobookIngestion(t *testing.T) {
 		t.Fatalf("expected 3 book files, got %d", len(files))
 	}
 }
+
+func TestMultiFileAudiobook_Track17TitleFixAndAuthorNormalization(t *testing.T) {
+	tempLib := t.TempDir()
+	tempData := t.TempDir()
+	ctx := context.Background()
+
+	db, err := database.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("creating db: %v", err)
+	}
+	defer db.Close()
+	if err := database.RunMigrations(ctx, db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	repo := repository.NewSQLiteStorageEngine(db)
+	defer repo.Close()
+
+	// 1. Create directory structure: J.R.R. Tolkien / The Hobbit
+	bookDir := filepath.Join(tempLib, "J.R.R. Tolkien", "The Hobbit")
+	if err := os.MkdirAll(bookDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Create Track 17 first with empty album and track title "17. The Clouds Burst"
+	track17 := createSampleM4A("", "17. The Clouds Burst", 17, 120)
+	os.WriteFile(filepath.Join(bookDir, "17. The Clouds Burst.m4a"), track17, 0644)
+
+	ingester := scanner.NewIngester(repo, tempLib, tempData)
+
+	// Ingest track 17 first
+	s := scanner.NewScanner(tempLib)
+	files, err := s.Scan()
+	if err != nil {
+		t.Fatalf("scan error: %v", err)
+	}
+	for _, f := range files {
+		_, _, err := ingester.SyncFile(ctx, f.FullPath, f.RelativePath)
+		if err != nil {
+			t.Fatalf("ingest track 17 error: %v", err)
+		}
+	}
+
+	// Verify that title was NOT set to "17. The Clouds Burst" but resolved to folder "The Hobbit"
+	books, err := repo.ListBooks(ctx, repository.BookFilter{})
+	if err != nil {
+		t.Fatalf("list books: %v", err)
+	}
+	if len(books) != 1 {
+		t.Fatalf("expected 1 book, got %d", len(books))
+	}
+	if books[0].Title != "The Hobbit" {
+		t.Errorf("expected book Title 'The Hobbit', got '%s'", books[0].Title)
+	}
+
+	// Now add Track 18
+	track18 := createSampleM4A("The Hobbit", "18. The Return Journey", 18, 150)
+	os.WriteFile(filepath.Join(bookDir, "18. The Return Journey.m4a"), track18, 0644)
+
+	// Rescan
+	files2, _ := s.Scan()
+	for _, f := range files2 {
+		_, _, _ = ingester.SyncFile(ctx, f.FullPath, f.RelativePath)
+	}
+
+	// Verify author is normalized
+	authors, err := repo.ListAuthors(ctx)
+	if err != nil {
+		t.Fatalf("list authors: %v", err)
+	}
+	if len(authors) != 1 {
+		t.Fatalf("expected 1 author, got %d", len(authors))
+	}
+	if authors[0].Name != "J. R. R. Tolkien" {
+		t.Errorf("expected normalized author name 'J. R. R. Tolkien', got %q", authors[0].Name)
+	}
+}

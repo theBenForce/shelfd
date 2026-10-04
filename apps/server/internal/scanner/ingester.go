@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -580,6 +581,29 @@ func resolveAuthors(parsedAuthors []epub.ParsedAuthor, relativePath string) []ep
 	return nil
 }
 
+func splitAuthors(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ';' || r == '/' || r == '\n'
+	})
+	var results []string
+	for _, f := range fields {
+		clean := repository.NormalizeAuthorName(f)
+		if clean != "" {
+			results = append(results, clean)
+		}
+	}
+	if len(results) == 0 {
+		clean := repository.NormalizeAuthorName(raw)
+		if clean != "" {
+			results = append(results, clean)
+		}
+	}
+	return results
+}
+
 type audioTrackCandidate struct {
 	file DiscoveredFile
 	meta *audio.Metadata
@@ -599,7 +623,11 @@ func (in *Ingester) importNewAudiobook(ctx context.Context, fullPath, relativePa
 	if title == "" {
 		title = meta.Title
 	}
-	if title == "" || title == meta.TrackTitle {
+	isTrackLike := false
+	if matched, _ := regexp.MatchString(`^\d+[\.\-\s]`, title); matched {
+		isTrackLike = true
+	}
+	if title == "" || title == meta.TrackTitle || isTrackLike {
 		parts := strings.Split(filepath.ToSlash(filepath.Dir(relativePath)), "/")
 		if len(parts) >= 1 && parts[len(parts)-1] != "." && parts[len(parts)-1] != "" && !strings.EqualFold(parts[len(parts)-1], "audiobooks") {
 			title = parts[len(parts)-1]
@@ -646,17 +674,23 @@ func (in *Ingester) importNewAudiobook(ctx context.Context, fullPath, relativePa
 		}
 	}
 	if authorName != "" {
-		author, err := in.repo.UpsertAuthor(ctx, authorName)
-		if err == nil {
-			_ = in.repo.LinkBookAuthor(ctx, book.ID, author.ID, "Author")
+		for _, aName := range splitAuthors(authorName) {
+			author, err := in.repo.UpsertAuthor(ctx, aName)
+			if err == nil {
+				_ = in.repo.LinkBookAuthor(ctx, book.ID, author.ID, "Author")
+			}
 		}
 	}
 
 	// Link Narrator if provided
-	if meta.Narrator != "" && !strings.EqualFold(meta.Narrator, authorName) {
-		narrator, err := in.repo.UpsertAuthor(ctx, meta.Narrator)
-		if err == nil {
-			_ = in.repo.LinkBookAuthor(ctx, book.ID, narrator.ID, "Narrator")
+	if meta.Narrator != "" {
+		for _, nName := range splitAuthors(meta.Narrator) {
+			if !strings.EqualFold(nName, authorName) {
+				narrator, err := in.repo.UpsertAuthor(ctx, nName)
+				if err == nil {
+					_ = in.repo.LinkBookAuthor(ctx, book.ID, narrator.ID, "Narrator")
+				}
+			}
 		}
 	}
 
@@ -673,9 +707,15 @@ func (in *Ingester) updateModifiedAudiobook(ctx context.Context, book *repositor
 	modTime := fi.ModTime().UTC().Truncate(time.Second)
 
 	if meta.Album != "" {
-		book.Title = meta.Album
-	} else if meta.Title != "" && book.Title == "" {
-		book.Title = meta.Title
+		isAlbumTrackLike, _ := regexp.MatchString(`^\d+[\.\-\s]`, meta.Album)
+		if !isAlbumTrackLike {
+			book.Title = meta.Album
+		}
+	} else if meta.Title != "" {
+		isTitleTrackLike, _ := regexp.MatchString(`^\d+[\.\-\s]`, meta.Title)
+		if !isTitleTrackLike && book.Title == "" {
+			book.Title = meta.Title
+		}
 	}
 	book.FileSizeBytes = &sizeBytes
 	book.FileModifiedAt = &modTime
@@ -882,14 +922,66 @@ func (in *Ingester) syncBookFiles(ctx context.Context, bookID, bookFullPath stri
 		if book.BookType == "audiobook" && len(audioTracks) > 0 {
 			firstMeta := audioTracks[0].meta
 			dirName := filepath.Base(bookDirFull)
-			// If book title was set to track 1 title or placeholder, fix to album or folder name
-			if book.Title == "" || (firstMeta != nil && (book.Title == firstMeta.TrackTitle || strings.HasPrefix(book.Title, "1.") || strings.HasPrefix(book.Title, "01"))) {
+
+			// Determine if current title is a track title / track number
+			isTrackTitle := false
+			if book.Title == "" {
+				isTrackTitle = true
+			} else {
+				for _, at := range audioTracks {
+					if at.meta != nil && at.meta.TrackTitle != "" && strings.EqualFold(book.Title, at.meta.TrackTitle) {
+						isTrackTitle = true
+						break
+					}
+					trackBase := strings.TrimSuffix(filepath.Base(at.file.FullPath), filepath.Ext(at.file.FullPath))
+					if strings.EqualFold(book.Title, trackBase) {
+						isTrackTitle = true
+						break
+					}
+				}
+				if !isTrackTitle {
+					matched, _ := regexp.MatchString(`^\d+[\.\-\s]`, book.Title)
+					if matched {
+						isTrackTitle = true
+					}
+				}
+			}
+
+			if isTrackTitle {
 				if firstMeta != nil && firstMeta.Album != "" {
-					book.Title = firstMeta.Album
-					changed = true
+					isAlbumTrackLike, _ := regexp.MatchString(`^\d+[\.\-\s]`, firstMeta.Album)
+					if !isAlbumTrackLike {
+						book.Title = firstMeta.Album
+						changed = true
+					} else if dirName != "." && dirName != "" && !strings.EqualFold(dirName, "audiobooks") {
+						book.Title = dirName
+						changed = true
+					}
 				} else if dirName != "." && dirName != "" && !strings.EqualFold(dirName, "audiobooks") {
 					book.Title = dirName
 					changed = true
+				}
+			}
+
+			// Ensure authors and narrators from audio tracks are linked
+			for _, at := range audioTracks {
+				if at.meta != nil {
+					if at.meta.Author != "" {
+						for _, aName := range splitAuthors(at.meta.Author) {
+							author, err := in.repo.UpsertAuthor(ctx, aName)
+							if err == nil {
+								_ = in.repo.LinkBookAuthor(ctx, book.ID, author.ID, "Author")
+							}
+						}
+					}
+					if at.meta.Narrator != "" {
+						for _, nName := range splitAuthors(at.meta.Narrator) {
+							narrator, err := in.repo.UpsertAuthor(ctx, nName)
+							if err == nil {
+								_ = in.repo.LinkBookAuthor(ctx, book.ID, narrator.ID, "Narrator")
+							}
+						}
+					}
 				}
 			}
 		}
