@@ -1,3 +1,17 @@
+# [1.10.0](https://github.com/theBenForce/shelfd/compare/v1.9.0...v1.10.0) (2026-10-04)
+
+
+### Bug Fixes
+
+* **app:** replace non-rendering rounded icon variants in audiobook player with standard Material icons ([#44](https://github.com/theBenForce/shelfd/issues/44)) ([ea85c9f](https://github.com/theBenForce/shelfd/commit/ea85c9fbfc7a0180f664f98b5b9b64323b2136b9))
+* **test:** mock audio player engine in audiobook ui widget tests ([#46](https://github.com/theBenForce/shelfd/issues/46)) ([daf9ed6](https://github.com/theBenForce/shelfd/commit/daf9ed6c76944bf6715878e4261ea36a7713bde0))
+
+
+### Features
+
+* **audio:** support multi-file audiobooks with directory track aggregation ([#45](https://github.com/theBenForce/shelfd/issues/45)) ([ce435d7](https://github.com/theBenForce/shelfd/commit/ce435d7cb1f6c739060916d1c42062dcb1ce5393))
+* **upload:** confirm duplicate book uploads and sync edited metadata ([#43](https://github.com/theBenForce/shelfd/issues/43)) ([de37f53](https://github.com/theBenForce/shelfd/commit/de37f53f23930d330f6912bda0bd2c969d6a6e5f))
+
 # [1.9.0](https://github.com/theBenForce/shelfd/compare/v1.8.0...v1.9.0) (2026-10-03)
 
 
