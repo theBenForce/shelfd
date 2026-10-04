@@ -375,4 +375,182 @@ void main() {
     expect(state.stagedJobs.first.hasCover, isTrue);
     expect(state.coverVersions['job-cover-1'], 1);
   });
+
+  test('UploadNotifier skips auto-commit for duplicate books even when autoCommit is enabled', () async {
+    SharedPreferences.setMockInitialValues({'shelfd_auto_commit_uploads': true});
+    final prefs = await SharedPreferences.getInstance();
+    final storageService = StorageService(prefs);
+
+    bool commitCalled = false;
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/books/upload/stage') {
+        return http.Response(
+          jsonEncode({
+            'job_id': 'dup-job-1',
+            'status': 'staged',
+            'filename': 'dune_dup.epub',
+            'is_duplicate': true,
+            'warnings': ['Book already exists in library'],
+            'metadata': {
+              'title': 'Dune',
+              'authors': ['Frank Herbert'],
+              'is_duplicate': true,
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (request.url.path.endsWith('/commit')) {
+        commitCalled = true;
+        return http.Response('{}', 201, headers: {'content-type': 'application/json'});
+      }
+      if (request.url.path == '/api/v1/books/upload/jobs') {
+        return http.Response(jsonEncode({'jobs': []}), 200, headers: {'content-type': 'application/json'});
+      }
+      if (request.url.path == '/api/v1/queue/status') {
+        return http.Response(
+          jsonEncode({'pending': 0, 'processing': 0, 'staged_uploads': 1}),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('Not Found', 404);
+    });
+
+    final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+    final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+    final container = ProviderContainer(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        apiServiceProvider.overrideWithValue(apiService),
+        bookRepositoryProvider.overrideWithValue(bookRepo),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final notifier = container.read(uploadProvider.notifier);
+    expect(container.read(uploadProvider).autoCommit, isTrue);
+
+    final files = [
+      PickedEpubFile(name: 'dune_dup.epub', bytes: [1, 2, 3]),
+    ];
+
+    final count = await notifier.uploadEpubFiles(files);
+    expect(count, 1);
+    expect(commitCalled, isFalse); // Skipped auto-commit because it's a duplicate!
+  });
+
+  test('UploadNotifier updateStagedMetadata dynamically recalculates duplicate status against library books', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final storageService = StorageService(prefs);
+
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/books') {
+        return http.Response(
+          jsonEncode({
+            'books': [
+              {
+                'id': 'book-1',
+                'title': 'Dune',
+                'authors': [{'id': 'a1', 'name': 'Frank Herbert'}],
+              }
+            ],
+            'total': 1,
+            'offset': 0,
+            'limit': 50,
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (request.url.path == '/api/v1/authors') {
+        return http.Response(jsonEncode({'authors': []}), 200, headers: {'content-type': 'application/json'});
+      }
+      if (request.url.path == '/api/v1/genres') {
+        return http.Response(jsonEncode({'genres': []}), 200, headers: {'content-type': 'application/json'});
+      }
+      if (request.url.path == '/api/v1/topics') {
+        return http.Response(jsonEncode({'topics': []}), 200, headers: {'content-type': 'application/json'});
+      }
+      if (request.url.path == '/api/v1/series') {
+        return http.Response(jsonEncode({'series': []}), 200, headers: {'content-type': 'application/json'});
+      }
+      if (request.url.path == '/api/v1/books/upload/jobs') {
+        return http.Response(
+          jsonEncode({
+            'jobs': [
+              {
+                'job_id': 'job-1',
+                'status': 'staged',
+                'filename': 'novel.epub',
+                'metadata': {
+                  'title': 'Unknown Novel',
+                  'authors': ['Random Author'],
+                },
+                'is_duplicate': false,
+                'warnings': [],
+              }
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      return http.Response('Not Found', 404);
+    });
+
+    final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+    final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+    final container = ProviderContainer(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        apiServiceProvider.overrideWithValue(apiService),
+        bookRepositoryProvider.overrideWithValue(bookRepo),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    // Populate library provider with books
+    await container.read(libraryProvider.notifier).loadLibrary();
+    expect(container.read(libraryProvider).books.length, 1);
+
+    final notifier = container.read(uploadProvider.notifier);
+    await notifier.loadStagedJobs();
+    expect(container.read(uploadProvider).stagedJobs.length, 1);
+    expect(container.read(uploadProvider).stagedJobs.first.isDuplicate, isFalse);
+
+    // 1. Update metadata to match existing library book ("Dune" by "Frank Herbert")
+    notifier.updateStagedMetadata(
+      'job-1',
+      const StagedMetadata(
+        title: 'Dune',
+        authors: ['Frank Herbert'],
+      ),
+    );
+
+    var job = container.read(uploadProvider).stagedJobs.first;
+    expect(job.metadata.title, 'Dune');
+    expect(job.isDuplicate, isTrue);
+    expect(job.metadata.isDuplicate, isTrue);
+    expect(job.warnings, contains('Book already exists in library'));
+
+    // 2. Update metadata to a non-duplicate title ("Dune Messiah")
+    notifier.updateStagedMetadata(
+      'job-1',
+      const StagedMetadata(
+        title: 'Dune Messiah',
+        authors: ['Frank Herbert'],
+      ),
+    );
+
+    job = container.read(uploadProvider).stagedJobs.first;
+    expect(job.metadata.title, 'Dune Messiah');
+    expect(job.isDuplicate, isFalse);
+    expect(job.metadata.isDuplicate, isFalse);
+    expect(job.warnings.contains('Book already exists in library'), isFalse);
+  });
 }

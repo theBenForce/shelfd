@@ -879,6 +879,8 @@ type StagedMetadataDTO struct {
 	Publisher      *string  `json:"publisher,omitempty"`
 	Language       *string  `json:"language,omitempty"`
 	Genres         []string `json:"genres,omitempty"`
+	IsDuplicate    bool     `json:"is_duplicate,omitempty"`
+	Warnings       []string `json:"warnings,omitempty"`
 }
 
 // CommitUploadRequest represents the user-confirmed or edited metadata to commit to /library.
@@ -1005,6 +1007,48 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 		lang = &l
 	}
 
+	var warnings []string
+	if len(authors) == 1 && authors[0] == "Unknown" {
+		warnings = append(warnings, "No author found in EPUB metadata")
+	}
+	if title == "Untitled" {
+		warnings = append(warnings, "No title found in EPUB metadata")
+	}
+
+	primaryAuthor := authors[0]
+	isDuplicate := false
+	targetRelPath := filepath.Join(scanner.SanitizePathSegment(primaryAuthor), scanner.SanitizePathSegment(title), scanner.SanitizePathSegment(title)+".epub")
+	if existing, err := h.repo.GetBookByFilePath(r.Context(), targetRelPath); err == nil && existing != nil {
+		isDuplicate = true
+	} else {
+		books, err := h.repo.ListBooks(r.Context(), repository.BookFilter{
+			Search: &title,
+			Limit:  50,
+		})
+		if err == nil {
+			for _, b := range books {
+				if strings.EqualFold(strings.TrimSpace(b.Title), title) {
+					bAuthors, err := h.repo.GetBookAuthors(r.Context(), b.ID)
+					if err == nil {
+						for _, ba := range bAuthors {
+							if strings.EqualFold(strings.TrimSpace(ba.Name), primaryAuthor) {
+								isDuplicate = true
+								break
+							}
+						}
+					}
+					if isDuplicate {
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if isDuplicate {
+		warnings = append(warnings, "Book already exists in library")
+	}
+
 	dto := StagedMetadataDTO{
 		Title:          title,
 		Authors:        authors,
@@ -1014,18 +1058,12 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 		Publisher:      pub,
 		Language:       lang,
 		Genres:         parsed.Genres,
+		IsDuplicate:    isDuplicate,
+		Warnings:       warnings,
 	}
 
 	metaBytes, _ := json.Marshal(dto)
 	metaStr := string(metaBytes)
-
-	var warnings []string
-	if len(authors) == 1 && authors[0] == "Unknown" {
-		warnings = append(warnings, "No author found in EPUB metadata")
-	}
-	if title == "Untitled" {
-		warnings = append(warnings, "No title found in EPUB metadata")
-	}
 
 	job := &repository.UploadJob{
 		ID:         jobID,
@@ -1047,13 +1085,14 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("Staged book upload for review", "job_id", job.ID, "filename", job.Filename, "title", title)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"job_id":     job.ID,
-		"status":     job.Status,
-		"filename":   job.Filename,
-		"metadata":   dto,
-		"has_cover":  hasCover,
-		"warnings":   warnings,
-		"created_at": job.CreatedAt,
+		"job_id":       job.ID,
+		"status":       job.Status,
+		"filename":     job.Filename,
+		"metadata":     dto,
+		"has_cover":    hasCover,
+		"warnings":     warnings,
+		"is_duplicate": isDuplicate,
+		"created_at":   job.CreatedAt,
 	})
 }
 

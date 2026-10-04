@@ -9,6 +9,7 @@ class StagedMetadata {
   final String? publisher;
   final String? language;
   final List<String> genres;
+  final bool isDuplicate;
 
   const StagedMetadata({
     required this.title,
@@ -19,6 +20,7 @@ class StagedMetadata {
     this.publisher,
     this.language,
     this.genres = const [],
+    this.isDuplicate = false,
   });
 
   String get primaryAuthor {
@@ -48,6 +50,7 @@ class StagedMetadata {
     String? publisher,
     String? language,
     List<String>? genres,
+    bool? isDuplicate,
   }) {
     return StagedMetadata(
       title: title ?? this.title,
@@ -58,6 +61,7 @@ class StagedMetadata {
       publisher: publisher ?? this.publisher,
       language: language ?? this.language,
       genres: genres ?? this.genres,
+      isDuplicate: isDuplicate ?? this.isDuplicate,
     );
   }
 
@@ -82,6 +86,7 @@ class StagedMetadata {
       publisher: json['publisher'] as String?,
       language: json['language'] as String?,
       genres: rawGenres.map((g) => g.toString()).toList(),
+      isDuplicate: json['is_duplicate'] as bool? ?? false,
     );
   }
 
@@ -96,6 +101,7 @@ class StagedMetadata {
       if (publisher != null && publisher!.trim().isNotEmpty) 'publisher': publisher!.trim(),
       if (language != null && language!.trim().isNotEmpty) 'language': language!.trim(),
       if (genres.isNotEmpty) 'genres': genres,
+      if (isDuplicate) 'is_duplicate': isDuplicate,
     };
   }
 }
@@ -107,6 +113,7 @@ class StagedUploadJob {
   final StagedMetadata metadata;
   final bool hasCover;
   final List<String> warnings;
+  final bool isDuplicate;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -117,6 +124,7 @@ class StagedUploadJob {
     required this.metadata,
     this.hasCover = false,
     this.warnings = const [],
+    this.isDuplicate = false,
     this.createdAt,
     this.updatedAt,
   });
@@ -158,13 +166,18 @@ class StagedUploadJob {
       }
     }
 
+    final isDuplicate = json['is_duplicate'] as bool? ??
+        metadata.isDuplicate ||
+        warnings.any((w) => w.toLowerCase().contains('already exists'));
+
     return StagedUploadJob(
       jobId: json['job_id'] as String? ?? json['id'] as String? ?? '',
       status: json['status'] as String? ?? 'staged',
       filename: json['filename'] as String? ?? '',
-      metadata: metadata,
+      metadata: metadata.copyWith(isDuplicate: isDuplicate),
       hasCover: json['has_cover'] as bool? ?? false,
       warnings: warnings,
+      isDuplicate: isDuplicate,
       createdAt: created,
       updatedAt: updated,
     );
@@ -177,6 +190,7 @@ class StagedUploadJob {
     StagedMetadata? metadata,
     bool? hasCover,
     List<String>? warnings,
+    bool? isDuplicate,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -187,6 +201,7 @@ class StagedUploadJob {
       metadata: metadata ?? this.metadata,
       hasCover: hasCover ?? this.hasCover,
       warnings: warnings ?? this.warnings,
+      isDuplicate: isDuplicate ?? this.isDuplicate,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -200,6 +215,7 @@ class StagedUploadJob {
       'metadata': metadata.toJson(),
       'has_cover': hasCover,
       'warnings': warnings,
+      'is_duplicate': isDuplicate,
       if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
     };
   }
