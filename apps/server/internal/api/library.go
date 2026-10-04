@@ -157,6 +157,14 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Reconcile authors and clean up orphaned taxonomy
+		if err := h.repo.ReconcileAuthors(ctx); err != nil {
+			h.logger.Error("failed to reconcile authors after scan", "error", err)
+		}
+		if _, err := h.repo.PruneOrphanedGenres(ctx); err != nil {
+			h.logger.Error("failed to prune orphaned genres after scan", "error", err)
+		}
+
 		h.logger.Info("background scan and ingestion finished",
 			"new", newCount,
 			"modified", modifiedCount,

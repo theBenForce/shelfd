@@ -1931,4 +1931,85 @@ func TestAudioChaptersAndBookFiles(t *testing.T) {
 	}
 }
 
+func TestReconcileAuthorsAndPruneOrphans(t *testing.T) {
+	ctx := context.Background()
+	db, repo := setupTestDB(t)
+	defer repo.Close()
+
+	// 1. Create two books
+	b1 := &repository.Book{ID: "book-1", Title: "The Fellowship of the Ring", FilePath: "J.R.R. Tolkien/FotR/FotR.epub"}
+	b2 := &repository.Book{ID: "book-2", Title: "The Hobbit", FilePath: "J.R.R. Tolkien/Hobbit/Hobbit.mp3"}
+	if err := repo.CreateBook(ctx, b1); err != nil {
+		t.Fatalf("create book 1: %v", err)
+	}
+	if err := repo.CreateBook(ctx, b2); err != nil {
+		t.Fatalf("create book 2: %v", err)
+	}
+
+	// 2. Direct insert two separate variations into database simulating old unnormalized state:
+	// "J.R.R. Tolkien" and "J. R. R. Tolkien"
+	a1ID := "author-unspaced"
+	a2ID := "author-spaced"
+	_, _ = db.ExecContext(ctx, "INSERT INTO authors (id, name, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)", a1ID, "J.R.R. Tolkien")
+	_, _ = db.ExecContext(ctx, "INSERT INTO authors (id, name, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)", a2ID, "J. R. R. Tolkien")
+
+	// 3. Link b1 to a1 and b2 to a2
+	if err := repo.LinkBookAuthor(ctx, b1.ID, a1ID, "author"); err != nil {
+		t.Fatalf("link b1: %v", err)
+	}
+	if err := repo.LinkBookAuthor(ctx, b2.ID, a2ID, "author"); err != nil {
+		t.Fatalf("link b2: %v", err)
+	}
+
+	// 4. Also insert an orphaned author with 0 books
+	orphanID := "author-orphan"
+	_, _ = db.ExecContext(ctx, "INSERT INTO authors (id, name, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)", orphanID, "Ghost Author")
+
+	// Verify before reconciliation: 3 authors exist
+	authorsBefore, err := repo.ListAuthors(ctx)
+	if err != nil {
+		t.Fatalf("list authors before: %v", err)
+	}
+	if len(authorsBefore) != 3 {
+		t.Fatalf("expected 3 authors before reconciliation, got %d", len(authorsBefore))
+	}
+
+	// 5. Run ReconcileAuthors
+	if err := repo.ReconcileAuthors(ctx); err != nil {
+		t.Fatalf("reconcile authors: %v", err)
+	}
+
+	// 6. Verify after reconciliation:
+	// Only 1 author should exist ("J. R. R. Tolkien"), orphan deleted, duplicate merged
+	authorsAfter, err := repo.ListAuthors(ctx)
+	if err != nil {
+		t.Fatalf("list authors after: %v", err)
+	}
+	if len(authorsAfter) != 1 {
+		t.Fatalf("expected exactly 1 author after reconciliation, got %d", len(authorsAfter))
+	}
+
+	canonAuthor := authorsAfter[0]
+	if canonAuthor.Name != "J. R. R. Tolkien" {
+		t.Errorf("expected canonical author name 'J. R. R. Tolkien', got %q", canonAuthor.Name)
+	}
+
+	// 7. Verify both books now link to this single canonical author ID
+	b1Authors, err := repo.GetBookAuthors(ctx, b1.ID)
+	if err != nil {
+		t.Fatalf("get b1 authors: %v", err)
+	}
+	if len(b1Authors) != 1 || b1Authors[0].ID != canonAuthor.ID {
+		t.Errorf("expected b1 linked to canonAuthor %s, got %+v", canonAuthor.ID, b1Authors)
+	}
+
+	b2Authors, err := repo.GetBookAuthors(ctx, b2.ID)
+	if err != nil {
+		t.Fatalf("get b2 authors: %v", err)
+	}
+	if len(b2Authors) != 1 || b2Authors[0].ID != canonAuthor.ID {
+		t.Errorf("expected b2 linked to canonAuthor %s, got %+v", canonAuthor.ID, b2Authors)
+	}
+}
+
 

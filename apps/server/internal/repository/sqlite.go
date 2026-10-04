@@ -338,19 +338,41 @@ func (r *SQLiteStorageEngine) ListBooks(ctx context.Context, filter BookFilter) 
 // --- Authors ---
 
 func (r *SQLiteStorageEngine) UpsertAuthor(ctx context.Context, name string) (*Author, error) {
-	trimmed := strings.TrimSpace(name)
-	if trimmed == "" {
+	cleanName := NormalizeAuthorName(name)
+	if cleanName == "" {
 		return nil, fmt.Errorf("author name cannot be empty")
 	}
 
+	// 1. Direct case-insensitive match
+	a := &Author{}
+	var photoURL sql.NullString
+	err := r.db.QueryRowContext(ctx, "SELECT id, name, photo_url, created_at FROM authors WHERE name = ? COLLATE NOCASE", cleanName).Scan(&a.ID, &a.Name, &photoURL, &a.CreatedAt)
+	if err == nil {
+		if photoURL.Valid {
+			a.PhotoURL = &photoURL.String
+		}
+		return a, nil
+	}
+
+	// 2. Lookup key match for existing variations (e.g. "J.R.R. Tolkien" vs "J. R. R. Tolkien")
+	lookupKey := AuthorLookupKey(cleanName)
+	authors, listErr := r.ListAuthors(ctx)
+	if listErr == nil {
+		for _, existing := range authors {
+			if AuthorLookupKey(existing.Name) == lookupKey {
+				return existing, nil
+			}
+		}
+	}
+
+	// 3. Insert new canonical author
 	query := `
 		INSERT INTO authors (id, name, created_at)
 		VALUES (?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(name) DO UPDATE SET name = excluded.name
 		RETURNING id, name, created_at
 	`
-	a := &Author{}
-	err := r.db.QueryRowContext(ctx, query, uuid.NewString(), trimmed).Scan(&a.ID, &a.Name, &a.CreatedAt)
+	err = r.db.QueryRowContext(ctx, query, uuid.NewString(), cleanName).Scan(&a.ID, &a.Name, &a.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("upserting author: %w", err)
 	}
@@ -854,6 +876,86 @@ func (r *SQLiteStorageEngine) PruneOrphanedGenres(ctx context.Context) (int, err
 	res, err := r.db.ExecContext(ctx, "DELETE FROM genres WHERE id NOT IN (SELECT DISTINCT genre_id FROM book_genres)")
 	if err != nil {
 		return 0, fmt.Errorf("pruning orphaned genres: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+func (r *SQLiteStorageEngine) ReconcileAuthors(ctx context.Context) error {
+	authors, err := r.ListAuthors(ctx)
+	if err != nil {
+		return fmt.Errorf("listing authors for reconciliation: %w", err)
+	}
+
+	// Group authors by normalized lookup key
+	groups := make(map[string][]*Author)
+	for _, a := range authors {
+		key := AuthorLookupKey(a.Name)
+		if key != "" {
+			groups[key] = append(groups[key], a)
+		}
+	}
+
+	for _, group := range groups {
+		if len(group) == 0 {
+			continue
+		}
+
+		var primary *Author = group[0]
+		for _, a := range group[1:] {
+			if a.BookCount > primary.BookCount {
+				primary = a
+			} else if a.BookCount == primary.BookCount && (primary.PhotoURL == nil || *primary.PhotoURL == "") && (a.PhotoURL != nil && *a.PhotoURL != "") {
+				primary = a
+			}
+		}
+
+		canonicalName := NormalizeAuthorName(primary.Name)
+		if primary.Name != canonicalName {
+			_, _ = r.db.ExecContext(ctx, "UPDATE authors SET name = ? WHERE id = ?", canonicalName, primary.ID)
+			primary.Name = canonicalName
+		}
+
+		for _, secondary := range group {
+			if secondary.ID == primary.ID {
+				continue
+			}
+
+			rows, err := r.db.QueryContext(ctx, "SELECT book_id, role FROM book_authors WHERE author_id = ?", secondary.ID)
+			if err == nil {
+				type link struct{ bookID, role string }
+				var links []link
+				for rows.Next() {
+					var l link
+					if err := rows.Scan(&l.bookID, &l.role); err == nil {
+						links = append(links, l)
+					}
+				}
+				rows.Close()
+
+				for _, l := range links {
+					var count int
+					_ = r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM book_authors WHERE book_id = ? AND author_id = ? AND role = ?", l.bookID, primary.ID, l.role).Scan(&count)
+					if count > 0 {
+						_, _ = r.db.ExecContext(ctx, "DELETE FROM book_authors WHERE book_id = ? AND author_id = ? AND role = ?", l.bookID, secondary.ID, l.role)
+					} else {
+						_, _ = r.db.ExecContext(ctx, "UPDATE book_authors SET author_id = ? WHERE book_id = ? AND author_id = ? AND role = ?", primary.ID, l.bookID, secondary.ID, l.role)
+					}
+				}
+			}
+
+			_, _ = r.db.ExecContext(ctx, "DELETE FROM authors WHERE id = ?", secondary.ID)
+		}
+	}
+
+	_, _ = r.PruneOrphanedAuthors(ctx)
+	return nil
+}
+
+func (r *SQLiteStorageEngine) PruneOrphanedAuthors(ctx context.Context) (int, error) {
+	res, err := r.db.ExecContext(ctx, "DELETE FROM authors WHERE id NOT IN (SELECT DISTINCT author_id FROM book_authors) AND (photo_url IS NULL OR photo_url = '')")
+	if err != nil {
+		return 0, fmt.Errorf("pruning orphaned authors: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	return int(n), nil

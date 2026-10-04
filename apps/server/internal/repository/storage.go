@@ -56,6 +56,8 @@ type StorageEngine interface {
 	GetBookTopics(ctx context.Context, bookID string) ([]*Topic, error)
 	GetBookSeries(ctx context.Context, bookID string) ([]*BookSeriesDetail, error)
 	PruneOrphanedGenres(ctx context.Context) (int, error)
+	ReconcileAuthors(ctx context.Context) error
+	PruneOrphanedAuthors(ctx context.Context) (int, error)
 
 	// Chapters
 	CreateChapter(ctx context.Context, chapter *Chapter) error

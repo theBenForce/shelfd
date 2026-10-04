@@ -227,7 +227,7 @@ func (r *BunStorageEngine) CountBooks(ctx context.Context, filter BookFilter) (i
 // --- Authors ---
 
 func (r *BunStorageEngine) UpsertAuthor(ctx context.Context, name string) (*Author, error) {
-	cleanName := strings.TrimSpace(name)
+	cleanName := NormalizeAuthorName(name)
 	if cleanName == "" {
 		return nil, fmt.Errorf("author name cannot be empty")
 	}
@@ -239,6 +239,17 @@ func (r *BunStorageEngine) UpsertAuthor(ctx context.Context, name string) (*Auth
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("looking up author: %w", err)
+	}
+
+	// Lookup key match
+	lookupKey := AuthorLookupKey(cleanName)
+	authors, listErr := r.ListAuthors(ctx)
+	if listErr == nil {
+		for _, existing := range authors {
+			if AuthorLookupKey(existing.Name) == lookupKey {
+				return existing, nil
+			}
+		}
 	}
 
 	author = &Author{
@@ -737,6 +748,77 @@ func (r *BunStorageEngine) PruneOrphanedGenres(ctx context.Context) (int, error)
 		Exec(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("pruning orphaned genres: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+func (r *BunStorageEngine) ReconcileAuthors(ctx context.Context) error {
+	authors, err := r.ListAuthors(ctx)
+	if err != nil {
+		return fmt.Errorf("listing authors for reconciliation: %w", err)
+	}
+
+	groups := make(map[string][]*Author)
+	for _, a := range authors {
+		key := AuthorLookupKey(a.Name)
+		if key != "" {
+			groups[key] = append(groups[key], a)
+		}
+	}
+
+	for _, group := range groups {
+		if len(group) == 0 {
+			continue
+		}
+
+		var primary *Author = group[0]
+		for _, a := range group[1:] {
+			if a.BookCount > primary.BookCount {
+				primary = a
+			} else if a.BookCount == primary.BookCount && (primary.PhotoURL == nil || *primary.PhotoURL == "") && (a.PhotoURL != nil && *a.PhotoURL != "") {
+				primary = a
+			}
+		}
+
+		canonicalName := NormalizeAuthorName(primary.Name)
+		if primary.Name != canonicalName {
+			_, _ = r.db.NewUpdate().Model((*Author)(nil)).Set("name = ?", canonicalName).Where("id = ?", primary.ID).Exec(ctx)
+			primary.Name = canonicalName
+		}
+
+		for _, secondary := range group {
+			if secondary.ID == primary.ID {
+				continue
+			}
+
+			var links []BookAuthor
+			if err := r.db.NewSelect().Model(&links).Where("author_id = ?", secondary.ID).Scan(ctx); err == nil {
+				for _, l := range links {
+					exists, _ := r.db.NewSelect().Model((*BookAuthor)(nil)).Where("book_id = ? AND author_id = ? AND role = ?", l.BookID, primary.ID, l.Role).Exists(ctx)
+					if exists {
+						_, _ = r.db.NewDelete().Model((*BookAuthor)(nil)).Where("book_id = ? AND author_id = ? AND role = ?", l.BookID, secondary.ID, l.Role).Exec(ctx)
+					} else {
+						_, _ = r.db.NewUpdate().Model((*BookAuthor)(nil)).Set("author_id = ?", primary.ID).Where("book_id = ? AND author_id = ? AND role = ?", l.BookID, secondary.ID, l.Role).Exec(ctx)
+					}
+				}
+			}
+
+			_, _ = r.db.NewDelete().Model((*Author)(nil)).Where("id = ?", secondary.ID).Exec(ctx)
+		}
+	}
+
+	_, _ = r.PruneOrphanedAuthors(ctx)
+	return nil
+}
+
+func (r *BunStorageEngine) PruneOrphanedAuthors(ctx context.Context) (int, error) {
+	res, err := r.db.NewDelete().
+		TableExpr("authors").
+		Where("id NOT IN (SELECT DISTINCT author_id FROM book_authors) AND (photo_url IS NULL OR photo_url = '')").
+		Exec(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("pruning orphaned authors: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	return int(n), nil
