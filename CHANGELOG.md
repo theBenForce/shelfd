@@ -1,3 +1,10 @@
+# [1.11.0](https://github.com/theBenForce/shelfd/compare/v1.10.1...v1.11.0) (2026-10-06)
+
+
+### Features
+
+* **utilities:** support multi-format book merge with companion file retention ([#48](https://github.com/theBenForce/shelfd/issues/48)) ([7b323f0](https://github.com/theBenForce/shelfd/commit/7b323f0727f938571acae1ca6383550d40ee2a70))
+
 ## [1.10.1](https://github.com/theBenForce/shelfd/compare/v1.10.0...v1.10.1) (2026-10-04)
 
 
