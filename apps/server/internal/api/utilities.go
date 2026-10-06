@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -471,12 +472,37 @@ func (h *UtilityHandler) MergeBooks(w http.ResponseWriter, r *http.Request) {
 					primarySeries = dupSeries
 				}
 			}
+
+			// Merge duration if primary has none
+			if (primaryBook.DurationSeconds == nil || *primaryBook.DurationSeconds == 0) && dup.DurationSeconds != nil && *dup.DurationSeconds > 0 {
+				primaryBook.DurationSeconds = dup.DurationSeconds
+			}
+		}
+
+		// If primary is audiobook and any duplicate is ebook/epub, upgrade primary book to ebook
+		if primaryBook.BookType == "audiobook" {
+			for _, dup := range dupBooks {
+				if dup.BookType == "ebook" || strings.ToLower(filepath.Ext(dup.FilePath)) == ".epub" {
+					primaryBook.BookType = "ebook"
+					break
+				}
+			}
 		}
 
 		if err := h.repo.UpdateBook(ctx, primaryBook); err != nil {
 			h.logger.Warn("Failed to update primary book metadata during merge", "err", err)
 		}
 	}
+
+	// Fetch existing book files on primary to avoid duplicate companion records
+	existingPrimaryFiles, _ := h.repo.GetBookFilesByBookID(ctx, primaryBook.ID)
+	primaryPathSet := make(map[string]bool)
+	primaryPathSet[primaryBook.FilePath] = true
+	for _, f := range existingPrimaryFiles {
+		primaryPathSet[f.FilePath] = true
+	}
+
+	primaryAudioChapters, _ := h.repo.GetAudioChaptersByBookID(ctx, primaryBook.ID)
 
 	// Process each duplicate book
 	for _, dup := range dupBooks {
@@ -487,11 +513,101 @@ func (h *UtilityHandler) MergeBooks(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Delete duplicate file on disk if requested
+		// Transfer audiobook progress
+		if err := h.repo.TransferAudiobookProgress(ctx, dup.ID, primaryBook.ID); err != nil {
+			h.logger.Warn("Failed to transfer audiobook progress", "from", dup.ID, "to", primaryBook.ID, "err", err)
+		}
+
+		// Identify companion files to preserve from duplicate
+		dupFiles, _ := h.repo.GetBookFilesByBookID(ctx, dup.ID)
+		var filesToPreserve []*repository.BookFile
+		retainedPaths := make(map[string]bool)
+
+		isAudio := func(ext string) bool {
+			switch strings.ToLower(ext) {
+			case ".m4b", ".m4a", ".mp3", ".ogg", ".oga", ".flac", ".opus":
+				return true
+			default:
+				return false
+			}
+		}
+
+		// Check duplicate primary file
+		dupExt := strings.ToLower(filepath.Ext(dup.FilePath))
+		primaryExt := strings.ToLower(filepath.Ext(primaryBook.FilePath))
+		isFormatDifferent := (isAudio(dupExt) && !isAudio(primaryExt)) || (!isAudio(dupExt) && isAudio(primaryExt)) || (dupExt != primaryExt && dupExt != "")
+
+		if dup.FilePath != "" && !primaryPathSet[dup.FilePath] && isFormatDifferent {
+			fileType := "ebook"
+			if isAudio(dupExt) {
+				fileType = "audiobook"
+			}
+			mimeType := getAudioMimeType(dup.FilePath)
+			filesToPreserve = append(filesToPreserve, &repository.BookFile{
+				ID:              ulid.New(),
+				BookID:          primaryBook.ID,
+				FileType:        fileType,
+				FilePath:        dup.FilePath,
+				FileSizeBytes:   dup.FileSizeBytes,
+				DurationSeconds: dup.DurationSeconds,
+				MimeType:        &mimeType,
+				FileModifiedAt:  dup.FileModifiedAt,
+			})
+			primaryPathSet[dup.FilePath] = true
+			retainedPaths[dup.FilePath] = true
+		}
+
+		// Check book_files on duplicate
+		for _, df := range dupFiles {
+			if !primaryPathSet[df.FilePath] {
+				dfCopy := *df
+				dfCopy.ID = ulid.New()
+				dfCopy.BookID = primaryBook.ID
+				filesToPreserve = append(filesToPreserve, &dfCopy)
+				primaryPathSet[df.FilePath] = true
+				retainedPaths[df.FilePath] = true
+			}
+		}
+
+		if len(filesToPreserve) > 0 {
+			if err := h.repo.CreateBookFiles(ctx, filesToPreserve); err != nil {
+				h.logger.Warn("Failed to preserve companion book files during merge", "err", err)
+			}
+		}
+
+		// Migrate audio chapters if primary has none
+		if len(primaryAudioChapters) == 0 {
+			dupAudioChapters, _ := h.repo.GetAudioChaptersByBookID(ctx, dup.ID)
+			if len(dupAudioChapters) > 0 {
+				newChapters := make([]*repository.AudioChapter, len(dupAudioChapters))
+				for idx, ch := range dupAudioChapters {
+					newChapters[idx] = &repository.AudioChapter{
+						ID:             ulid.New(),
+						BookID:         primaryBook.ID,
+						ChapterIndex:   ch.ChapterIndex,
+						Title:          ch.Title,
+						StartOffsetSec: ch.StartOffsetSec,
+						DurationSec:    ch.DurationSec,
+					}
+				}
+				if err := h.repo.CreateAudioChapters(ctx, newChapters); err != nil {
+					h.logger.Warn("Failed to transfer audio chapters during merge", "err", err)
+				} else {
+					primaryAudioChapters = newChapters
+				}
+			}
+		}
+
+		// Delete duplicate file on disk if requested, except retained companion files
 		if deleteFiles {
-			if dup.FilePath != "" && dup.FilePath != primaryBook.FilePath {
+			if dup.FilePath != "" && dup.FilePath != primaryBook.FilePath && !retainedPaths[dup.FilePath] {
 				if err := os.Remove(dup.FilePath); err != nil && !os.IsNotExist(err) {
 					h.logger.Warn("Failed to delete duplicate book file", "path", dup.FilePath, "err", err)
+				}
+			}
+			for _, df := range dupFiles {
+				if !retainedPaths[df.FilePath] && df.FilePath != primaryBook.FilePath {
+					_ = os.Remove(df.FilePath)
 				}
 			}
 			if dup.CoverPath != nil && *dup.CoverPath != "" {

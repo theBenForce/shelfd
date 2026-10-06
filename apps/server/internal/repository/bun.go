@@ -2268,5 +2268,36 @@ func (r *BunStorageEngine) DeleteAudiobookProgress(ctx context.Context, bookID s
 	return nil
 }
 
+func (r *BunStorageEngine) TransferAudiobookProgress(ctx context.Context, fromBookID, toBookID string) error {
+	// If progress already exists for (toBookID, user_id), keep the most recently updated one and remove the duplicate
+	var fromProgress []*AudiobookProgress
+	err := r.db.NewSelect().Model(&fromProgress).
+		Where("book_id = ?", fromBookID).
+		Scan(ctx)
+	if err != nil {
+		return fmt.Errorf("querying audiobook progress to transfer: %w", err)
+	}
+	for _, p := range fromProgress {
+		existing, err := r.GetAudiobookProgress(ctx, toBookID, p.UserID)
+		_ = r.DeleteAudiobookProgress(ctx, fromBookID, p.UserID)
+		if err == nil && existing != nil {
+			if p.UpdatedAt.After(existing.UpdatedAt) {
+				p.ID = existing.ID
+				p.BookID = toBookID
+				if err := r.UpsertAudiobookProgress(ctx, p); err != nil {
+					return err
+				}
+			}
+		} else {
+			p.ID = ulid.New()
+			p.BookID = toBookID
+			if err := r.UpsertAudiobookProgress(ctx, p); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 
 
