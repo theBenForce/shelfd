@@ -348,7 +348,7 @@ class ShelfdUploadsBadgeButton extends ConsumerWidget {
   }
 }
 
-class ShelfdBottomNav extends StatelessWidget {
+class ShelfdBottomNav extends ConsumerWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
   final String? currentPath;
@@ -368,10 +368,12 @@ class ShelfdBottomNav extends StatelessWidget {
       if (p.startsWith('/series')) return 1;
       if (p.startsWith('/authors') || p.startsWith('/author')) return 2;
       if (p.startsWith('/search')) return 3;
-      if (p.startsWith('/settings')) return 4;
+      if (p.startsWith('/uploads')) return 4;
+      if (p.startsWith('/utilities')) return 5;
+      if (p.startsWith('/settings')) return 6;
       return 0; // /books, /library, default
     }
-    return currentIndex.clamp(0, 4);
+    return currentIndex.clamp(0, 6);
   }
 
   void _handleTap(int index) {
@@ -390,6 +392,12 @@ class ShelfdBottomNav extends StatelessWidget {
           onNavigate!('/search');
           return;
         case 4:
+          onNavigate!('/uploads');
+          return;
+        case 5:
+          onNavigate!('/utilities');
+          return;
+        case 6:
           onNavigate!('/settings');
           return;
       }
@@ -398,8 +406,11 @@ class ShelfdBottomNav extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final idx = _calculateIndex();
+    final queueStatus = ref.watch(queueProvider).status;
+    final stagedCount = queueStatus?.stagedUploads ?? 0;
+
     return Container(
       decoration: const BoxDecoration(
         border: Border(top: BorderSide(color: AppTokens.crispBorder, width: 1)),
@@ -411,28 +422,56 @@ class ShelfdBottomNav extends StatelessWidget {
         elevation: 0,
         height: 64,
         indicatorColor: AppTokens.boneContainer,
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.menu_book_outlined),
             selectedIcon: Icon(Icons.menu_book_rounded, color: AppTokens.charcoalInk),
             label: 'Books',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.collections_bookmark_outlined),
             selectedIcon: Icon(Icons.collections_bookmark_rounded, color: AppTokens.charcoalInk),
             label: 'Series',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.people_outline_rounded),
             selectedIcon: Icon(Icons.people_rounded, color: AppTokens.charcoalInk),
             label: 'Authors',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.saved_search_outlined),
             selectedIcon: Icon(Icons.saved_search_rounded, color: AppTokens.charcoalInk),
             label: 'Search',
           ),
           NavigationDestination(
+            icon: Badge(
+              isLabelVisible: stagedCount > 0,
+              label: Text(
+                '$stagedCount',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10),
+              ),
+              backgroundColor: const Color(0xFFF08C00),
+              textColor: Colors.white,
+              child: const Icon(Icons.cloud_upload_outlined),
+            ),
+            selectedIcon: Badge(
+              isLabelVisible: stagedCount > 0,
+              label: Text(
+                '$stagedCount',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10),
+              ),
+              backgroundColor: const Color(0xFFF08C00),
+              textColor: Colors.white,
+              child: const Icon(Icons.cloud_upload_rounded, color: AppTokens.charcoalInk),
+            ),
+            label: 'Uploads',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.handyman_outlined),
+            selectedIcon: Icon(Icons.handyman_rounded, color: AppTokens.charcoalInk),
+            label: 'Utilities',
+          ),
+          const NavigationDestination(
             icon: Icon(Icons.settings_outlined),
             selectedIcon: Icon(Icons.settings_rounded, color: AppTokens.charcoalInk),
             label: 'Settings',
@@ -636,7 +675,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                     selectedIcon: Icons.saved_search_rounded,
                     label: 'Semantic Search',
                     isSelected: isSearch,
-                    onTap: () => _navigate('/search', 1),
+                    onTap: () => _navigate('/search', 3),
                   ),
                   const SizedBox(height: AppTokens.space8),
                   _SideNavItem(
@@ -662,7 +701,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                             ),
                           )
                         : null,
-                    onTap: () => _navigate('/uploads', 3),
+                    onTap: () => _navigate('/uploads', 4),
                   ),
                   const SizedBox(height: AppTokens.space8),
                   _SideNavItem(
@@ -670,7 +709,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                     selectedIcon: Icons.handyman_rounded,
                     label: 'Utilities',
                     isSelected: isUtilities,
-                    onTap: () => _navigate('/utilities', 6),
+                    onTap: () => _navigate('/utilities', 5),
                   ),
                   const SizedBox(height: AppTokens.space8),
                   _SideNavItem(
@@ -678,7 +717,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                     selectedIcon: Icons.settings_rounded,
                     label: 'Settings',
                     isSelected: isSettings,
-                    onTap: () => _navigate('/settings', 2),
+                    onTap: () => _navigate('/settings', 6),
                   ),
                 ],
               ),
@@ -1523,12 +1562,13 @@ void showShelfdSettingsModal(
 }) {
   showModalBottomSheet(
     context: context,
+    isScrollControlled: true,
     backgroundColor: AppTokens.boneBackground,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
     ),
     builder: (ctx) => SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(AppTokens.space24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1652,6 +1692,34 @@ void showShelfdSettingsModal(
               },
             ),
             const SizedBox(height: AppTokens.space24),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTokens.charcoalInk,
+                side: const BorderSide(color: AppTokens.crispBorder),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              icon: const Icon(Icons.cloud_upload_outlined, size: 18),
+              label: const Text('Uploads & Staged Queue'),
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                GoRouter.of(context).go('/uploads');
+              },
+            ),
+            const SizedBox(height: AppTokens.space12),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTokens.charcoalInk,
+                side: const BorderSide(color: AppTokens.crispBorder),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              icon: const Icon(Icons.handyman_outlined, size: 18),
+              label: const Text('Library Utilities & Merge'),
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                GoRouter.of(context).go('/utilities');
+              },
+            ),
+            const SizedBox(height: AppTokens.space12),
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppTokens.charcoalInk,

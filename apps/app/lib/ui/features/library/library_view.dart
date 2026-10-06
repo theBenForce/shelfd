@@ -109,6 +109,10 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
     } else if (index == 3) {
       context.go('/search');
     } else if (index == 4) {
+      context.go('/uploads');
+    } else if (index == 5) {
+      context.go('/utilities');
+    } else if (index == 6) {
       context.go('/settings');
     }
   }
@@ -116,6 +120,8 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
   @override
   Widget build(BuildContext context) {
     final libraryState = ref.watch(libraryProvider);
+    final queueState = ref.watch(queueProvider);
+    final isRescanning = queueState.isLoading;
     final horizontalPad = Responsive.horizontalPadding(context);
     final isDesktop = Responsive.isDesktop(context);
 
@@ -188,6 +194,11 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
       actions: [
         const ShelfdUploadsBadgeButton(),
         IconButton(
+          icon: const Icon(Icons.handyman_outlined),
+          tooltip: 'Utilities',
+          onPressed: () => context.go('/utilities'),
+        ),
+        IconButton(
           icon: const Icon(Icons.refresh_rounded),
           tooltip: 'Rescan Library',
           onPressed: handleScan,
@@ -241,6 +252,36 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                         textColor: AppTokens.mutedCopy,
                       ),
                       const Spacer(),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTokens.charcoalInk,
+                          side: const BorderSide(color: AppTokens.crispBorder),
+                          backgroundColor: AppTokens.boneSurface,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppTokens.space16,
+                            vertical: AppTokens.space12,
+                          ),
+                        ),
+                        onPressed: isRescanning ? null : handleScan,
+                        icon: isRescanning
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppTokens.charcoalInk,
+                                ),
+                              )
+                            : const Icon(Icons.sync_rounded, size: 18),
+                        label: Text(
+                          isRescanning ? 'Scanning...' : 'Rescan Library',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      const SizedBox(width: AppTokens.space12),
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppTokens.charcoalInk,
