@@ -2749,6 +2749,52 @@ func (r *SQLiteStorageEngine) DeleteAudiobookProgress(ctx context.Context, bookI
 	return nil
 }
 
+func (r *SQLiteStorageEngine) TransferAudiobookProgress(ctx context.Context, fromBookID, toBookID string) error {
+	query := `
+		SELECT id, book_id, user_id, position_seconds, speed, is_completed, created_at, updated_at
+		FROM audiobook_progress
+		WHERE book_id = ?
+	`
+	rows, err := r.db.QueryContext(ctx, query, fromBookID)
+	if err != nil {
+		return fmt.Errorf("querying audiobook progress to transfer: %w", err)
+	}
+	defer rows.Close()
+
+	var fromProgress []*AudiobookProgress
+	for rows.Next() {
+		p := &AudiobookProgress{}
+		if err := rows.Scan(&p.ID, &p.BookID, &p.UserID, &p.PositionSeconds, &p.Speed, &p.IsCompleted, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return fmt.Errorf("scanning audiobook progress: %w", err)
+		}
+		fromProgress = append(fromProgress, p)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating audiobook progress: %w", err)
+	}
+
+	for _, p := range fromProgress {
+		existing, err := r.GetAudiobookProgress(ctx, toBookID, p.UserID)
+		_ = r.DeleteAudiobookProgress(ctx, fromBookID, p.UserID)
+		if err == nil && existing != nil {
+			if p.UpdatedAt.After(existing.UpdatedAt) {
+				p.ID = existing.ID
+				p.BookID = toBookID
+				if err := r.UpsertAudiobookProgress(ctx, p); err != nil {
+					return err
+				}
+			}
+		} else {
+			p.ID = ulid.New()
+			p.BookID = toBookID
+			if err := r.UpsertAudiobookProgress(ctx, p); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 
 
 

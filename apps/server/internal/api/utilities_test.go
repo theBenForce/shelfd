@@ -265,6 +265,153 @@ func TestAPI_Utilities_MergeBooks_Success(t *testing.T) {
 	}
 }
 
+func TestAPI_Utilities_MergeBooks_MultiFormat(t *testing.T) {
+	f := setupAPITest(t)
+	token := f.loginAndGetToken(t)
+	ctx := context.Background()
+
+	// Create test files: EPUB for primary, M4B for duplicate
+	epubFile := filepath.Join(f.dataDir, "project_hail_mary.epub")
+	m4bFile := filepath.Join(f.dataDir, "project_hail_mary.m4b")
+	_ = os.MkdirAll(filepath.Dir(epubFile), 0755)
+	_ = os.MkdirAll(filepath.Dir(m4bFile), 0755)
+	_ = os.WriteFile(epubFile, []byte("fake-epub-data"), 0644)
+	_ = os.WriteFile(m4bFile, []byte("fake-audio-data"), 0644)
+
+	// Primary book: EPUB
+	bPrimary := &repository.Book{
+		ID:        ulid.New(),
+		Title:     "Project Hail Mary",
+		BookType:  "ebook",
+		FilePath:  epubFile,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := f.repo.CreateBook(ctx, bPrimary); err != nil {
+		t.Fatalf("creating primary book: %v", err)
+	}
+
+	// Duplicate book: Audiobook with duration, chapter, and listening progress
+	audioDuration := 57600.0 // 16 hours
+	bDup := &repository.Book{
+		ID:              ulid.New(),
+		Title:           "Project Hail Mary (Audiobook)",
+		BookType:        "audiobook",
+		FilePath:        m4bFile,
+		DurationSeconds: &audioDuration,
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := f.repo.CreateBook(ctx, bDup); err != nil {
+		t.Fatalf("creating duplicate audiobook: %v", err)
+	}
+
+	// Add audio chapter to duplicate book
+	ch := &repository.AudioChapter{
+		ID:             ulid.New(),
+		BookID:         bDup.ID,
+		ChapterIndex:   1,
+		Title:          "Chapter 1",
+		StartOffsetSec: 0.0,
+		DurationSec:    1800.0,
+	}
+	if err := f.repo.CreateAudioChapters(ctx, []*repository.AudioChapter{ch}); err != nil {
+		t.Fatalf("creating audio chapter: %v", err)
+	}
+
+	// Add listening progress to duplicate book
+	prog := &repository.AudiobookProgress{
+		ID:              ulid.New(),
+		BookID:          bDup.ID,
+		UserID:          "test-user",
+		PositionSeconds: 450.0,
+		Speed:           1.25,
+	}
+	if err := f.repo.UpsertAudiobookProgress(ctx, prog); err != nil {
+		t.Fatalf("creating audiobook progress: %v", err)
+	}
+
+	// Merge bDup into bPrimary with DeleteFiles enabled
+	mergePayload := api.MergeBooksRequest{
+		PrimaryBookID:    bPrimary.ID,
+		DuplicateBookIDs: []string{bDup.ID},
+		Options: &api.MergeBooksOptions{
+			TransferBookmarks:  boolPtr(true),
+			TransferHighlights: boolPtr(true),
+			MergeMetadata:      boolPtr(true),
+			DeleteFiles:        boolPtr(true),
+		},
+	}
+	body, _ := json.Marshal(mergePayload)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/utilities/merge-books", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 1. Verify duplicate book row was deleted
+	_, err := f.repo.GetBookByID(ctx, bDup.ID)
+	if err != repository.ErrNotFound {
+		t.Fatalf("expected ErrNotFound for duplicate book, got %v", err)
+	}
+
+	// 2. Verify neither the EPUB nor the M4B file was deleted from disk
+	if _, err := os.Stat(epubFile); err != nil {
+		t.Fatalf("expected primary EPUB to remain intact on disk: %v", err)
+	}
+	if _, err := os.Stat(m4bFile); err != nil {
+		t.Fatalf("expected companion M4B audio file to be preserved on disk, got: %v", err)
+	}
+
+	// 3. Verify primary book was updated with DurationSeconds
+	updatedPrimary, err := f.repo.GetBookByID(ctx, bPrimary.ID)
+	if err != nil {
+		t.Fatalf("fetching updated primary book: %v", err)
+	}
+	if updatedPrimary.DurationSeconds == nil || *updatedPrimary.DurationSeconds != audioDuration {
+		t.Fatalf("expected duration %v, got %v", audioDuration, updatedPrimary.DurationSeconds)
+	}
+
+	// 4. Verify duplicate M4B was converted to a BookFile on primary
+	files, err := f.repo.GetBookFilesByBookID(ctx, bPrimary.ID)
+	if err != nil {
+		t.Fatalf("fetching book files: %v", err)
+	}
+	var audioBookFile *repository.BookFile
+	for _, f := range files {
+		if f.FilePath == m4bFile {
+			audioBookFile = f
+			break
+		}
+	}
+	if audioBookFile == nil {
+		t.Fatalf("expected M4B to be preserved as BookFile on primary book")
+	}
+	if audioBookFile.FileType != "audiobook" {
+		t.Fatalf("expected BookFile file_type to be 'audiobook', got %q", audioBookFile.FileType)
+	}
+
+	// 5. Verify audio chapter transferred to primary
+	chapters, err := f.repo.GetAudioChaptersByBookID(ctx, bPrimary.ID)
+	if err != nil {
+		t.Fatalf("fetching audio chapters: %v", err)
+	}
+	if len(chapters) != 1 || chapters[0].Title != "Chapter 1" {
+		t.Fatalf("expected 1 transferred audio chapter on primary book, got %v", chapters)
+	}
+
+	// 6. Verify audiobook progress transferred to primary
+	transferredProg, err := f.repo.GetAudiobookProgress(ctx, bPrimary.ID, "test-user")
+	if err != nil {
+		t.Fatalf("fetching transferred audiobook progress: %v", err)
+	}
+	if transferredProg.PositionSeconds != 450.0 {
+		t.Fatalf("expected position 450.0, got %v", transferredProg.PositionSeconds)
+	}
+}
+
 func boolPtr(b bool) *bool {
 	return &b
 }
