@@ -419,10 +419,70 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           activeTrackColor: AppTokens.charcoalInk,
                           onChanged: (val) => ref.read(uploadProvider.notifier).toggleAutoCommit(val),
                         ),
+                        const SizedBox(height: AppTokens.space12),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTokens.charcoalInk,
+                            side: const BorderSide(color: AppTokens.crispBorder),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppTokens.space16,
+                              vertical: AppTokens.space12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                            ),
+                          ),
+                          icon: const Icon(Icons.cloud_upload_outlined, size: 18),
+                          label: const Text('Open Uploads & Staged Queue'),
+                          onPressed: () => context.go('/uploads'),
+                        ),
                       ],
                     ),
                   );
                 },
+              ),
+
+              const SizedBox(height: AppTokens.space20),
+
+              // Library Utilities Card
+              BentoCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.handyman_outlined, size: 20, color: AppTokens.mutedCopy),
+                        const SizedBox(width: AppTokens.space8),
+                        Text(
+                          'Library Utilities',
+                          style: AppTypography.titleSerif(fontSize: 18),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppTokens.space8),
+                    Text(
+                      'Detect duplicate books, merge book editions, and resolve library conflicts.',
+                      style: AppTypography.captionSans(color: AppTokens.mutedCopy),
+                    ),
+                    const SizedBox(height: AppTokens.space12),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTokens.charcoalInk,
+                        side: const BorderSide(color: AppTokens.crispBorder),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppTokens.space16,
+                          vertical: AppTokens.space12,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                        ),
+                      ),
+                      icon: const Icon(Icons.merge_type_rounded, size: 18),
+                      label: const Text('Manage Duplicates & Book Merge'),
+                      onPressed: () => context.go('/utilities'),
+                    ),
+                  ],
+                ),
               ),
 
               const SizedBox(height: AppTokens.space20),
@@ -518,6 +578,39 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                             ),
                           ],
                         ],
+                        const SizedBox(height: AppTokens.space16),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTokens.charcoalInk,
+                            side: const BorderSide(color: AppTokens.crispBorder),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppTokens.space16,
+                              vertical: AppTokens.space12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                            ),
+                          ),
+                          icon: queueState.isLoading
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppTokens.charcoalInk,
+                                  ),
+                                )
+                              : const Icon(Icons.sync_rounded, size: 18),
+                          label: Text(queueState.isLoading ? 'Scanning...' : 'Rescan Library for New Books'),
+                          onPressed: queueState.isLoading
+                              ? null
+                              : () async {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Scanning library for new books...')),
+                                  );
+                                  await ref.read(bookRepositoryProvider).triggerScan();
+                                },
+                        ),
                       ],
                     ),
                   );

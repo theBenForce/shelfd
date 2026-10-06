@@ -7,6 +7,9 @@ import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/genre.dart';
 import 'package:shelf/data/models/series.dart';
 import 'package:shelf/data/models/topic.dart';
+import 'package:shelf/data/repositories/book_repository.dart';
+import 'package:shelf/data/services/api_service.dart';
+import 'package:shelf/data/services/storage_service.dart';
 import 'package:shelf/ui/core/shared_layout.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/library/library_view.dart';
@@ -428,6 +431,112 @@ void main() {
     expect(find.text('The Bullet Journal Method'), findsWidgets);
     expect(find.text('No matching books'), findsNothing);
   });
+
+  testWidgets('LibraryView desktop layout renders Rescan Library button next to Upload EPUB',
+      (tester) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final mockRepo = MockScanBookRepo();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookRepositoryProvider.overrideWithValue(mockRepo),
+          libraryProvider.overrideWith(() => FakeLibraryNotifier(const [])),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const LibraryView(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify both Rescan Library and Upload EPUB are in desktop view
+    final rescanButtons = find.widgetWithText(OutlinedButton, 'Rescan Library');
+    expect(rescanButtons, findsNWidgets(2)); // SideNav and Desktop Header
+    expect(find.widgetWithText(OutlinedButton, 'Upload EPUB'), findsOneWidget);
+
+    // Tap Rescan Library in desktop header
+    await tester.tap(rescanButtons.last);
+    await tester.pump();
+
+    expect(mockRepo.scanTriggered, isTrue);
+    expect(find.text('Scanning library for new books...'), findsOneWidget);
+  });
+
+  testWidgets('LibraryView mobile layout renders Utilities and Rescan in top bar and bottom nav',
+      (tester) async {
+    tester.view.physicalSize = const Size(600, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final mockRepo = MockScanBookRepo();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookRepositoryProvider.overrideWithValue(mockRepo),
+          libraryProvider.overrideWith(() => FakeLibraryNotifier(const [])),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const LibraryView(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify mobile top bar actions
+    final topBar = find.byType(ShelfdTopBar);
+    expect(find.descendant(of: topBar, matching: find.byTooltip('Utilities')), findsOneWidget);
+    expect(find.descendant(of: topBar, matching: find.byTooltip('Rescan Library')), findsOneWidget);
+    expect(find.descendant(of: topBar, matching: find.byType(ShelfdUploadsBadgeButton)), findsOneWidget);
+
+    // Verify mobile bottom nav destinations
+    final bottomNav = find.byType(ShelfdBottomNav);
+    expect(find.descendant(of: bottomNav, matching: find.text('Uploads')), findsOneWidget);
+    expect(find.descendant(of: bottomNav, matching: find.text('Utilities')), findsOneWidget);
+
+    // Tap Rescan in top bar
+    await tester.tap(find.descendant(of: topBar, matching: find.byTooltip('Rescan Library')));
+    await tester.pump();
+
+    expect(mockRepo.scanTriggered, isTrue);
+    expect(find.text('Scanning library for new books...'), findsOneWidget);
+  });
+}
+
+class MockScanBookRepo implements BookRepository {
+  bool scanTriggered = false;
+
+  @override
+  ApiService get apiService => throw UnimplementedError();
+
+  @override
+  StorageService get storageService => throw UnimplementedError();
+
+  @override
+  Future<void> triggerScan() async {
+    scanTriggered = true;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 class FakePagingLibraryNotifier extends LibraryNotifier {

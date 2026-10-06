@@ -67,7 +67,12 @@ void main() {
     expect(find.text('New Password'), findsOneWidget);
     expect(find.text('Confirm New Password'), findsOneWidget);
     expect(find.text('Update Password'), findsOneWidget);
+    expect(find.text('Uploads & Ingestion'), findsOneWidget);
+    expect(find.text('Open Uploads & Staged Queue'), findsOneWidget);
+    expect(find.text('Library Utilities'), findsOneWidget);
+    expect(find.text('Manage Duplicates & Book Merge'), findsOneWidget);
     expect(find.text('Server Connection'), findsOneWidget);
+    expect(find.text('Rescan Library for New Books'), findsOneWidget);
     expect(find.text('Disconnect / Sign Out'), findsOneWidget);
   });
 

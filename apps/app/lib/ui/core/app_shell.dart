@@ -22,13 +22,13 @@ class AppShell extends ConsumerWidget {
       return 3;
     }
     if (location.startsWith('/uploads')) {
-      return 5;
+      return 4;
     }
     if (location.startsWith('/utilities')) {
-      return 6;
+      return 5;
     }
     if (location.startsWith('/settings')) {
-      return 4;
+      return 6;
     }
     return 0;
   }
@@ -43,11 +43,11 @@ class AppShell extends ConsumerWidget {
     } else if (index == 3) {
       context.go('/search');
     } else if (index == 4) {
-      context.go('/settings');
-    } else if (index == 5) {
       context.go('/uploads');
-    } else if (index == 6) {
+    } else if (index == 5) {
       context.go('/utilities');
+    } else if (index == 6) {
+      context.go('/settings');
     }
   }
 

@@ -156,7 +156,7 @@ void main() {
 
       await tester.tap(find.text('Semantic Search'));
       await tester.pump();
-      expect(selectedNav, 1);
+      expect(selectedNav, 3);
     });
 
     testWidgets('ShelfdSideNav renders active AI Indexing progress card', (tester) async {
@@ -471,6 +471,91 @@ void main() {
 
       expect(bookEntries.length, 1);
       expect(bookEntries.first.displayName, 'Standalone Novel');
+    });
+
+    testWidgets('ShelfdBottomNav renders 7 destinations including Uploads and Utilities', (tester) async {
+      String? navigatedPath;
+      const status = QueueStatus(
+        totalChapters: 0,
+        indexedChapters: 0,
+        pendingChapters: 0,
+        pendingUploads: 0,
+        progressPercent: 0.0,
+        isActive: false,
+        stagedUploads: 3,
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            queueProvider.overrideWith(() => FakeQueueNotifier(const QueueState(status: status))),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              bottomNavigationBar: ShelfdBottomNav(
+                currentIndex: 0,
+                currentPath: '/books',
+                onTap: (_) {},
+                onNavigate: (path) => navigatedPath = path,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // Verify all 7 destinations exist
+      expect(find.text('Books'), findsOneWidget);
+      expect(find.text('Series'), findsOneWidget);
+      expect(find.text('Authors'), findsOneWidget);
+      expect(find.text('Search'), findsOneWidget);
+      expect(find.text('Uploads'), findsOneWidget);
+      expect(find.text('Utilities'), findsOneWidget);
+      expect(find.text('Settings'), findsOneWidget);
+
+      // Verify staged badge is visible on Uploads
+      expect(find.text('3'), findsWidgets);
+
+      // Tap Uploads
+      await tester.tap(find.text('Uploads'));
+      await tester.pumpAndSettle();
+      expect(navigatedPath, '/uploads');
+
+      // Tap Utilities
+      await tester.tap(find.text('Utilities'));
+      await tester.pumpAndSettle();
+      expect(navigatedPath, '/utilities');
+    });
+
+    testWidgets('showShelfdSettingsModal includes Uploads and Utilities shortcuts', (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            queueProvider.overrideWith(() => FakeQueueNotifier()),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () => showShelfdSettingsModal(
+                    context,
+                    onLogout: () async {},
+                  ),
+                  child: const Text('Open Modal'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Modal'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Uploads & Staged Queue'), findsOneWidget);
+      expect(find.text('Library Utilities & Merge'), findsOneWidget);
+      expect(find.text('Change Password & Account Settings'), findsOneWidget);
     });
   });
 }
