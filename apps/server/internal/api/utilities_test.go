@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -121,6 +122,124 @@ func TestAPI_Utilities_FindDuplicates_MatchingISBNAndTitle(t *testing.T) {
 	}
 	if res.Groups[0].Confidence != 1.0 {
 		t.Fatalf("expected confidence 1.0 for ISBN match, got %f", res.Groups[0].Confidence)
+	}
+}
+
+func TestAPI_Utilities_FindDuplicates_MoreThan50Books(t *testing.T) {
+	f := setupAPITest(t)
+	token := f.loginAndGetToken(t)
+	ctx := context.Background()
+
+	author, err := f.repo.UpsertAuthor(ctx, "J. R. R. Tolkien")
+	if err != nil {
+		t.Fatalf("upserting author: %v", err)
+	}
+
+	// Insert 52 books that sort alphabetically before "The Hobbit"
+	for i := 1; i <= 52; i++ {
+		b := &repository.Book{
+			ID:        ulid.New(),
+			Title:     fmt.Sprintf("Distinct Title %03d", i),
+			FilePath:  fmt.Sprintf("/tmp/alpha_%03d.epub", i),
+			CreatedAt: time.Now().UTC(),
+		}
+		if err := f.repo.CreateBook(ctx, b); err != nil {
+			t.Fatalf("creating book %d: %v", i, err)
+		}
+	}
+
+	// Insert two duplicate copies of The Hobbit by Tolkien
+	hobbit1 := &repository.Book{
+		ID:        ulid.New(),
+		Title:     "The Hobbit - Read By Andy Serkis",
+		FilePath:  "/tmp/hobbit_copy1.m4b",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := f.repo.CreateBook(ctx, hobbit1); err != nil {
+		t.Fatalf("creating hobbit1: %v", err)
+	}
+	_ = f.repo.LinkBookAuthor(ctx, hobbit1.ID, author.ID, "author")
+
+	hobbit2 := &repository.Book{
+		ID:        ulid.New(),
+		Title:     "The Hobbit - Read By Andy Serkis",
+		FilePath:  "/tmp/hobbit_copy2.m4b",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := f.repo.CreateBook(ctx, hobbit2); err != nil {
+		t.Fatalf("creating hobbit2: %v", err)
+	}
+	_ = f.repo.LinkBookAuthor(ctx, hobbit2.ID, author.ID, "author")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/utilities/duplicates", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var res api.DuplicateScanResponse
+	if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+
+	if res.TotalGroups != 1 {
+		t.Fatalf("expected 1 duplicate group among >50 books, got %d (total books in library: 54)", res.TotalGroups)
+	}
+	if res.TotalDuplicateBooks != 2 {
+		t.Fatalf("expected 2 duplicate books, got %d", res.TotalDuplicateBooks)
+	}
+}
+
+func TestAPI_Utilities_FindDuplicates_AudiobookNarratorSubtitle(t *testing.T) {
+	f := setupAPITest(t)
+	token := f.loginAndGetToken(t)
+	ctx := context.Background()
+
+	author, err := f.repo.UpsertAuthor(ctx, "J. R. R. Tolkien")
+	if err != nil {
+		t.Fatalf("upserting author: %v", err)
+	}
+
+	// One is standard title "The Hobbit", other is "The Hobbit - Read By Andy Serkis"
+	hobbit1 := &repository.Book{
+		ID:        ulid.New(),
+		Title:     "The Hobbit",
+		FilePath:  "/tmp/hobbit.epub",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := f.repo.CreateBook(ctx, hobbit1); err != nil {
+		t.Fatalf("creating hobbit1: %v", err)
+	}
+	_ = f.repo.LinkBookAuthor(ctx, hobbit1.ID, author.ID, "author")
+
+	hobbit2 := &repository.Book{
+		ID:        ulid.New(),
+		Title:     "The Hobbit - Read By Andy Serkis",
+		FilePath:  "/tmp/hobbit_audio.m4b",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := f.repo.CreateBook(ctx, hobbit2); err != nil {
+		t.Fatalf("creating hobbit2: %v", err)
+	}
+	_ = f.repo.LinkBookAuthor(ctx, hobbit2.ID, author.ID, "author")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/utilities/duplicates", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var res api.DuplicateScanResponse
+	if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+
+	if res.TotalGroups != 1 {
+		t.Fatalf("expected 1 duplicate group for audiobook title variation, got %d", res.TotalGroups)
 	}
 }
 
