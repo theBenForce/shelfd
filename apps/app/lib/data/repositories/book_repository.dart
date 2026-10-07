@@ -5,6 +5,7 @@ import '../models/bookmark.dart';
 import '../models/duplicate_group.dart';
 import '../models/genre.dart';
 import '../models/highlight.dart';
+import '../models/metadata_search_result.dart';
 import '../models/paginated_books.dart';
 import '../models/series.dart';
 import '../models/topic.dart';
@@ -243,4 +244,25 @@ class BookRepository {
     final progress = storageService.getReadingProgress(book.id);
     return book.copyWith(readingProgress: progress);
   }
+
+  Future<List<MetadataSearchResult>> searchMetadata({
+    String? query,
+    String? title,
+    String? author,
+    String? isbn,
+    String? provider,
+  }) =>
+      apiService.searchMetadata(
+        query: query,
+        title: title,
+        author: author,
+        isbn: isbn,
+        provider: provider,
+      );
+
+  Future<void> fetchBookCoverFromUrl(String bookId, String coverUrl) =>
+      apiService.fetchBookCoverFromUrl(bookId, coverUrl);
+
+  Future<void> fetchJobCoverFromUrl(String jobId, String coverUrl) =>
+      apiService.fetchJobCoverFromUrl(jobId, coverUrl);
 }
