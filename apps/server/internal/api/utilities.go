@@ -78,7 +78,7 @@ func (h *UtilityHandler) FindDuplicates(w http.ResponseWriter, r *http.Request) 
 	}
 
 	ctx := r.Context()
-	books, err := h.repo.ListBooks(ctx, repository.BookFilter{})
+	books, err := h.repo.ListBooks(ctx, repository.BookFilter{Limit: 100000})
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to list books: %v", err))
 		return
@@ -683,7 +683,7 @@ func normalizeIdentifier(id *string) string {
 	return b.String()
 }
 
-var subtitlePatterns = regexp.MustCompile(`(?i)\b(a novel|special edition|expanded edition|collector'?s edition|deluxe edition|anniversary edition|revised edition|first edition|vol\s*\d+|volume\s*\d+|book\s*\d+|part\s*\d+)\b`)
+var subtitlePatterns = regexp.MustCompile(`(?i)\b((?:read|narrated|performed) by .+|unabridged|abridged|audiobook|audio cd|a novel|special edition|expanded edition|collector'?s edition|deluxe edition|anniversary edition|revised edition|first edition|vol\s*\d+|volume\s*\d+|book\s*\d+|part\s*\d+|chapter\s*\d+|track\s*\d+|disc\s*\d+|cd\s*\d+)\b`)
 
 // stripSubtitles strips common edition descriptors.
 func stripSubtitles(s string) string {
