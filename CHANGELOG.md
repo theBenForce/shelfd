@@ -1,3 +1,11 @@
+# [1.12.0](https://github.com/theBenForce/shelfd/compare/v1.11.0...v1.12.0) (2026-10-07)
+
+
+### Features
+
+* **metadata:** add external metadata search and cover auto-population ([#50](https://github.com/theBenForce/shelfd/issues/50)) ([72a45ba](https://github.com/theBenForce/shelfd/commit/72a45bad49d469aa7539f5bd34e6d7b74e83da72))
+* **ui:** add mobile uploads and utilities access and desktop library rescan button ([#49](https://github.com/theBenForce/shelfd/issues/49)) ([0d3c3c6](https://github.com/theBenForce/shelfd/commit/0d3c3c65a69aeec3343a5056fb460b254ed20b05))
+
 # [1.11.0](https://github.com/theBenForce/shelfd/compare/v1.10.1...v1.11.0) (2026-10-06)
 
 
