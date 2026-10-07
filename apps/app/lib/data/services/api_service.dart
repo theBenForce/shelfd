@@ -11,6 +11,7 @@ import '../models/genre.dart';
 import '../models/highlight.dart';
 import '../models/queue_status.dart';
 import '../models/search_result.dart';
+import '../models/metadata_search_result.dart';
 import '../models/series.dart';
 import '../models/topic.dart';
 import '../models/paginated_books.dart';
@@ -827,5 +828,54 @@ class ApiService {
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final bookData = data['book'] as Map<String, dynamic>? ?? data;
     return Book.fromJson(bookData, baseUrl: baseUrl);
+  }
+
+  Future<List<MetadataSearchResult>> searchMetadata({
+    String? query,
+    String? title,
+    String? author,
+    String? isbn,
+    String? provider,
+  }) async {
+    final queryParams = <String, String>{};
+    if (query != null && query.isNotEmpty) queryParams['q'] = query;
+    if (title != null && title.isNotEmpty) queryParams['title'] = title;
+    if (author != null && author.isNotEmpty) queryParams['author'] = author;
+    if (isbn != null && isbn.isNotEmpty) queryParams['isbn'] = isbn;
+    if (provider != null && provider.isNotEmpty) queryParams['provider'] = provider;
+
+    final response = await client.get(
+      _uri('/api/v1/metadata/search', queryParams.isNotEmpty ? queryParams : null),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final list = jsonDecode(response.body) as List<dynamic>;
+    return list
+        .map((item) => MetadataSearchResult.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> fetchBookCoverFromUrl(String bookId, String coverUrl) async {
+    final response = await client.post(
+      _uri('/api/v1/books/$bookId/cover/fetch'),
+      headers: _headers(),
+      body: jsonEncode({'cover_url': coverUrl}),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+  }
+
+  Future<void> fetchJobCoverFromUrl(String jobId, String coverUrl) async {
+    final response = await client.post(
+      _uri('/api/v1/books/upload/jobs/$jobId/cover/fetch'),
+      headers: _headers(),
+      body: jsonEncode({'cover_url': coverUrl}),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
   }
 }

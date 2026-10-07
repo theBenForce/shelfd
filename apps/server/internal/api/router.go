@@ -47,6 +47,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	queueHandler := NewQueueHandler(cfg.Repo, cfg.Worker, cfg.UploadWorker, cfg.Hub)
 	utilHandler := NewUtilityHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
 	audioHandler := NewAudiobookHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, logger)
+	metadataHandler := NewMetadataHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
 
 	auth := AuthMiddleware(cfg.Repo, cfg.JWTSecret)
 
@@ -62,6 +63,9 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/auth/tokens", auth(http.HandlerFunc(authHandler.ListTokens)))
 	mux.Handle("DELETE /api/v1/auth/tokens/{id}", auth(http.HandlerFunc(authHandler.DeleteToken)))
 
+	// Metadata search & auto-populate
+	mux.Handle("GET /api/v1/metadata/search", auth(http.HandlerFunc(metadataHandler.Search)))
+
 	mux.Handle("GET /api/v1/books", auth(http.HandlerFunc(bookHandler.ListBooks)))
 	mux.Handle("POST /api/v1/books/upload", auth(http.HandlerFunc(bookHandler.UploadBook)))
 	mux.Handle("POST /api/v1/books/upload/stage", auth(http.HandlerFunc(bookHandler.StageUploadBook)))
@@ -69,11 +73,13 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/books/upload/jobs/{id}", auth(http.HandlerFunc(bookHandler.GetUploadJob)))
 	mux.Handle("GET /api/v1/books/upload/jobs/{id}/cover", auth(http.HandlerFunc(bookHandler.GetUploadJobCover)))
 	mux.Handle("POST /api/v1/books/upload/jobs/{id}/cover", auth(http.HandlerFunc(bookHandler.UploadJobCover)))
+	mux.Handle("POST /api/v1/books/upload/jobs/{id}/cover/fetch", auth(http.HandlerFunc(metadataHandler.FetchJobCover)))
 	mux.Handle("POST /api/v1/books/upload/jobs/{id}/commit", auth(http.HandlerFunc(bookHandler.CommitUploadJob)))
 	mux.Handle("DELETE /api/v1/books/upload/jobs/{id}", auth(http.HandlerFunc(bookHandler.DeleteUploadJob)))
 	mux.Handle("GET /api/v1/books/{id}", auth(http.HandlerFunc(bookHandler.GetBook)))
 	mux.Handle("PUT /api/v1/books/{id}/metadata", auth(http.HandlerFunc(bookHandler.UpdateBookMetadata)))
 	mux.Handle("POST /api/v1/books/{id}/cover", auth(http.HandlerFunc(bookHandler.UploadBookCover)))
+	mux.Handle("POST /api/v1/books/{id}/cover/fetch", auth(http.HandlerFunc(metadataHandler.FetchBookCover)))
 	mux.Handle("GET /api/v1/books/{id}/download", auth(http.HandlerFunc(bookHandler.DownloadBook)))
 	mux.Handle("GET /api/v1/books/{id}/cover", auth(http.HandlerFunc(bookHandler.GetBookCover)))
 	mux.Handle("GET /api/v1/books/{id}/assets/{path...}", auth(http.HandlerFunc(bookHandler.GetBookAsset)))

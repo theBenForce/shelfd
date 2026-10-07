@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/models/book.dart';
 import '../../../data/models/upload_job.dart';
+import '../book_detail/metadata_search_dialog.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
 import '../../core/tokens.dart';
@@ -343,6 +344,83 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
     }
   }
 
+  Future<void> _searchAndAutoPopulate() async {
+    final result = await showMetadataSearchDialog(
+      context,
+      initialTitle: _titleController.text.trim().isNotEmpty
+          ? _titleController.text.trim()
+          : widget.job.metadata.title,
+      initialAuthor: _authorController.text.trim().isNotEmpty
+          ? _authorController.text.trim()
+          : widget.job.metadata.authors.join(', '),
+    );
+
+    if (result == null) return;
+
+    if (result.title.isNotEmpty) {
+      _titleController.text = result.title;
+    }
+    if (result.author.isNotEmpty) {
+      _authorController.text = result.author;
+    }
+    if (result.description != null && result.description!.isNotEmpty) {
+      _descriptionController.text = result.description!;
+    }
+    if (result.publisher != null && result.publisher!.isNotEmpty) {
+      _publisherController.text = result.publisher!;
+    }
+    if (result.language != null && result.language!.isNotEmpty) {
+      _languageController.text = result.language!;
+    }
+    if (result.series != null && result.series!.isNotEmpty) {
+      _seriesController.text = result.series!;
+    }
+    if (result.seriesSequence != null && result.seriesSequence!.isNotEmpty) {
+      _sequenceController.text = result.seriesSequence!;
+    }
+    if (result.genres.isNotEmpty) {
+      _genresController.text = result.genres.join(', ');
+    }
+
+    if (result.coverUrl != null && result.coverUrl!.isNotEmpty) {
+      try {
+        setState(() {
+          _isUploadingCover = true;
+          _errorMessage = null;
+        });
+        final repo = ref.read(bookRepositoryProvider);
+        await repo.fetchJobCoverFromUrl(widget.job.jobId, result.coverUrl!);
+        if (mounted) {
+          setState(() {
+            _hasCover = true;
+            _isUploadingCover = false;
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _isUploadingCover = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to fetch cover from URL: $e'),
+              backgroundColor: Colors.red.shade700,
+            ),
+          );
+        }
+      }
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Auto-populated metadata from ${result.provider}!'),
+          backgroundColor: AppTokens.charcoalInk,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isMobile = widget.isBottomSheet || Responsive.isMobile(context);
@@ -388,6 +466,17 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
               ],
             ),
           ),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.auto_fix_high, size: 16),
+            label: const Text('Auto-Fill'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTokens.charcoalInk,
+              side: const BorderSide(color: AppTokens.crispBorder),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            ),
+            onPressed: _isSaving || _isDiscarding ? null : _searchAndAutoPopulate,
+          ),
+          const SizedBox(width: AppTokens.space8),
           IconButton(
             icon: const Icon(Icons.close_rounded, size: 20),
             onPressed: _isSaving || _isDiscarding ? null : () => Navigator.of(context).pop(null),
@@ -471,6 +560,36 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
               ],
             ),
           ),
+        ),
+        const SizedBox(height: AppTokens.space8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.upload_file, size: 14),
+                label: const Text('Upload', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTokens.charcoalInk,
+                  side: const BorderSide(color: AppTokens.crispBorder),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                ),
+                onPressed: _isUploadingCover ? null : _pickAndUploadCover,
+              ),
+            ),
+            const SizedBox(width: AppTokens.space8),
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.search, size: 14),
+                label: const Text('Search', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTokens.charcoalInk,
+                  side: const BorderSide(color: AppTokens.crispBorder),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                ),
+                onPressed: _isSaving || _isDiscarding || _isUploadingCover ? null : _searchAndAutoPopulate,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: AppTokens.space12),
 
