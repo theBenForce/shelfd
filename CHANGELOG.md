@@ -1,3 +1,10 @@
+## [1.12.1](https://github.com/theBenForce/shelfd/compare/v1.12.0...v1.12.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **api:** remove scan limit and support audiobook subtitles in FindDuplicates ([#51](https://github.com/theBenForce/shelfd/issues/51)) ([558b2af](https://github.com/theBenForce/shelfd/commit/558b2afa66c304dc6fbcfb4ccaafffe7f3795ee5))
+
 # [1.12.0](https://github.com/theBenForce/shelfd/compare/v1.11.0...v1.12.0) (2026-10-07)
 
 
