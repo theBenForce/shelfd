@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
-import '../../data/models/audiobook.dart';
 import '../../data/models/book.dart';
 import '../../data/repositories/audio_repository.dart';
-import 'audio_player_state.dart';
 import 'providers.dart';
 
 abstract class AudioPlayerEngine {

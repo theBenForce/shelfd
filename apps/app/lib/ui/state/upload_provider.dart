@@ -10,12 +10,18 @@ class PickedEpubFile {
   final String? path;
   final List<int>? bytes;
   final Future<List<int>> Function()? readBytes;
+  final String? coverName;
+  final List<int>? coverBytes;
+  final Future<List<int>> Function()? readCoverBytes;
 
   const PickedEpubFile({
     required this.name,
     this.path,
     this.bytes,
     this.readBytes,
+    this.coverName,
+    this.coverBytes,
+    this.readCoverBytes,
   });
 
   Future<List<int>> getBytes() async {
@@ -23,7 +29,15 @@ class PickedEpubFile {
     if (readBytes != null) return await readBytes!();
     return const [];
   }
+
+  Future<List<int>?> getCoverBytes() async {
+    if (coverBytes != null && coverBytes!.isNotEmpty) return coverBytes!;
+    if (readCoverBytes != null) return await readCoverBytes!();
+    return null;
+  }
 }
+
+typedef PickedUploadFile = PickedEpubFile;
 
 class UploadState {
   final bool isUploading;
@@ -148,12 +162,13 @@ class UploadNotifier extends Notifier<UploadState> {
       final updatedJobs = List<StagedUploadJob>.from(state.stagedJobs);
       final current = updatedJobs[index];
       final newWarnings = <String>[];
+      final isAudio = metadata.bookType == 'audiobook';
       if (metadata.authors.isEmpty ||
           (metadata.authors.length == 1 && metadata.authors[0].toLowerCase() == 'unknown')) {
-        newWarnings.add('No author found in EPUB metadata');
+        newWarnings.add(isAudio ? 'No author found in audiobook metadata' : 'No author found in EPUB metadata');
       }
       if (metadata.title == 'Untitled' || metadata.title.isEmpty) {
-        newWarnings.add('No title found in EPUB metadata');
+        newWarnings.add(isAudio ? 'No title found in audiobook metadata' : 'No title found in EPUB metadata');
       }
 
       // Check duplicate against library state
@@ -185,6 +200,8 @@ class UploadNotifier extends Notifier<UploadState> {
     state = state.copyWith(autoCommit: enabled);
   }
 
+  Future<int> uploadFiles(List<PickedUploadFile> files) => uploadEpubFiles(files);
+
   Future<int> uploadEpubFiles(List<PickedEpubFile> files) async {
     if (files.isEmpty) return 0;
 
@@ -212,8 +229,14 @@ class UploadNotifier extends Notifier<UploadState> {
       try {
         final bytes = await file.getBytes();
         if (bytes.isEmpty) continue;
+        final coverBytes = await file.getCoverBytes();
 
-        final staged = await bookRepo.stageUpload(filename: file.name, bytes: bytes);
+        final staged = await bookRepo.stageUpload(
+          filename: file.name,
+          bytes: bytes,
+          coverFilename: file.coverName,
+          coverBytes: coverBytes,
+        );
         successCount++;
 
         final isDup = staged.isDuplicate ||

@@ -194,7 +194,7 @@ func TestIngesterAndUpload(t *testing.T) {
 
 	// 2. Test Atomic Upload
 	uploadEPUBBytes := createSampleEPUB("Neuromancer", "William Gibson", "Cyberpunk", "Sprawl", 1.0)
-	uploadedBook, err := ingester.SaveUpload(ctx, "William Gibson", "Neuromancer", bytes.NewReader(uploadEPUBBytes))
+	uploadedBook, err := ingester.SaveUpload(ctx, "William Gibson", "Neuromancer", "Neuromancer.epub", bytes.NewReader(uploadEPUBBytes))
 	if err != nil {
 		t.Fatalf("SaveUpload failed: %v", err)
 	}

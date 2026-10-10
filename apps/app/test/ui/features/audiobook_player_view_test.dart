@@ -13,8 +13,6 @@ import 'package:shelf/ui/features/audiobook/widgets/chapter_drawer.dart';
 import 'package:shelf/ui/features/audiobook/widgets/mini_player_bar.dart';
 import 'package:shelf/ui/features/audiobook/widgets/scrubber_bar.dart';
 import 'package:shelf/ui/features/book_detail/book_detail_view.dart';
-import 'package:shelf/ui/state/audio_player_provider.dart';
-import 'package:shelf/ui/state/audio_player_state.dart';
 import 'package:shelf/ui/state/providers.dart';
 
 class _MockBookDetailNotifier extends BookDetailNotifier {

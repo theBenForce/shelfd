@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/duplicate_group.dart';
 
 void main() {

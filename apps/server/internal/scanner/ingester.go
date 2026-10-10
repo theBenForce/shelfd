@@ -79,6 +79,11 @@ func (in *Ingester) SetTaxonomyNormalizer(normalizer TaxonomyNormalizer) {
 	in.taxonomyNormalizer = normalizer
 }
 
+// LibraryDir returns the root library directory path.
+func (in *Ingester) LibraryDir() string {
+	return in.libraryDir
+}
+
 // SyncStatus represents the synchronization outcome for an EPUB file.
 type SyncStatus int
 
@@ -359,10 +364,10 @@ func (in *Ingester) updateModifiedBook(ctx context.Context, book *repository.Boo
 	return book, nil
 }
 
-// SaveUpload securely saves an uploaded EPUB stream directly into Audiobookshelf structure:
-// /library/<Author>/<Title>/<Title>.epub
+// SaveUpload securely saves an uploaded media stream directly into Audiobookshelf structure:
+// /library/<Author>/<Title>/<Title><ext>
 // It performs atomic staging (.tmp file) before final rename to ensure no partial reads by ABS scanners.
-func (in *Ingester) SaveUpload(ctx context.Context, authorName, title string, r io.Reader) (*repository.Book, error) {
+func (in *Ingester) SaveUpload(ctx context.Context, authorName, title, originalFilename string, r io.Reader) (*repository.Book, error) {
 	sanitizedAuthor := SanitizePathSegment(authorName)
 	sanitizedTitle := SanitizePathSegment(title)
 
@@ -371,7 +376,12 @@ func (in *Ingester) SaveUpload(ctx context.Context, authorName, title string, r 
 		return nil, fmt.Errorf("creating book directory: %w", err)
 	}
 
-	finalFilename := sanitizedTitle + ".epub"
+	ext := strings.ToLower(filepath.Ext(originalFilename))
+	if ext == "" {
+		ext = ".epub"
+	}
+
+	finalFilename := sanitizedTitle + ext
 	finalFilePath := filepath.Join(targetDir, finalFilename)
 	tmpFilePath := finalFilePath + ".tmp"
 

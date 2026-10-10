@@ -676,6 +676,8 @@ class ApiService {
   Future<StagedUploadJob> stageUploadBook({
     required String filename,
     required List<int> bytes,
+    String? coverFilename,
+    List<int>? coverBytes,
   }) async {
     final uri = _uri('/api/v1/books/upload/stage');
     final request = http.MultipartRequest('POST', uri);
@@ -689,6 +691,15 @@ class ApiService {
         filename: filename,
       ),
     );
+    if (coverBytes != null && coverBytes.isNotEmpty) {
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'cover',
+          coverBytes,
+          filename: coverFilename ?? 'cover.jpg',
+        ),
+      );
+    }
 
     final streamedResponse = await client.send(request);
     final response = await http.Response.fromStream(streamedResponse);

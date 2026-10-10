@@ -10,6 +10,9 @@ class StagedMetadata {
   final String? language;
   final List<String> genres;
   final bool isDuplicate;
+  final String bookType;
+  final String? narrator;
+  final double? durationSeconds;
 
   const StagedMetadata({
     required this.title,
@@ -21,6 +24,9 @@ class StagedMetadata {
     this.language,
     this.genres = const [],
     this.isDuplicate = false,
+    this.bookType = 'epub',
+    this.narrator,
+    this.durationSeconds,
   });
 
   String get primaryAuthor {
@@ -35,10 +41,20 @@ class StagedMetadata {
     return sanitized.isEmpty ? 'Unknown' : sanitized;
   }
 
-  String get destinationPathPreview {
+  String get destinationPathPreview => destinationPath();
+
+  String destinationPath([String? originalFilename]) {
     final authorSegment = sanitizePathSegment(primaryAuthor);
     final titleSegment = sanitizePathSegment(title.trim().isEmpty ? 'Untitled' : title.trim());
-    return '/library/$authorSegment/$titleSegment/$titleSegment.epub';
+    final String ext;
+    if (originalFilename != null && originalFilename.contains('.')) {
+      ext = '.${originalFilename.split('.').last.toLowerCase()}';
+    } else if (bookType == 'audiobook') {
+      ext = '.m4b';
+    } else {
+      ext = '.epub';
+    }
+    return '/library/$authorSegment/$titleSegment/$titleSegment$ext';
   }
 
   StagedMetadata copyWith({
@@ -51,6 +67,9 @@ class StagedMetadata {
     String? language,
     List<String>? genres,
     bool? isDuplicate,
+    String? bookType,
+    String? narrator,
+    double? durationSeconds,
   }) {
     return StagedMetadata(
       title: title ?? this.title,
@@ -62,6 +81,9 @@ class StagedMetadata {
       language: language ?? this.language,
       genres: genres ?? this.genres,
       isDuplicate: isDuplicate ?? this.isDuplicate,
+      bookType: bookType ?? this.bookType,
+      narrator: narrator ?? this.narrator,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
     );
   }
 
@@ -87,6 +109,9 @@ class StagedMetadata {
       language: json['language'] as String?,
       genres: rawGenres.map((g) => g.toString()).toList(),
       isDuplicate: json['is_duplicate'] as bool? ?? false,
+      bookType: json['book_type'] as String? ?? 'epub',
+      narrator: json['narrator'] as String?,
+      durationSeconds: (json['duration_seconds'] as num?)?.toDouble(),
     );
   }
 
@@ -102,6 +127,9 @@ class StagedMetadata {
       if (language != null && language!.trim().isNotEmpty) 'language': language!.trim(),
       if (genres.isNotEmpty) 'genres': genres,
       if (isDuplicate) 'is_duplicate': isDuplicate,
+      'book_type': bookType,
+      if (narrator != null && narrator!.trim().isNotEmpty) 'narrator': narrator!.trim(),
+      if (durationSeconds != null) 'duration_seconds': durationSeconds,
     };
   }
 }
@@ -157,12 +185,13 @@ class StagedUploadJob {
     final metadata = StagedMetadata.fromJson(metaJson);
     final warnings = rawWarnings.map((w) => w.toString()).toList();
     if (warnings.isEmpty) {
+      final isAudio = metadata.bookType == 'audiobook';
       if (metadata.authors.isEmpty ||
           (metadata.authors.length == 1 && metadata.authors[0].toLowerCase() == 'unknown')) {
-        warnings.add('No author found in EPUB metadata');
+        warnings.add(isAudio ? 'No author found in audiobook metadata' : 'No author found in EPUB metadata');
       }
       if (metadata.title == 'Untitled' || metadata.title.isEmpty) {
-        warnings.add('No title found in EPUB metadata');
+        warnings.add(isAudio ? 'No title found in audiobook metadata' : 'No title found in EPUB metadata');
       }
     }
 
@@ -206,6 +235,10 @@ class StagedUploadJob {
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
+
+  String get destinationPath => metadata.destinationPath(filename);
+  String destinationPathPreview([String? originalFilename]) =>
+      metadata.destinationPath(originalFilename ?? filename);
 
   Map<String, dynamic> toJson() {
     return {
