@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -1585,6 +1586,268 @@ func TestAPI_StagedUploadAndCommit(t *testing.T) {
 	stagedDiskPath := filepath.Join(f.dataDir, "uploads", stageResp.JobID+".epub")
 	if _, err := os.Stat(stagedDiskPath); !os.IsNotExist(err) {
 		t.Errorf("expected staged file to be cleaned up after commit, but still exists: %s", stagedDiskPath)
+	}
+}
+
+func createSyntheticMP3(title, author, narrator string, durationMs uint32, coverBytes []byte) []byte {
+	var id3Buf bytes.Buffer
+
+	writeID3FrameHelper(&id3Buf, "TIT2", "\x03"+title)
+	writeID3FrameHelper(&id3Buf, "TPE1", "\x03"+author)
+	if narrator != "" {
+		writeID3FrameHelper(&id3Buf, "TPE2", "\x03"+narrator)
+	}
+	if durationMs > 0 {
+		writeID3FrameHelper(&id3Buf, "TLEN", fmt.Sprintf("\x00%d", durationMs))
+	}
+
+	if len(coverBytes) > 0 {
+		var apicBuf bytes.Buffer
+		apicBuf.WriteByte(0)
+		apicBuf.WriteString("image/jpeg\x00")
+		apicBuf.WriteByte(3)
+		apicBuf.WriteString("Cover\x00")
+		apicBuf.Write(coverBytes)
+		writeID3FrameHelper(&id3Buf, "APIC", string(apicBuf.Bytes()))
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("ID3\x03\x00\x00")
+	tagSize := id3Buf.Len()
+	buf.Write([]byte{
+		byte((tagSize >> 21) & 0x7F),
+		byte((tagSize >> 14) & 0x7F),
+		byte((tagSize >> 7) & 0x7F),
+		byte(tagSize & 0x7F),
+	})
+	buf.Write(id3Buf.Bytes())
+	buf.Write(make([]byte, 1024))
+	return buf.Bytes()
+}
+
+func writeID3FrameHelper(w *bytes.Buffer, frameID string, payload string) {
+	w.WriteString(frameID)
+	binary.Write(w, binary.BigEndian, uint32(len(payload)))
+	w.Write([]byte{0, 0})
+	w.WriteString(payload)
+}
+
+func TestAPI_StagedUploadAudiobookAndCommit(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+
+	coverData := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x01, 0x02}
+	audioBytes := createSyntheticMP3("Project Hail Mary", "Andy Weir", "Ray Porter", 180000, coverData)
+
+	// 1. Stage upload via POST /api/v1/books/upload/stage
+	body := &bytes.Buffer{}
+	mpw := multipart.NewWriter(body)
+	part, _ := mpw.CreateFormFile("file", "project_hail_mary.mp3")
+	part.Write(audioBytes)
+	mpw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/stage", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", mpw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on stage upload, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var stageResp struct {
+		JobID    string `json:"job_id"`
+		Status   string `json:"status"`
+		Filename string `json:"filename"`
+		HasCover bool   `json:"has_cover"`
+		Metadata struct {
+			Title           string   `json:"title"`
+			Authors         []string `json:"authors"`
+			Narrator        string   `json:"narrator"`
+			BookType        string   `json:"book_type"`
+			DurationSeconds *float64 `json:"duration_seconds"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &stageResp); err != nil {
+		t.Fatalf("failed to unmarshal stage response: %v", err)
+	}
+
+	if stageResp.JobID == "" || stageResp.Status != "staged" {
+		t.Fatalf("expected staged job status, got %+v", stageResp)
+	}
+	if !stageResp.HasCover {
+		t.Errorf("expected has_cover to be true for embedded cover")
+	}
+	if stageResp.Metadata.BookType != "audiobook" {
+		t.Errorf("expected book_type audiobook, got %q", stageResp.Metadata.BookType)
+	}
+	if stageResp.Metadata.Title != "Project Hail Mary" {
+		t.Errorf("expected title Project Hail Mary, got %q", stageResp.Metadata.Title)
+	}
+	if len(stageResp.Metadata.Authors) == 0 || stageResp.Metadata.Authors[0] != "Andy Weir" {
+		t.Errorf("expected author Andy Weir, got %+v", stageResp.Metadata.Authors)
+	}
+	if stageResp.Metadata.Narrator != "Ray Porter" {
+		t.Errorf("expected narrator Ray Porter, got %q", stageResp.Metadata.Narrator)
+	}
+	if stageResp.Metadata.DurationSeconds == nil || *stageResp.Metadata.DurationSeconds != 180 {
+		t.Errorf("expected duration 180s, got %+v", stageResp.Metadata.DurationSeconds)
+	}
+
+	// 2. Authenticated cover preview via shelfd_token cookie
+	coverReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/"+stageResp.JobID+"/cover", nil)
+	coverReq.AddCookie(&http.Cookie{Name: "shelfd_token", Value: token})
+	coverRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(coverRec, coverReq)
+
+	if coverRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on cover preview, got %d: %s", coverRec.Code, coverRec.Body.String())
+	}
+	if coverRec.Body.Len() != len(coverData) {
+		t.Errorf("expected cover length %d, got %d", len(coverData), coverRec.Body.Len())
+	}
+
+	// 3. Commit upload with user-edited metadata via POST /api/v1/books/upload/jobs/{id}/commit
+	commitBody, _ := json.Marshal(map[string]any{
+		"title":    "Project Hail Mary (Unabridged)",
+		"author":   "Andy Weir",
+		"narrator": "Ray Porter",
+		"genres":   []string{"Science Fiction"},
+	})
+
+	commitReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/jobs/"+stageResp.JobID+"/commit", bytes.NewReader(commitBody))
+	commitReq.Header.Set("Authorization", "Bearer "+token)
+	commitReq.Header.Set("Content-Type", "application/json")
+	commitRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(commitRec, commitReq)
+
+	if commitRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created on commit, got %d: %s", commitRec.Code, commitRec.Body.String())
+	}
+
+	var createdBook repository.Book
+	if err := json.Unmarshal(commitRec.Body.Bytes(), &createdBook); err != nil {
+		t.Fatalf("failed to unmarshal created book: %v", err)
+	}
+
+	if createdBook.BookType != "audiobook" {
+		t.Errorf("expected BookType audiobook, got %q", createdBook.BookType)
+	}
+	if createdBook.Title != "Project Hail Mary (Unabridged)" {
+		t.Errorf("expected Title 'Project Hail Mary (Unabridged)', got %q", createdBook.Title)
+	}
+	expectedRel := filepath.Join("Andy Weir", "Project Hail Mary (Unabridged)", "Project Hail Mary (Unabridged).mp3")
+	if createdBook.FilePath != expectedRel {
+		t.Errorf("expected FilePath %s, got %s", expectedRel, createdBook.FilePath)
+	}
+
+	// 4. Verify file was saved to /library/<Author>/<Title>/<Title>.mp3 and is unmutated
+	finalDiskPath := filepath.Join(f.libDir, expectedRel)
+	savedBytes, err := os.ReadFile(finalDiskPath)
+	if err != nil {
+		t.Fatalf("final audio not found on disk at %s: %v", finalDiskPath, err)
+	}
+	if !bytes.Equal(savedBytes, audioBytes) {
+		t.Errorf("audiobook file was modified during commit")
+	}
+
+	// 5. Verify cover was created in library folder
+	libCoverPath := filepath.Join(f.libDir, "Andy Weir", "Project Hail Mary (Unabridged)", "cover.jpg")
+	if data, err := os.ReadFile(libCoverPath); err != nil {
+		t.Fatalf("expected cover.jpg in library folder, not found: %v", err)
+	} else if !bytes.Equal(data, coverData) {
+		t.Errorf("expected library cover.jpg to match embedded cover bytes")
+	}
+
+	// 6. Verify staged file was removed from dataDir/uploads
+	stagedDiskPath := filepath.Join(f.dataDir, "uploads", stageResp.JobID+".mp3")
+	if _, err := os.Stat(stagedDiskPath); !os.IsNotExist(err) {
+		t.Errorf("expected staged audio file to be cleaned up after commit, but still exists: %s", stagedDiskPath)
+	}
+}
+
+func TestAPI_StageUploadWithAttachedCover(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+
+	// Create audio file with NO embedded cover
+	audioBytes := createSyntheticMP3("The Martian", "Andy Weir", "R.C. Bray", 240000, nil)
+	externalCoverData := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x99, 0x88}
+
+	// Stage upload via POST /api/v1/books/upload/stage with attached cover
+	body := &bytes.Buffer{}
+	mpw := multipart.NewWriter(body)
+	part, _ := mpw.CreateFormFile("file", "the_martian.m4b")
+	part.Write(audioBytes)
+	coverPart, _ := mpw.CreateFormFile("cover", "cover.jpg")
+	coverPart.Write(externalCoverData)
+	mpw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/stage", body)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", mpw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on stage upload with cover, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var stageResp struct {
+		JobID    string `json:"job_id"`
+		Status   string `json:"status"`
+		HasCover bool   `json:"has_cover"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &stageResp); err != nil {
+		t.Fatalf("failed to unmarshal stage response: %v", err)
+	}
+
+	if !stageResp.HasCover {
+		t.Errorf("expected has_cover to be true for attached cover")
+	}
+
+	// Verify cover preview returns the attached cover data
+	coverReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/"+stageResp.JobID+"/cover", nil)
+	coverReq.AddCookie(&http.Cookie{Name: "shelfd_token", Value: token})
+	coverRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(coverRec, coverReq)
+
+	if coverRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on cover preview, got %d: %s", coverRec.Code, coverRec.Body.String())
+	}
+	if !bytes.Equal(coverRec.Body.Bytes(), externalCoverData) {
+		t.Errorf("expected attached cover bytes, got %q", coverRec.Body.Bytes())
+	}
+
+	// Commit upload
+	commitBody, _ := json.Marshal(map[string]any{
+		"title":    "The Martian",
+		"author":   "Andy Weir",
+		"narrator": "R.C. Bray",
+	})
+	commitReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/jobs/"+stageResp.JobID+"/commit", bytes.NewReader(commitBody))
+	commitReq.Header.Set("Authorization", "Bearer "+token)
+	commitReq.Header.Set("Content-Type", "application/json")
+	commitRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(commitRec, commitReq)
+
+	if commitRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created on commit, got %d: %s", commitRec.Code, commitRec.Body.String())
+	}
+
+	// Verify cover was written to library folder
+	libCoverPath := filepath.Join(f.libDir, "Andy Weir", "The Martian", "cover.jpg")
+	if data, err := os.ReadFile(libCoverPath); err != nil {
+		t.Fatalf("expected cover.jpg in library folder, not found: %v", err)
+	} else if !bytes.Equal(data, externalCoverData) {
+		t.Errorf("expected library cover.jpg to match attached cover bytes")
 	}
 }
 

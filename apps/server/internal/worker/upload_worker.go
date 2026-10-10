@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/shelfd/shelfd/internal/audio"
 	"github.com/shelfd/shelfd/internal/epub"
 	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/repository"
@@ -92,8 +94,10 @@ func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	// Always ensure staged file is removed when done with processing
+	// Always ensure staged file and staged cover are removed when done with processing
 	defer os.Remove(job.StagedPath)
+	stagedCoverPath := filepath.Join(filepath.Dir(job.StagedPath), job.ID+".cover")
+	defer os.Remove(stagedCoverPath)
 
 	// Verify staged file exists
 	if _, err := os.Stat(job.StagedPath); os.IsNotExist(err) {
@@ -103,30 +107,49 @@ func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 
-	// Parse EPUB metadata
-	epubReader, err := epub.Open(job.StagedPath)
-	if err != nil {
-		errMsg := fmt.Sprintf("invalid epub archive: %v", err)
-		_ = w.repo.UpdateUploadJobStatus(ctx, job.ID, "failed", nil, &errMsg)
-		w.logger.Error("upload job failed: opening epub", "job_id", job.ID, "error", err)
-		return true, nil
-	}
-	parsed, err := epubReader.ParseBook()
-	epubReader.Close()
-	if err != nil {
-		errMsg := fmt.Sprintf("failed to parse epub metadata: %v", err)
-		_ = w.repo.UpdateUploadJobStatus(ctx, job.ID, "failed", nil, &errMsg)
-		w.logger.Error("upload job failed: parsing metadata", "job_id", job.ID, "error", err)
-		return true, nil
-	}
-
+	fileType, _ := scanner.DetectFileType(job.Filename)
 	author := "Unknown"
-	if len(parsed.Authors) > 0 && strings.TrimSpace(parsed.Authors[0].Name) != "" {
-		author = parsed.Authors[0].Name
-	}
 	title := strings.TrimSuffix(job.Filename, filepath.Ext(job.Filename))
-	if strings.TrimSpace(parsed.Title) != "" {
-		title = parsed.Title
+
+	if fileType == "epub" {
+		epubReader, err := epub.Open(job.StagedPath)
+		if err != nil {
+			errMsg := fmt.Sprintf("invalid epub archive: %v", err)
+			_ = w.repo.UpdateUploadJobStatus(ctx, job.ID, "failed", nil, &errMsg)
+			w.logger.Error("upload job failed: opening epub", "job_id", job.ID, "error", err)
+			return true, nil
+		}
+		parsed, err := epubReader.ParseBook()
+		epubReader.Close()
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to parse epub metadata: %v", err)
+			_ = w.repo.UpdateUploadJobStatus(ctx, job.ID, "failed", nil, &errMsg)
+			w.logger.Error("upload job failed: parsing metadata", "job_id", job.ID, "error", err)
+			return true, nil
+		}
+
+		if len(parsed.Authors) > 0 && strings.TrimSpace(parsed.Authors[0].Name) != "" {
+			author = parsed.Authors[0].Name
+		}
+		if strings.TrimSpace(parsed.Title) != "" {
+			title = parsed.Title
+		}
+	} else {
+		meta, err := audio.ExtractMetadata(job.StagedPath)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to parse audio metadata: %v", err)
+			_ = w.repo.UpdateUploadJobStatus(ctx, job.ID, "failed", nil, &errMsg)
+			w.logger.Error("upload job failed: parsing audio metadata", "job_id", job.ID, "error", err)
+			return true, nil
+		}
+		if meta.Author != "" {
+			author = meta.Author
+		}
+		if meta.Title != "" {
+			title = meta.Title
+		} else if meta.Album != "" {
+			title = meta.Album
+		}
 	}
 
 	stagedFile, err := os.Open(job.StagedPath)
@@ -138,7 +161,21 @@ func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
 	}
 	defer stagedFile.Close()
 
-	book, err := w.ingester.SaveUpload(ctx, author, title, stagedFile)
+	// If staged cover exists, copy it to library folder
+	if coverBytes, err := os.ReadFile(stagedCoverPath); err == nil && len(coverBytes) > 0 {
+		ext := ".jpg"
+		ct := http.DetectContentType(coverBytes)
+		if strings.Contains(ct, "png") {
+			ext = ".png"
+		} else if strings.Contains(ct, "webp") {
+			ext = ".webp"
+		}
+		bookDir := filepath.Join(w.ingester.LibraryDir(), scanner.SanitizePathSegment(author), scanner.SanitizePathSegment(title))
+		_ = os.MkdirAll(bookDir, 0755)
+		_ = os.WriteFile(filepath.Join(bookDir, "cover"+ext), coverBytes, 0644)
+	}
+
+	book, err := w.ingester.SaveUpload(ctx, author, title, job.Filename, stagedFile)
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to ingest book into library: %v", err)
 		_ = w.repo.UpdateUploadJobStatus(ctx, job.ID, "failed", nil, &errMsg)
@@ -160,7 +197,7 @@ func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
 		})
 	}
 
-	if w.chapterWorker != nil {
+	if w.chapterWorker != nil && fileType == "epub" {
 		w.chapterWorker.Trigger()
 	}
 
