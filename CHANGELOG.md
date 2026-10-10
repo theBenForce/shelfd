@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/theBenForce/shelfd/compare/v1.12.1...v1.13.0) (2026-10-10)
+
+
+### Features
+
+* **uploads:** support audiobook uploads and sibling cover auto-association ([#52](https://github.com/theBenForce/shelfd/issues/52)) ([ca48395](https://github.com/theBenForce/shelfd/commit/ca48395fbddb602f3075367815af81ac4cdc3906))
+
 ## [1.12.1](https://github.com/theBenForce/shelfd/compare/v1.12.0...v1.12.1) (2026-10-07)
 
 
