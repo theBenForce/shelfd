@@ -42,6 +42,7 @@ class AppTypography {
     FontWeight fontWeight = FontWeight.w400,
     Color color = AppTokens.mutedCopy,
     double lineHeight = 1.5,
+    FontStyle? fontStyle,
   }) {
     return TextStyle(
       fontFamilyFallback: sansFallbacks,
@@ -49,6 +50,7 @@ class AppTypography {
       fontWeight: fontWeight,
       color: color,
       height: lineHeight,
+      fontStyle: fontStyle,
     );
   }
 

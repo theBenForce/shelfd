@@ -57,7 +57,7 @@ void main() {
     expect(find.text('Uploads & Ingestion'), findsOneWidget);
     expect(find.text('Auto-add'), findsOneWidget);
     expect(find.text('Drag & drop EPUB files or nested folders here'), findsOneWidget);
-    expect(find.text('Browse EPUB Files'), findsOneWidget);
+    expect(find.text('Browse Files'), findsOneWidget);
     expect(find.text('Select Folder'), findsOneWidget);
     expect(find.text('No Pending Uploads'), findsOneWidget);
   });
@@ -165,5 +165,60 @@ void main() {
     expect(find.text('Target Library Destination'), findsOneWidget);
     expect(find.text('/library/Frank Herbert/Dune/Dune.epub'), findsOneWidget);
     expect(find.text('Save & Add to Library'), findsOneWidget);
+  });
+
+  testWidgets('UploadsView renders audiobook staged card and narrator field', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+
+    const audioJob = StagedUploadJob(
+      jobId: 'audio-job-1',
+      status: 'staged',
+      filename: 'les_miserables.mp3',
+      metadata: StagedMetadata(
+        title: 'Les Misérables',
+        authors: ['Victor Hugo'],
+        bookType: 'audiobook',
+        narrator: 'George Guidall',
+        durationSeconds: 216000.0,
+      ),
+      hasCover: false,
+      warnings: [],
+    );
+
+    const state = UploadState(
+      stagedJobs: [audioJob],
+      selectedJobId: 'audio-job-1',
+      autoCommit: false,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          uploadProvider.overrideWith(() => FakeUploadNotifier(state)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const UploadsView(),
+        ),
+      ),
+    );
+
+    // Audio badge and narrator in card
+    expect(find.text('AUDIO'), findsOneWidget);
+    expect(find.text('Narrated by George Guidall'), findsOneWidget);
+    expect(find.text('les_miserables.mp3'), findsOneWidget);
+
+    // Metadata Inspector for audiobook
+    expect(find.text('Narrator (optional)'), findsOneWidget);
+    expect(find.text('George Guidall'), findsOneWidget);
+    expect(find.text('/library/Victor Hugo/Les Misérables/Les Misérables.mp3'), findsOneWidget);
   });
 }

@@ -24,14 +24,15 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
     try {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['epub'],
+        allowedExtensions: ['epub', 'm4b', 'mp3', 'm4a', 'flac'],
+        allowMultiple: true,
       );
 
       if (result.isEmpty) return;
 
       final pickedList = <PickedEpubFile>[];
       for (final f in result) {
-        if (!f.name.toLowerCase().endsWith('.epub')) continue;
+        if (!isSupportedBook(f.name)) continue;
         pickedList.add(PickedEpubFile(
           name: f.name,
           path: f.path,
@@ -45,7 +46,7 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to pick EPUB files: $e')),
+          SnackBar(content: Text('Failed to pick files: $e')),
         );
       }
     }
@@ -72,15 +73,22 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
     setState(() => _isDraggingOver = false);
     if (details.files.isEmpty) return;
 
-    final pickedList = <PickedEpubFile>[];
+    final droppedBooks = <PickedEpubFile>[];
+    final droppedCovers = <PickedEpubFile>[];
 
     for (final item in details.files) {
       final path = item.path;
       if (path.isNotEmpty && isDirectoryPath(path)) {
-        final nestedEpubs = await scanPathForEpubs(path);
-        pickedList.addAll(nestedEpubs);
-      } else if (item.name.toLowerCase().endsWith('.epub')) {
-        pickedList.add(PickedEpubFile(
+        final nestedBooks = await scanPathForEpubs(path);
+        droppedBooks.addAll(nestedBooks);
+      } else if (isSupportedBook(item.name)) {
+        droppedBooks.add(PickedEpubFile(
+          name: item.name,
+          path: item.path.isNotEmpty ? item.path : null,
+          readBytes: () => item.readAsBytes(),
+        ));
+      } else if (isSupportedCover(item.name)) {
+        droppedCovers.add(PickedEpubFile(
           name: item.name,
           path: item.path.isNotEmpty ? item.path : null,
           readBytes: () => item.readAsBytes(),
@@ -88,10 +96,12 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
       }
     }
 
+    final pickedList = matchLooseFilesWithCovers(droppedBooks, droppedCovers);
+
     if (pickedList.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No valid .epub files detected in dropped items')),
+          const SnackBar(content: Text('No valid ebook or audiobook files detected in dropped items')),
         );
       }
       return;
@@ -111,7 +121,7 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
       backgroundColor: AppTokens.boneBackground,
       appBar: ShelfdTopBar(
         title: 'Uploads & Ingestion',
-        subtitle: 'Ingest EPUB files or folders with nested structures',
+        subtitle: 'Ingest EPUB & Audiobook files or folders with nested structures',
         actions: [
           Row(
             mainAxisSize: MainAxisSize.min,
@@ -305,7 +315,7 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
                 ),
                 onPressed: _pickFiles,
                 icon: const Icon(Icons.insert_drive_file_outlined, size: 16),
-                label: const Text('Browse EPUB Files', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                label: const Text('Browse Files', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
               ),
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
@@ -398,7 +408,7 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
             ),
             const SizedBox(height: AppTokens.space4),
             Text(
-              'EPUBs staged for review will appear here.',
+              'EPUBs and audiobooks staged for review will appear here.',
               style: AppTypography.bodySans(fontSize: 13, color: AppTokens.mutedCopy),
             ),
           ],
@@ -579,13 +589,25 @@ class _StagedJobCard extends ConsumerWidget {
                         fit: BoxFit.cover,
                         errorBuilder: (context, error, stackTrace) {
                           debugPrint('Cover load error: $error');
-                          return const Center(
-                            child: Icon(Icons.book_outlined, size: 20, color: AppTokens.mutedCopy),
+                          return Center(
+                            child: Icon(
+                              job.metadata.bookType == 'audiobook'
+                                  ? Icons.headphones_outlined
+                                  : Icons.book_outlined,
+                              size: 20,
+                              color: AppTokens.mutedCopy,
+                            ),
                           );
                         },
                       )
-                    : const Center(
-                        child: Icon(Icons.book_outlined, size: 20, color: AppTokens.mutedCopy),
+                    : Center(
+                        child: Icon(
+                          job.metadata.bookType == 'audiobook'
+                              ? Icons.headphones_outlined
+                              : Icons.book_outlined,
+                          size: 20,
+                          color: AppTokens.mutedCopy,
+                        ),
                       ),
               ),
               const SizedBox(width: AppTokens.space12),
@@ -594,11 +616,43 @@ class _StagedJobCard extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      job.metadata.title,
-                      style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            job.metadata.title,
+                            style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: job.metadata.bookType == 'audiobook'
+                                ? const Color(0xFFE7F5FF)
+                                : AppTokens.boneContainer,
+                            borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                            border: Border.all(
+                              color: job.metadata.bookType == 'audiobook'
+                                  ? const Color(0xFFA5D8FF)
+                                  : AppTokens.crispBorder,
+                            ),
+                          ),
+                          child: Text(
+                            job.metadata.bookType == 'audiobook' ? 'AUDIO' : 'EPUB',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              color: job.metadata.bookType == 'audiobook'
+                                  ? const Color(0xFF1971C2)
+                                  : AppTokens.mutedCopy,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -607,6 +661,21 @@ class _StagedJobCard extends ConsumerWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (job.metadata.bookType == 'audiobook' &&
+                        job.metadata.narrator != null &&
+                        job.metadata.narrator!.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Narrated by ${job.metadata.narrator}',
+                        style: AppTypography.bodySans(
+                          fontSize: 11,
+                          color: AppTokens.mutedCopy,
+                          fontStyle: FontStyle.italic,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                     const SizedBox(height: 4),
                     Text(
                       job.filename,
@@ -689,6 +758,7 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
 
   late final TextEditingController _titleController;
   late final TextEditingController _authorController;
+  late final TextEditingController _narratorController;
   late final TextEditingController _seriesController;
   late final TextEditingController _sequenceController;
   late final TextEditingController _genresController;
@@ -706,6 +776,7 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
     _authorController = TextEditingController(
       text: m.authors.isNotEmpty && m.authors.first != 'Unknown' ? m.authors.join(', ') : '',
     );
+    _narratorController = TextEditingController(text: m.narrator ?? '');
     _seriesController = TextEditingController(text: m.series ?? '');
     _sequenceController = TextEditingController(
       text: m.sequenceNumber != null ? m.sequenceNumber.toString() : '',
@@ -715,6 +786,7 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
 
     _titleController.addListener(_onTextChanged);
     _authorController.addListener(_onTextChanged);
+    _narratorController.addListener(_onTextChanged);
     _seriesController.addListener(_onTextChanged);
     _sequenceController.addListener(_onTextChanged);
     _genresController.addListener(_onTextChanged);
@@ -743,6 +815,7 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
       sequenceNumber: seq,
       genres: genresList,
       description: _descriptionController.text.trim().isNotEmpty ? _descriptionController.text.trim() : null,
+      narrator: _narratorController.text.trim().isNotEmpty ? _narratorController.text.trim() : null,
     );
 
     ref.read(uploadProvider.notifier).updateStagedMetadata(widget.job.jobId, update);
@@ -753,12 +826,14 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
   void dispose() {
     _titleController.removeListener(_onTextChanged);
     _authorController.removeListener(_onTextChanged);
+    _narratorController.removeListener(_onTextChanged);
     _seriesController.removeListener(_onTextChanged);
     _sequenceController.removeListener(_onTextChanged);
     _genresController.removeListener(_onTextChanged);
     _descriptionController.removeListener(_onTextChanged);
     _titleController.dispose();
     _authorController.dispose();
+    _narratorController.dispose();
     _seriesController.dispose();
     _sequenceController.dispose();
     _genresController.dispose();
@@ -775,7 +850,10 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
     final titleSegment = StagedMetadata.sanitizePathSegment(
       rawTitle.isNotEmpty ? rawTitle : 'Untitled',
     );
-    return '/library/$authorSegment/$titleSegment/$titleSegment.epub';
+    final ext = widget.job.filename.contains('.')
+        ? '.${widget.job.filename.split('.').last.toLowerCase()}'
+        : (widget.job.metadata.bookType == 'audiobook' ? '.m4b' : '.epub');
+    return '/library/$authorSegment/$titleSegment/$titleSegment$ext';
   }
 
   bool get _isDuplicateWarning {
@@ -849,13 +927,14 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
 
     final seq = double.tryParse(_sequenceController.text.trim());
 
-    final update = StagedMetadata(
+    final update = widget.job.metadata.copyWith(
       title: _titleController.text.trim(),
       authors: authorsList.isNotEmpty ? authorsList : ['Unknown'],
       series: _seriesController.text.trim().isNotEmpty ? _seriesController.text.trim() : null,
       sequenceNumber: seq,
       genres: genresList,
       description: _descriptionController.text.trim().isNotEmpty ? _descriptionController.text.trim() : null,
+      narrator: _narratorController.text.trim().isNotEmpty ? _narratorController.text.trim() : null,
     );
 
     final book = await ref.read(uploadProvider.notifier).commitJob(widget.job.jobId, update);
@@ -1089,6 +1168,18 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
               validator: (v) => (v == null || v.trim().isEmpty) ? 'Author cannot be empty' : null,
             ),
             const SizedBox(height: AppTokens.space12),
+
+            if (widget.job.metadata.bookType == 'audiobook') ...[
+              TextFormField(
+                controller: _narratorController,
+                decoration: const InputDecoration(
+                  labelText: 'Narrator (optional)',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: AppTokens.space12),
+            ],
 
             Row(
               children: [

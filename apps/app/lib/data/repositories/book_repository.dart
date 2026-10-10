@@ -177,8 +177,15 @@ class BookRepository {
   Future<StagedUploadJob> stageUpload({
     required String filename,
     required List<int> bytes,
+    String? coverFilename,
+    List<int>? coverBytes,
   }) =>
-      apiService.stageUploadBook(filename: filename, bytes: bytes);
+      apiService.stageUploadBook(
+        filename: filename,
+        bytes: bytes,
+        coverFilename: coverFilename,
+        coverBytes: coverBytes,
+      );
 
   Future<Book> commitUpload(String jobId, StagedMetadata metadata) =>
       apiService.commitUploadJob(jobId, metadata);

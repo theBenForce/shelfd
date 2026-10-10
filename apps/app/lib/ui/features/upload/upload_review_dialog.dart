@@ -69,6 +69,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
 
   late final TextEditingController _titleController;
   late final TextEditingController _authorController;
+  late final TextEditingController _narratorController;
   late final TextEditingController _seriesController;
   late final TextEditingController _sequenceController;
   late final TextEditingController _genresController;
@@ -91,6 +92,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
     _authorController = TextEditingController(
       text: m.authors.isNotEmpty && m.authors.first != 'Unknown' ? m.authors.join(', ') : '',
     );
+    _narratorController = TextEditingController(text: m.narrator ?? '');
     _seriesController = TextEditingController(text: m.series ?? '');
     _sequenceController = TextEditingController(
       text: m.sequenceNumber != null ? m.sequenceNumber.toString() : '',
@@ -102,6 +104,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
 
     _titleController.addListener(_onTextChanged);
     _authorController.addListener(_onTextChanged);
+    _narratorController.addListener(_onTextChanged);
     _seriesController.addListener(_onTextChanged);
     _sequenceController.addListener(_onTextChanged);
     _genresController.addListener(_onTextChanged);
@@ -134,6 +137,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
       publisher: _publisherController.text.trim().isNotEmpty ? _publisherController.text.trim() : null,
       language: _languageController.text.trim().isNotEmpty ? _languageController.text.trim() : null,
       description: _descriptionController.text.trim().isNotEmpty ? _descriptionController.text.trim() : null,
+      narrator: _narratorController.text.trim().isNotEmpty ? _narratorController.text.trim() : null,
     );
 
     ref.read(uploadProvider.notifier).updateStagedMetadata(widget.job.jobId, update);
@@ -144,6 +148,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
   void dispose() {
     _titleController.removeListener(_onTextChanged);
     _authorController.removeListener(_onTextChanged);
+    _narratorController.removeListener(_onTextChanged);
     _seriesController.removeListener(_onTextChanged);
     _sequenceController.removeListener(_onTextChanged);
     _genresController.removeListener(_onTextChanged);
@@ -152,6 +157,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
     _descriptionController.removeListener(_onTextChanged);
     _titleController.dispose();
     _authorController.dispose();
+    _narratorController.dispose();
     _seriesController.dispose();
     _sequenceController.dispose();
     _genresController.dispose();
@@ -170,7 +176,10 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
     final titleSegment = StagedMetadata.sanitizePathSegment(
       rawTitle.isNotEmpty ? rawTitle : 'Untitled',
     );
-    return '/library/$authorSegment/$titleSegment/$titleSegment.epub';
+    final ext = widget.job.filename.contains('.')
+        ? '.${widget.job.filename.split('.').last.toLowerCase()}'
+        : (widget.job.metadata.bookType == 'audiobook' ? '.m4b' : '.epub');
+    return '/library/$authorSegment/$titleSegment/$titleSegment$ext';
   }
 
   bool get _hasMissingAuthorWarning {
@@ -273,7 +282,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
 
       final seq = double.tryParse(_sequenceController.text.trim());
 
-      final update = StagedMetadata(
+      final update = widget.job.metadata.copyWith(
         title: _titleController.text.trim(),
         authors: authorsList.isNotEmpty ? authorsList : ['Unknown'],
         series: _seriesController.text.trim().isNotEmpty ? _seriesController.text.trim() : null,
@@ -282,6 +291,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
         publisher: _publisherController.text.trim().isNotEmpty ? _publisherController.text.trim() : null,
         language: _languageController.text.trim().isNotEmpty ? _languageController.text.trim() : null,
         description: _descriptionController.text.trim().isNotEmpty ? _descriptionController.text.trim() : null,
+        narrator: _narratorController.text.trim().isNotEmpty ? _narratorController.text.trim() : null,
       );
 
       final book = await ref.read(bookRepositoryProvider).commitUpload(widget.job.jobId, update);
@@ -456,7 +466,9 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Review Staged EPUB',
+                  widget.job.metadata.bookType == 'audiobook'
+                      ? 'Review Staged Audiobook'
+                      : 'Review Staged EPUB',
                   style: AppTypography.titleSerif(fontSize: 18, fontWeight: FontWeight.w600),
                 ),
                 Text(
@@ -789,6 +801,19 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
             validator: (v) => (v == null || v.trim().isEmpty) ? 'Author is required' : null,
           ),
           const SizedBox(height: AppTokens.space16),
+
+          if (widget.job.metadata.bookType == 'audiobook') ...[
+            TextFormField(
+              controller: _narratorController,
+              decoration: const InputDecoration(
+                labelText: 'Narrator',
+                hintText: 'e.g. Frank Muller, Ray Porter',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: AppTokens.space16),
+          ],
 
           // Series & Sequence row
           Row(

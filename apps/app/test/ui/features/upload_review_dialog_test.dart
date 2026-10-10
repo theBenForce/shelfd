@@ -453,6 +453,78 @@ void main() {
       expect(committedTitle, 'Dune: Chapterhouse');
       expect(find.text('Review Staged EPUB'), findsNothing);
     });
+
+    testWidgets('renders audiobook metadata with narrator field and audio destination', (tester) async {
+      final stagedJob = StagedUploadJob(
+        jobId: 'job-audio-1',
+        status: 'staged',
+        filename: 'HailMary.m4b',
+        hasCover: true,
+        metadata: const StagedMetadata(
+          title: 'Project Hail Mary',
+          authors: ['Andy Weir'],
+          narrator: 'Ray Porter',
+          bookType: 'audiobook',
+          durationSeconds: 57900.0,
+        ),
+      );
+
+      String? committedNarrator;
+      String? committedBookType;
+
+      final mockClient = MockClient((request) async {
+        if (request.url.path.contains('/commit')) {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          committedNarrator = body['narrator'] as String?;
+          committedBookType = body['book_type'] as String?;
+          return http.Response(jsonEncode({
+            'id': 'book-committed-1',
+            'title': 'Project Hail Mary',
+            'book_type': 'audiobook',
+          }), 200);
+        }
+        return http.Response('{}', 200);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            bookRepositoryProvider.overrideWithValue(bookRepo),
+            storageServiceProvider.overrideWithValue(storageService),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              body: UploadReviewContent(job: stagedJob, isBottomSheet: false),
+            ),
+          ),
+        ),
+      );
+
+      // Verify header reflects audiobook
+      expect(find.text('Review Staged Audiobook'), findsOneWidget);
+      expect(find.text('HailMary.m4b'), findsOneWidget);
+
+      // Verify destination preview preserves .m4b
+      expect(
+        find.text('/library/Andy Weir/Project Hail Mary/Project Hail Mary.m4b'),
+        findsOneWidget,
+      );
+
+      // Verify Narrator field is present and prefilled
+      expect(find.text('Ray Porter'), findsOneWidget);
+      expect(find.text('Narrator'), findsOneWidget);
+
+      // Tap Save & Add to Library
+      await tester.tap(find.text('Save & Add to Library'));
+      await tester.pumpAndSettle();
+
+      expect(committedNarrator, 'Ray Porter');
+      expect(committedBookType, 'audiobook');
+    });
   });
 
   group('ShelfdDropTarget Tests', () {
@@ -466,7 +538,7 @@ void main() {
       );
 
       expect(find.text('Inner Content'), findsOneWidget);
-      expect(find.text('Drop EPUB anywhere to upload'), findsNothing);
+      expect(find.text('Drop books or audiobooks anywhere to upload'), findsNothing);
     });
   });
 }

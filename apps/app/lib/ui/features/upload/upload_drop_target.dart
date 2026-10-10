@@ -35,15 +35,22 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
         setState(() => _isDragging = false);
         if (details.files.isEmpty) return;
 
-        final pickedList = <PickedEpubFile>[];
+        final droppedBooks = <PickedEpubFile>[];
+        final droppedCovers = <PickedEpubFile>[];
 
         for (final item in details.files) {
           final path = item.path;
           if (path.isNotEmpty && isDirectoryPath(path)) {
-            final nestedEpubs = await scanPathForEpubs(path);
-            pickedList.addAll(nestedEpubs);
-          } else if (item.name.toLowerCase().endsWith('.epub')) {
-            pickedList.add(PickedEpubFile(
+            final nestedBooks = await scanPathForEpubs(path);
+            droppedBooks.addAll(nestedBooks);
+          } else if (isSupportedBook(item.name)) {
+            droppedBooks.add(PickedEpubFile(
+              name: item.name,
+              path: item.path.isNotEmpty ? item.path : null,
+              readBytes: () => item.readAsBytes(),
+            ));
+          } else if (isSupportedCover(item.name)) {
+            droppedCovers.add(PickedEpubFile(
               name: item.name,
               path: item.path.isNotEmpty ? item.path : null,
               readBytes: () => item.readAsBytes(),
@@ -51,10 +58,12 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
           }
         }
 
+        final pickedList = matchLooseFilesWithCovers(droppedBooks, droppedCovers);
+
         if (pickedList.isEmpty) {
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('No valid .epub files detected in dropped items')),
+              const SnackBar(content: Text('No valid ebook or audiobook files detected in dropped items')),
             );
           }
           return;
@@ -67,7 +76,7 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
             if (currentPath != '/uploads') {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('Staged $count book(s) for review'),
+                  content: Text('Staged $count item(s) for review'),
                   backgroundColor: AppTokens.charcoalInk,
                   action: SnackBarAction(
                     label: 'View in Uploads',
@@ -127,7 +136,7 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
                           ),
                           const SizedBox(height: AppTokens.space16),
                           Text(
-                            'Drop EPUB anywhere to upload',
+                            'Drop books or audiobooks anywhere to upload',
                             textAlign: TextAlign.center,
                             style: AppTypography.titleSerif(
                               fontSize: 22,
@@ -136,7 +145,7 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
                           ),
                           const SizedBox(height: AppTokens.space8),
                           Text(
-                            'Supports standard .epub format. Metadata can be reviewed and edited before saving to your library.',
+                            'Supports .epub, .m4b, .mp3, .m4a, and .flac formats. Folders and sibling cover art are detected automatically.',
                             textAlign: TextAlign.center,
                             style: AppTypography.bodySans(
                               fontSize: 13,
@@ -144,14 +153,16 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
                             ),
                           ),
                           const SizedBox(height: AppTokens.space20),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                          Wrap(
+                            spacing: AppTokens.space8,
+                            runSpacing: AppTokens.space8,
+                            alignment: WrapAlignment.center,
                             children: const [
                               _FormatBadge(label: '.EPUB'),
-                              SizedBox(width: AppTokens.space8),
-                              _FormatBadge(label: 'EPUB 3'),
-                              SizedBox(width: AppTokens.space8),
-                              _FormatBadge(label: 'EPUB 2'),
+                              _FormatBadge(label: '.M4B'),
+                              _FormatBadge(label: '.MP3'),
+                              _FormatBadge(label: '.M4A'),
+                              _FormatBadge(label: '.FLAC'),
                             ],
                           ),
                           const SizedBox(height: AppTokens.space24),
