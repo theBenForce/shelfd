@@ -1542,7 +1542,7 @@ func TestAPI_StagedUploadAndCommit(t *testing.T) {
 	if createdBook.Title != "A Wizard of Earthsea" {
 		t.Errorf("expected Title 'A Wizard of Earthsea', got %q", createdBook.Title)
 	}
-	expectedRel := filepath.Join("Ursula K. Le Guin", "A Wizard of Earthsea", "A Wizard of Earthsea.epub")
+	expectedRel := filepath.Join(scanner.SanitizeAuthorSegment("Ursula K. Le Guin"), scanner.SanitizePathSegment("A Wizard of Earthsea"), scanner.SanitizePathSegment("A Wizard of Earthsea")+".epub")
 	if createdBook.FilePath != expectedRel {
 		t.Errorf("expected FilePath %s, got %s", expectedRel, createdBook.FilePath)
 	}
@@ -1575,7 +1575,7 @@ func TestAPI_StagedUploadAndCommit(t *testing.T) {
 	}
 
 	// 5b. Verify committed book has cover.png in library book folder
-	libCoverPath := filepath.Join(f.libDir, "Ursula K. Le Guin", "A Wizard of Earthsea", "cover.png")
+	libCoverPath := filepath.Join(filepath.Dir(finalDiskPath), "cover.png")
 	if data, err := os.ReadFile(libCoverPath); err != nil {
 		t.Fatalf("expected cover.png in library book folder, not found: %v", err)
 	} else if !bytes.Equal(data, replCoverData) {
@@ -1740,7 +1740,8 @@ func TestAPI_StagedUploadAudiobookAndCommit(t *testing.T) {
 	if createdBook.Title != "Project Hail Mary (Unabridged)" {
 		t.Errorf("expected Title 'Project Hail Mary (Unabridged)', got %q", createdBook.Title)
 	}
-	expectedRel := filepath.Join("Andy Weir", "Project Hail Mary (Unabridged)", "Project Hail Mary (Unabridged).mp3")
+	sanitizedTitle := scanner.SanitizePathSegment("Project Hail Mary (Unabridged)")
+	expectedRel := filepath.Join(scanner.SanitizeAuthorSegment("Andy Weir"), sanitizedTitle, sanitizedTitle+".mp3")
 	if createdBook.FilePath != expectedRel {
 		t.Errorf("expected FilePath %s, got %s", expectedRel, createdBook.FilePath)
 	}
@@ -1756,7 +1757,7 @@ func TestAPI_StagedUploadAudiobookAndCommit(t *testing.T) {
 	}
 
 	// 5. Verify cover was created in library folder
-	libCoverPath := filepath.Join(f.libDir, "Andy Weir", "Project Hail Mary (Unabridged)", "cover.jpg")
+	libCoverPath := filepath.Join(filepath.Dir(finalDiskPath), "cover.jpg")
 	if data, err := os.ReadFile(libCoverPath); err != nil {
 		t.Fatalf("expected cover.jpg in library folder, not found: %v", err)
 	} else if !bytes.Equal(data, coverData) {

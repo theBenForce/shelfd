@@ -14,6 +14,7 @@ import (
 
 	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/repository"
+	"github.com/shelfd/shelfd/internal/scanner"
 	"github.com/shelfd/shelfd/internal/ulid"
 )
 
@@ -494,12 +495,25 @@ func (h *UtilityHandler) MergeBooks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Track media formats currently present on the primary book
+	primaryFormats := make(map[string]bool)
+	if pType, isPrimary := scanner.DetectFileType(primaryBook.FilePath); isPrimary {
+		primaryFormats[pType] = true
+	} else if primaryBook.BookType != "" {
+		primaryFormats[primaryBook.BookType] = true
+	}
+
 	// Fetch existing book files on primary to avoid duplicate companion records
 	existingPrimaryFiles, _ := h.repo.GetBookFilesByBookID(ctx, primaryBook.ID)
 	primaryPathSet := make(map[string]bool)
 	primaryPathSet[primaryBook.FilePath] = true
 	for _, f := range existingPrimaryFiles {
 		primaryPathSet[f.FilePath] = true
+		if fType, isPrimary := scanner.DetectFileType(f.FilePath); isPrimary {
+			primaryFormats[fType] = true
+		} else if f.FileType != "" && f.FileType != "cover" && f.FileType != "other" {
+			primaryFormats[f.FileType] = true
+		}
 	}
 
 	primaryAudioChapters, _ := h.repo.GetAudioChaptersByBookID(ctx, primaryBook.ID)
@@ -518,29 +532,26 @@ func (h *UtilityHandler) MergeBooks(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("Failed to transfer audiobook progress", "from", dup.ID, "to", primaryBook.ID, "err", err)
 		}
 
-		// Identify companion files to preserve from duplicate
+		// Identify missing primary media formats to preserve from duplicate
 		dupFiles, _ := h.repo.GetBookFilesByBookID(ctx, dup.ID)
-		var filesToPreserve []*repository.BookFile
-		retainedPaths := make(map[string]bool)
-
-		isAudio := func(ext string) bool {
-			switch strings.ToLower(ext) {
-			case ".m4b", ".m4a", ".mp3", ".ogg", ".oga", ".flac", ".opus":
-				return true
-			default:
-				return false
+		missingFormats := make(map[string]bool)
+		if t, isPrimary := scanner.DetectFileType(dup.FilePath); isPrimary && !primaryFormats[t] {
+			missingFormats[t] = true
+		}
+		for _, df := range dupFiles {
+			if t, isPrimary := scanner.DetectFileType(df.FilePath); isPrimary && !primaryFormats[t] {
+				missingFormats[t] = true
 			}
 		}
 
-		// Check duplicate primary file
-		dupExt := strings.ToLower(filepath.Ext(dup.FilePath))
-		primaryExt := strings.ToLower(filepath.Ext(primaryBook.FilePath))
-		isFormatDifferent := (isAudio(dupExt) && !isAudio(primaryExt)) || (!isAudio(dupExt) && isAudio(primaryExt)) || (dupExt != primaryExt && dupExt != "")
+		var filesToPreserve []*repository.BookFile
+		retainedPaths := make(map[string]bool)
 
-		if dup.FilePath != "" && !primaryPathSet[dup.FilePath] && isFormatDifferent {
-			fileType := "ebook"
-			if isAudio(dupExt) {
-				fileType = "audiobook"
+		// Preserve duplicate primary file if its media format was missing on primary
+		if t, isPrimary := scanner.DetectFileType(dup.FilePath); isPrimary && missingFormats[t] && !primaryPathSet[dup.FilePath] {
+			fileType := t
+			if fileType == "epub" {
+				fileType = "ebook"
 			}
 			mimeType := getAudioMimeType(dup.FilePath)
 			filesToPreserve = append(filesToPreserve, &repository.BookFile{
@@ -557,9 +568,9 @@ func (h *UtilityHandler) MergeBooks(w http.ResponseWriter, r *http.Request) {
 			retainedPaths[dup.FilePath] = true
 		}
 
-		// Check book_files on duplicate
+		// Preserve duplicate companion media files matching missing formats
 		for _, df := range dupFiles {
-			if !primaryPathSet[df.FilePath] {
+			if t, isPrimary := scanner.DetectFileType(df.FilePath); isPrimary && missingFormats[t] && !primaryPathSet[df.FilePath] {
 				dfCopy := *df
 				dfCopy.ID = ulid.New()
 				dfCopy.BookID = primaryBook.ID
@@ -567,6 +578,10 @@ func (h *UtilityHandler) MergeBooks(w http.ResponseWriter, r *http.Request) {
 				primaryPathSet[df.FilePath] = true
 				retainedPaths[df.FilePath] = true
 			}
+		}
+
+		for fmtName := range missingFormats {
+			primaryFormats[fmtName] = true
 		}
 
 		if len(filesToPreserve) > 0 {
@@ -598,22 +613,41 @@ func (h *UtilityHandler) MergeBooks(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Delete duplicate file on disk if requested, except retained companion files
+		// Delete duplicate files on disk if requested, except retained companion files
 		if deleteFiles {
-			if dup.FilePath != "" && dup.FilePath != primaryBook.FilePath && !retainedPaths[dup.FilePath] {
-				if err := os.Remove(dup.FilePath); err != nil && !os.IsNotExist(err) {
-					h.logger.Warn("Failed to delete duplicate book file", "path", dup.FilePath, "err", err)
+			deleteDiskFile := func(relPath string) {
+				if relPath == "" || relPath == primaryBook.FilePath || retainedPaths[relPath] {
+					return
+				}
+				resolved := resolveStoredPath(h.libraryDir, h.dataDir, relPath)
+				if resolved != "" && (isUnderDir(resolved, h.libraryDir) || isUnderDir(resolved, h.dataDir)) {
+					if err := os.Remove(resolved); err != nil && !os.IsNotExist(err) {
+						h.logger.Warn("Failed to delete duplicate file", "path", resolved, "err", err)
+					}
 				}
 			}
+
+			deleteDiskFile(dup.FilePath)
 			for _, df := range dupFiles {
-				if !retainedPaths[df.FilePath] && df.FilePath != primaryBook.FilePath {
-					_ = os.Remove(df.FilePath)
-				}
+				deleteDiskFile(df.FilePath)
 			}
 			if dup.CoverPath != nil && *dup.CoverPath != "" {
 				isDistinctCover := primaryBook.CoverPath == nil || *dup.CoverPath != *primaryBook.CoverPath
 				if isDistinctCover {
-					_ = os.Remove(*dup.CoverPath)
+					deleteDiskFile(*dup.CoverPath)
+				}
+			}
+
+			// Clean up duplicate directory if it is empty
+			dupFull := resolveStoredPath(h.libraryDir, h.dataDir, dup.FilePath)
+			if dupFull != "" {
+				dupDir := filepath.Dir(dupFull)
+				if isUnderDir(dupDir, h.libraryDir) {
+					_ = os.Remove(dupDir)
+					parentDir := filepath.Dir(dupDir)
+					if isUnderDir(parentDir, h.libraryDir) {
+						_ = os.Remove(parentDir)
+					}
 				}
 			}
 		}
