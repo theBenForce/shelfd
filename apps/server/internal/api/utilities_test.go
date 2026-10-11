@@ -531,6 +531,83 @@ func TestAPI_Utilities_MergeBooks_MultiFormat(t *testing.T) {
 	}
 }
 
+func TestAPI_Utilities_MergeBooks_SameFormatScannedDuplicate(t *testing.T) {
+	f := setupAPITest(t)
+	token := f.loginAndGetToken(t)
+	ctx := context.Background()
+
+	writeLibFile := func(rel string) {
+		full := filepath.Join(f.libDir, rel)
+		_ = os.MkdirAll(filepath.Dir(full), 0o755)
+		if err := os.WriteFile(full, []byte(rel), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", rel, err)
+		}
+	}
+	createScannedBook := func(dir, epubName string) *repository.Book {
+		epubRel := filepath.Join(dir, epubName)
+		coverRel := filepath.Join(dir, "cover.jpg")
+		metaRel := filepath.Join(dir, "metadata.json")
+		for _, rel := range []string{epubRel, coverRel, metaRel} {
+			writeLibFile(rel)
+		}
+		b := &repository.Book{
+			ID:        ulid.New(),
+			Title:     "Spidey's New Costume",
+			FilePath:  epubRel,
+			CoverPath: &coverRel,
+			CreatedAt: time.Now().UTC(),
+		}
+		if err := f.repo.CreateBook(ctx, b); err != nil {
+			t.Fatalf("creating book: %v", err)
+		}
+		err := f.repo.CreateBookFiles(ctx, []*repository.BookFile{
+			{BookID: b.ID, FileType: "epub", FilePath: epubRel},
+			{BookID: b.ID, FileType: "cover", FilePath: coverRel},
+			{BookID: b.ID, FileType: "other", FilePath: metaRel},
+		})
+		if err != nil {
+			t.Fatalf("creating book files: %v", err)
+		}
+		return b
+	}
+
+	dupDir := filepath.Join("Marvel Press", "Spideys New Costume")
+	primary := createScannedBook(filepath.Join("Marvel", "Spidey's New Costume"), "Spidey's New Costume.epub")
+	dup := createScannedBook(dupDir, "Spideys New Costume.epub")
+
+	body, _ := json.Marshal(api.MergeBooksRequest{
+		PrimaryBookID:    primary.ID,
+		DuplicateBookIDs: []string{dup.ID},
+		Options:          &api.MergeBooksOptions{DeleteFiles: boolPtr(true)},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/utilities/merge-books", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	for _, name := range []string{"Spideys New Costume.epub", "cover.jpg", "metadata.json"} {
+		if _, err := os.Stat(filepath.Join(f.libDir, dupDir, name)); !os.IsNotExist(err) {
+			t.Errorf("duplicate file %q still on disk after merge", name)
+		}
+	}
+
+	files, err := f.repo.GetBookFilesByBookID(ctx, primary.ID)
+	if err != nil {
+		t.Fatalf("fetching primary book files: %v", err)
+	}
+	if len(files) != 3 {
+		paths := make([]string, len(files))
+		for i, bf := range files {
+			paths[i] = bf.FilePath
+		}
+		t.Errorf("expected primary to keep only its own 3 files, got %d: %v", len(files), paths)
+	}
+}
+
 func boolPtr(b bool) *bool {
 	return &b
 }
