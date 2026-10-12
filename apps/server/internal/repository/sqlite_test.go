@@ -1876,6 +1876,19 @@ func TestAudioChaptersAndBookFiles(t *testing.T) {
 		t.Errorf("unexpected file path: %s vs %s", singleFile.FilePath, fetchedFiles[0].FilePath)
 	}
 
+	byPathFile, err := repo.GetBookFileByFilePath(ctx, fetchedFiles[0].FilePath)
+	if err != nil {
+		t.Fatalf("get book file by file path: %v", err)
+	}
+	if byPathFile.ID != fetchedFiles[0].ID {
+		t.Errorf("unexpected file ID: %s vs %s", byPathFile.ID, fetchedFiles[0].ID)
+	}
+
+	_, err = repo.GetBookFileByFilePath(ctx, "nonexistent/path.m4b")
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Errorf("expected ErrNotFound for nonexistent file path, got %v", err)
+	}
+
 	// 3. Audiobook Progress
 	progress := &repository.AudiobookProgress{
 		BookID:          book.ID,

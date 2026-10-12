@@ -79,6 +79,7 @@ type StorageEngine interface {
 	CreateBookFiles(ctx context.Context, files []*BookFile) error
 	GetBookFilesByBookID(ctx context.Context, bookID string) ([]*BookFile, error)
 	GetBookFileByID(ctx context.Context, id string) (*BookFile, error)
+	GetBookFileByFilePath(ctx context.Context, filePath string) (*BookFile, error)
 	DeleteBookFilesByBookID(ctx context.Context, bookID string) error
 
 	// Audiobook Progress

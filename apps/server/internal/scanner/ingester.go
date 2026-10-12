@@ -147,6 +147,19 @@ func (in *Ingester) SyncFile(ctx context.Context, fullPath, relativePath string)
 		return updatedBook, SyncStatusModified, nil
 	}
 
+	existingFile, err := in.repo.GetBookFileByFilePath(ctx, relativePath)
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return nil, SyncStatusUnchanged, fmt.Errorf("checking existing book file: %w", err)
+	}
+	if existingFile != nil {
+		parentBook, err := in.repo.GetBookByID(ctx, existingFile.BookID)
+		if err == nil && parentBook != nil {
+			parentFullPath := filepath.Join(in.libraryDir, parentBook.FilePath)
+			_ = in.syncBookFiles(ctx, parentBook.ID, parentFullPath)
+			return parentBook, SyncStatusUnchanged, nil
+		}
+	}
+
 	// Check if another file in the same directory already created a Book record
 	bookDirRel := filepath.Dir(relativePath)
 	dirBook, err := in.repo.GetBookByDirectory(ctx, bookDirRel)
@@ -166,7 +179,8 @@ func (in *Ingester) SyncFile(ctx context.Context, fullPath, relativePath string)
 				return updatedBook, SyncStatusModified, nil
 			}
 		}
-		_ = in.syncBookFiles(ctx, dirBook.ID, fullPath)
+		dirBookFullPath := filepath.Join(in.libraryDir, dirBook.FilePath)
+		_ = in.syncBookFiles(ctx, dirBook.ID, dirBookFullPath)
 		return dirBook, SyncStatusUnchanged, nil
 	}
 
@@ -805,6 +819,41 @@ func (in *Ingester) syncBookFiles(ctx context.Context, bookID, bookFullPath stri
 	discovered, err := s.ScanBookDirectory(bookDirFull)
 	if err != nil {
 		return err
+	}
+
+	existingFiles, err := in.repo.GetBookFilesByBookID(ctx, bookID)
+	if err == nil && len(existingFiles) > 0 {
+		seenPaths := make(map[string]bool, len(discovered))
+		for _, d := range discovered {
+			seenPaths[d.RelativePath] = true
+		}
+
+		for _, ef := range existingFiles {
+			if seenPaths[ef.FilePath] {
+				continue
+			}
+			efFullPath := filepath.Join(in.libraryDir, ef.FilePath)
+			efDirFull := filepath.Dir(efFullPath)
+			if filepath.Clean(efDirFull) == filepath.Clean(bookDirFull) {
+				continue
+			}
+
+			fi, statErr := os.Stat(efFullPath)
+			if statErr == nil && !fi.IsDir() {
+				fileType := ef.FileType
+				if fileType == "" {
+					fileType, _ = DetectFileType(filepath.Base(efFullPath))
+				}
+				discovered = append(discovered, DiscoveredFile{
+					FullPath:     efFullPath,
+					RelativePath: ef.FilePath,
+					ModTime:      fi.ModTime().UTC().Truncate(time.Second),
+					SizeBytes:    fi.Size(),
+					FileType:     fileType,
+				})
+				seenPaths[ef.FilePath] = true
+			}
+		}
 	}
 
 	var audioTracks []audioTrackCandidate
