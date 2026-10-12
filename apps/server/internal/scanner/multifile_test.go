@@ -270,3 +270,132 @@ func TestMultiFileAudiobook_Track17TitleFixAndAuthorNormalization(t *testing.T) 
 		t.Errorf("expected normalized author name 'J. R. R. Tolkien', got %q", authors[0].Name)
 	}
 }
+
+func TestCrossFolderCompanionFiles_RescanPreservesAndPreventsDuplicates(t *testing.T) {
+	tempLib := t.TempDir()
+	tempData := t.TempDir()
+	ctx := context.Background()
+
+	db, err := database.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("creating db: %v", err)
+	}
+	defer db.Close()
+	if err := database.RunMigrations(ctx, db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	repo := repository.NewSQLiteStorageEngine(db)
+	defer repo.Close()
+
+	epubDir := filepath.Join(tempLib, "Brandon Sanderson", "The Way of Kings")
+	audioDir := filepath.Join(tempLib, "Brandon Sanderson", "The Way of Kings (Audiobook)")
+	if err := os.MkdirAll(epubDir, 0755); err != nil {
+		t.Fatalf("mkdir epubDir: %v", err)
+	}
+	if err := os.MkdirAll(audioDir, 0755); err != nil {
+		t.Fatalf("mkdir audioDir: %v", err)
+	}
+
+	epubPath := filepath.Join(epubDir, "The Way of Kings.epub")
+	audioPath := filepath.Join(audioDir, "The Way of Kings.m4a")
+	os.WriteFile(epubPath, createSampleEPUB("The Way of Kings", "Brandon Sanderson", "Fantasy", "Stormlight Archive", 1.0), 0644)
+	os.WriteFile(audioPath, createSampleM4A("The Way of Kings", "Chapter 1", 1, 300), 0644)
+
+	ingester := scanner.NewIngester(repo, tempLib, tempData)
+
+	epubRelPath := filepath.Join("Brandon Sanderson", "The Way of Kings", "The Way of Kings.epub")
+	audioRelPath := filepath.Join("Brandon Sanderson", "The Way of Kings (Audiobook)", "The Way of Kings.m4a")
+
+	bEpub, _, err := ingester.SyncFile(ctx, epubPath, epubRelPath)
+	if err != nil {
+		t.Fatalf("ingest epub: %v", err)
+	}
+	bAudio, _, err := ingester.SyncFile(ctx, audioPath, audioRelPath)
+	if err != nil {
+		t.Fatalf("ingest audio: %v", err)
+	}
+
+	initialBooks, err := repo.ListBooks(ctx, repository.BookFilter{})
+	if err != nil {
+		t.Fatalf("list books: %v", err)
+	}
+	if len(initialBooks) != 2 {
+		t.Fatalf("expected 2 books before merge, got %d", len(initialBooks))
+	}
+
+	audioFiles, err := repo.GetBookFilesByBookID(ctx, bAudio.ID)
+	if err != nil {
+		t.Fatalf("get audio book files: %v", err)
+	}
+	for _, af := range audioFiles {
+		af.ID = ""
+		af.BookID = bEpub.ID
+	}
+	if err := repo.CreateBookFiles(ctx, audioFiles); err != nil {
+		t.Fatalf("create companion book files on epub: %v", err)
+	}
+	if err := repo.DeleteBook(ctx, bAudio.ID); err != nil {
+		t.Fatalf("delete duplicate audio book: %v", err)
+	}
+
+	filesAfterMerge, err := repo.GetBookFilesByBookID(ctx, bEpub.ID)
+	if err != nil {
+		t.Fatalf("get book files after merge: %v", err)
+	}
+	if len(filesAfterMerge) != 3 {
+		t.Fatalf("expected 3 book files after merge, got %d", len(filesAfterMerge))
+	}
+
+	booksAfterMerge, err := repo.ListBooks(ctx, repository.BookFilter{})
+	if err != nil {
+		t.Fatalf("list books after merge: %v", err)
+	}
+	if len(booksAfterMerge) != 1 {
+		t.Fatalf("expected 1 book after merge, got %d", len(booksAfterMerge))
+	}
+
+	s := scanner.NewScanner(tempLib)
+	discovered, err := s.Scan()
+	if err != nil {
+		t.Fatalf("scan error: %v", err)
+	}
+	if len(discovered) != 2 {
+		t.Fatalf("expected 2 discovered files, got %d", len(discovered))
+	}
+
+	for _, f := range discovered {
+		_, _, err := ingester.SyncFile(ctx, f.FullPath, f.RelativePath)
+		if err != nil {
+			t.Fatalf("sync file error on %s: %v", f.RelativePath, err)
+		}
+	}
+
+	booksAfterRescan, err := repo.ListBooks(ctx, repository.BookFilter{})
+	if err != nil {
+		t.Fatalf("list books after rescan: %v", err)
+	}
+	if len(booksAfterRescan) != 1 {
+		t.Fatalf("expected exactly 1 book after rescan, but duplicate book was created: %d books found", len(booksAfterRescan))
+	}
+
+	filesAfterRescan, err := repo.GetBookFilesByBookID(ctx, bEpub.ID)
+	if err != nil {
+		t.Fatalf("get book files after rescan: %v", err)
+	}
+	if len(filesAfterRescan) != 3 {
+		t.Fatalf("expected 3 book files after rescan, got %d", len(filesAfterRescan))
+	}
+
+	foundCompanion := false
+	for _, f := range filesAfterRescan {
+		if f.FilePath == audioRelPath {
+			foundCompanion = true
+			break
+		}
+	}
+	if !foundCompanion {
+		t.Fatalf("companion file %s was dropped from book_files during rescan", audioRelPath)
+	}
+}
+
