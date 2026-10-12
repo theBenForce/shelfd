@@ -1,3 +1,11 @@
+## [1.13.1](https://github.com/theBenForce/shelfd/compare/v1.13.0...v1.13.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **scanner:** preserve cross-folder companion files during rescan ([#55](https://github.com/theBenForce/shelfd/issues/55)) ([6145578](https://github.com/theBenForce/shelfd/commit/614557832e5c582ef5b5501e56108be64991746e))
+* **utilities:** delete duplicate files and restrict companion retention during merge ([#53](https://github.com/theBenForce/shelfd/issues/53)) ([8c22528](https://github.com/theBenForce/shelfd/commit/8c22528ee35922308ea4e3e82548132b0ec93059))
+
 # [1.13.0](https://github.com/theBenForce/shelfd/compare/v1.12.1...v1.13.0) (2026-10-10)
 
 
