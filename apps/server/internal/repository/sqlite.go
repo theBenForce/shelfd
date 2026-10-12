@@ -2668,6 +2668,30 @@ func (r *SQLiteStorageEngine) GetBookFileByID(ctx context.Context, id string) (*
 	return f, nil
 }
 
+func (r *SQLiteStorageEngine) GetBookFileByFilePath(ctx context.Context, filePath string) (*BookFile, error) {
+	query := `
+		SELECT id, book_id, file_type, file_path, file_size_bytes, duration_seconds, bitrate_kbps, page_count, mime_type, file_modified_at, created_at
+		FROM book_files
+		WHERE file_path = ?
+		LIMIT 1
+	`
+	f := &BookFile{}
+	var fileModAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, query, filePath).Scan(
+		&f.ID, &f.BookID, &f.FileType, &f.FilePath, &f.FileSizeBytes, &f.DurationSeconds, &f.BitrateKbps, &f.PageCount, &f.MimeType, &fileModAt, &f.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting book file by file path: %w", err)
+	}
+	if fileModAt.Valid {
+		f.FileModifiedAt = &fileModAt.Time
+	}
+	return f, nil
+}
+
 func (r *SQLiteStorageEngine) DeleteBookFilesByBookID(ctx context.Context, bookID string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM book_files WHERE book_id = ?", bookID)
 	if err != nil {

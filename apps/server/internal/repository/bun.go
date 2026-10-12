@@ -2209,6 +2209,18 @@ func (r *BunStorageEngine) GetBookFileByID(ctx context.Context, id string) (*Boo
 	return file, nil
 }
 
+func (r *BunStorageEngine) GetBookFileByFilePath(ctx context.Context, filePath string) (*BookFile, error) {
+	file := new(BookFile)
+	err := r.db.NewSelect().Model(file).Where("file_path = ?", filePath).Limit(1).Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting book file by file path: %w", err)
+	}
+	return file, nil
+}
+
 func (r *BunStorageEngine) DeleteBookFilesByBookID(ctx context.Context, bookID string) error {
 	_, err := r.db.NewDelete().Model((*BookFile)(nil)).
 		Where("book_id = ?", bookID).
