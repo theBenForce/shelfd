@@ -1,3 +1,10 @@
+## [1.13.2](https://github.com/theBenForce/shelfd/compare/v1.13.1...v1.13.2) (2026-10-12)
+
+
+### Bug Fixes
+
+* **ci:** fetch notes refs before semantic-release ([#57](https://github.com/theBenForce/shelfd/issues/57)) ([6b56d59](https://github.com/theBenForce/shelfd/commit/6b56d59526ac89b03b31133b3301df9d3582e391))
+
 ## [1.13.1](https://github.com/theBenForce/shelfd/compare/v1.13.0...v1.13.1) (2026-10-12)
 
 
