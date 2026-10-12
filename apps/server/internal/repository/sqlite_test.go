@@ -2025,4 +2025,101 @@ func TestReconcileAuthorsAndPruneOrphans(t *testing.T) {
 	}
 }
 
+func TestExternalFTS5ParagraphsLifecycle(t *testing.T) {
+	ctx := context.Background()
+	db, repo := setupTestDB(t)
+	defer repo.Close()
+
+	var contentTableCount int
+	err := db.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name = 'paragraphs_fts_content'").Scan(&contentTableCount)
+	if err != nil {
+		t.Fatalf("querying shadow tables: %v", err)
+	}
+	if contentTableCount != 0 {
+		t.Fatalf("expected 0 paragraphs_fts_content shadow tables, got %d (duplicate storage detected)", contentTableCount)
+	}
+
+	book := &repository.Book{
+		ID:       "book-fts-ext",
+		Title:    "Count Zero",
+		FilePath: "count_zero.epub",
+	}
+	if err := repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("create book: %v", err)
+	}
+
+	ch := &repository.Chapter{
+		ID:           "ch-fts-ext",
+		BookID:       book.ID,
+		ChapterIndex: 1,
+		Summary:      "",
+		ContentPlain: "They set a slammed doorway in the throat of an alley.",
+	}
+	if err := repo.CreateChapter(ctx, ch); err != nil {
+		t.Fatalf("create chapter: %v", err)
+	}
+
+	para := &repository.Paragraph{
+		BookID:         book.ID,
+		ChapterID:      ch.ID,
+		ChapterIndex:   1,
+		StartParagraph: 1,
+		EndParagraph:   1,
+		Content:        "They set a slammed doorway in the throat of an alley called the Sprawl.",
+	}
+	if err := repo.CreateParagraphs(ctx, []*repository.Paragraph{para}); err != nil {
+		t.Fatalf("create paragraphs: %v", err)
+	}
+
+	hits, err := repo.SearchFTSParagraphs(ctx, "Sprawl", repository.SearchFilter{Limit: 5})
+	if err != nil {
+		t.Fatalf("search initial content: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("expected 1 hit for Sprawl, got %d", len(hits))
+	}
+	if hits[0].BookTitle != "Count Zero" {
+		t.Errorf("expected book title 'Count Zero', got %q", hits[0].BookTitle)
+	}
+
+	newContent := "They set a slammed doorway in the throat of an alley called Night City."
+	_, err = db.ExecContext(ctx, "UPDATE paragraphs SET content = ? WHERE id = ?", newContent, para.ID)
+	if err != nil {
+		t.Fatalf("updating paragraph content: %v", err)
+	}
+
+	oldHits, err := repo.SearchFTSParagraphs(ctx, "Sprawl", repository.SearchFilter{Limit: 5})
+	if err != nil {
+		t.Fatalf("search old term: %v", err)
+	}
+	if len(oldHits) != 0 {
+		t.Fatalf("expected 0 hits for old term Sprawl after update, got %d", len(oldHits))
+	}
+
+	newHits, err := repo.SearchFTSParagraphs(ctx, "\"Night City\"", repository.SearchFilter{Limit: 5})
+	if err != nil {
+		t.Fatalf("search new term: %v", err)
+	}
+	if len(newHits) != 1 {
+		t.Fatalf("expected 1 hit for Night City after update, got %d", len(newHits))
+	}
+	if newHits[0].Content != newContent {
+		t.Errorf("expected hit content %q, got %q", newContent, newHits[0].Content)
+	}
+
+	_, err = db.ExecContext(ctx, "DELETE FROM paragraphs WHERE id = ?", para.ID)
+	if err != nil {
+		t.Fatalf("deleting paragraph: %v", err)
+	}
+
+	delHits, err := repo.SearchFTSParagraphs(ctx, "\"Night City\"", repository.SearchFilter{Limit: 5})
+	if err != nil {
+		t.Fatalf("search after delete: %v", err)
+	}
+	if len(delHits) != 0 {
+		t.Fatalf("expected 0 hits after paragraph delete, got %d", len(delHits))
+	}
+}
+
+
 
