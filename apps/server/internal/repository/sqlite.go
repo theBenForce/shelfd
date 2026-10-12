@@ -2307,7 +2307,7 @@ func (r *SQLiteStorageEngine) SearchFTSParagraphs(ctx context.Context, queryText
 			p.content AS content,
 			bm25(paragraphs_fts) AS rank
 		FROM paragraphs_fts f
-		JOIN paragraphs p ON f.paragraph_id = p.id
+		JOIN paragraphs p ON f.rowid = p.rowid
 		JOIN chapters c ON p.chapter_id = c.id
 		JOIN books b ON p.book_id = b.id
 		WHERE paragraphs_fts MATCH ?
