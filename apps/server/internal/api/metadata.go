@@ -282,19 +282,8 @@ func (h *MetadataHandler) FetchJobCover(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *MetadataHandler) resolveBookFilePath(b *repository.Book) string {
-	if b == nil || b.FilePath == "" {
+	if b == nil {
 		return ""
 	}
-	libPath := filepath.Join(h.libraryDir, b.FilePath)
-	if fi, err := os.Stat(libPath); err == nil && !fi.IsDir() {
-		return libPath
-	}
-	dataPath := filepath.Join(h.dataDir, b.FilePath)
-	if fi, err := os.Stat(dataPath); err == nil && !fi.IsDir() {
-		return dataPath
-	}
-	if fi, err := os.Stat(b.FilePath); err == nil && !fi.IsDir() {
-		return b.FilePath
-	}
-	return ""
+	return resolveStoredPath(h.libraryDir, h.dataDir, b.FilePath)
 }

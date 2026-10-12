@@ -531,6 +531,178 @@ func TestAPI_Utilities_MergeBooks_MultiFormat(t *testing.T) {
 	}
 }
 
+func TestAPI_Utilities_MergeBooks_SameFormatScannedDuplicate(t *testing.T) {
+	f := setupAPITest(t)
+	token := f.loginAndGetToken(t)
+	ctx := context.Background()
+
+	writeLibFile := func(rel string) {
+		full := filepath.Join(f.libDir, rel)
+		_ = os.MkdirAll(filepath.Dir(full), 0o755)
+		if err := os.WriteFile(full, []byte(rel), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", rel, err)
+		}
+	}
+	createScannedBook := func(dir, epubName string) *repository.Book {
+		epubRel := filepath.Join(dir, epubName)
+		coverRel := filepath.Join(dir, "cover.jpg")
+		metaRel := filepath.Join(dir, "metadata.json")
+		for _, rel := range []string{epubRel, coverRel, metaRel} {
+			writeLibFile(rel)
+		}
+		b := &repository.Book{
+			ID:        ulid.New(),
+			Title:     "Spidey's New Costume",
+			FilePath:  epubRel,
+			CoverPath: &coverRel,
+			CreatedAt: time.Now().UTC(),
+		}
+		if err := f.repo.CreateBook(ctx, b); err != nil {
+			t.Fatalf("creating book: %v", err)
+		}
+		err := f.repo.CreateBookFiles(ctx, []*repository.BookFile{
+			{BookID: b.ID, FileType: "epub", FilePath: epubRel},
+			{BookID: b.ID, FileType: "cover", FilePath: coverRel},
+			{BookID: b.ID, FileType: "other", FilePath: metaRel},
+		})
+		if err != nil {
+			t.Fatalf("creating book files: %v", err)
+		}
+		return b
+	}
+
+	dupDir := filepath.Join("Marvel Press", "Spideys New Costume")
+	primary := createScannedBook(filepath.Join("Marvel", "Spidey's New Costume"), "Spidey's New Costume.epub")
+	dup := createScannedBook(dupDir, "Spideys New Costume.epub")
+
+	body, _ := json.Marshal(api.MergeBooksRequest{
+		PrimaryBookID:    primary.ID,
+		DuplicateBookIDs: []string{dup.ID},
+		Options:          &api.MergeBooksOptions{DeleteFiles: boolPtr(true)},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/utilities/merge-books", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	for _, name := range []string{"Spideys New Costume.epub", "cover.jpg", "metadata.json"} {
+		if _, err := os.Stat(filepath.Join(f.libDir, dupDir, name)); !os.IsNotExist(err) {
+			t.Errorf("duplicate file %q still on disk after merge", name)
+		}
+	}
+
+	files, err := f.repo.GetBookFilesByBookID(ctx, primary.ID)
+	if err != nil {
+		t.Fatalf("fetching primary book files: %v", err)
+	}
+	if len(files) != 3 {
+		paths := make([]string, len(files))
+		for i, bf := range files {
+			paths[i] = bf.FilePath
+		}
+		t.Errorf("expected primary to keep only its own 3 files, got %d: %v", len(files), paths)
+	}
+}
+
+func TestAPI_Utilities_MergeBooks_RetainsMissingAudioFormatAndDeletesDuplicateEpub(t *testing.T) {
+	f := setupAPITest(t)
+	token := f.loginAndGetToken(t)
+	ctx := context.Background()
+
+	writeLibFile := func(rel string) {
+		full := filepath.Join(f.libDir, rel)
+		_ = os.MkdirAll(filepath.Dir(full), 0o755)
+		if err := os.WriteFile(full, []byte(rel), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", rel, err)
+		}
+	}
+
+	primaryDir := filepath.Join("Andy Weir", "The Martian")
+	primaryEpubRel := filepath.Join(primaryDir, "The Martian.epub")
+	writeLibFile(primaryEpubRel)
+
+	primary := &repository.Book{
+		ID:        ulid.New(),
+		Title:     "The Martian",
+		BookType:  "ebook",
+		FilePath:  primaryEpubRel,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := f.repo.CreateBook(ctx, primary); err != nil {
+		t.Fatalf("creating primary book: %v", err)
+	}
+	_ = f.repo.CreateBookFiles(ctx, []*repository.BookFile{
+		{BookID: primary.ID, FileType: "epub", FilePath: primaryEpubRel},
+	})
+
+	dupDir := filepath.Join("Andy Weir", "The Martian (Deluxe)")
+	dupEpubRel := filepath.Join(dupDir, "The Martian.epub")
+	dupAudioRel := filepath.Join(dupDir, "The Martian.m4b")
+	writeLibFile(dupEpubRel)
+	writeLibFile(dupAudioRel)
+
+	dup := &repository.Book{
+		ID:        ulid.New(),
+		Title:     "The Martian (Deluxe)",
+		BookType:  "ebook",
+		FilePath:  dupEpubRel,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := f.repo.CreateBook(ctx, dup); err != nil {
+		t.Fatalf("creating duplicate book: %v", err)
+	}
+	_ = f.repo.CreateBookFiles(ctx, []*repository.BookFile{
+		{BookID: dup.ID, FileType: "epub", FilePath: dupEpubRel},
+		{BookID: dup.ID, FileType: "audiobook", FilePath: dupAudioRel},
+	})
+
+	body, _ := json.Marshal(api.MergeBooksRequest{
+		PrimaryBookID:    primary.ID,
+		DuplicateBookIDs: []string{dup.ID},
+		Options:          &api.MergeBooksOptions{DeleteFiles: boolPtr(true)},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/utilities/merge-books", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Duplicate EPUB must be deleted on disk
+	if _, err := os.Stat(filepath.Join(f.libDir, dupEpubRel)); !os.IsNotExist(err) {
+		t.Errorf("expected duplicate epub %s to be deleted, but it still exists", dupEpubRel)
+	}
+
+	// Companion M4B must remain on disk
+	if _, err := os.Stat(filepath.Join(f.libDir, dupAudioRel)); err != nil {
+		t.Errorf("expected companion audio %s to remain on disk: %v", dupAudioRel, err)
+	}
+
+	// Primary book should now have its original EPUB plus the preserved M4B
+	files, err := f.repo.GetBookFilesByBookID(ctx, primary.ID)
+	if err != nil {
+		t.Fatalf("fetching primary book files: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files on primary (1 epub, 1 audio), got %d", len(files))
+	}
+	hasAudio := false
+	for _, bf := range files {
+		if bf.FilePath == dupAudioRel {
+			hasAudio = true
+		}
+	}
+	if !hasAudio {
+		t.Errorf("expected primary book to include preserved audio file %s", dupAudioRel)
+	}
+}
+
 func boolPtr(b bool) *bool {
 	return &b
 }

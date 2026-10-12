@@ -382,7 +382,7 @@ func (in *Ingester) updateModifiedBook(ctx context.Context, book *repository.Boo
 // /library/<Author>/<Title>/<Title><ext>
 // It performs atomic staging (.tmp file) before final rename to ensure no partial reads by ABS scanners.
 func (in *Ingester) SaveUpload(ctx context.Context, authorName, title, originalFilename string, r io.Reader) (*repository.Book, error) {
-	sanitizedAuthor := SanitizePathSegment(authorName)
+	sanitizedAuthor := SanitizeAuthorSegment(authorName)
 	sanitizedTitle := SanitizePathSegment(title)
 
 	targetDir := filepath.Join(in.libraryDir, sanitizedAuthor, sanitizedTitle)

@@ -532,24 +532,10 @@ func (h *BookHandler) GetChapterDirect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *BookHandler) resolveBookFilePath(b *repository.Book) string {
-	if b == nil || b.FilePath == "" {
+	if b == nil {
 		return ""
 	}
-	// 1. Check relative to libraryDir
-	libPath := filepath.Join(h.libraryDir, b.FilePath)
-	if fi, err := os.Stat(libPath); err == nil && !fi.IsDir() {
-		return libPath
-	}
-	// 2. Check relative to dataDir
-	dataPath := filepath.Join(h.dataDir, b.FilePath)
-	if fi, err := os.Stat(dataPath); err == nil && !fi.IsDir() {
-		return dataPath
-	}
-	// 3. Absolute path
-	if fi, err := os.Stat(b.FilePath); err == nil && !fi.IsDir() {
-		return b.FilePath
-	}
-	return ""
+	return resolveStoredPath(h.libraryDir, h.dataDir, b.FilePath)
 }
 
 func sanitizeDownloadFilename(name string) string {
@@ -1109,7 +1095,7 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 
 	primaryAuthor := authors[0]
 	isDuplicate := false
-	targetRelPath := filepath.Join(scanner.SanitizePathSegment(primaryAuthor), scanner.SanitizePathSegment(title), scanner.SanitizePathSegment(title)+ext)
+	targetRelPath := filepath.Join(scanner.SanitizeAuthorSegment(primaryAuthor), scanner.SanitizePathSegment(title), scanner.SanitizePathSegment(title)+ext)
 	if existing, err := h.repo.GetBookByFilePath(r.Context(), targetRelPath); err == nil && existing != nil {
 		isDuplicate = true
 	} else {
@@ -1430,7 +1416,7 @@ func (h *BookHandler) CommitUploadJob(w http.ResponseWriter, r *http.Request) {
 		} else if strings.Contains(ct, "webp") {
 			ext = ".webp"
 		}
-		bookDir := filepath.Join(h.libraryDir, scanner.SanitizePathSegment(primaryAuthor), scanner.SanitizePathSegment(title))
+		bookDir := filepath.Join(h.libraryDir, scanner.SanitizeAuthorSegment(primaryAuthor), scanner.SanitizePathSegment(title))
 		_ = os.MkdirAll(bookDir, 0755)
 		_ = os.WriteFile(filepath.Join(bookDir, "cover"+ext), coverBytes, 0644)
 	}
