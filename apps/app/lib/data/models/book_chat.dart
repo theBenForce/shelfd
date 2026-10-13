@@ -2,21 +2,50 @@ class BookCitation {
   final String chapterId;
   final int chapterIndex;
   final String? chapterTitle;
+  final int? startParagraph;
+  final int? endParagraph;
+  final String? excerpt;
   final String summary;
 
   const BookCitation({
     required this.chapterId,
     required this.chapterIndex,
     this.chapterTitle,
+    this.startParagraph,
+    this.endParagraph,
+    this.excerpt,
     required this.summary,
   });
+
+  BookCitation copyWith({
+    String? chapterId,
+    int? chapterIndex,
+    String? chapterTitle,
+    int? startParagraph,
+    int? endParagraph,
+    String? excerpt,
+    String? summary,
+  }) {
+    return BookCitation(
+      chapterId: chapterId ?? this.chapterId,
+      chapterIndex: chapterIndex ?? this.chapterIndex,
+      chapterTitle: chapterTitle ?? this.chapterTitle,
+      startParagraph: startParagraph ?? this.startParagraph,
+      endParagraph: endParagraph ?? this.endParagraph,
+      excerpt: excerpt ?? this.excerpt,
+      summary: summary ?? this.summary,
+    );
+  }
 
   factory BookCitation.fromJson(Map<String, dynamic> json) {
     return BookCitation(
       chapterId: json['chapter_id'] as String? ?? '',
       chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
       chapterTitle: json['chapter_title'] as String?,
-      summary: json['summary'] as String? ?? '',
+      startParagraph: (json['start_paragraph'] as num?)?.toInt(),
+      endParagraph: (json['end_paragraph'] as num?)?.toInt(),
+      excerpt: json['excerpt'] as String?,
+      summary: json['summary'] as String? ?? json['excerpt'] as String? ?? '',
     );
   }
 
@@ -25,6 +54,9 @@ class BookCitation {
       'chapter_id': chapterId,
       'chapter_index': chapterIndex,
       if (chapterTitle != null) 'chapter_title': chapterTitle,
+      if (startParagraph != null) 'start_paragraph': startParagraph,
+      if (endParagraph != null) 'end_paragraph': endParagraph,
+      if (excerpt != null) 'excerpt': excerpt,
       'summary': summary,
     };
   }
