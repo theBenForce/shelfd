@@ -1,6 +1,10 @@
 package mcp
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/shelfd/shelfd/internal/ai"
+)
 
 // JSON-RPC 2.0 Error Codes
 const (
@@ -90,13 +94,17 @@ func AvailableTools() []Tool {
 	return []Tool{
 		{
 			Name:        "search_library",
-			Description: "Perform semantic vector search across chapter summaries in the library, returning matching chapters with book titles, authors, and relevance scores.",
+			Description: "Perform semantic vector search across chapter summaries in the library, returning matching chapters with book titles, authors, and relevance scores. Can be constrained to a single book by providing book_id.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"query": map[string]any{
 						"type":        "string",
 						"description": "Natural language search prompt or thematic concept (e.g. 'How do the characters escape the orbital station?' or 'books about artificial intelligence'). Semantic vector search operates across this text.",
+					},
+					"book_id": map[string]any{
+						"type":        "string",
+						"description": "Optional book ID (ULID or UUID) to constrain semantic search strictly within a single book",
 					},
 					"author": map[string]any{
 						"type":        "string",
@@ -167,4 +175,18 @@ func AvailableTools() []Tool {
 			},
 		},
 	}
+}
+
+// AvailableToolDefinitions converts AvailableTools into ai.ToolDefinition structs for LLMs.
+func AvailableToolDefinitions() []ai.ToolDefinition {
+	tools := AvailableTools()
+	defs := make([]ai.ToolDefinition, len(tools))
+	for i, t := range tools {
+		defs[i] = ai.ToolDefinition{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.InputSchema,
+		}
+	}
+	return defs
 }

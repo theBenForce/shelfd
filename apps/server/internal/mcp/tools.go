@@ -6,9 +6,23 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/repository"
+	"github.com/shelfd/shelfd/internal/ulid"
 )
+
+// isValidID checks if an identifier is a valid ULID or UUID.
+func isValidID(s string) bool {
+	if s == "" {
+		return false
+	}
+	if ulid.IsValid(s) {
+		return true
+	}
+	_, err := uuid.Parse(s)
+	return err == nil
+}
 
 // ToolExecutor executes MCP tools against repository and AI services.
 type ToolExecutor struct {
@@ -29,8 +43,14 @@ func NewToolExecutor(repo repository.StorageEngine, aiClient ai.Client, logger *
 	}
 }
 
-// Execute dispatches a tool call to the appropriate tool implementation.
-func (te *ToolExecutor) Execute(ctx context.Context, name string, args map[string]any) (*CallToolResult, error) {
+// AvailableToolDefinitions returns the LLM-compatible tool definitions.
+func (te *ToolExecutor) AvailableToolDefinitions() []ai.ToolDefinition {
+	return AvailableToolDefinitions()
+}
+
+// ExecuteInProcess dispatches a tool call for internal consumers (such as chat agents)
+// returning both text content and structured citations.
+func (te *ToolExecutor) ExecuteInProcess(ctx context.Context, name string, args map[string]any) (*ai.ToolExecutionResult, error) {
 	switch name {
 	case "search_library":
 		return te.searchLibrary(ctx, args)
@@ -39,26 +59,33 @@ func (te *ToolExecutor) Execute(ctx context.Context, name string, args map[strin
 	case "read_chapter_content":
 		return te.readChapterContent(ctx, args)
 	default:
-		return &CallToolResult{
+		return &ai.ToolExecutionResult{
 			IsError: true,
-			Content: []ContentItem{
-				{
-					Type: "text",
-					Text: fmt.Sprintf("unknown tool: %s", name),
-				},
-			},
+			Content: fmt.Sprintf("unknown tool: %s", name),
 		}, nil
 	}
 }
 
+// Execute dispatches a tool call to the appropriate tool implementation for JSON-RPC MCP clients.
+func (te *ToolExecutor) Execute(ctx context.Context, name string, args map[string]any) (*CallToolResult, error) {
+	res, err := te.ExecuteInProcess(ctx, name, args)
+	if err != nil {
+		return nil, err
+	}
+	return &CallToolResult{
+		IsError: res.IsError,
+		Content: []ContentItem{{Type: "text", Text: res.Content}},
+	}, nil
+}
+
 // searchLibrary performs hybrid semantic vector search across chapter summaries.
-func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) (*CallToolResult, error) {
+func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) (*ai.ToolExecutionResult, error) {
 	query, _ := args["query"].(string)
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return &CallToolResult{
+		return &ai.ToolExecutionResult{
 			IsError: true,
-			Content: []ContentItem{{Type: "text", Text: "argument 'query' is required and cannot be empty"}},
+			Content: "argument 'query' is required and cannot be empty",
 		}, nil
 	}
 
@@ -74,6 +101,17 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 
 	filter := repository.SearchFilter{
 		Limit: limit,
+	}
+
+	if rawBookID, ok := args["book_id"].(string); ok && strings.TrimSpace(rawBookID) != "" {
+		bookID := strings.TrimSpace(rawBookID)
+		if !isValidID(bookID) {
+			return &ai.ToolExecutionResult{
+				IsError: true,
+				Content: fmt.Sprintf("invalid book_id format: %s", bookID),
+			}, nil
+		}
+		filter.BookID = &bookID
 	}
 
 	var fallbackNotes []string
@@ -120,17 +158,17 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 
 	queryEmbedding, err := te.aiClient.GenerateEmbedding(ctx, query)
 	if err != nil {
-		return &CallToolResult{
+		return &ai.ToolExecutionResult{
 			IsError: true,
-			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("failed to generate search embedding: %v", err)}},
+			Content: fmt.Sprintf("failed to generate search embedding: %v", err),
 		}, nil
 	}
 
 	hits, err := te.repo.SearchVectorParagraphs(ctx, queryEmbedding, filter)
 	if err != nil {
-		return &CallToolResult{
+		return &ai.ToolExecutionResult{
 			IsError: true,
-			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("vector search failed: %v", err)}},
+			Content: fmt.Sprintf("vector search failed: %v", err),
 		}, nil
 	}
 
@@ -144,18 +182,20 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 		te.logger.Info("mcp search_library executed",
 			"query", query,
 			"hits", 0,
+			"book_filter", filter.BookID != nil,
 			"author_filter", filter.AuthorID != nil,
 			"genre_filter", filter.GenreID != nil,
 			"topic_filter", filter.TopicID != nil,
 			"series_filter", filter.SeriesID != nil,
 		)
-		return &CallToolResult{
-			Content: []ContentItem{{Type: "text", Text: strings.TrimSpace(sb.String())}},
+		return &ai.ToolExecutionResult{
+			Content: strings.TrimSpace(sb.String()),
 		}, nil
 	}
 
 	sb.WriteString(fmt.Sprintf("Found %d relevant passage(s):\n\n", len(hits)))
 
+	var citations []ai.BookCitation
 	for i, hit := range hits {
 		author := "Unknown"
 		if hit.AuthorName != nil && *hit.AuthorName != "" {
@@ -180,6 +220,19 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 			}
 		}
 
+		citations = append(citations, ai.BookCitation{
+			BookID:         hit.BookID,
+			BookTitle:      hit.BookTitle,
+			AuthorName:     author,
+			ChapterID:      hit.ChapterID,
+			ChapterTitle:   chTitle,
+			ChapterIndex:   hit.ChapterIndex,
+			StartParagraph: hit.StartParagraph,
+			EndParagraph:   hit.EndParagraph,
+			Excerpt:        excerpt,
+			CosineDistance: float32(hit.Distance),
+		})
+
 		sb.WriteString(fmt.Sprintf("%d. **%s** by %s\n", i+1, hit.BookTitle, author))
 		sb.WriteString(fmt.Sprintf("   Book ID: `%s`\n", hit.BookID))
 		if hit.SeriesName != nil && *hit.SeriesName != "" {
@@ -200,33 +253,41 @@ func (te *ToolExecutor) searchLibrary(ctx context.Context, args map[string]any) 
 	te.logger.Info("mcp search_library executed",
 		"query", query,
 		"hits", len(hits),
+		"book_filter", filter.BookID != nil,
 		"author_filter", filter.AuthorID != nil,
 		"genre_filter", filter.GenreID != nil,
 		"topic_filter", filter.TopicID != nil,
 		"series_filter", filter.SeriesID != nil,
 	)
 
-	return &CallToolResult{
-		Content: []ContentItem{{Type: "text", Text: strings.TrimSpace(sb.String())}},
+	return &ai.ToolExecutionResult{
+		Content:   strings.TrimSpace(sb.String()),
+		Citations: citations,
 	}, nil
 }
 
 // getBookMetadata retrieves complete book details, TOC, and chapter summaries.
-func (te *ToolExecutor) getBookMetadata(ctx context.Context, args map[string]any) (*CallToolResult, error) {
+func (te *ToolExecutor) getBookMetadata(ctx context.Context, args map[string]any) (*ai.ToolExecutionResult, error) {
 	bookID, _ := args["book_id"].(string)
 	bookID = strings.TrimSpace(bookID)
 	if bookID == "" {
-		return &CallToolResult{
+		return &ai.ToolExecutionResult{
 			IsError: true,
-			Content: []ContentItem{{Type: "text", Text: "argument 'book_id' is required"}},
+			Content: "argument 'book_id' is required",
+		}, nil
+	}
+	if !isValidID(bookID) {
+		return &ai.ToolExecutionResult{
+			IsError: true,
+			Content: fmt.Sprintf("invalid book_id format: %s", bookID),
 		}, nil
 	}
 
 	book, err := te.repo.GetBookByID(ctx, bookID)
 	if err != nil {
-		return &CallToolResult{
+		return &ai.ToolExecutionResult{
 			IsError: true,
-			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("book with ID '%s' not found", bookID)}},
+			Content: fmt.Sprintf("book with ID '%s' not found", bookID),
 		}, nil
 	}
 
@@ -304,24 +365,36 @@ func (te *ToolExecutor) getBookMetadata(ctx context.Context, args map[string]any
 
 	te.logger.Debug("mcp get_book_metadata executed", "book_id", bookID, "title", book.Title, "chapters", len(chapters))
 
-	return &CallToolResult{
-		Content: []ContentItem{{Type: "text", Text: strings.TrimSpace(sb.String())}},
+	return &ai.ToolExecutionResult{
+		Content: strings.TrimSpace(sb.String()),
 	}, nil
 }
 
 // readChapterContent retrieves plain text for a specified chapter with paragraph windowing.
-func (te *ToolExecutor) readChapterContent(ctx context.Context, args map[string]any) (*CallToolResult, error) {
+func (te *ToolExecutor) readChapterContent(ctx context.Context, args map[string]any) (*ai.ToolExecutionResult, error) {
 	bookID, _ := args["book_id"].(string)
 	bookID = strings.TrimSpace(bookID)
 	if bookID == "" {
-		return &CallToolResult{
+		return &ai.ToolExecutionResult{
 			IsError: true,
-			Content: []ContentItem{{Type: "text", Text: "argument 'book_id' is required"}},
+			Content: "argument 'book_id' is required",
+		}, nil
+	}
+	if !isValidID(bookID) {
+		return &ai.ToolExecutionResult{
+			IsError: true,
+			Content: fmt.Sprintf("invalid book_id format: %s", bookID),
 		}, nil
 	}
 
 	chapterID, _ := args["chapter_id"].(string)
 	chapterID = strings.TrimSpace(chapterID)
+	if chapterID != "" && !isValidID(chapterID) {
+		return &ai.ToolExecutionResult{
+			IsError: true,
+			Content: fmt.Sprintf("invalid chapter_id format: %s", chapterID),
+		}, nil
+	}
 
 	var chapterIndex int
 	hasIndex := false
@@ -334,17 +407,17 @@ func (te *ToolExecutor) readChapterContent(ctx context.Context, args map[string]
 	}
 
 	if chapterID == "" && !hasIndex {
-		return &CallToolResult{
+		return &ai.ToolExecutionResult{
 			IsError: true,
-			Content: []ContentItem{{Type: "text", Text: "either 'chapter_id' or 'chapter_index' is required"}},
+			Content: "either 'chapter_id' or 'chapter_index' is required",
 		}, nil
 	}
 
 	book, err := te.repo.GetBookByID(ctx, bookID)
 	if err != nil {
-		return &CallToolResult{
+		return &ai.ToolExecutionResult{
 			IsError: true,
-			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("book with ID '%s' not found", bookID)}},
+			Content: fmt.Sprintf("book with ID '%s' not found", bookID),
 		}, nil
 	}
 
@@ -352,17 +425,17 @@ func (te *ToolExecutor) readChapterContent(ctx context.Context, args map[string]
 	if chapterID != "" {
 		chapter, err = te.repo.GetChapterByID(ctx, chapterID)
 		if err != nil || (chapter != nil && chapter.BookID != bookID) {
-			return &CallToolResult{
+			return &ai.ToolExecutionResult{
 				IsError: true,
-				Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("chapter '%s' not found in book '%s'", chapterID, book.Title)}},
+				Content: fmt.Sprintf("chapter '%s' not found in book '%s'", chapterID, book.Title),
 			}, nil
 		}
 	} else {
 		chapter, err = te.repo.GetChapterByBookAndIndex(ctx, bookID, chapterIndex)
 		if err != nil {
-			return &CallToolResult{
+			return &ai.ToolExecutionResult{
 				IsError: true,
-				Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("chapter %d not found in book '%s'", chapterIndex, book.Title)}},
+				Content: fmt.Sprintf("chapter %d not found in book '%s'", chapterIndex, book.Title),
 			}, nil
 		}
 	}
@@ -380,8 +453,8 @@ func (te *ToolExecutor) readChapterContent(ctx context.Context, args map[string]
 
 	totalParas := len(paras)
 	if totalParas == 0 {
-		return &CallToolResult{
-			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("[Book: %s | Chapter %d]\n\n(This chapter contains no text content.)", book.Title, chapterIndex)}},
+		return &ai.ToolExecutionResult{
+			Content: fmt.Sprintf("[Book: %s | Chapter %d]\n\n(This chapter contains no text content.)", book.Title, chapterIndex),
 		}, nil
 	}
 
@@ -393,9 +466,9 @@ func (te *ToolExecutor) readChapterContent(ctx context.Context, args map[string]
 	}
 
 	if startPara > totalParas {
-		return &CallToolResult{
+		return &ai.ToolExecutionResult{
 			IsError: true,
-			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("start_paragraph (%d) exceeds total paragraphs (%d)", startPara, totalParas)}},
+			Content: fmt.Sprintf("start_paragraph (%d) exceeds total paragraphs (%d)", startPara, totalParas),
 		}, nil
 	}
 
@@ -436,7 +509,32 @@ func (te *ToolExecutor) readChapterContent(ctx context.Context, args map[string]
 		"total_paragraphs", totalParas,
 	)
 
-	return &CallToolResult{
-		Content: []ContentItem{{Type: "text", Text: strings.TrimSpace(sb.String())}},
+	author := "Unknown"
+	if authors, _ := te.repo.GetBookAuthors(ctx, bookID); len(authors) > 0 && authors[0].Name != "" {
+		author = authors[0].Name
+	}
+	sampleExcerpt := ""
+	if len(paras) >= startPara {
+		sampleExcerpt = paras[startPara-1]
+		if len(sampleExcerpt) > 200 {
+			sampleExcerpt = sampleExcerpt[:200] + "..."
+		}
+	}
+
+	citation := ai.BookCitation{
+		BookID:         book.ID,
+		BookTitle:      book.Title,
+		AuthorName:     author,
+		ChapterID:      chapter.ID,
+		ChapterTitle:   chTitle,
+		ChapterIndex:   chapter.ChapterIndex,
+		StartParagraph: startPara,
+		EndParagraph:   endPara,
+		Excerpt:        sampleExcerpt,
+	}
+
+	return &ai.ToolExecutionResult{
+		Content:   strings.TrimSpace(sb.String()),
+		Citations: []ai.BookCitation{citation},
 	}, nil
 }

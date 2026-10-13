@@ -50,6 +50,16 @@ func NewServer(repo repository.StorageEngine, aiClient ai.Client, cfg Config) *S
 	}
 }
 
+// Executor returns the underlying ToolExecutor for in-process tool calling.
+func (s *Server) Executor() *ToolExecutor {
+	return s.executor
+}
+
+// AvailableToolDefinitions returns the LLM-compatible tool definitions.
+func (s *Server) AvailableToolDefinitions() []ai.ToolDefinition {
+	return AvailableToolDefinitions()
+}
+
 // Routes returns an http.Handler with all MCP endpoints registered and authenticated.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
