@@ -1,3 +1,13 @@
+# [1.14.0](https://github.com/theBenForce/shelfd/compare/v1.13.2...v1.14.0) (2026-10-13)
+
+
+### Features
+
+* **ai:** decouple embedder and chat model endpoints and authentication ([#58](https://github.com/theBenForce/shelfd/issues/58)) ([6a29189](https://github.com/theBenForce/shelfd/commit/6a29189fb1f7140629a07528f99148e77a091a70))
+* **app:** enhance book chat with dynamic citations, staged progress, and reader deep-linking ([#61](https://github.com/theBenForce/shelfd/issues/61)) ([d36f300](https://github.com/theBenForce/shelfd/commit/d36f3004624ad4adacd7c67793fca2899ff2c121))
+* **chat:** implement agentic multi-turn tool calling with lean book prompt ([#60](https://github.com/theBenForce/shelfd/issues/60)) ([2e2a3d8](https://github.com/theBenForce/shelfd/commit/2e2a3d8ca35de7ec5fd47b0a3ba1880be6af262f))
+* **mcp:** add book-scoped search and in-process tool executor with citations ([#59](https://github.com/theBenForce/shelfd/issues/59)) ([06b1080](https://github.com/theBenForce/shelfd/commit/06b1080e7142b4b2352481534895e355c16ac9d6))
+
 ## [1.13.2](https://github.com/theBenForce/shelfd/compare/v1.13.1...v1.13.2) (2026-10-12)
 
 
