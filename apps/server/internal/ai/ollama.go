@@ -52,6 +52,45 @@ func NewOllamaClient(cfg *config.AIConfig) *OllamaClient {
 	}
 }
 
+// NewOllamaEmbedder creates an Ollama client instance configured for embeddings.
+func NewOllamaEmbedder(cfg *config.ModelEndpointConfig) *OllamaClient {
+	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = "http://localhost:11434"
+	}
+	model := cfg.Model
+	if model == "" {
+		model = "nomic-embed-text"
+	}
+	dims := cfg.Dimensions
+	if dims <= 0 {
+		dims = 256
+	}
+	return &OllamaClient{
+		baseURL:             baseURL,
+		embeddingModel:      model,
+		embeddingDimensions: dims,
+		httpClient:          &http.Client{Timeout: defaultTimeout},
+	}
+}
+
+// NewOllamaChatClient creates an Ollama client instance configured for chat and summarization.
+func NewOllamaChatClient(cfg *config.ModelEndpointConfig) *OllamaClient {
+	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = "http://localhost:11434"
+	}
+	model := cfg.Model
+	if model == "" {
+		model = "llama3.2:3b"
+	}
+	return &OllamaClient{
+		baseURL:      baseURL,
+		summaryModel: model,
+		httpClient:   &http.Client{Timeout: defaultTimeout},
+	}
+}
+
 func (c *OllamaClient) SummarizeChapter(ctx context.Context, title, content string) (string, error) {
 	prompt := FormatSummarizePrompt(title, content)
 

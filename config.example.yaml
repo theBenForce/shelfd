@@ -67,6 +67,18 @@ ai:
   # embedding_model: "mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ"
   # embedding_dimensions: 256
   # chat_model: "gemma-4-E4B-it-MLX-4bit"
+  #
+  # Decoupled Endpoints Example (Local Ollama embeddings + Remote OpenAI chat):
+  # embedder:
+  #   provider: "ollama"
+  #   base_url: "http://host.docker.internal:11434"
+  #   model: "nomic-embed-text"
+  #   dimensions: 256
+  # chat:
+  #   provider: "openai"
+  #   base_url: "https://api.openai.com/v1"
+  #   api_key: "sk-..."
+  #   model: "gpt-4o-mini"
 
 mcp:
   # Model Context Protocol (MCP) server integration for AI agents (Cursor, Claude Desktop)

@@ -55,6 +55,49 @@ func NewOpenAIClient(cfg *config.AIConfig) *OpenAIClient {
 	}
 }
 
+// NewOpenAIEmbedder creates an OpenAI-compatible client instance configured for embeddings.
+func NewOpenAIEmbedder(cfg *config.ModelEndpointConfig) *OpenAIClient {
+	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	baseURL = strings.TrimSuffix(baseURL, "/v1")
+	if baseURL == "" {
+		baseURL = "https://api.openai.com"
+	}
+	model := cfg.Model
+	if model == "" {
+		model = "text-embedding-3-small"
+	}
+	dims := cfg.Dimensions
+	if dims <= 0 {
+		dims = 256
+	}
+	return &OpenAIClient{
+		baseURL:             baseURL,
+		apiKey:              cfg.APIKey,
+		embeddingModel:      model,
+		embeddingDimensions: dims,
+		httpClient:          &http.Client{Timeout: defaultTimeout},
+	}
+}
+
+// NewOpenAIChatClient creates an OpenAI-compatible client instance configured for chat and summarization.
+func NewOpenAIChatClient(cfg *config.ModelEndpointConfig) *OpenAIClient {
+	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	baseURL = strings.TrimSuffix(baseURL, "/v1")
+	if baseURL == "" {
+		baseURL = "https://api.openai.com"
+	}
+	model := cfg.Model
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
+	return &OpenAIClient{
+		baseURL:      baseURL,
+		apiKey:       cfg.APIKey,
+		summaryModel: model,
+		httpClient:   &http.Client{Timeout: defaultTimeout},
+	}
+}
+
 func (c *OpenAIClient) SummarizeChapter(ctx context.Context, title, content string) (string, error) {
 	prompt := FormatSummarizePrompt(title, content)
 

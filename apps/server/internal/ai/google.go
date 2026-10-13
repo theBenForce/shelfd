@@ -58,6 +58,49 @@ func NewGoogleClient(cfg *config.AIConfig) *GoogleClient {
 	}
 }
 
+// NewGoogleEmbedder creates a Google Gemini client instance configured for embeddings.
+func NewGoogleEmbedder(cfg *config.ModelEndpointConfig) *GoogleClient {
+	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = "https://generativelanguage.googleapis.com"
+	}
+	model := cfg.Model
+	if model == "" {
+		model = "text-embedding-004"
+	}
+	model = strings.TrimPrefix(model, "models/")
+	dims := cfg.Dimensions
+	if dims <= 0 {
+		dims = 256
+	}
+	return &GoogleClient{
+		baseURL:             baseURL,
+		apiKey:              cfg.APIKey,
+		embeddingModel:      model,
+		embeddingDimensions: dims,
+		httpClient:          &http.Client{Timeout: defaultTimeout},
+	}
+}
+
+// NewGoogleChatClient creates a Google Gemini client instance configured for chat and summarization.
+func NewGoogleChatClient(cfg *config.ModelEndpointConfig) *GoogleClient {
+	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = "https://generativelanguage.googleapis.com"
+	}
+	model := cfg.Model
+	if model == "" {
+		model = "gemini-1.5-flash"
+	}
+	model = strings.TrimPrefix(model, "models/")
+	return &GoogleClient{
+		baseURL:    baseURL,
+		apiKey:     cfg.APIKey,
+		chatModel:  model,
+		httpClient: &http.Client{Timeout: defaultTimeout},
+	}
+}
+
 func (c *GoogleClient) SummarizeChapter(ctx context.Context, title, content string) (string, error) {
 	prompt := FormatSummarizePrompt(title, content)
 	messages := []ChatMessage{
