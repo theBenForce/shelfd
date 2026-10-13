@@ -423,3 +423,123 @@ func TestGoogleClient(t *testing.T) {
 	}
 }
 
+func TestSplitModelEndpointsCompositeClient(t *testing.T) {
+	ctx := context.Background()
+
+	embedderHit := false
+	embedderServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/embeddings" {
+			embedderHit = true
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"embedding": []float32{0.5, 0.5, 0.5, 0.5},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer embedderServer.Close()
+
+	chatHit := false
+	chatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			if r.Header.Get("Authorization") != "Bearer test-chat-key" {
+				t.Errorf("expected Authorization Bearer test-chat-key, got %s", r.Header.Get("Authorization"))
+			}
+			chatHit = true
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{
+						"message": map[string]interface{}{
+							"role":    "assistant",
+							"content": "Split endpoints response.",
+						},
+					},
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer chatServer.Close()
+
+	cfg := &config.AIConfig{
+		Embedder: config.ModelEndpointConfig{
+			Provider:   "ollama",
+			BaseURL:    embedderServer.URL,
+			Model:      "nomic-embed-text",
+			Dimensions: 4,
+		},
+		Chat: config.ModelEndpointConfig{
+			Provider: "openai",
+			BaseURL:  chatServer.URL,
+			APIKey:   "test-chat-key",
+			Model:    "gpt-4o-mini",
+		},
+	}
+
+	client, err := ai.NewClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create composite client: %v", err)
+	}
+
+	// Verify embedding goes to embedderServer
+	emb, err := client.GenerateEmbedding(ctx, "Test embedding")
+	if err != nil {
+		t.Fatalf("GenerateEmbedding failed: %v", err)
+	}
+	if !embedderHit {
+		t.Errorf("expected embedderServer to be hit")
+	}
+	if len(emb) != 4 {
+		t.Errorf("expected 4 dimensions, got %d", len(emb))
+	}
+
+	// Verify chat goes to chatServer
+	reply, err := client.Chat(ctx, []ai.ChatMessage{{Role: "user", Content: "Hello"}})
+	if err != nil {
+		t.Fatalf("Chat failed: %v", err)
+	}
+	if !chatHit {
+		t.Errorf("expected chatServer to be hit")
+	}
+	if reply != "Split endpoints response." {
+		t.Errorf("expected 'Split endpoints response.', got %s", reply)
+	}
+}
+
+func TestSplitModelEndpointsSSRF(t *testing.T) {
+	badCfg := &config.ModelEndpointConfig{
+		Provider: "ollama",
+		BaseURL:  "http://169.254.169.254/latest/meta-data",
+	}
+
+	_, err := ai.NewEmbedder(badCfg)
+	if err == nil {
+		t.Errorf("expected error when embedder base_url points to metadata IP, got nil")
+	}
+
+	_, err = ai.NewChatClient(badCfg)
+	if err == nil {
+		t.Errorf("expected error when chat base_url points to metadata IP, got nil")
+	}
+}
+
+func TestSanitizeURL(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"", ""},
+		{"http://localhost:11434", "http://localhost:11434"},
+		{"https://user:secret123@api.openai.com/v1", "https://user:REDACTED@api.openai.com/v1"},
+		{"not-a-valid-url:%%%", "not-a-valid-url:%%%"},
+	}
+
+	for _, tt := range tests {
+		got := ai.SanitizeURL(tt.input)
+		if got != tt.expected {
+			t.Errorf("SanitizeURL(%q) = %q, expected %q", tt.input, got, tt.expected)
+		}
+	}
+}
+

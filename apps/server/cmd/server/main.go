@@ -65,6 +65,12 @@ func main() {
 	// Apply any SHELFD_* environment variable overrides
 	config.ApplyEnvOverrides(cfg)
 
+	// Validate configuration after environment overrides are applied
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Set up structured slog logger based on configuration
 	var logLevel slog.Level
 	switch strings.ToLower(cfg.Logging.Level) {
@@ -149,7 +155,15 @@ func main() {
 		logger.Error("Failed to initialize AI client", "error", err)
 		os.Exit(1)
 	}
-	logger.Info("AI client initialized", "provider", cfg.AI.Provider, "base_url", cfg.AI.BaseURL)
+	logger.Info("AI client initialized",
+		"embedder_provider", cfg.AI.Embedder.Provider,
+		"embedder_url", ai.SanitizeURL(cfg.AI.Embedder.BaseURL),
+		"embedder_model", cfg.AI.Embedder.Model,
+		"embedder_dimensions", cfg.AI.Embedder.Dimensions,
+		"chat_provider", cfg.AI.Chat.Provider,
+		"chat_url", ai.SanitizeURL(cfg.AI.Chat.BaseURL),
+		"chat_model", cfg.AI.Chat.Model,
+	)
 
 	taxService := taxonomy.NewTaxonomyService(repo, aiClient, logger)
 

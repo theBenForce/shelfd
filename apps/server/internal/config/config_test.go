@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shelfd/shelfd/internal/config"
@@ -475,6 +476,196 @@ logging:
 	}
 	if cfg2.Logging.Format != "json" {
 		t.Errorf("expected env override json, got %s", cfg2.Logging.Format)
+	}
+}
+
+func TestSplitModelEndpointsConfig(t *testing.T) {
+	yamlContent := `
+ai:
+  embedder:
+    provider: "ollama"
+    base_url: "http://localhost:11434"
+    api_key: "emb-key"
+    model: "nomic-embed-text"
+    dimensions: 384
+  chat:
+    provider: "openai"
+    base_url: "https://api.openai.com/v1"
+    api_key: "sk-chatkey12345"
+    model: "gpt-4o-mini"
+`
+	parsed, err := config.Parse([]byte(yamlContent))
+	if err != nil {
+		t.Fatalf("unexpected error parsing split model config: %v", err)
+	}
+
+	if parsed.AI.Embedder.Provider != "ollama" {
+		t.Errorf("expected embedder provider ollama, got %s", parsed.AI.Embedder.Provider)
+	}
+	if parsed.AI.Embedder.BaseURL != "http://localhost:11434" {
+		t.Errorf("expected embedder base_url http://localhost:11434, got %s", parsed.AI.Embedder.BaseURL)
+	}
+	if parsed.AI.Embedder.Dimensions != 384 || parsed.AI.EmbeddingDimensions != 384 {
+		t.Errorf("expected dimensions 384, got embedder=%d, global=%d", parsed.AI.Embedder.Dimensions, parsed.AI.EmbeddingDimensions)
+	}
+	if parsed.AI.Chat.Provider != "openai" {
+		t.Errorf("expected chat provider openai, got %s", parsed.AI.Chat.Provider)
+	}
+	if parsed.AI.Chat.Model != "gpt-4o-mini" {
+		t.Errorf("expected chat model gpt-4o-mini, got %s", parsed.AI.Chat.Model)
+	}
+
+	// Masking test
+	masked := parsed.AI.Chat.String()
+	if strings.Contains(masked, "sk-chatkey12345") {
+		t.Errorf("expected API key to be masked in String(), got %s", masked)
+	}
+	if !strings.Contains(masked, "****") {
+		t.Errorf("expected **** in masked string, got %s", masked)
+	}
+}
+
+func TestSplitModelEndpointsFallbackInheritance(t *testing.T) {
+	// 1. Legacy flat config inheritance
+	legacyYAML := `
+ai:
+  provider: "openai"
+  base_url: "https://api.openai.com/v1"
+  api_key: "sk-legacy-secret"
+  embedding_model: "text-embedding-3-small"
+  embedding_dimensions: 512
+  chat_model: "gpt-4o"
+`
+	parsed, err := config.Parse([]byte(legacyYAML))
+	if err != nil {
+		t.Fatalf("unexpected error parsing legacy config: %v", err)
+	}
+
+	if parsed.AI.Embedder.Provider != "openai" {
+		t.Errorf("expected embedder provider openai, got %s", parsed.AI.Embedder.Provider)
+	}
+	if parsed.AI.Embedder.BaseURL != "https://api.openai.com/v1" {
+		t.Errorf("expected embedder base_url https://api.openai.com/v1, got %s", parsed.AI.Embedder.BaseURL)
+	}
+	if parsed.AI.Embedder.APIKey != "sk-legacy-secret" {
+		t.Errorf("expected embedder api_key sk-legacy-secret, got %s", parsed.AI.Embedder.APIKey)
+	}
+	if parsed.AI.Embedder.Model != "text-embedding-3-small" {
+		t.Errorf("expected embedder model text-embedding-3-small, got %s", parsed.AI.Embedder.Model)
+	}
+	if parsed.AI.Embedder.Dimensions != 512 {
+		t.Errorf("expected embedder dimensions 512, got %d", parsed.AI.Embedder.Dimensions)
+	}
+	if parsed.AI.Chat.Provider != "openai" {
+		t.Errorf("expected chat provider openai, got %s", parsed.AI.Chat.Provider)
+	}
+	if parsed.AI.Chat.APIKey != "sk-legacy-secret" {
+		t.Errorf("expected chat api_key sk-legacy-secret, got %s", parsed.AI.Chat.APIKey)
+	}
+	if parsed.AI.Chat.Model != "gpt-4o" {
+		t.Errorf("expected chat model gpt-4o, got %s", parsed.AI.Chat.Model)
+	}
+
+	// 2. Partial override with provider mismatch prevents key/URL bleed
+	partialYAML := `
+ai:
+  provider: "openai"
+  base_url: "https://api.openai.com/v1"
+  api_key: "sk-openai-key"
+  embedder:
+    provider: "ollama"
+    model: "nomic-embed-text"
+`
+	partialParsed, err := config.Parse([]byte(partialYAML))
+	if err != nil {
+		t.Fatalf("unexpected error parsing partial config: %v", err)
+	}
+	if partialParsed.AI.Embedder.Provider != "ollama" {
+		t.Errorf("expected embedder provider ollama, got %s", partialParsed.AI.Embedder.Provider)
+	}
+	// Embedder baseURL should be default Ollama, NOT OpenAI
+	if partialParsed.AI.Embedder.BaseURL != config.DefaultBaseURLForProvider("ollama") {
+		t.Errorf("expected embedder base_url default ollama, got %s", partialParsed.AI.Embedder.BaseURL)
+	}
+	// Embedder API key must NOT inherit OpenAI key
+	if partialParsed.AI.Embedder.APIKey != "" {
+		t.Errorf("expected empty embedder api_key for ollama, got %s", partialParsed.AI.Embedder.APIKey)
+	}
+	// Chat should still inherit OpenAI settings
+	if partialParsed.AI.Chat.Provider != "openai" || partialParsed.AI.Chat.APIKey != "sk-openai-key" {
+		t.Errorf("expected chat to inherit openai settings, got provider=%s, key=%s", partialParsed.AI.Chat.Provider, partialParsed.AI.Chat.APIKey)
+	}
+}
+
+func TestSplitModelEndpointsEnvOverrides(t *testing.T) {
+	os.Setenv("SHELFD_AI_PROVIDER", "ollama")
+	os.Setenv("SHELFD_AI_EMBEDDER_PROVIDER", "google")
+	os.Setenv("SHELFD_AI_EMBEDDER_BASE_URL", "https://generativelanguage.googleapis.com")
+	os.Setenv("SHELFD_AI_EMBEDDER_API_KEY", "google-api-key")
+	os.Setenv("SHELFD_AI_EMBEDDER_MODEL", "text-embedding-004")
+	os.Setenv("SHELFD_AI_EMBEDDER_DIMENSIONS", "768")
+	os.Setenv("SHELFD_AI_CHAT_PROVIDER", "openai")
+	os.Setenv("SHELFD_AI_CHAT_BASE_URL", "https://api.openai.com/v1")
+	os.Setenv("SHELFD_AI_CHAT_API_KEY", "sk-env-openai")
+	os.Setenv("SHELFD_AI_CHAT_MODEL", "gpt-4o")
+
+	defer func() {
+		os.Unsetenv("SHELFD_AI_PROVIDER")
+		os.Unsetenv("SHELFD_AI_EMBEDDER_PROVIDER")
+		os.Unsetenv("SHELFD_AI_EMBEDDER_BASE_URL")
+		os.Unsetenv("SHELFD_AI_EMBEDDER_API_KEY")
+		os.Unsetenv("SHELFD_AI_EMBEDDER_MODEL")
+		os.Unsetenv("SHELFD_AI_EMBEDDER_DIMENSIONS")
+		os.Unsetenv("SHELFD_AI_CHAT_PROVIDER")
+		os.Unsetenv("SHELFD_AI_CHAT_BASE_URL")
+		os.Unsetenv("SHELFD_AI_CHAT_API_KEY")
+		os.Unsetenv("SHELFD_AI_CHAT_MODEL")
+	}()
+
+	cfg := config.DefaultConfig()
+	config.ApplyEnvOverrides(cfg)
+
+	if cfg.AI.Embedder.Provider != "google" {
+		t.Errorf("expected embedder provider google, got %s", cfg.AI.Embedder.Provider)
+	}
+	if cfg.AI.Embedder.Dimensions != 768 || cfg.AI.EmbeddingDimensions != 768 {
+		t.Errorf("expected dimensions 768, got %d and %d", cfg.AI.Embedder.Dimensions, cfg.AI.EmbeddingDimensions)
+	}
+	if cfg.AI.Chat.Provider != "openai" {
+		t.Errorf("expected chat provider openai, got %s", cfg.AI.Chat.Provider)
+	}
+	if cfg.AI.Chat.APIKey != "sk-env-openai" {
+		t.Errorf("expected chat api key sk-env-openai, got %s", cfg.AI.Chat.APIKey)
+	}
+}
+
+func TestSplitModelEndpointsSSRFValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		url     string
+		blocked bool
+	}{
+		{"ipv4_metadata_exact", "http://169.254.169.254/latest/meta-data", true},
+		{"ipv4_metadata_prefix", "http://169.254.10.20:8080", true},
+		{"ipv6_metadata", "http://[fd00:ec2::254]/v1", true},
+		{"ipv6_link_local", "http://[fe80::1]/v1", true},
+		{"google_metadata_host", "http://metadata.google.internal/computeMetadata/v1", true},
+		{"valid_localhost", "http://localhost:11434", false},
+		{"valid_docker_host", "http://host.docker.internal:11434", false},
+		{"valid_private_network", "http://192.168.1.100:11434", false},
+		{"valid_openai", "https://api.openai.com/v1", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := config.ValidateSSRF(tc.url)
+			if tc.blocked && err == nil {
+				t.Errorf("expected SSRF error for %s, got nil", tc.url)
+			}
+			if !tc.blocked && err != nil {
+				t.Errorf("expected valid URL for %s, got error: %v", tc.url, err)
+			}
+		})
 	}
 }
 

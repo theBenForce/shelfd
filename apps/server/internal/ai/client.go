@@ -42,12 +42,28 @@ type ChatMessage struct {
 	Content string `json:"content"`
 }
 
-// Client defines the universal interface for LLM chat, chapter summarization, and batch vector embedding generation.
-type Client interface {
-	SummarizeChapter(ctx context.Context, title, content string) (string, error)
+// Embedder defines the interface for batch and single vector embedding generation.
+type Embedder interface {
 	GenerateEmbedding(ctx context.Context, text string) ([]float32, error)
 	GenerateBatchEmbeddings(ctx context.Context, texts []string) ([][]float32, error)
+}
+
+// ChatClient defines the interface for LLM chat and chapter summarization.
+type ChatClient interface {
+	SummarizeChapter(ctx context.Context, title, content string) (string, error)
 	Chat(ctx context.Context, messages []ChatMessage) (string, error)
+}
+
+// Client defines the universal composite interface for embeddings, chat, and summarization.
+type Client interface {
+	Embedder
+	ChatClient
+}
+
+// CompositeClient wraps separate Embedder and ChatClient instances into a single Client.
+type CompositeClient struct {
+	Embedder
+	ChatClient
 }
 
 // ChunkTexts partitions a slice of strings into chunks of at most maxBatchSize.
@@ -95,34 +111,122 @@ func FormatSummarizePrompt(title, content string) string {
 	return sb.String()
 }
 
-// NewClient instantiates an AI client based on configuration with SSRF safeguards.
-func NewClient(cfg *config.AIConfig) (Client, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("ai config cannot be nil")
+// SanitizeURL strips credentials from a URL for safe logging.
+func SanitizeURL(rawURL string) string {
+	if strings.TrimSpace(rawURL) == "" {
+		return ""
 	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	if parsed.User != nil {
+		parsed.User = url.UserPassword(parsed.User.Username(), "REDACTED")
+	}
+	return parsed.String()
+}
 
-	if cfg.BaseURL != "" {
-		parsed, err := url.Parse(cfg.BaseURL)
-		if err != nil {
-			return nil, fmt.Errorf("invalid ai.base_url: %w", err)
-		}
-		hostname := parsed.Hostname()
-		if hostname == "169.254.169.254" || strings.HasPrefix(hostname, "169.254.") {
-			return nil, fmt.Errorf("ai.base_url contains prohibited cloud metadata address: %s", hostname)
-		}
+// NewEmbedder instantiates an embedding client based on endpoint configuration.
+func NewEmbedder(cfg *config.ModelEndpointConfig) (Embedder, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("embedder endpoint config cannot be nil")
+	}
+	if err := config.ValidateSSRF(cfg.BaseURL); err != nil {
+		return nil, fmt.Errorf("embedder base_url contains %w", err)
 	}
 
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	switch provider {
 	case "ollama":
-		return NewOllamaClient(cfg), nil
+		return NewOllamaEmbedder(cfg), nil
 	case "openai":
-		return NewOpenAIClient(cfg), nil
+		return NewOpenAIEmbedder(cfg), nil
 	case "google", "gemini":
-		return NewGoogleClient(cfg), nil
+		return NewGoogleEmbedder(cfg), nil
 	default:
-		return nil, fmt.Errorf("unsupported ai provider: %s", cfg.Provider)
+		return nil, fmt.Errorf("unsupported ai embedder provider: %s", cfg.Provider)
 	}
+}
+
+// NewChatClient instantiates a chat/summarization client based on endpoint configuration.
+func NewChatClient(cfg *config.ModelEndpointConfig) (ChatClient, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("chat endpoint config cannot be nil")
+	}
+	if err := config.ValidateSSRF(cfg.BaseURL); err != nil {
+		return nil, fmt.Errorf("chat base_url contains %w", err)
+	}
+
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	switch provider {
+	case "ollama":
+		return NewOllamaChatClient(cfg), nil
+	case "openai":
+		return NewOpenAIChatClient(cfg), nil
+	case "google", "gemini":
+		return NewGoogleChatClient(cfg), nil
+	default:
+		return nil, fmt.Errorf("unsupported ai chat provider: %s", cfg.Provider)
+	}
+}
+
+// NewClient instantiates a composite AI client, decoupling embedder and chat endpoints.
+func NewClient(cfg *config.AIConfig) (Client, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("ai config cannot be nil")
+	}
+
+	// Resolve Embedder config with fallback to top-level legacy fields
+	embedderCfg := cfg.Embedder
+	if embedderCfg.Provider == "" {
+		embedderCfg.Provider = cfg.Provider
+	}
+	if embedderCfg.BaseURL == "" {
+		embedderCfg.BaseURL = cfg.BaseURL
+	}
+	if embedderCfg.APIKey == "" {
+		embedderCfg.APIKey = cfg.APIKey
+	}
+	if embedderCfg.Model == "" {
+		embedderCfg.Model = cfg.EmbeddingModel
+	}
+	if embedderCfg.Dimensions <= 0 {
+		embedderCfg.Dimensions = cfg.EmbeddingDimensions
+	}
+
+	// Resolve Chat config with fallback to top-level legacy fields
+	chatCfg := cfg.Chat
+	if chatCfg.Provider == "" {
+		chatCfg.Provider = cfg.Provider
+	}
+	if chatCfg.BaseURL == "" {
+		chatCfg.BaseURL = cfg.BaseURL
+	}
+	if chatCfg.APIKey == "" {
+		chatCfg.APIKey = cfg.APIKey
+	}
+	if chatCfg.Model == "" {
+		if cfg.ChatModel != "" {
+			chatCfg.Model = cfg.ChatModel
+		} else {
+			chatCfg.Model = cfg.SummaryModel
+		}
+	}
+
+	embedder, err := NewEmbedder(&embedderCfg)
+	if err != nil {
+		return nil, fmt.Errorf("initializing embedder: %w", err)
+	}
+
+	chatClient, err := NewChatClient(&chatCfg)
+	if err != nil {
+		return nil, fmt.Errorf("initializing chat client: %w", err)
+	}
+
+	return &CompositeClient{
+		Embedder:   embedder,
+		ChatClient: chatClient,
+	}, nil
 }
 
 const defaultTimeout = 60 * time.Second
