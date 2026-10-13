@@ -224,6 +224,9 @@ func main() {
 		w.Write([]byte(`{"status":"ok","version":"` + Version + `"}`))
 	})
 
+	// MCP Tool Executor (available for in-process book chat and HTTP/SSE MCP server)
+	toolExecutor := mcp.NewToolExecutor(repo, aiClient, logger)
+
 	if cfg.MCP.Enabled {
 		mcpServer := mcp.NewServer(repo, aiClient, mcp.Config{
 			BasePath: cfg.MCP.Path,
@@ -248,6 +251,7 @@ func main() {
 		Worker:          chapterWorker,
 		UploadWorker:    uploadWorker,
 		AIClient:        aiClient,
+		ToolInvoker:     toolExecutor,
 		Hub:             eventHub,
 		DataDir:         cfg.Storage.DataDir,
 		LibraryDir:      cfg.Storage.LibraryDir,

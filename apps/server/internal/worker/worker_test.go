@@ -71,6 +71,10 @@ func (m *mockAIClient) Chat(ctx context.Context, messages []ai.ChatMessage) (str
 	return "Mock chat response", nil
 }
 
+func (m *mockAIClient) ChatWithTools(ctx context.Context, messages []ai.ChatMessage, tools []ai.ToolDefinition) (*ai.ChatResponse, error) {
+	return &ai.ChatResponse{Content: "Mock chat response"}, nil
+}
+
 func setupTestDB(t *testing.T) (*sql.DB, repository.StorageEngine) {
 	t.Helper()
 	db, err := database.OpenSQLite(":memory:")

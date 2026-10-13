@@ -69,6 +69,10 @@ func (m *mockAIClient) Chat(ctx context.Context, messages []ai.ChatMessage) (str
 	return "Standard MCP AI response", nil
 }
 
+func (m *mockAIClient) ChatWithTools(ctx context.Context, messages []ai.ChatMessage, tools []ai.ToolDefinition) (*ai.ChatResponse, error) {
+	return &ai.ChatResponse{Content: "Standard MCP AI response"}, nil
+}
+
 func setupTestEnvironment(t *testing.T) (*sql.DB, repository.StorageEngine, string, *mcp.Server) {
 	t.Helper()
 	db, err := database.OpenSQLite(":memory:")

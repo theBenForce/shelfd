@@ -33,10 +33,16 @@ type BookHandler struct {
 	worker       *worker.Worker
 	uploadWorker *worker.UploadWorker
 	aiClient     ai.Client
+	toolInvoker  ai.ToolInvoker
 	dataDir      string
 	libraryDir   string
 	hub          *events.Hub
 	logger       *slog.Logger
+}
+
+// SetToolInvoker sets the in-process tool invoker for agentic book chat.
+func (h *BookHandler) SetToolInvoker(invoker ai.ToolInvoker) {
+	h.toolInvoker = invoker
 }
 
 func NewBookHandler(
@@ -1680,92 +1686,21 @@ func (h *BookHandler) ChatBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var citations []BookCitation
-	var contextBuilder strings.Builder
-
-	// RAG: 1. Generate query embedding and search paragraphs scoped to bookID
-	queryEmbedding, err := h.aiClient.GenerateEmbedding(r.Context(), message)
-	if err == nil && len(queryEmbedding) > 0 {
-		hits, err := h.repo.SearchVectorParagraphs(r.Context(), queryEmbedding, repository.SearchFilter{
-			BookID: &bookID,
-			Limit:  5,
-		})
-		if err == nil && len(hits) > 0 {
-			for _, hit := range hits {
-				chTitle := fmt.Sprintf("Chapter %d", hit.ChapterIndex)
-				if hit.ChapterTitle != nil && *hit.ChapterTitle != "" {
-					chTitle = fmt.Sprintf("Chapter %d: %s", hit.ChapterIndex, *hit.ChapterTitle)
-				}
-				contextBuilder.WriteString(fmt.Sprintf("[%s (Paragraphs %d-%d)]\n%s\n\n", chTitle, hit.StartParagraph, hit.EndParagraph, hit.Content))
-				citations = append(citations, BookCitation{
-					ChapterID:      hit.ChapterID,
-					ChapterIndex:   hit.ChapterIndex,
-					ChapterTitle:   hit.ChapterTitle,
-					StartParagraph: hit.StartParagraph,
-					EndParagraph:   hit.EndParagraph,
-					Excerpt:        hit.Content,
-					Summary:        hit.Content,
-				})
-			}
-		}
-	}
-
-	// 2. Fallback to FTS5 search across paragraphs if vector search yielded no hits
-	if len(citations) == 0 {
-		ftsHits, err := h.repo.SearchFTSParagraphs(r.Context(), message, repository.SearchFilter{
-			BookID: &bookID,
-			Limit:  5,
-		})
-		if err == nil && len(ftsHits) > 0 {
-			for _, hit := range ftsHits {
-				chTitle := fmt.Sprintf("Chapter %d", hit.ChapterIndex)
-				if hit.ChapterTitle != nil && *hit.ChapterTitle != "" {
-					chTitle = fmt.Sprintf("Chapter %d: %s", hit.ChapterIndex, *hit.ChapterTitle)
-				}
-				contextBuilder.WriteString(fmt.Sprintf("[%s (Paragraphs %d-%d)]\n%s\n\n", chTitle, hit.StartParagraph, hit.EndParagraph, hit.Content))
-				citations = append(citations, BookCitation{
-					ChapterID:      hit.ChapterID,
-					ChapterIndex:   hit.ChapterIndex,
-					ChapterTitle:   hit.ChapterTitle,
-					StartParagraph: hit.StartParagraph,
-					EndParagraph:   hit.EndParagraph,
-					Excerpt:        hit.Content,
-					Summary:        hit.Content,
-				})
-			}
-		}
-	}
-
-	// 3. Fallback to chapter summaries if still empty (e.g. legacy un-chunked book)
-	if len(citations) == 0 {
-		chapters, _ := h.repo.GetChaptersByBookID(r.Context(), bookID)
-		for i, c := range chapters {
-			if i >= 3 {
-				break
-			}
-			if c.Summary != "" {
-				title := fmt.Sprintf("Chapter %d", c.ChapterIndex)
-				if c.Title != nil && *c.Title != "" {
-					title = fmt.Sprintf("Chapter %d: %s", c.ChapterIndex, *c.Title)
-				}
-				contextBuilder.WriteString(fmt.Sprintf("[%s]\n%s\n\n", title, c.Summary))
-				citations = append(citations, BookCitation{
-					ChapterID:    c.ID,
-					ChapterIndex: c.ChapterIndex,
-					ChapterTitle: c.Title,
-					Excerpt:      c.Summary,
-					Summary:      c.Summary,
-				})
-			}
-		}
+	var desc string
+	if book.Description != nil && strings.TrimSpace(*book.Description) != "" {
+		desc = strings.TrimSpace(*book.Description)
+	} else {
+		desc = "No description available."
 	}
 
 	systemPrompt := fmt.Sprintf(
-		"You are an insightful, knowledgeable literary companion assisting a reader with the book \"%s\". "+
-			"Answer the reader's question thoughtfully and accurately based on the book context below. "+
-			"Ground your answer in the provided chapter text and summaries, and mention relevant chapters where applicable.\n\n"+
-			"Retrieved Book Context:\n%s",
-		book.Title, contextBuilder.String(),
+		"You are an insightful literary companion assisting a reader with the book \"%s\".\n"+
+			"Book ID: %s\n"+
+			"Description: %s\n\n"+
+			"Primarily answer questions from this book. You have tools available to search the library and read chapter content. "+
+			"If you need details, summaries, or specific passages from the book, invoke the available tools using book_id \"%s\". "+
+			"Ground your answers in the book text and cite chapters or sections where appropriate.",
+		book.Title, book.ID, desc, book.ID,
 	)
 
 	messages := []ai.ChatMessage{
@@ -1779,21 +1714,42 @@ func (h *BookHandler) ChatBook(w http.ResponseWriter, r *http.Request) {
 			history = history[len(history)-6:]
 		}
 		for _, m := range history {
-			if m.Role == "user" || m.Role == "assistant" {
-				messages = append(messages, m)
+			role := strings.ToLower(m.Role)
+			if role == "user" || role == "assistant" {
+				messages = append(messages, ai.ChatMessage{
+					Role:    role,
+					Content: m.Content,
+				})
 			}
 		}
 	}
 	messages = append(messages, ai.ChatMessage{Role: "user", Content: message})
 
-	reply, err := h.aiClient.Chat(r.Context(), messages)
+	var invoker ai.ToolInvoker = h.toolInvoker
+	agent := ai.NewChatAgent(h.aiClient, invoker)
+	agentResult, err := agent.Execute(r.Context(), bookID, messages)
 	if err != nil {
+		h.logger.Error("AI chat agent failed", "book_id", bookID, "error", err)
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("AI chat failed: %v", err))
 		return
 	}
 
+	citations := make([]BookCitation, 0, len(agentResult.Citations))
+	for _, c := range agentResult.Citations {
+		title := c.ChapterTitle
+		citations = append(citations, BookCitation{
+			ChapterID:      c.ChapterID,
+			ChapterIndex:   c.ChapterIndex,
+			ChapterTitle:   &title,
+			StartParagraph: c.StartParagraph,
+			EndParagraph:   c.EndParagraph,
+			Excerpt:        c.Excerpt,
+			Summary:        c.Excerpt,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, BookChatResponse{
-		Reply:     reply,
+		Reply:     agentResult.Reply,
 		Citations: citations,
 	})
 }
