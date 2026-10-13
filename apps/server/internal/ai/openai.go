@@ -238,27 +238,70 @@ func (c *OpenAIClient) GenerateBatchEmbeddings(ctx context.Context, texts []stri
 }
 
 func (c *OpenAIClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
-	openAIMessages := make([]map[string]string, len(messages))
+	resp, err := c.ChatWithTools(ctx, messages, nil)
+	if err != nil {
+		return "", err
+	}
+	return resp.Content, nil
+}
+
+func (c *OpenAIClient) ChatWithTools(ctx context.Context, messages []ChatMessage, tools []ToolDefinition) (*ChatResponse, error) {
+	openAIMessages := make([]map[string]any, len(messages))
 	for i, m := range messages {
-		openAIMessages[i] = map[string]string{
-			"role":    m.Role,
-			"content": m.Content,
+		msg := map[string]any{
+			"role": m.Role,
 		}
+		if m.Content != "" {
+			msg["content"] = m.Content
+		}
+		if m.ToolCallID != "" {
+			msg["tool_call_id"] = m.ToolCallID
+		}
+		if len(m.ToolCalls) > 0 {
+			var tcList []map[string]any
+			for _, tc := range m.ToolCalls {
+				tcList = append(tcList, map[string]any{
+					"id":   tc.ID,
+					"type": "function",
+					"function": map[string]any{
+						"name":      tc.Name,
+						"arguments": tc.Arguments,
+					},
+				})
+			}
+			msg["tool_calls"] = tcList
+		}
+		openAIMessages[i] = msg
 	}
 
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"model":    c.summaryModel,
 		"messages": openAIMessages,
 	}
 
+	if len(tools) > 0 {
+		var openAITools []map[string]any
+		for _, t := range tools {
+			openAITools = append(openAITools, map[string]any{
+				"type": "function",
+				"function": map[string]any{
+					"name":        t.Name,
+					"description": t.Description,
+					"parameters":  t.Parameters,
+				},
+			})
+		}
+		payload["tools"] = openAITools
+	}
+
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("marshaling openai chat request: %w", err)
+		return nil, fmt.Errorf("marshaling openai chat request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewReader(bodyBytes))
 	if err != nil {
-		return "", fmt.Errorf("creating request: %w", err)
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
@@ -267,30 +310,51 @@ func (c *OpenAIClient) Chat(ctx context.Context, messages []ChatMessage) (string
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("sending openai chat request: %w", err)
+		return nil, fmt.Errorf("sending openai chat request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("openai chat returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("openai chat returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var res struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Role      string `json:"role"`
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					ID       string `json:"id"`
+					Type     string `json:"type"`
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return "", fmt.Errorf("decoding openai chat response: %w", err)
+		return nil, fmt.Errorf("decoding openai chat response: %w", err)
 	}
 
 	if len(res.Choices) == 0 {
-		return "", fmt.Errorf("no completion choices returned by openai")
+		return nil, fmt.Errorf("no choices returned by openai chat")
 	}
 
-	return strings.TrimSpace(res.Choices[0].Message.Content), nil
+	msg := res.Choices[0].Message
+	chatResp := &ChatResponse{
+		Content: strings.TrimSpace(msg.Content),
+	}
+	for _, tc := range msg.ToolCalls {
+		chatResp.ToolCalls = append(chatResp.ToolCalls, ToolCall{
+			ID:        tc.ID,
+			Name:      tc.Function.Name,
+			Arguments: tc.Function.Arguments,
+		})
+	}
+
+	return chatResp, nil
 }
 

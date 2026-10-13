@@ -29,8 +29,10 @@ import (
 	"github.com/shelfd/shelfd/internal/database"
 	"github.com/shelfd/shelfd/internal/epub"
 	"github.com/shelfd/shelfd/internal/events"
+	"github.com/shelfd/shelfd/internal/mcp"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
+	"github.com/shelfd/shelfd/internal/ulid"
 	"github.com/shelfd/shelfd/internal/worker"
 )
 
@@ -89,6 +91,34 @@ func (m *mockAIClient) Chat(ctx context.Context, messages []ai.ChatMessage) (str
 		return m.chatResp, nil
 	}
 	return "Mock AI response about the book.", nil
+}
+
+func (m *mockAIClient) ChatWithTools(ctx context.Context, messages []ai.ChatMessage, tools []ai.ToolDefinition) (*ai.ChatResponse, error) {
+	if m.chatErr != nil {
+		return nil, m.chatErr
+	}
+	if m.chatResp != "" {
+		return &ai.ChatResponse{Content: m.chatResp}, nil
+	}
+	hasToolResult := false
+	for _, msg := range messages {
+		if msg.Role == "tool" {
+			hasToolResult = true
+			break
+		}
+	}
+	if len(tools) > 0 && !hasToolResult {
+		return &ai.ChatResponse{
+			ToolCalls: []ai.ToolCall{
+				{
+					ID:        "call_test_1",
+					Name:      "read_chapter_content",
+					Arguments: `{"chapter_index":1}`,
+				},
+			},
+		}, nil
+	}
+	return &ai.ChatResponse{Content: "Mock AI response about the book."}, nil
 }
 
 type testFixture struct {
@@ -158,6 +188,7 @@ func setupAPITest(t *testing.T) *testFixture {
 		Worker:          nil,
 		UploadWorker:    uploadWorker,
 		AIClient:        aiClient,
+		ToolInvoker:     mcp.NewToolExecutor(repo, aiClient, slog.Default()),
 		Hub:             hub,
 		DataDir:         dataDir,
 		LibraryDir:      libDir,
@@ -2391,8 +2422,10 @@ func TestChatBookEndpoint(t *testing.T) {
 	token := f.loginAndGetToken(t)
 	ctx := context.Background()
 
+	bookID := ulid.New()
+	chapterID := ulid.New()
 	book := &repository.Book{
-		ID:       "chat-book-1",
+		ID:       bookID,
 		Title:    "Moby Dick",
 		FilePath: "/test/moby.epub",
 	}
@@ -2402,7 +2435,7 @@ func TestChatBookEndpoint(t *testing.T) {
 	title := "Loomings"
 	summary := "Ishmael decides to go to sea and travels to New Bedford."
 	ch := &repository.Chapter{
-		ID:           "ch-moby-1",
+		ID:           chapterID,
 		BookID:       book.ID,
 		ChapterIndex: 1,
 		Title:        &title,
@@ -2415,7 +2448,7 @@ func TestChatBookEndpoint(t *testing.T) {
 
 	// Valid chat request
 	chatPayload := `{"query": "Why does Ishmael go to sea?"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/chat-book-1/chat", strings.NewReader(chatPayload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+bookID+"/chat", strings.NewReader(chatPayload))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -2429,8 +2462,9 @@ func TestChatBookEndpoint(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &chatRes); err != nil {
 		t.Fatalf("failed to decode chat response: %v", err)
 	}
-	if chatRes["response"] == "" {
-		t.Errorf("expected non-empty response, got %+v", chatRes)
+	reply, _ := chatRes["reply"].(string)
+	if reply == "" {
+		t.Errorf("expected non-empty reply, got %+v", chatRes)
 	}
 	citations, ok := chatRes["citations"].([]interface{})
 	if !ok || len(citations) == 0 {
@@ -2438,7 +2472,7 @@ func TestChatBookEndpoint(t *testing.T) {
 	}
 
 	// Empty query error
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/books/chat-book-1/chat", strings.NewReader(`{"query": ""}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/books/"+bookID+"/chat", strings.NewReader(`{"query": ""}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()

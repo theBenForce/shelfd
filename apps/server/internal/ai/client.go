@@ -38,8 +38,16 @@ func NormalizeAndTruncateMRL(vec []float32, targetDim int) []float32 {
 
 // ChatMessage represents an individual conversational message.
 type ChatMessage struct {
-	Role    string `json:"role"` // "system", "user", "assistant"
-	Content string `json:"content"`
+	Role       string     `json:"role"` // "system", "user", "assistant", "tool"
+	Content    string     `json:"content"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+}
+
+// ChatResponse represents the outcome of a chat completion step.
+type ChatResponse struct {
+	Content   string     `json:"content"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 
 // Embedder defines the interface for batch and single vector embedding generation.
@@ -52,6 +60,7 @@ type Embedder interface {
 type ChatClient interface {
 	SummarizeChapter(ctx context.Context, title, content string) (string, error)
 	Chat(ctx context.Context, messages []ChatMessage) (string, error)
+	ChatWithTools(ctx context.Context, messages []ChatMessage, tools []ToolDefinition) (*ChatResponse, error)
 }
 
 // Client defines the universal composite interface for embeddings, chat, and summarization.

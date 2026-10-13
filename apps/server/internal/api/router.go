@@ -19,6 +19,7 @@ type RouterConfig struct {
 	Worker          *worker.Worker
 	UploadWorker    *worker.UploadWorker
 	AIClient        ai.Client
+	ToolInvoker     ai.ToolInvoker
 	Hub             *events.Hub
 	DataDir         string
 	LibraryDir      string
@@ -41,6 +42,9 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	authHandler := NewAuthHandler(cfg.Repo, cfg.JWTSecret, logger)
 	bookHandler := NewBookHandler(cfg.Repo, cfg.Ingester, cfg.Worker, cfg.UploadWorker, cfg.AIClient, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
+	if cfg.ToolInvoker != nil {
+		bookHandler.SetToolInvoker(cfg.ToolInvoker)
+	}
 	taxHandler := NewTaxonomyHandler(cfg.Repo, cfg.LibraryDir, cfg.DataDir, logger)
 	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, cfg.Hub, logger)
 	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version, cfg.DefaultUsername)

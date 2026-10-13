@@ -38,6 +38,14 @@ func (m *mockAIClient) Chat(ctx context.Context, messages []ai.ChatMessage) (str
 	return "", errors.New("chat not implemented")
 }
 
+func (m *mockAIClient) ChatWithTools(ctx context.Context, messages []ai.ChatMessage, tools []ai.ToolDefinition) (*ai.ChatResponse, error) {
+	content, err := m.Chat(ctx, messages)
+	if err != nil {
+		return nil, err
+	}
+	return &ai.ChatResponse{Content: content}, nil
+}
+
 func setupTestDB(t *testing.T) repository.StorageEngine {
 	t.Helper()
 	ctx := context.Background()

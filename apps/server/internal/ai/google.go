@@ -208,38 +208,102 @@ func (c *GoogleClient) GenerateBatchEmbeddings(ctx context.Context, texts []stri
 }
 
 func (c *GoogleClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
-	type textPart struct {
-		Text string `json:"text"`
+	resp, err := c.ChatWithTools(ctx, messages, nil)
+	if err != nil {
+		return "", err
 	}
+	return resp.Content, nil
+}
+
+func (c *GoogleClient) ChatWithTools(ctx context.Context, messages []ChatMessage, tools []ToolDefinition) (*ChatResponse, error) {
+	type partItem struct {
+		Text             string `json:"text,omitempty"`
+		FunctionCall     *struct {
+			Name string         `json:"name"`
+			Args map[string]any `json:"args"`
+		} `json:"functionCall,omitempty"`
+		FunctionResponse *struct {
+			Name     string         `json:"name"`
+			Response map[string]any `json:"response"`
+		} `json:"functionResponse,omitempty"`
+	}
+
 	type contentItem struct {
 		Role  string     `json:"role"`
-		Parts []textPart `json:"parts"`
+		Parts []partItem `json:"parts"`
 	}
+
 	type sysInstruction struct {
-		Parts []textPart `json:"parts"`
+		Parts []partItem `json:"parts"`
 	}
+
+	type functionDecl struct {
+		Name        string         `json:"name"`
+		Description string         `json:"description"`
+		Parameters  map[string]any `json:"parameters,omitempty"`
+	}
+
+	type toolItem struct {
+		FunctionDeclarations []functionDecl `json:"functionDeclarations"`
+	}
+
 	type generatePayload struct {
 		SystemInstruction *sysInstruction `json:"systemInstruction,omitempty"`
 		Contents          []contentItem   `json:"contents"`
+		Tools             []toolItem      `json:"tools,omitempty"`
 	}
 
-	var sysParts []textPart
+	var sysParts []partItem
 	var contents []contentItem
 
 	for _, m := range messages {
 		role := strings.ToLower(strings.TrimSpace(m.Role))
 		switch role {
 		case "system":
-			sysParts = append(sysParts, textPart{Text: m.Content})
+			sysParts = append(sysParts, partItem{Text: m.Content})
 		case "assistant":
+			var parts []partItem
+			if m.Content != "" {
+				parts = append(parts, partItem{Text: m.Content})
+			}
+			for _, tc := range m.ToolCalls {
+				var args map[string]any
+				if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
+					args = make(map[string]any)
+				}
+				parts = append(parts, partItem{
+					FunctionCall: &struct {
+						Name string         `json:"name"`
+						Args map[string]any `json:"args"`
+					}{
+						Name: tc.Name,
+						Args: args,
+					},
+				})
+			}
 			contents = append(contents, contentItem{
 				Role:  "model",
-				Parts: []textPart{{Text: m.Content}},
+				Parts: parts,
+			})
+		case "tool":
+			contents = append(contents, contentItem{
+				Role: "function",
+				Parts: []partItem{
+					{
+						FunctionResponse: &struct {
+							Name     string         `json:"name"`
+							Response map[string]any `json:"response"`
+						}{
+							Name:     m.ToolCallID,
+							Response: map[string]any{"output": m.Content},
+						},
+					},
+				},
 			})
 		default:
 			contents = append(contents, contentItem{
 				Role:  "user",
-				Parts: []textPart{{Text: m.Content}},
+				Parts: []partItem{{Text: m.Content}},
 			})
 		}
 	}
@@ -249,9 +313,21 @@ func (c *GoogleClient) Chat(ctx context.Context, messages []ChatMessage) (string
 		payload.SystemInstruction = &sysInstruction{Parts: sysParts}
 	}
 
+	if len(tools) > 0 {
+		var decls []functionDecl
+		for _, t := range tools {
+			decls = append(decls, functionDecl{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  t.Parameters,
+			})
+		}
+		payload.Tools = []toolItem{{FunctionDeclarations: decls}}
+	}
+
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("marshaling google generateContent request: %w", err)
+		return nil, fmt.Errorf("marshaling google generateContent request: %w", err)
 	}
 
 	modelPath := "models/" + c.chatModel
@@ -259,7 +335,7 @@ func (c *GoogleClient) Chat(ctx context.Context, messages []ChatMessage) (string
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return "", fmt.Errorf("creating google generateContent request: %w", err)
+		return nil, fmt.Errorf("creating google generateContent request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
@@ -268,36 +344,52 @@ func (c *GoogleClient) Chat(ctx context.Context, messages []ChatMessage) (string
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("sending google generateContent request: %w", err)
+		return nil, fmt.Errorf("sending google generateContent request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("google generateContent returned status %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("google generateContent returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var res struct {
 		Candidates []struct {
 			Content struct {
 				Parts []struct {
-					Text string `json:"text"`
+					Text         string `json:"text"`
+					FunctionCall *struct {
+						Name string         `json:"name"`
+						Args map[string]any `json:"args"`
+					} `json:"functionCall"`
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return "", fmt.Errorf("decoding google generateContent response: %w", err)
+		return nil, fmt.Errorf("decoding google generateContent response: %w", err)
 	}
 
 	if len(res.Candidates) == 0 || len(res.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("no candidates returned by google generateContent")
+		return nil, fmt.Errorf("no candidates returned by google generateContent")
 	}
 
-	var sb strings.Builder
-	for _, p := range res.Candidates[0].Content.Parts {
-		sb.WriteString(p.Text)
+	chatResp := &ChatResponse{}
+	var textBuilder strings.Builder
+	for i, p := range res.Candidates[0].Content.Parts {
+		if p.FunctionCall != nil {
+			argsBytes, _ := json.Marshal(p.FunctionCall.Args)
+			chatResp.ToolCalls = append(chatResp.ToolCalls, ToolCall{
+				ID:        fmt.Sprintf("call_%s_%d", p.FunctionCall.Name, i+1),
+				Name:      p.FunctionCall.Name,
+				Arguments: string(argsBytes),
+			})
+		}
+		if p.Text != "" {
+			textBuilder.WriteString(p.Text)
+		}
 	}
+	chatResp.Content = strings.TrimSpace(textBuilder.String())
 
-	return strings.TrimSpace(sb.String()), nil
+	return chatResp, nil
 }
