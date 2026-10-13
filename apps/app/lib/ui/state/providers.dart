@@ -1202,6 +1202,17 @@ class BookChatNotifier extends Notifier<BookChatState> {
   void clearChat() {
     state = const BookChatState();
   }
+
+  Future<void> retry() async {
+    final lastUserIndex = state.messages.lastIndexWhere((m) => m.role == 'user');
+    if (lastUserIndex == -1) return;
+    final lastUserMsg = state.messages[lastUserIndex];
+    state = state.copyWith(
+      messages: state.messages.sublist(0, lastUserIndex),
+      error: null,
+    );
+    await sendMessage(lastUserMsg.content);
+  }
 }
 
 final bookChatProvider =

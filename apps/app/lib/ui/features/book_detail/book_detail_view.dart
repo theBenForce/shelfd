@@ -1456,7 +1456,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               const SizedBox(width: AppTokens.space8),
               Expanded(
                 child: Text(
-                  'Grounding questions in chapter vector embeddings & summaries',
+                  'Connected to Shelfd MCP tools: search passages and read chapters on demand',
                   style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
                 ),
               ),
@@ -1502,6 +1502,15 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                   child: Text(
                     chatState.error!,
                     style: const TextStyle(fontSize: 12, color: Colors.red),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {
+                    ref.read(bookChatProvider(widget.bookId).notifier).retry();
+                  },
+                  child: const Text(
+                    'Retry',
+                    style: TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
@@ -1645,7 +1654,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 ),
                 const SizedBox(width: AppTokens.space8),
                 Text(
-                  'Consulting chapter context...',
+                  'Agent consulting library & retrieving passages...',
                   style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
                 ),
               ],
@@ -1793,15 +1802,13 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                           ActionChip(
                             avatar: const Icon(Icons.menu_book, size: 14),
                             label: Text(
-                              cit.chapterTitle != null && cit.chapterTitle!.isNotEmpty
-                                  ? 'Ch. ${cit.chapterIndex}: ${cit.chapterTitle}'
-                                  : 'Chapter ${cit.chapterIndex}',
+                              _formatCitationLabel(cit),
                               style: const TextStyle(fontSize: 11),
                             ),
                             backgroundColor: AppTokens.boneBackground,
                             side: const BorderSide(color: AppTokens.crispBorder),
                             onPressed: () {
-                              context.go('/books/${widget.bookId}/read/${cit.chapterIndex}');
+                              _showCitationDetails(context, cit);
                             },
                           ),
                       ],
@@ -1813,6 +1820,114 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           ),
         ],
       ),
+    );
+  }
+
+  String _formatCitationLabel(BookCitation cit) {
+    final title = cit.chapterTitle != null && cit.chapterTitle!.isNotEmpty
+        ? 'Ch. ${cit.chapterIndex}: ${cit.chapterTitle}'
+        : 'Chapter ${cit.chapterIndex}';
+    if (cit.startParagraph != null) {
+      final para = cit.startParagraph == cit.endParagraph
+          ? '¶${cit.startParagraph}'
+          : '¶¶${cit.startParagraph}–${cit.endParagraph}';
+      return '$title ($para)';
+    }
+    return title;
+  }
+
+  void _showCitationDetails(BuildContext context, BookCitation cit) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppTokens.boneBackground,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
+      ),
+      builder: (bottomSheetContext) {
+        final title = cit.chapterTitle != null && cit.chapterTitle!.isNotEmpty
+            ? cit.chapterTitle!
+            : 'Chapter ${cit.chapterIndex}';
+        final paraLabel = cit.startParagraph != null
+            ? (cit.startParagraph == cit.endParagraph
+                ? 'Paragraph ${cit.startParagraph}'
+                : 'Paragraphs ${cit.startParagraph}–${cit.endParagraph}')
+            : null;
+
+        final previewText = (cit.excerpt != null && cit.excerpt!.isNotEmpty)
+            ? cit.excerpt!
+            : cit.summary;
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(AppTokens.space20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.menu_book, size: 20, color: AppTokens.charcoalInk),
+                    const SizedBox(width: AppTokens.space8),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: AppTypography.titleSerif(fontSize: 16),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () => Navigator.of(bottomSheetContext).pop(),
+                    ),
+                  ],
+                ),
+                if (paraLabel != null) ...[
+                  const SizedBox(height: AppTokens.space4),
+                  Text(
+                    paraLabel,
+                    style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
+                  ),
+                ],
+                const SizedBox(height: AppTokens.space12),
+                if (previewText.isNotEmpty) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(AppTokens.space12),
+                    decoration: BoxDecoration(
+                      color: AppTokens.boneContainer,
+                      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                      border: Border.all(color: AppTokens.crispBorder),
+                    ),
+                    child: Text(
+                      previewText,
+                      style: AppTypography.bodySans(fontSize: 13, lineHeight: 1.4),
+                    ),
+                  ),
+                  const SizedBox(height: AppTokens.space16),
+                ],
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTokens.charcoalInk,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: AppTokens.space12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                      ),
+                    ),
+                    icon: const Icon(Icons.auto_stories, size: 16),
+                    label: const Text('Read in Reader'),
+                    onPressed: () {
+                      Navigator.of(bottomSheetContext).pop();
+                      context.go('/books/${widget.bookId}/read/${cit.chapterIndex}');
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
