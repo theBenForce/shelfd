@@ -850,3 +850,124 @@ func TestMCPServer_StreamableHTTP(t *testing.T) {
 	}
 }
 
+func TestAvailableToolDefinitions(t *testing.T) {
+	defs := mcp.AvailableToolDefinitions()
+	if len(defs) == 0 {
+		t.Fatalf("expected tool definitions, got empty")
+	}
+
+	var searchTool *ai.ToolDefinition
+	for i := range defs {
+		if defs[i].Name == "search_library" {
+			searchTool = &defs[i]
+			break
+		}
+	}
+	if searchTool == nil {
+		t.Fatalf("search_library tool definition not found")
+	}
+
+	props, ok := searchTool.Parameters["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("parameters missing properties object: %v", searchTool.Parameters)
+	}
+	if _, ok := props["book_id"]; !ok {
+		t.Errorf("expected book_id property in search_library parameters schema")
+	}
+}
+
+func TestSearchLibrary_BookIDFilterAndInProcess(t *testing.T) {
+	db, repo, _, server := setupTestEnvironment(t)
+	defer db.Close()
+	defer repo.Close()
+
+	ctx := context.Background()
+
+	// Seed Book 1
+	book1 := &repository.Book{Title: "Book One", FilePath: "/lib/b1.epub"}
+	repo.CreateBook(ctx, book1)
+	chTitle1 := "Chapter 1 of Book 1"
+	ch1 := &repository.Chapter{
+		BookID:       book1.ID,
+		ChapterIndex: 1,
+		Title:        &chTitle1,
+		Summary:      "Protagonist discovers secret.",
+		ContentPlain: "This is the first paragraph.\n\nThis is the second paragraph.",
+	}
+	repo.CreateChapter(ctx, ch1)
+	vec := make([]float32, 256)
+	vec[0] = 1.0
+	repo.InsertChapterVector(ctx, ch1.ID, vec)
+
+	// Seed Book 2
+	book2 := &repository.Book{Title: "Book Two", FilePath: "/lib/b2.epub"}
+	repo.CreateBook(ctx, book2)
+	chTitle2 := "Chapter 1 of Book 2"
+	ch2 := &repository.Chapter{
+		BookID:       book2.ID,
+		ChapterIndex: 1,
+		Title:        &chTitle2,
+		Summary:      "Protagonist travels to Mars.",
+		ContentPlain: "Martian landscape was red.\n\nDust storms raged.",
+	}
+	repo.CreateChapter(ctx, ch2)
+	repo.InsertChapterVector(ctx, ch2.ID, vec)
+
+	executor := server.Executor()
+
+	// 1. Search with book_id scoping to Book 1
+	res1, err := executor.ExecuteInProcess(ctx, "search_library", map[string]any{
+		"query":   "protagonist",
+		"book_id": book1.ID,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteInProcess error: %v", err)
+	}
+	if res1.IsError {
+		t.Fatalf("expected success, got error: %s", res1.Content)
+	}
+	if !strings.Contains(res1.Content, "Book One") {
+		t.Errorf("expected Book One in content, got: %s", res1.Content)
+	}
+	if strings.Contains(res1.Content, "Book Two") {
+		t.Errorf("did not expect Book Two when filtering by Book One ID: %s", res1.Content)
+	}
+	if len(res1.Citations) == 0 {
+		t.Errorf("expected citations in ExecuteInProcess result, got none")
+	} else {
+		if res1.Citations[0].BookID != book1.ID {
+			t.Errorf("expected citation BookID %s, got %s", book1.ID, res1.Citations[0].BookID)
+		}
+	}
+
+	// 2. Search with invalid book_id format
+	resBad, err := executor.ExecuteInProcess(ctx, "search_library", map[string]any{
+		"query":   "protagonist",
+		"book_id": "../../../etc/passwd",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resBad.IsError {
+		t.Errorf("expected error for invalid book_id, got success")
+	}
+
+	// 3. Test read_chapter_content with citations
+	resRead, err := executor.ExecuteInProcess(ctx, "read_chapter_content", map[string]any{
+		"book_id":       book1.ID,
+		"chapter_index": 1,
+	})
+	if err != nil {
+		t.Fatalf("read_chapter_content error: %v", err)
+	}
+	if resRead.IsError {
+		t.Fatalf("read_chapter_content returned error: %s", resRead.Content)
+	}
+	if len(resRead.Citations) == 0 {
+		t.Errorf("expected citation for read_chapter_content")
+	} else if resRead.Citations[0].BookID != book1.ID {
+		t.Errorf("expected citation BookID %s, got %s", book1.ID, resRead.Citations[0].BookID)
+	}
+}
+
+
