@@ -1,3 +1,16 @@
+# [1.15.0](https://github.com/theBenForce/shelfd/compare/v1.14.0...v1.15.0) (2026-10-19)
+
+
+### Bug Fixes
+
+* **epub:** display only named chapters in table of contents for pre-paginated books ([#65](https://github.com/theBenForce/shelfd/issues/65)) ([9d252bd](https://github.com/theBenForce/shelfd/commit/9d252bd4ef3c4a66685c7be2ce7245a36920f417))
+* **reader:** ensure readable paper canvas for fixed-layout pages ([#63](https://github.com/theBenForce/shelfd/issues/63)) ([8450383](https://github.com/theBenForce/shelfd/commit/84503835c97bdabcead61cc7ad5d5249d2883360))
+
+
+### Features
+
+* **app:** support application-wide theme switching across shell and settings ([#64](https://github.com/theBenForce/shelfd/issues/64)) ([c1a79af](https://github.com/theBenForce/shelfd/commit/c1a79af48efd3334815d7fd60da1c837ab23b4d7))
+
 # [1.14.0](https://github.com/theBenForce/shelfd/compare/v1.13.2...v1.14.0) (2026-10-13)
 
 
