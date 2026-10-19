@@ -118,6 +118,44 @@ void main() {
       expect(item.toJson(), json);
     });
 
+    test('SpineItem hasNamedChapter distinguishes named chapters from generic pages', () {
+      const genericPage1 = SpineItem(id: '1', bookId: 'b', chapterIndex: 1, title: 'Page 1');
+      const genericPage144 = SpineItem(id: '2', bookId: 'b', chapterIndex: 144, title: 'Page 144');
+      const genericPageWithNbsp = SpineItem(id: '3', bookId: 'b', chapterIndex: 2, title: 'Page\u00a02');
+      const emptyTitle = SpineItem(id: '4', bookId: 'b', chapterIndex: 3, title: '');
+      const whitespaceTitle = SpineItem(id: '5', bookId: 'b', chapterIndex: 4, title: '   ');
+
+      const realChapter = SpineItem(id: '6', bookId: 'b', chapterIndex: 1, title: 'Chapter 1: The Beginning');
+      const pageWithSubtitle = SpineItem(id: '7', bookId: 'b', chapterIndex: 5, title: 'Page 5: Map of the Realm');
+      const namedSection = SpineItem(id: '8', bookId: 'b', chapterIndex: 10, title: 'Prologue');
+
+      expect(genericPage1.hasNamedChapter, isFalse);
+      expect(genericPage144.hasNamedChapter, isFalse);
+      expect(genericPageWithNbsp.hasNamedChapter, isFalse);
+      expect(emptyTitle.hasNamedChapter, isFalse);
+      expect(whitespaceTitle.hasNamedChapter, isFalse);
+
+      expect(realChapter.hasNamedChapter, isTrue);
+      expect(pageWithSubtitle.hasNamedChapter, isTrue);
+      expect(namedSection.hasNamedChapter, isTrue);
+    });
+
+    test('Book namedSpine filters out untitled and generic page spine items', () {
+      const book = Book(
+        id: 'book-1',
+        title: 'Toy Story 4',
+        spine: [
+          SpineItem(id: '1', bookId: 'book-1', chapterIndex: 1, title: 'Cover'),
+          SpineItem(id: '2', bookId: 'book-1', chapterIndex: 2, title: 'Page 2'),
+          SpineItem(id: '3', bookId: 'book-1', chapterIndex: 3, title: 'Chapter 1: Lost and Found'),
+          SpineItem(id: '4', bookId: 'book-1', chapterIndex: 4, title: ''),
+        ],
+      );
+
+      expect(book.namedSpine.length, 2);
+      expect(book.namedSpine.map((s) => s.title), ['Cover', 'Chapter 1: Lost and Found']);
+    });
+
     test('Chapter fromJson & toJson', () {
       final json = {
         'id': 'chap-1',

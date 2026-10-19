@@ -656,6 +656,98 @@ func TestFixedLayoutDetection(t *testing.T) {
 	if chapters[1].PageSpread == nil || *chapters[1].PageSpread != "left" {
 		t.Errorf("expected p1 spread 'left', got %v", chapters[1].PageSpread)
 	}
+	if chapters[0].Title != nil {
+		t.Errorf("expected untitled cover title to be nil, got %v", *chapters[0].Title)
+	}
+	if chapters[1].Title != nil {
+		t.Errorf("expected untitled p1 title to be nil, got %v", *chapters[1].Title)
+	}
+}
+
+func TestExtractChapters_EPUB3_FixedLayout_NamedChapters(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfEPUB3 := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Toy Story 4</dc:title>
+    <meta property="rendition:layout">pre-paginated</meta>
+  </metadata>
+  <manifest>
+    <item id="nav" href="text/nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="cover" href="text/cover.xhtml" media-type="application/xhtml+xml"/>
+    <item id="page1" href="text/page01.xhtml" media-type="application/xhtml+xml"/>
+    <item id="page2" href="text/page02.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="cover"/>
+    <itemref idref="page1"/>
+    <itemref idref="page2"/>
+  </spine>
+</package>`
+
+	navHTML := `<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<body>
+  <nav epub:type="toc">
+    <ol>
+      <li><a href="page01.xhtml">Chapter 1: Woody's Journey</a></li>
+    </ol>
+  </nav>
+</body>
+</html>`
+
+	coverHTML := `<!DOCTYPE html><html><head><meta name="viewport" content="width=1024, height=768"/></head><body><img src="../images/cover.jpg"/></body></html>`
+	page1HTML := `<!DOCTYPE html><html><head><meta name="viewport" content="width=1024, height=768"/></head><body><p>Chapter 1 text</p></body></html>`
+	page2HTML := `<!DOCTYPE html><html><head><meta name="viewport" content="width=1024, height=768"/></head><body><p>Continuation text</p></body></html>`
+
+	epubBytes := createTestEPUB(map[string][]byte{
+		"META-INF/container.xml": []byte(containerXML),
+		"OEBPS/content.opf":      []byte(opfEPUB3),
+		"OEBPS/text/nav.xhtml":   []byte(navHTML),
+		"OEBPS/text/cover.xhtml": []byte(coverHTML),
+		"OEBPS/text/page01.xhtml": []byte(page1HTML),
+		"OEBPS/text/page02.xhtml": []byte(page2HTML),
+	})
+
+	zr, err := zip.NewReader(bytes.NewReader(epubBytes), int64(len(epubBytes)))
+	if err != nil {
+		t.Fatalf("zip new reader error: %v", err)
+	}
+
+	reader, err := epub.NewReader(zr)
+	if err != nil {
+		t.Fatalf("epub new reader error: %v", err)
+	}
+
+	chapters, err := reader.ExtractChapters()
+	if err != nil {
+		t.Fatalf("extract chapters error: %v", err)
+	}
+
+	if len(chapters) != 3 {
+		t.Fatalf("expected 3 spine items, got %d", len(chapters))
+	}
+
+	// Cover has no TOC title
+	if chapters[0].Title != nil {
+		t.Errorf("expected cover title to be nil, got %v", *chapters[0].Title)
+	}
+
+	// Page 1 is mapped to Chapter 1 in NAV
+	if chapters[1].Title == nil || *chapters[1].Title != "Chapter 1: Woody's Journey" {
+		t.Errorf("expected page 1 title to be 'Chapter 1: Woody's Journey', got %v", chapters[1].Title)
+	}
+
+	// Page 2 has no TOC title and must NOT be synthesized as 'Page 3'
+	if chapters[2].Title != nil {
+		t.Errorf("expected page 2 title to be nil, got %v", *chapters[2].Title)
+	}
 }
 
 func TestExtractChapters_EPUB2_NCX_TOC(t *testing.T) {

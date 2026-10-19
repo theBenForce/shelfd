@@ -661,6 +661,8 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final spine = widget.book.spine;
+    final namedSpine = widget.book.namedSpine;
+    final displayItems = namedSpine.isNotEmpty ? namedSpine : spine;
 
     return Drawer(
       backgroundColor: theme.colorScheme.surface,
@@ -671,16 +673,16 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
             Padding(
               padding: const EdgeInsets.all(AppTokens.space20),
               child: Text(
-                'Pages & Chapters',
+                namedSpine.isNotEmpty ? 'Table of Contents' : 'Pages',
                 style: AppTypography.titleSerif(fontSize: 20, color: theme.colorScheme.onSurface),
               ),
             ),
             Divider(color: theme.dividerColor, height: 1),
             Expanded(
               child: ListView.builder(
-                itemCount: spine.length,
+                itemCount: displayItems.length,
                 itemBuilder: (context, idx) {
-                  final item = spine[idx];
+                  final item = displayItems[idx];
                   final matchingSpreadIdx = spreads.indexWhere((s) => s.containsChapter(item.id));
                   final isCurrent = matchingSpreadIdx == _currentSpreadIndex;
 
@@ -694,7 +696,9 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                           : AppTypography.bodySans(fontSize: 14, color: theme.colorScheme.onSurface),
                     ),
                     subtitle: Text(
-                      item.isGatefold ? 'Gatefold Spread' : (item.pageSpread ?? 'Standard Page'),
+                      namedSpine.isNotEmpty
+                          ? 'Page ${item.chapterIndex}'
+                          : (item.isGatefold ? 'Gatefold Spread' : (item.pageSpread ?? 'Standard Page')),
                       style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     trailing: isCurrent

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'tokens.dart';
 
 class AppTypography {
   AppTypography._();

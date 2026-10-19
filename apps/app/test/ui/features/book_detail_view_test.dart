@@ -381,6 +381,56 @@ void main() {
     expect(find.text('1. An Unexpected Party'), findsWidgets);
     expect(find.text('2. Roast Mutton'), findsWidgets);
   });
+
+  testWidgets('BookDetailView shows only named chapters in TOC for fixed layout books', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    const fixedLayoutBook = Book(
+      id: 'toy-story-4',
+      title: 'Toy Story 4',
+      layout: 'pre-paginated',
+      spine: [
+        SpineItem(id: 's1', bookId: 'toy-story-4', chapterIndex: 1, title: 'Cover'),
+        SpineItem(id: 's2', bookId: 'toy-story-4', chapterIndex: 2, title: 'Page 2'),
+        SpineItem(id: 's3', bookId: 'toy-story-4', chapterIndex: 3, title: 'Chapter 1: The Antique Shop'),
+        SpineItem(id: 's4', bookId: 'toy-story-4', chapterIndex: 4, title: 'Page 4'),
+        SpineItem(id: 's5', bookId: 'toy-story-4', chapterIndex: 5, title: 'Chapter 2: Carnival Adventure'),
+        SpineItem(id: 's6', bookId: 'toy-story-4', chapterIndex: 6, title: 'Page 6'),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookDetailProvider('toy-story-4').overrideWith(() => _MockBookDetailNotifier(fixedLayoutBook)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const BookDetailView(bookId: 'toy-story-4'),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Verify Chapter count header displays named chapters and total pages
+    expect(find.text('3 chapters (6 pages)'), findsWidgets);
+
+    // Verify Table of Contents displays named chapters and not generic pages
+    expect(find.text('Cover'), findsOneWidget);
+    expect(find.text('Chapter 1: The Antique Shop'), findsOneWidget);
+    expect(find.text('Chapter 2: Carnival Adventure'), findsOneWidget);
+    expect(find.text('Page 2'), findsNothing);
+    expect(find.text('Page 4'), findsNothing);
+    expect(find.text('Page 6'), findsNothing);
+
+    // Verify page badges
+    expect(find.text('Page 3'), findsOneWidget);
+    expect(find.text('Page 5'), findsOneWidget);
+  });
 }
 
 class _MockBookDetailNotifier extends BookDetailNotifier {
