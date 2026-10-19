@@ -1042,5 +1042,13 @@ func TestRewritePageHTML(t *testing.T) {
 	if !strings.Contains(rewritten, `width=1024, height=768`) {
 		t.Errorf("expected injected viewport tag")
 	}
+
+	// Verify paper canvas default background color is #ffffff rather than transparent
+	if !strings.Contains(rewritten, "background-color: #ffffff;") {
+		t.Errorf("expected background-color: #ffffff; for paper canvas default")
+	}
+	if strings.Contains(rewritten, "background-color: transparent") {
+		t.Errorf("did not expect background-color: transparent")
+	}
 }
 

@@ -352,13 +352,13 @@ html {
   width: 100%% !important;
   height: 100%% !important;
   overflow: hidden !important;
-  background-color: transparent !important;
+  background-color: #ffffff;
 }
 body {
   margin: 0 !important;
   padding: 0 !important;
   overflow: hidden !important;
-  background-color: transparent !important;
+  background-color: #ffffff;
   transform-origin: 0 0 !important;
 }
 </style>
@@ -402,7 +402,7 @@ html, body {
   height: 100% !important;
   overflow: hidden !important;
   box-sizing: border-box !important;
-  background-color: transparent !important;
+  background-color: #ffffff;
 }
 img, svg {
   max-width: 100%;

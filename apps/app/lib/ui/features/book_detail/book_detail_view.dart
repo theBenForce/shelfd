@@ -1023,7 +1023,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                           isAudio
                               ? '${_formatFileSize(f.fileSizeBytes)} • ${_formatAudioDuration(f.durationSeconds ?? book.durationSeconds)} • ${f.bitrateKbps ?? book.bitrateKbps ?? 64} kbps AAC'
                               : isEpub
-                                  ? '${_formatFileSize(f.fileSizeBytes)} • Reflowable EPUB3'
+                                  ? '${_formatFileSize(f.fileSizeBytes)} • ${book.isFixedLayout ? 'Fixed-Layout EPUB3' : 'Reflowable EPUB3'}'
                                   : isPdf
                                       ? '${_formatFileSize(f.fileSizeBytes)} • Fixed Layout PDF'
                                       : '${_formatFileSize(f.fileSizeBytes)} • 2:3 Cover Artwork',
