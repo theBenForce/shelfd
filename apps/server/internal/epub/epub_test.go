@@ -1144,3 +1144,136 @@ func TestRewritePageHTML(t *testing.T) {
 	}
 }
 
+func TestRewritePageHTML_NormalizesSelfClosingTagsAndInlineSpanWhitespace(t *testing.T) {
+	rawHTML := `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title/>
+  <link rel="stylesheet" href="../css/idGeneratedStyles.css" type="text/css"/>
+</head>
+<body style="width:5310px;height:8600px">
+  <div class="empty-layer"/>
+  <p class="tx ParaOverride-1">
+    <span class="CharOverride-7 _idTextSpan3716" style="position:absolute;top:60.82px;left:270px;">“
+      
+      <span class="audio" id="word1">Look</span>
+    </span>
+    <span class="CharOverride-7 _idTextSpan3758" style="position:absolute;top:1860.82px;left:270px;">“
+      
+      <span class="audio" id="word2">T</span>-
+      
+      <span class="audio" id="word3">t</span>-
+      
+      <span class="audio" id="word4">trash</span>?”
+    </span>
+    <span class="CharOverride-7 _idTextSpan859" style="position:absolute;top:4380.82px;left:5310px;" data-loc="227"/>
+    <span class="CharOverride-7 _idTextSpan860" style="position:absolute;top:4740.82px;left:0px;" data-loc="228">
+      <span class="audio" id="word5">The</span>
+    </span>
+  </p>
+  <img src="../images/bg.jpg" />
+</body>
+</html>`
+
+	pw := 5310
+	ph := 8600
+	rewritten := epub.RewritePageHTML(rawHTML, "book-ts4", "OEBPS/xhtml/Toy_Story_4-9.xhtml", &pw, &ph)
+
+	if !strings.Contains(rewritten, "<title></title>") {
+		t.Errorf("expected self-closing <title/> to expand to <title></title>, got:\n%s", rewritten)
+	}
+	if !strings.Contains(rewritten, `<div class="empty-layer"></div>`) {
+		t.Errorf("expected self-closing <div/> to expand to <div></div>, got:\n%s", rewritten)
+	}
+	if !strings.Contains(rewritten, `data-loc="227"></span>`) {
+		t.Errorf("expected self-closing <span .../> to expand to <span ...></span>, got:\n%s", rewritten)
+	}
+	if strings.Contains(rewritten, "</img>") || strings.Contains(rewritten, "</link>") {
+		t.Errorf("expected HTML void elements img and link not to have closing tags, got:\n%s", rewritten)
+	}
+	if !strings.Contains(rewritten, `“<span class="audio" id="word1">Look</span>`) {
+		t.Errorf("expected newline after opening quote to be removed before <span, got:\n%s", rewritten)
+	}
+	if !strings.Contains(rewritten, `<span class="audio" id="word2">T</span>-<span class="audio" id="word3">t</span>-<span class="audio" id="word4">trash</span>`) {
+		t.Errorf("expected newlines after hyphens to be removed before <span, got:\n%s", rewritten)
+	}
+}
+
+func TestExtractChapters_SelfClosingTitleAndOdnormSpanWhitespace(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfXML := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Toy Story 4</dc:title>
+    <meta property="rendition:layout">pre-paginated</meta>
+  </metadata>
+  <manifest>
+    <item id="p1" href="xhtml/page1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="p1"/>
+  </spine>
+</package>`
+
+	page1XHTML := `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title/>
+  <meta name="viewport" content="width=576, height=576"/>
+</head>
+<body>
+  <p class="tx ParaOverride-1">
+    <span class="_idTextSpan1">“
+      
+      <span class="audio" id="word1">Look</span>,
+    </span>
+    <span class="_idTextSpan2">
+      <span class="audio" id="word2">T</span>-
+      
+      <span class="audio" id="word3">trash</span>—
+      
+      <span class="audio" id="word4">Forky</span>!”
+    </span>
+  </p>
+</body>
+</html>`
+
+	epubBytes := createTestEPUB(map[string][]byte{
+		"META-INF/container.xml":  []byte(containerXML),
+		"OEBPS/content.opf":       []byte(opfXML),
+		"OEBPS/xhtml/page1.xhtml": []byte(page1XHTML),
+	})
+
+	zr, err := zip.NewReader(bytes.NewReader(epubBytes), int64(len(epubBytes)))
+	if err != nil {
+		t.Fatalf("zip new reader error: %v", err)
+	}
+
+	reader, err := epub.NewReader(zr)
+	if err != nil {
+		t.Fatalf("epub new reader error: %v", err)
+	}
+
+	chapters, err := reader.ExtractChapters()
+	if err != nil {
+		t.Fatalf("ExtractChapters error: %v", err)
+	}
+	if len(chapters) != 1 {
+		t.Fatalf("expected 1 chapter, got %d", len(chapters))
+	}
+	if chapters[0].Title != nil {
+		t.Errorf("expected nil chapter title for empty <title/>, got %q", *chapters[0].Title)
+	}
+	expectedPlain := "“Look, T-trash—Forky!”"
+	if chapters[0].ContentPlain != expectedPlain {
+		t.Errorf("expected ContentPlain %q, got %q", expectedPlain, chapters[0].ContentPlain)
+	}
+}
