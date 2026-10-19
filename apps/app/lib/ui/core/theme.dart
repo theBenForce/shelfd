@@ -20,7 +20,15 @@ class AppTheme {
             onPrimary: Colors.white,
             surface: AppTokens.boneSurface,
             onSurface: AppTokens.charcoalInk,
+            onSurfaceVariant: AppTokens.mutedCopy,
             outline: AppTokens.crispBorder,
+          ),
+          textTheme: const TextTheme(
+            bodyMedium: TextStyle(color: AppTokens.charcoalInk),
+            bodyLarge: TextStyle(color: AppTokens.charcoalInk),
+            bodySmall: TextStyle(color: AppTokens.mutedCopy),
+            titleMedium: TextStyle(color: AppTokens.charcoalInk),
+            titleLarge: TextStyle(color: AppTokens.charcoalInk),
           ),
           appBarTheme: const AppBarTheme(
             backgroundColor: AppTokens.boneBackground,
@@ -42,7 +50,15 @@ class AppTheme {
             onPrimary: Colors.white,
             surface: AppTokens.sepiaSurface,
             onSurface: AppTokens.sepiaInk,
+            onSurfaceVariant: AppTokens.sepiaCopy,
             outline: AppTokens.sepiaBorder,
+          ),
+          textTheme: const TextTheme(
+            bodyMedium: TextStyle(color: AppTokens.sepiaInk),
+            bodyLarge: TextStyle(color: AppTokens.sepiaInk),
+            bodySmall: TextStyle(color: AppTokens.sepiaCopy),
+            titleMedium: TextStyle(color: AppTokens.sepiaInk),
+            titleLarge: TextStyle(color: AppTokens.sepiaInk),
           ),
           appBarTheme: const AppBarTheme(
             backgroundColor: AppTokens.sepiaBackground,
@@ -64,7 +80,15 @@ class AppTheme {
             onPrimary: Colors.black,
             surface: AppTokens.darkOledSurface,
             onSurface: AppTokens.darkOledInk,
+            onSurfaceVariant: AppTokens.darkOledCopy,
             outline: AppTokens.darkOledBorder,
+          ),
+          textTheme: const TextTheme(
+            bodyMedium: TextStyle(color: AppTokens.darkOledInk),
+            bodyLarge: TextStyle(color: AppTokens.darkOledInk),
+            bodySmall: TextStyle(color: AppTokens.darkOledCopy),
+            titleMedium: TextStyle(color: AppTokens.darkOledInk),
+            titleLarge: TextStyle(color: AppTokens.darkOledInk),
           ),
           appBarTheme: const AppBarTheme(
             backgroundColor: AppTokens.darkOledBackground,

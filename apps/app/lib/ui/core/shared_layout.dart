@@ -85,6 +85,7 @@ class FilterPillsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
@@ -98,17 +99,17 @@ class FilterPillsRow extends StatelessWidget {
                 style: AppTypography.bodySans(
                   fontSize: 13,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                  color: isSelected ? Colors.white : AppTokens.mutedCopy,
+                  color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurfaceVariant,
                 ),
               ),
               selected: isSelected,
               onSelected: (_) => onSelected(item.id),
-              selectedColor: AppTokens.charcoalInk,
-              backgroundColor: AppTokens.boneSurface,
+              selectedColor: theme.colorScheme.primary,
+              backgroundColor: theme.colorScheme.surface,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(AppTokens.radiusPill),
                 side: BorderSide(
-                  color: isSelected ? AppTokens.charcoalInk : AppTokens.crispBorder,
+                  color: isSelected ? theme.colorScheme.primary : theme.dividerColor,
                 ),
               ),
               showCheckmark: false,
@@ -310,7 +311,7 @@ class ShelfdTopBar extends StatelessWidget implements PreferredSizeWidget {
                     subtitle!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppTypography.bodySans(fontSize: 11, color: AppTokens.mutedCopy),
+                    style: AppTypography.bodySans(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ),
               ],
@@ -321,7 +322,7 @@ class ShelfdTopBar extends StatelessWidget implements PreferredSizeWidget {
       actions: actions,
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
-        child: Container(color: AppTokens.crispBorder, height: 1),
+        child: Container(color: Theme.of(context).dividerColor, height: 1),
       ),
     );
   }
@@ -411,36 +412,39 @@ class ShelfdBottomNav extends ConsumerWidget {
     final queueStatus = ref.watch(queueProvider).status;
     final stagedCount = queueStatus?.stagedUploads ?? 0;
 
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return Container(
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: AppTokens.crispBorder, width: 1)),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: theme.dividerColor, width: 1)),
       ),
       child: NavigationBar(
         selectedIndex: idx,
         onDestinationSelected: _handleTap,
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        backgroundColor: theme.scaffoldBackgroundColor,
         elevation: 0,
         height: 64,
-        indicatorColor: AppTokens.boneContainer,
+        indicatorColor: isDark ? const Color(0xFF262626) : AppTokens.boneContainer,
         destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.menu_book_outlined),
-            selectedIcon: Icon(Icons.menu_book_rounded, color: AppTokens.charcoalInk),
+          NavigationDestination(
+            icon: const Icon(Icons.menu_book_outlined),
+            selectedIcon: Icon(Icons.menu_book_rounded, color: theme.colorScheme.onSurface),
             label: 'Books',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.collections_bookmark_outlined),
-            selectedIcon: Icon(Icons.collections_bookmark_rounded, color: AppTokens.charcoalInk),
+          NavigationDestination(
+            icon: const Icon(Icons.collections_bookmark_outlined),
+            selectedIcon: Icon(Icons.collections_bookmark_rounded, color: theme.colorScheme.onSurface),
             label: 'Series',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.people_outline_rounded),
-            selectedIcon: Icon(Icons.people_rounded, color: AppTokens.charcoalInk),
+          NavigationDestination(
+            icon: const Icon(Icons.people_outline_rounded),
+            selectedIcon: Icon(Icons.people_rounded, color: theme.colorScheme.onSurface),
             label: 'Authors',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.saved_search_outlined),
-            selectedIcon: Icon(Icons.saved_search_rounded, color: AppTokens.charcoalInk),
+          NavigationDestination(
+            icon: const Icon(Icons.saved_search_outlined),
+            selectedIcon: Icon(Icons.saved_search_rounded, color: theme.colorScheme.onSurface),
             label: 'Search',
           ),
           NavigationDestination(
@@ -462,18 +466,18 @@ class ShelfdBottomNav extends ConsumerWidget {
               ),
               backgroundColor: const Color(0xFFF08C00),
               textColor: Colors.white,
-              child: const Icon(Icons.cloud_upload_rounded, color: AppTokens.charcoalInk),
+              child: Icon(Icons.cloud_upload_rounded, color: theme.colorScheme.onSurface),
             ),
             label: 'Uploads',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.handyman_outlined),
-            selectedIcon: Icon(Icons.handyman_rounded, color: AppTokens.charcoalInk),
+          NavigationDestination(
+            icon: const Icon(Icons.handyman_outlined),
+            selectedIcon: Icon(Icons.handyman_rounded, color: theme.colorScheme.onSurface),
             label: 'Utilities',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings_rounded, color: AppTokens.charcoalInk),
+          NavigationDestination(
+            icon: const Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings_rounded, color: theme.colorScheme.onSurface),
             label: 'Settings',
           ),
         ],
@@ -539,8 +543,8 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
       height: double.infinity,
       decoration: BoxDecoration(
         color: theme.scaffoldBackgroundColor,
-        border: const Border(
-          right: BorderSide(color: AppTokens.crispBorder, width: 1),
+        border: Border(
+          right: BorderSide(color: theme.dividerColor, width: 1),
         ),
       ),
       padding: const EdgeInsets.symmetric(
@@ -557,12 +561,12 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: AppTokens.charcoalInk,
+                  color: theme.colorScheme.primary,
                   borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.auto_stories_rounded,
-                  color: AppTokens.boneSurface,
+                  color: theme.colorScheme.onPrimary,
                   size: 20,
                 ),
               ),
@@ -577,13 +581,14 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                       style: AppTypography.titleSerif(
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
+                        color: theme.colorScheme.onSurface,
                       ),
                     ),
                     Text(
                       'Your Digital Vellum',
                       style: AppTypography.bodySans(
                         fontSize: 11,
-                        color: AppTokens.mutedCopy,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -766,9 +771,9 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: AppTokens.boneContainer,
+              color: theme.brightness == Brightness.dark ? const Color(0xFF262626) : AppTokens.boneContainer,
               borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              border: Border.all(color: AppTokens.crispBorder),
+              border: Border.all(color: theme.dividerColor),
             ),
             child: Row(
               children: [
@@ -787,7 +792,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                     style: AppTypography.bodySans(
                       fontSize: 11,
                       fontWeight: FontWeight.w500,
-                      color: AppTokens.mutedCopy,
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -820,8 +825,14 @@ class _SideNavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final selectedBg = isDark ? const Color(0xFF262626) : AppTokens.boneContainer;
+    final unselectedColor = theme.colorScheme.onSurfaceVariant;
+    final activeColor = theme.colorScheme.onSurface;
+
     return Material(
-      color: isSelected ? AppTokens.boneContainer : Colors.transparent,
+      color: isSelected ? selectedBg : Colors.transparent,
       borderRadius: BorderRadius.circular(AppTokens.radiusMd),
       child: InkWell(
         onTap: onTap,
@@ -831,13 +842,13 @@ class _SideNavItem extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-            border: isSelected ? Border.all(color: AppTokens.crispBorder) : null,
+            border: isSelected ? Border.all(color: theme.dividerColor) : null,
           ),
           child: Row(
             children: [
               Icon(
                 isSelected ? selectedIcon : icon,
-                color: isSelected ? AppTokens.charcoalInk : AppTokens.mutedCopy,
+                color: isSelected ? activeColor : unselectedColor,
                 size: 22,
               ),
               const SizedBox(width: AppTokens.space12),
@@ -847,7 +858,7 @@ class _SideNavItem extends StatelessWidget {
                   style: AppTypography.bodySans(
                     fontSize: 14,
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                    color: isSelected ? AppTokens.charcoalInk : AppTokens.mutedCopy,
+                    color: isSelected ? activeColor : unselectedColor,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -858,7 +869,7 @@ class _SideNavItem extends StatelessWidget {
                   width: 4,
                   height: 16,
                   decoration: BoxDecoration(
-                    color: AppTokens.charcoalInk,
+                    color: theme.colorScheme.primary,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),

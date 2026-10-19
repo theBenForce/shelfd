@@ -25,7 +25,7 @@ class AppTypography {
   static TextStyle titleSerif({
     double fontSize = 22.0,
     FontWeight fontWeight = FontWeight.w600,
-    Color color = AppTokens.charcoalInk,
+    Color? color,
   }) {
     return TextStyle(
       fontFamily: 'Georgia',
@@ -40,7 +40,7 @@ class AppTypography {
   static TextStyle bodySans({
     double fontSize = 15.0,
     FontWeight fontWeight = FontWeight.w400,
-    Color color = AppTokens.mutedCopy,
+    Color? color,
     double lineHeight = 1.5,
     FontStyle? fontStyle,
   }) {
@@ -57,7 +57,7 @@ class AppTypography {
   static TextStyle labelCaps({
     double fontSize = 11.0,
     FontWeight fontWeight = FontWeight.w600,
-    Color color = AppTokens.mutedCopy,
+    Color? color,
   }) {
     return TextStyle(
       fontFamilyFallback: sansFallbacks,
@@ -71,7 +71,7 @@ class AppTypography {
   static TextStyle captionSans({
     double fontSize = 12.0,
     FontWeight fontWeight = FontWeight.w400,
-    Color color = AppTokens.mutedCopy,
+    Color? color,
   }) {
     return TextStyle(
       fontFamilyFallback: sansFallbacks,
