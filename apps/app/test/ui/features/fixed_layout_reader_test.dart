@@ -104,6 +104,12 @@ void main() {
     expect(find.text('Coco Read-Along Storybook'), findsOneWidget);
     // On first spread (Cover), it shows Page 1 of 6
     expect(find.text('Page 1 of 6'), findsWidgets);
+
+    // Verify paper canvas container has white background
+    final whiteContainer = find.byWidgetPredicate(
+      (w) => w is Container && (w.decoration as BoxDecoration?)?.color == Colors.white,
+    );
+    expect(whiteContainer, findsWidgets);
   });
 
   testWidgets('FixedLayoutReader navigates to facing spread (Pages 2-3) on Next click', (tester) async {

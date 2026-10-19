@@ -535,7 +535,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
           width: displayW,
           height: displayH,
           decoration: BoxDecoration(
-            color: Colors.black,
+            color: Colors.white,
             boxShadow: const [
               BoxShadow(
                 color: Colors.black87,
@@ -602,7 +602,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                 width: leftDisplayW,
                 height: displayH,
                 decoration: const BoxDecoration(
-                  color: Colors.black,
+                  color: Colors.white,
                   borderRadius: BorderRadius.horizontal(left: Radius.circular(4)),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -621,9 +621,9 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      Colors.black54,
-                      Colors.black12,
-                      Colors.black54,
+                       Colors.black54,
+                       Colors.black12,
+                       Colors.black54,
                     ],
                   ),
                 ),
@@ -634,7 +634,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                 width: rightDisplayW,
                 height: displayH,
                 decoration: const BoxDecoration(
-                  color: Colors.black,
+                  color: Colors.white,
                   borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
                 ),
                 clipBehavior: Clip.antiAlias,
