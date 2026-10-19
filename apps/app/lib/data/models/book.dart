@@ -68,6 +68,8 @@ class Book {
   bool get isFixedLayout => layout == 'pre-paginated';
   bool get isAudiobook => bookType == 'audiobook';
 
+  List<SpineItem> get namedSpine => spine.where((s) => s.hasNamedChapter).toList();
+
   String get authorDisplay {
     if (authors.isEmpty) return 'Unknown Author';
     return authors.map((a) => a.name).join(', ');
@@ -275,12 +277,23 @@ class SpineItem {
       (pageWidth != null && pageHeight != null && pageHeight! > 0 && (pageWidth! / pageHeight! > 1.2)) ||
       pageSpread == 'center';
 
+  bool get hasNamedChapter {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) return false;
+    final lower = trimmed.toLowerCase();
+    if (lower.startsWith('page ') || lower.startsWith('page\u00a0')) {
+      final rest = lower.substring(5).trim();
+      if (int.tryParse(rest) != null) return false;
+    }
+    return true;
+  }
+
   factory SpineItem.fromJson(Map<String, dynamic> json) {
     return SpineItem(
       id: json['id'] as String? ?? '',
       bookId: json['book_id'] as String? ?? '',
       chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 0,
-      title: json['title'] as String? ?? 'Chapter ${json['chapter_index'] ?? 0}',
+      title: json['title'] as String? ?? '',
       summary: json['summary'] as String? ?? '',
       href: json['href'] as String?,
       pageWidth: (json['page_width'] as num?)?.toDouble(),

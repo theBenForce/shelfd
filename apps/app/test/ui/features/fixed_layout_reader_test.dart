@@ -193,9 +193,10 @@ void main() {
     await tester.tap(tocBtn);
     await tester.pumpAndSettle();
 
-    expect(find.text('Pages & Chapters'), findsOneWidget);
+    expect(find.text('Table of Contents'), findsOneWidget);
     expect(find.text('Narrator & Cast'), findsOneWidget);
     expect(find.text('Wide Gatefold Art'), findsOneWidget);
+    expect(find.text('Page 5'), findsNothing);
 
     // Tap Wide Gatefold Art
     await tester.tap(find.text('Wide Gatefold Art'));

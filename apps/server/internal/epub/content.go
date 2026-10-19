@@ -188,10 +188,6 @@ func (r *Reader) ExtractChapters() ([]*ParsedChapter, error) {
 		}
 
 		chapterIndex++
-		if isPrePaginated && title == nil {
-			t := fmt.Sprintf("Page %d", chapterIndex)
-			title = &t
-		}
 
 		chapters = append(chapters, &ParsedChapter{
 			Index:        chapterIndex,

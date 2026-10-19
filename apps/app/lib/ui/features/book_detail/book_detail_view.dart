@@ -198,6 +198,13 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
 
   String _formatChapterCount(Book book) {
     if (book.spine.isNotEmpty) {
+      if (book.isFixedLayout) {
+        final namedCount = book.namedSpine.length;
+        if (namedCount > 0) {
+          return '$namedCount chapters (${book.spine.length} pages)';
+        }
+        return '${book.spine.length} pages';
+      }
       return '${book.spine.length} chapters';
     }
     if (book.audioChapters.isNotEmpty) {
@@ -1114,7 +1121,11 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               ),
               Text(
                 book.spine.isNotEmpty
-                    ? '${book.spine.length} items'
+                    ? (book.isFixedLayout
+                        ? (book.namedSpine.isNotEmpty
+                            ? '${book.namedSpine.length} chapters (${book.spine.length} pages)'
+                            : '${book.spine.length} pages')
+                        : '${book.spine.length} items')
                     : book.audioChapters.isNotEmpty
                         ? '${book.audioChapters.length} tracks'
                         : '0 items',
@@ -1123,54 +1134,68 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             ],
           ),
           const SizedBox(height: AppTokens.space16),
-          if (book.spine.isEmpty && book.audioChapters.isEmpty)
+          if ((book.isFixedLayout ? book.namedSpine.isEmpty : book.spine.isEmpty) && book.audioChapters.isEmpty)
             Text(
               'No chapters cataloged.',
               style: AppTypography.bodySans(fontSize: 14, color: AppTokens.mutedCopy),
             )
-          else if (book.spine.isNotEmpty)
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: book.spine.length,
-              separatorBuilder: (context, index) =>
-                  const Divider(height: 1, color: AppTokens.crispBorder),
-              itemBuilder: (context, index) {
-                final item = book.spine[index];
-                return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: AppTokens.space8,
-                    vertical: AppTokens.space4,
-                  ),
-                  title: Text(
-                    item.title,
-                    style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w500),
-                  ),
-                  subtitle: item.summary.isNotEmpty
-                      ? Padding(
-                          padding: const EdgeInsets.only(top: AppTokens.space4),
-                          child: Text(
-                            item.summary,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTypography.captionSans(
-                              fontSize: 12,
-                              color: AppTokens.mutedCopy,
+          else if (book.isFixedLayout ? book.namedSpine.isNotEmpty : book.spine.isNotEmpty)
+            () {
+              final displaySpine = book.isFixedLayout ? book.namedSpine : book.spine;
+              return ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: displaySpine.length,
+                separatorBuilder: (context, index) =>
+                    const Divider(height: 1, color: AppTokens.crispBorder),
+                itemBuilder: (context, index) {
+                  final item = displaySpine[index];
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: AppTokens.space8,
+                      vertical: AppTokens.space4,
+                    ),
+                    title: Text(
+                      item.title.isNotEmpty ? item.title : 'Chapter ${item.chapterIndex}',
+                      style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w500),
+                    ),
+                    subtitle: item.summary.isNotEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: AppTokens.space4),
+                            child: Text(
+                              item.summary,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTypography.captionSans(
+                                fontSize: 12,
+                                color: AppTokens.mutedCopy,
+                              ),
                             ),
+                          )
+                        : null,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (book.isFixedLayout)
+                          Text(
+                            'Page ${item.chapterIndex}',
+                            style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
                           ),
-                        )
-                      : null,
-                  trailing: const Icon(
-                    Icons.chevron_right_rounded,
-                    size: 20,
-                    color: AppTokens.mutedCopy,
-                  ),
-                  onTap: () {
-                    context.go('/books/${book.id}/read/${item.chapterIndex}');
-                  },
-                );
-              },
-            )
+                        const SizedBox(width: AppTokens.space8),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          size: 20,
+                          color: AppTokens.mutedCopy,
+                        ),
+                      ],
+                    ),
+                    onTap: () {
+                      context.go('/books/${book.id}/read/${item.chapterIndex}');
+                    },
+                  );
+                },
+              );
+            }()
           else
             ListView.separated(
               shrinkWrap: true,
