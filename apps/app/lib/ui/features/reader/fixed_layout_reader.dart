@@ -255,12 +255,14 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
         final canPrev = _currentSpreadIndex > 0;
         final canNext = _currentSpreadIndex < spreads.length - 1;
 
+        final theme = Theme.of(context);
+
         return Focus(
           focusNode: _focusNode,
           autofocus: true,
           onKeyEvent: _handleKeyEvent,
           child: Scaffold(
-            backgroundColor: const Color(0xFF141416),
+            backgroundColor: theme.scaffoldBackgroundColor,
             body: SafeArea(
               child: Stack(
                 children: [
@@ -352,17 +354,19 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   }
 
   Widget _buildTopBar(BuildContext context, FixedSpread? spread, int totalSpreads) {
+    final theme = Theme.of(context);
+
     return Container(
       height: 60,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E1E22).withValues(alpha: 0.95),
-        border: const Border(bottom: BorderSide(color: Color(0xFF2E2E34))),
+        color: theme.colorScheme.surface.withValues(alpha: 0.95),
+        border: Border(bottom: BorderSide(color: theme.dividerColor)),
       ),
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+            icon: Icon(Icons.arrow_back_rounded, color: theme.colorScheme.onSurface),
             tooltip: 'Back to Library',
             onPressed: () {
               if (widget.onClose != null) {
@@ -382,13 +386,13 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
               children: [
                 Text(
                   widget.book.title,
-                  style: AppTypography.titleSerif(fontSize: 15, color: Colors.white),
+                  style: AppTypography.titleSerif(fontSize: 15, color: theme.colorScheme.onSurface),
                   overflow: TextOverflow.ellipsis,
                 ),
                 if (spread != null)
                   Text(
                     '${spread.label} of ${widget.book.spine.length}',
-                    style: AppTypography.bodySans(fontSize: 12, color: Colors.white60),
+                    style: AppTypography.bodySans(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                   ),
               ],
             ),
@@ -402,7 +406,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   : _spreadMode == SpreadMode.twoPage
                       ? Icons.menu_book_rounded
                       : Icons.crop_portrait_rounded,
-              color: Colors.white70,
+              color: theme.colorScheme.onSurface,
             ),
             tooltip: _spreadMode == SpreadMode.auto
                 ? 'Spread Mode: Auto (Responsive)'
@@ -424,7 +428,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
 
           // Bookmark Button
           IconButton(
-            icon: const Icon(Icons.bookmark_add_outlined, color: Colors.white70),
+            icon: Icon(Icons.bookmark_add_outlined, color: theme.colorScheme.onSurface),
             tooltip: 'Bookmark Page',
             onPressed: () {
               if (spread == null) return;
@@ -448,7 +452,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
           // Table of Contents
           Builder(
             builder: (ctx) => IconButton(
-              icon: const Icon(Icons.list_rounded, color: Colors.white70),
+              icon: Icon(Icons.list_rounded, color: theme.colorScheme.onSurface),
               tooltip: 'Table of Contents',
               onPressed: () => Scaffold.of(ctx).openEndDrawer(),
             ),
@@ -459,6 +463,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   }
 
   Widget _buildBottomBar(BuildContext context, FixedSpread? spread, int totalSpreads) {
+    final theme = Theme.of(context);
     final canPrev = _currentSpreadIndex > 0;
     final canNext = _currentSpreadIndex < totalSpreads - 1;
 
@@ -466,22 +471,22 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
       height: 64,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E1E22).withValues(alpha: 0.95),
-        border: const Border(top: BorderSide(color: Color(0xFF2E2E34))),
+        color: theme.colorScheme.surface.withValues(alpha: 0.95),
+        border: Border(top: BorderSide(color: theme.dividerColor)),
       ),
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.chevron_left_rounded, color: Colors.white),
+            icon: Icon(Icons.chevron_left_rounded, color: theme.colorScheme.onSurface),
             tooltip: 'Previous',
             onPressed: canPrev ? () => _goToSpread(_currentSpreadIndex - 1, totalSpreads) : null,
           ),
           Expanded(
             child: SliderTheme(
               data: SliderTheme.of(context).copyWith(
-                activeTrackColor: Colors.white70,
-                inactiveTrackColor: Colors.white24,
-                thumbColor: Colors.white,
+                activeTrackColor: theme.colorScheme.primary,
+                inactiveTrackColor: theme.dividerColor,
+                thumbColor: theme.colorScheme.primary,
                 trackHeight: 3,
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
               ),
@@ -495,14 +500,14 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.chevron_right_rounded, color: Colors.white),
+            icon: Icon(Icons.chevron_right_rounded, color: theme.colorScheme.onSurface),
             tooltip: 'Next',
             onPressed: canNext ? () => _goToSpread(_currentSpreadIndex + 1, totalSpreads) : null,
           ),
           const SizedBox(width: 8),
           Text(
             spread != null ? spread.label : '',
-            style: AppTypography.bodySans(fontSize: 13, color: Colors.white70),
+            style: AppTypography.bodySans(fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -653,10 +658,12 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   }
 
   Widget _buildTocDrawer(BuildContext context, List<FixedSpread> spreads) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final spine = widget.book.spine;
 
     return Drawer(
-      backgroundColor: const Color(0xFF1E1E22),
+      backgroundColor: theme.colorScheme.surface,
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -665,10 +672,10 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
               padding: const EdgeInsets.all(AppTokens.space20),
               child: Text(
                 'Pages & Chapters',
-                style: AppTypography.titleSerif(fontSize: 20, color: Colors.white),
+                style: AppTypography.titleSerif(fontSize: 20, color: theme.colorScheme.onSurface),
               ),
             ),
-            const Divider(color: Color(0xFF2E2E34), height: 1),
+            Divider(color: theme.dividerColor, height: 1),
             Expanded(
               child: ListView.builder(
                 itemCount: spine.length,
@@ -679,19 +686,19 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
 
                   return ListTile(
                     selected: isCurrent,
-                    selectedTileColor: const Color(0xFF2A2A32),
+                    selectedTileColor: isDark ? const Color(0xFF2A2A32) : theme.cardColor,
                     title: Text(
                       item.title.isNotEmpty ? item.title : 'Page ${item.chapterIndex}',
                       style: isCurrent
-                          ? AppTypography.titleSerif(fontSize: 14, color: Colors.white)
-                          : AppTypography.bodySans(fontSize: 14, color: Colors.white70),
+                          ? AppTypography.titleSerif(fontSize: 14, color: theme.colorScheme.primary)
+                          : AppTypography.bodySans(fontSize: 14, color: theme.colorScheme.onSurface),
                     ),
                     subtitle: Text(
                       item.isGatefold ? 'Gatefold Spread' : (item.pageSpread ?? 'Standard Page'),
-                      style: const TextStyle(fontSize: 11, color: Colors.white38),
+                      style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
                     ),
                     trailing: isCurrent
-                        ? const Icon(Icons.check_rounded, size: 18, color: Colors.white)
+                        ? Icon(Icons.check_rounded, size: 18, color: theme.colorScheme.primary)
                         : null,
                     onTap: () {
                       Navigator.of(context).pop();

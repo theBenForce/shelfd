@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/app_shell.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -160,6 +161,67 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 ),
                 const SizedBox(height: AppTokens.space24),
               ],
+
+              // Appearance & Theme BentoCard
+              Consumer(
+                builder: (context, ref, _) {
+                  final readerSettings = ref.watch(readerSettingsProvider);
+                  final theme = Theme.of(context);
+                  return BentoCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.palette_outlined, size: 20, color: theme.colorScheme.onSurface),
+                            const SizedBox(width: AppTokens.space8),
+                            Text(
+                              'Appearance & Theme',
+                              style: AppTypography.titleSerif(fontSize: 18, color: theme.colorScheme.onSurface),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppTokens.space8),
+                        Text(
+                          'Choose the interface and reading color palette across the application.',
+                          style: AppTypography.captionSans(color: theme.colorScheme.onSurfaceVariant),
+                        ),
+                        const SizedBox(height: AppTokens.space16),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<ReadingThemeMode>(
+                            segments: const [
+                              ButtonSegment(
+                                value: ReadingThemeMode.bone,
+                                label: Text('Bone'),
+                                icon: Icon(Icons.light_mode_outlined),
+                              ),
+                              ButtonSegment(
+                                value: ReadingThemeMode.sepia,
+                                label: Text('Sepia'),
+                                icon: Icon(Icons.menu_book_outlined),
+                              ),
+                              ButtonSegment(
+                                value: ReadingThemeMode.dark,
+                                label: Text('Dark'),
+                                icon: Icon(Icons.dark_mode_outlined),
+                              ),
+                            ],
+                            selected: {readerSettings.themeMode},
+                            onSelectionChanged: (set) {
+                              if (set.isNotEmpty) {
+                                ref.read(readerSettingsProvider.notifier).setThemeMode(set.first);
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: AppTokens.space20),
 
               // Account & Security BentoCard
               BentoCard(

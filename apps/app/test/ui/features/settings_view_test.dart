@@ -225,4 +225,30 @@ void main() {
     expect(prefs.getString('shelfd_saved_username'), 'custom_user_42');
     expect(find.text('Default username updated to "custom_user_42"'), findsOneWidget);
   });
+
+  testWidgets('SettingsView toggles application theme via segmented button', (tester) async {
+    setLargeViewport(tester);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          queueProvider.overrideWith(() => FakeQueueNotifier()),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const SettingsView(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Appearance & Theme'), findsOneWidget);
+    expect(find.text('Dark'), findsOneWidget);
+
+    await tester.tap(find.text('Dark'));
+    await tester.pumpAndSettle();
+
+    expect(prefs.getString('shelfd_theme_mode'), 'dark');
+  });
 }
