@@ -26,9 +26,47 @@ var (
 	imgXlinkRegex       = regexp.MustCompile(`(?i)(<image[^>]+(?:xlink:href|href)=["'])([^"']+)(["'])`)
 	linkHrefRegex       = regexp.MustCompile(`(?i)(<link[^>]+href=["'])([^"']+)(["'])`)
 	sourceSrcRegex      = regexp.MustCompile(`(?i)(<source[^>]+src=["'])([^"']+)(["'])`)
-	cssUrlRegex         = regexp.MustCompile(`(?i)url\(\s*["']?([^"')]+)["']?\s*\)`)
-	negativeZIndex      = regexp.MustCompile(`(?i)z-index\s*:\s*-\d+`)
-	headTagRegex        = regexp.MustCompile(`(?i)<head[^>]*>`)
+	cssUrlRegex           = regexp.MustCompile(`(?i)url\(\s*["']?([^"')]+)["']?\s*\)`)
+	negativeZIndex        = regexp.MustCompile(`(?i)z-index\s*:\s*-\d+`)
+	headTagRegex          = regexp.MustCompile(`(?i)<head[^>]*>`)
+	selfClosingTagRegex   = regexp.MustCompile(`<([a-zA-Z][a-zA-Z0-9:-]*)((?:\s+[^>"'/=\s]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=>/]+))?)*)\s*/>`)
+	punctNewlineSpanRegex = regexp.MustCompile(`([^\p{L}\p{N}<>\s])\r?\n\s*(<span\b)`)
+
+	htmlSelfClosingAllowedTags = map[string]bool{
+		"area":     true,
+		"base":     true,
+		"basefont": true,
+		"bgsound":  true,
+		"br":       true,
+		"circle":   true,
+		"col":      true,
+		"command":  true,
+		"ellipse":  true,
+		"embed":    true,
+		"frame":    true,
+		"hr":       true,
+		"image":    true,
+		"img":      true,
+		"input":    true,
+		"isindex":  true,
+		"keygen":   true,
+		"line":     true,
+		"link":     true,
+		"menuitem": true,
+		"meta":     true,
+		"nextid":   true,
+		"param":    true,
+		"path":     true,
+		"polygon":  true,
+		"polyline": true,
+		"rect":     true,
+		"source":   true,
+		"spacer":   true,
+		"stop":     true,
+		"track":    true,
+		"use":      true,
+		"wbr":      true,
+	}
 )
 
 // ExtractPageDimensions extracts the viewport width and height from an XHTML content document.
@@ -285,7 +323,7 @@ func RewritePageHTML(rawHTML, bookID, chapterHref string, pageWidth, pageHeight 
 		return fmt.Sprintf("/api/v1/books/%s/assets/%s", bookID, target)
 	}
 
-	htmlStr := rawHTML
+	htmlStr := normalizeXHTMLForHTML(rawHTML)
 
 	// Rewrite img src
 	htmlStr = srcAttrRegex.ReplaceAllStringFunc(htmlStr, func(m string) string {
@@ -418,12 +456,29 @@ img, svg {
 	return htmlStr
 }
 
+func normalizeXHTMLForHTML(rawHTML string) string {
+	normalized := selfClosingTagRegex.ReplaceAllStringFunc(rawHTML, func(match string) string {
+		parts := selfClosingTagRegex.FindStringSubmatch(match)
+		if len(parts) != 3 {
+			return match
+		}
+		tagName := parts[1]
+		lowerTag := strings.ToLower(tagName)
+		if htmlSelfClosingAllowedTags[lowerTag] || strings.HasPrefix(lowerTag, "fe") {
+			return match
+		}
+		return "<" + tagName + parts[2] + "></" + tagName + ">"
+	})
+	return punctNewlineSpanRegex.ReplaceAllString(normalized, "$1$2")
+}
+
 func extractTextFromHTML(raw string) (*string, string) {
 	return extractTextFromHTMLWithContext(raw, "", "")
 }
 
 func extractTextFromHTMLWithContext(raw, bookTitle, fileName string) (*string, string) {
-	doc, err := nethtml.Parse(strings.NewReader(raw))
+	normalized := normalizeXHTMLForHTML(raw)
+	doc, err := nethtml.Parse(strings.NewReader(normalized))
 	if err != nil {
 		// Fallback to basic string extraction on malformed HTML
 		return nil, strings.TrimSpace(raw)

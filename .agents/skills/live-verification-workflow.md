@@ -136,3 +136,24 @@ To bypass the login screen and authenticate directly against local development b
    ```markdown
    ![Caption](<appDataDir>/brain/<conversation-id>/screenshot_<name>.png)
    ```
+
+### 6. Fixed-layout EPUB iframe and XHTML normalization checks
+
+Outer accessibility snapshots do not inspect the parsed DOM inside fixed-layout `<iframe>` elements. When verifying pre-paginated EPUB rendering or changes to `apps/server/internal/epub/content.go`, run both checks below.
+
+1. Run the EPUB unit test suite in `apps/server`.
+   ```bash
+   mise exec -- go test -tags sqlite_fts5 -v ./internal/epub/...
+   ```
+2. Inspect the live fixed-layout `<iframe>` DOM via `evaluate_script` to confirm that `text/html` parsing did not nest positioned spans from unclosed self-closing XHTML tags or swallow `<body>` into `<title>`.
+   ```json
+   {
+     "ServerName": "chrome-devtools-mcp",
+     "ToolName": "evaluate_script",
+     "Arguments": {
+       "pageId": 1,
+       "function": "() => Array.from(document.querySelectorAll('iframe')).map((f) => ({ src: f.src, bodyChildren: f.contentDocument ? f.contentDocument.body.children.length : 0, nestedAbsoluteSpans: f.contentDocument ? f.contentDocument.querySelectorAll('span[style*=\"position:absolute\"] span[style*=\"position:absolute\"]').length : -1 }))"
+     }
+   }
+   ```
+   Every loaded fixed-layout frame must report `bodyChildren > 0` and `nestedAbsoluteSpans === 0`.
