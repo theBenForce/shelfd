@@ -1,18 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../data/models/book.dart';
 import '../../../core/tokens.dart';
 import '../../../core/typography.dart';
+import '../../../state/providers.dart';
 
 /// Animated equalizer wave bars for the active audio chapter
 class EqualizerBars extends StatefulWidget {
   final bool isPlaying;
+  final bool? isAnimating;
   final Color color;
 
   const EqualizerBars({
     super.key,
     this.isPlaying = true,
+    this.isAnimating,
     this.color = AppTokens.amberAccent,
   });
+
+  bool get effectiveAnimating => isAnimating ?? isPlaying;
 
   @override
   State<EqualizerBars> createState() => _EqualizerBarsState();
@@ -28,7 +34,7 @@ class _EqualizerBarsState extends State<EqualizerBars> with SingleTickerProvider
       vsync: this,
       duration: const Duration(milliseconds: 800),
     );
-    if (widget.isPlaying) {
+    if (widget.effectiveAnimating) {
       _controller.repeat(reverse: true);
     }
   }
@@ -36,9 +42,9 @@ class _EqualizerBarsState extends State<EqualizerBars> with SingleTickerProvider
   @override
   void didUpdateWidget(covariant EqualizerBars oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.isPlaying && !_controller.isAnimating) {
+    if (widget.effectiveAnimating && !_controller.isAnimating) {
       _controller.repeat(reverse: true);
-    } else if (!widget.isPlaying && _controller.isAnimating) {
+    } else if (!widget.effectiveAnimating && _controller.isAnimating) {
       _controller.stop();
     }
   }
@@ -83,37 +89,39 @@ class _EqualizerBarsState extends State<EqualizerBars> with SingleTickerProvider
 }
 
 /// Chapters & Bookmarks Modal Bottom Sheet
-class ChapterDrawerSheet extends StatefulWidget {
-  final Book book;
-  final List<AudioChapter> chapters;
-  final int currentChapterIndex;
-  final Duration currentPosition;
+class ChapterDrawerSheet extends ConsumerStatefulWidget {
+  final String? bookId;
+  final Book? book;
+  final List<AudioChapter>? chapters;
+  final int? currentChapterIndex;
+  final Duration? currentPosition;
   final Duration? sleepTimerRemaining;
-  final bool isPlaying;
-  final ValueChanged<int> onChapterSelected;
-  final ValueChanged<Duration> onSeekToPosition;
-  final ValueChanged<Duration?> onSetSleepTimer;
-  final VoidCallback onAddBookmark;
+  final bool? isPlaying;
+  final ValueChanged<int>? onChapterSelected;
+  final ValueChanged<Duration>? onSeekToPosition;
+  final ValueChanged<Duration?>? onSetSleepTimer;
+  final VoidCallback? onAddBookmark;
 
   const ChapterDrawerSheet({
     super.key,
-    required this.book,
-    required this.chapters,
-    required this.currentChapterIndex,
-    required this.currentPosition,
+    this.bookId,
+    this.book,
+    this.chapters,
+    this.currentChapterIndex,
+    this.currentPosition,
     this.sleepTimerRemaining,
-    required this.isPlaying,
-    required this.onChapterSelected,
-    required this.onSeekToPosition,
-    required this.onSetSleepTimer,
-    required this.onAddBookmark,
+    this.isPlaying,
+    this.onChapterSelected,
+    this.onSeekToPosition,
+    this.onSetSleepTimer,
+    this.onAddBookmark,
   });
 
   @override
-  State<ChapterDrawerSheet> createState() => _ChapterDrawerSheetState();
+  ConsumerState<ChapterDrawerSheet> createState() => _ChapterDrawerSheetState();
 }
 
-class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
+class _ChapterDrawerSheetState extends ConsumerState<ChapterDrawerSheet> {
   int _selectedTab = 0; // 0: Chapters, 1: Bookmarks, 2: Sleep Timer
 
   String _formatDuration(Duration d) {
@@ -131,6 +139,27 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final playerState = ref.watch(audioPlayerProvider);
+    final effectiveBookId = widget.bookId ?? widget.book?.id ?? playerState.book?.id ?? '';
+    final detailBook = effectiveBookId.isNotEmpty
+        ? ref.watch(bookDetailProvider(effectiveBookId)).book
+        : null;
+
+    final effectiveBook = widget.book ??
+        detailBook ??
+        playerState.book ??
+        Book(
+          id: effectiveBookId,
+          title: 'Audiobook',
+          authors: const [],
+        );
+    final effectiveChapters = widget.chapters ??
+        (playerState.chapters.isNotEmpty ? playerState.chapters : effectiveBook.audioChapters);
+    final effectiveChapterIndex = widget.currentChapterIndex ?? playerState.currentChapterIndex;
+    final effectivePosition = widget.currentPosition ?? playerState.position;
+    final effectiveSleepTimer = widget.sleepTimerRemaining ?? playerState.sleepTimerRemaining;
+    final effectiveIsPlaying = widget.isPlaying ?? playerState.isPlaying;
+
     return Container(
       decoration: const BoxDecoration(
         color: AppTokens.obsidianBackground,
@@ -168,9 +197,9 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                       width: 44,
                       height: 44,
                       color: AppTokens.obsidianSurface,
-                      child: widget.book.coverUrl != null
+                      child: effectiveBook.coverUrl != null
                           ? Image.network(
-                              widget.book.coverUrl!,
+                              effectiveBook.coverUrl!,
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) =>
                                   const Icon(Icons.headphones, color: AppTokens.amberAccent, size: 24),
@@ -184,7 +213,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          widget.book.title,
+                          effectiveBook.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: AppTypography.titleSerif(
@@ -194,7 +223,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                           ),
                         ),
                         Text(
-                          widget.book.authorDisplay,
+                          effectiveBook.authorDisplay,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: AppTypography.bodySans(
@@ -220,14 +249,14 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
               padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16, vertical: AppTokens.space12),
               child: Row(
                 children: [
-                  _tabChip(0, 'Chapters (${widget.chapters.length})', Icons.format_list_bulleted),
+                  _tabChip(0, 'Chapters (${effectiveChapters.length})', Icons.format_list_bulleted),
                   const SizedBox(width: AppTokens.space8),
-                  _tabChip(1, 'Bookmarks (${widget.book.bookmarks.length})', Icons.bookmark_outline),
+                  _tabChip(1, 'Bookmarks (${effectiveBook.bookmarks.length})', Icons.bookmark_outline),
                   const SizedBox(width: AppTokens.space8),
                   _tabChip(
                     2,
-                    widget.sleepTimerRemaining != null
-                        ? _formatDuration(widget.sleepTimerRemaining!)
+                    effectiveSleepTimer != null
+                        ? _formatDuration(effectiveSleepTimer)
                         : 'Timer',
                     Icons.bedtime,
                   ),
@@ -241,7 +270,15 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                 constraints: BoxConstraints(
                   maxHeight: MediaQuery.of(context).size.height * 0.55,
                 ),
-                child: _buildTabBody(context),
+                child: _buildTabBody(
+                  context,
+                  effectiveBook: effectiveBook,
+                  effectiveChapters: effectiveChapters,
+                  effectiveChapterIndex: effectiveChapterIndex,
+                  effectivePosition: effectivePosition,
+                  effectiveSleepTimer: effectiveSleepTimer,
+                  effectiveIsPlaying: effectiveIsPlaying,
+                ),
               ),
             ),
           ],
@@ -297,20 +334,39 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
     );
   }
 
-  Widget _buildTabBody(BuildContext context) {
+  Widget _buildTabBody(
+    BuildContext context, {
+    required Book effectiveBook,
+    required List<AudioChapter> effectiveChapters,
+    required int effectiveChapterIndex,
+    required Duration effectivePosition,
+    required Duration? effectiveSleepTimer,
+    required bool effectiveIsPlaying,
+  }) {
     switch (_selectedTab) {
       case 0:
-        return _buildChaptersList();
+        return _buildChaptersList(
+          effectiveChapters: effectiveChapters,
+          effectiveChapterIndex: effectiveChapterIndex,
+          effectiveIsPlaying: effectiveIsPlaying,
+        );
       case 1:
-        return _buildBookmarksList();
+        return _buildBookmarksList(
+          effectiveBook: effectiveBook,
+          effectivePosition: effectivePosition,
+        );
       case 2:
       default:
-        return _buildSleepTimerList();
+        return _buildSleepTimerList(effectiveSleepTimer: effectiveSleepTimer);
     }
   }
 
-  Widget _buildChaptersList() {
-    if (widget.chapters.isEmpty) {
+  Widget _buildChaptersList({
+    required List<AudioChapter> effectiveChapters,
+    required int effectiveChapterIndex,
+    required bool effectiveIsPlaying,
+  }) {
+    if (effectiveChapters.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(AppTokens.space32),
@@ -325,20 +381,26 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
 
     return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16, vertical: AppTokens.space8),
-      itemCount: widget.chapters.length,
+      itemCount: effectiveChapters.length,
       separatorBuilder: (context, index) => const SizedBox(height: 6),
       itemBuilder: (context, index) {
-        final chapter = widget.chapters[index];
-        final isActive = index == widget.currentChapterIndex;
-        final isCompleted = index < widget.currentChapterIndex;
+        final chapter = effectiveChapters[index];
+        final isActive = index == effectiveChapterIndex;
+        final isCompleted = index < effectiveChapterIndex;
         final duration = Duration(seconds: chapter.durationSec.round());
         final startOffset = Duration(seconds: chapter.startOffsetSec.round());
 
         return InkWell(
           key: Key('chapter_tile_$index'),
           onTap: () {
-            widget.onChapterSelected(index);
-            Navigator.of(context).pop();
+            if (widget.onChapterSelected != null) {
+              widget.onChapterSelected!(index);
+            } else {
+              ref.read(audioPlayerProvider.notifier).seekToChapter(index);
+            }
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            }
           },
           borderRadius: BorderRadius.circular(AppTokens.radiusMd),
           child: Container(
@@ -356,7 +418,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                 if (isActive)
                   Padding(
                     padding: const EdgeInsets.only(right: 10),
-                    child: EqualizerBars(isPlaying: widget.isPlaying),
+                    child: EqualizerBars(isPlaying: effectiveIsPlaying),
                   )
                 else if (isCompleted)
                   const Padding(
@@ -368,7 +430,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                     padding: const EdgeInsets.only(right: 10),
                     child: Text(
                       '${index + 1}',
-                      style: AppTypography.bodySans(
+                      style: AppTypography.mono(
                         fontSize: 13,
                         color: Colors.white38,
                         fontWeight: FontWeight.w600,
@@ -392,7 +454,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                       const SizedBox(height: 2),
                       Text(
                         'Start: ${_formatDuration(startOffset)}',
-                        style: AppTypography.captionSans(
+                        style: AppTypography.mono(
                           fontSize: 11,
                           color: AppTokens.antiqueCream.withValues(alpha: 0.6),
                         ),
@@ -402,7 +464,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                 ),
                 Text(
                   _formatDuration(duration),
-                  style: AppTypography.captionSans(
+                  style: AppTypography.mono(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: isActive ? AppTokens.amberAccent : Colors.white54,
@@ -416,8 +478,11 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
     );
   }
 
-  Widget _buildBookmarksList() {
-    final bookmarks = widget.book.bookmarks;
+  Widget _buildBookmarksList({
+    required Book effectiveBook,
+    required Duration effectivePosition,
+  }) {
+    final bookmarks = effectiveBook.bookmarks;
 
     return Column(
       children: [
@@ -434,8 +499,22 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
               icon: const Icon(Icons.bookmark_add_outlined, size: 18),
               label: const Text('Add Audio Bookmark at Current Time'),
               onPressed: () {
-                widget.onAddBookmark();
-                Navigator.of(context).pop();
+                if (widget.onAddBookmark != null) {
+                  widget.onAddBookmark!();
+                } else if (effectiveBook.id.isNotEmpty) {
+                  final progress = effectiveBook.durationSeconds != null && effectiveBook.durationSeconds! > 0
+                      ? effectivePosition.inSeconds / effectiveBook.durationSeconds!
+                      : 0.0;
+                  final mins = effectivePosition.inMinutes;
+                  final secs = effectivePosition.inSeconds.remainder(60);
+                  ref.read(bookDetailProvider(effectiveBook.id).notifier).addBookmark(
+                        title: 'Audio Mark ${mins}m ${secs}s',
+                        progress: progress,
+                      );
+                }
+                if (Navigator.of(context).canPop()) {
+                  Navigator.of(context).pop();
+                }
               },
             ),
           ),
@@ -457,7 +536,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
               separatorBuilder: (context, index) => const SizedBox(height: 6),
               itemBuilder: (context, index) {
                 final bm = bookmarks[index];
-                final targetSeconds = (bm.progress * (widget.book.durationSeconds ?? 0)).round();
+                final targetSeconds = (bm.progress * (effectiveBook.durationSeconds ?? 0)).round();
                 final targetPos = Duration(seconds: targetSeconds);
 
                 return Material(
@@ -471,16 +550,26 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                     leading: const Icon(Icons.bookmark, color: AppTokens.amberAccent),
                     title: Text(
                       bm.title,
-                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                      style: AppTypography.bodySans(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     subtitle: Text(
                       'Position: ${_formatDuration(targetPos)}',
-                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                      style: AppTypography.mono(color: Colors.white54, fontSize: 12),
                     ),
                     trailing: const Icon(Icons.play_circle_outline, color: AppTokens.amberAccent),
                     onTap: () {
-                      widget.onSeekToPosition(targetPos);
-                      Navigator.of(context).pop();
+                      if (widget.onSeekToPosition != null) {
+                        widget.onSeekToPosition!(targetPos);
+                      } else {
+                        ref.read(audioPlayerProvider.notifier).seek(targetPos);
+                      }
+                      if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
+                      }
                     },
                   ),
                 );
@@ -491,7 +580,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
     );
   }
 
-  Widget _buildSleepTimerList() {
+  Widget _buildSleepTimerList({required Duration? effectiveSleepTimer}) {
     final timerOptions = [
       {'label': 'Off', 'duration': null},
       {'label': '15 minutes', 'duration': const Duration(minutes: 15)},
@@ -509,7 +598,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
         final opt = timerOptions[index];
         final label = opt['label'] as String;
         final dur = opt['duration'] as Duration?;
-        final isSelected = (dur == null && widget.sleepTimerRemaining == null);
+        final isSelected = (dur == null && effectiveSleepTimer == null);
 
         return Material(
           color: Colors.transparent,
@@ -528,7 +617,7 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
             ),
             title: Text(
               label,
-              style: TextStyle(
+              style: AppTypography.bodySans(
                 color: isSelected ? AppTokens.amberGlow : Colors.white,
                 fontSize: 14,
                 fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
@@ -538,8 +627,14 @@ class _ChapterDrawerSheetState extends State<ChapterDrawerSheet> {
                 ? const Icon(Icons.check, color: AppTokens.amberAccent)
                 : null,
             onTap: () {
-              widget.onSetSleepTimer(dur);
-              Navigator.of(context).pop();
+              if (widget.onSetSleepTimer != null) {
+                widget.onSetSleepTimer!(dur);
+              } else {
+                ref.read(audioPlayerProvider.notifier).setSleepTimerDuration(dur);
+              }
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              }
             },
           ),
         );

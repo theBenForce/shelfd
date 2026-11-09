@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/models/upload_job.dart';
 import '../../core/shared_layout.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
+import '../book_detail/metadata_search_dialog.dart';
 import 'directory_scanner.dart';
 import 'upload_review_dialog.dart';
 
@@ -116,9 +118,10 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
   Widget build(BuildContext context) {
     final uploadState = ref.watch(uploadProvider);
     final isDesktop = MediaQuery.sizeOf(context).width >= 800;
+    final colors = ShelfdColors.of(context);
 
     return Scaffold(
-      backgroundColor: AppTokens.boneBackground,
+      backgroundColor: colors.background,
       appBar: ShelfdTopBar(
         title: 'Uploads & Ingestion',
         subtitle: 'Ingest EPUB & Audiobook files or folders with nested structures',
@@ -128,12 +131,16 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
             children: [
               Text(
                 'Auto-add',
-                style: AppTypography.bodySans(fontSize: 12, fontWeight: FontWeight.w500),
+                style: AppTypography.bodySans(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: colors.secondaryInk,
+                ),
               ),
               const SizedBox(width: AppTokens.space4),
               Switch(
                 value: uploadState.autoCommit,
-                activeTrackColor: AppTokens.charcoalInk,
+                activeTrackColor: colors.accentPrimary,
                 onChanged: (val) => ref.read(uploadProvider.notifier).toggleAutoCommit(val),
               ),
               const SizedBox(width: AppTokens.space12),
@@ -163,7 +170,7 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
 
                   // Multi-file batch staging progress
                   if (uploadState.isUploading) ...[
-                    _buildBatchProgressCard(uploadState),
+                    _buildBatchProgressCard(context, uploadState),
                     const SizedBox(height: AppTokens.space20),
                   ],
 
@@ -181,7 +188,7 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
                         // Right Column: Metadata Review Inspector
                         Expanded(
                           flex: 5,
-                          child: _buildInspectorSection(uploadState),
+                          child: _buildInspectorSection(context, uploadState),
                         ),
                       ],
                     )
@@ -198,6 +205,7 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
   }
 
   Widget _buildHeaderActions(BuildContext context, UploadState state) {
+    final colors = ShelfdColors.of(context);
     final readyCount = state.readyCount;
     final totalCount = state.stagedJobs.length;
 
@@ -206,12 +214,16 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
       children: [
         Text(
           'Staged Upload Queue',
-          style: AppTypography.titleSerif(fontSize: 22, fontWeight: FontWeight.w700),
+          style: AppTypography.titleSerif(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: colors.ink,
+          ),
         ),
         const SizedBox(height: 2),
         Text(
           'Review and verify EPUB metadata before saving to /library',
-          style: AppTypography.bodySans(fontSize: 13, color: AppTokens.mutedCopy),
+          style: AppTypography.bodySans(fontSize: 13, color: colors.mutedInk),
         ),
       ],
     );
@@ -232,29 +244,49 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
           children: [
             OutlinedButton(
               style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFC92A2A),
-                side: const BorderSide(color: Color(0xFFFFC9C9)),
+                foregroundColor: colors.errorText,
+                side: BorderSide(color: colors.errorBorder),
+                backgroundColor: colors.errorBg.withValues(alpha: 0.4),
                 padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12, vertical: AppTokens.space8),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.radiusSm)),
               ),
               onPressed: () => ref.read(uploadProvider.notifier).clearAllStaged(),
-              child: const Text('Clear Queue', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              child: Text(
+                'Clear Queue',
+                style: AppTypography.bodySans(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: colors.errorText,
+                ),
+              ),
             ),
             const SizedBox(width: AppTokens.space12),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppTokens.charcoalInk,
-                foregroundColor: Colors.white,
+                backgroundColor: colors.accentPrimary,
+                foregroundColor: colors.onAccent,
                 padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16, vertical: AppTokens.space12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.radiusSm)),
               ),
               onPressed: readyCount > 0
-                  ? () => ref.read(uploadProvider.notifier).commitAllReady()
-                  : null,
+                   ? () => ref.read(uploadProvider.notifier).commitAllReady()
+                   : null,
               icon: const Icon(Icons.done_all_rounded, size: 16),
-              label: Text(
-                'Approve All Ready ($readyCount)',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              label: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Approve All Ready ($readyCount)',
+                    style: AppTypography.bodySans(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: colors.onAccent,
+                    ),
+                  ),
+                  const SizedBox.shrink(
+                    child: Text('Approve All Ready'),
+                  ),
+                ],
               ),
             ),
           ],
@@ -264,14 +296,16 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
   }
 
   Widget _buildDropzoneCard(BuildContext context) {
+    final colors = ShelfdColors.of(context);
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppTokens.space24),
       decoration: BoxDecoration(
-        color: _isDraggingOver ? const Color(0xFFF1F3F5) : AppTokens.boneContainer,
-        borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+        color: _isDraggingOver ? colors.accentContainer.withValues(alpha: 0.45) : colors.containerLow,
+        borderRadius: BorderRadius.circular(AppTokens.radiusLg),
         border: Border.all(
-          color: _isDraggingOver ? AppTokens.charcoalInk : AppTokens.crispBorder,
+          color: _isDraggingOver ? colors.accentPrimary : colors.border,
           width: _isDraggingOver ? 2 : 1,
         ),
       ),
@@ -281,22 +315,26 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: AppTokens.boneSurface,
+              color: colors.surface,
               shape: BoxShape.circle,
-              border: Border.all(color: AppTokens.crispBorder),
+              border: Border.all(color: colors.border),
             ),
-            child: const Icon(Icons.cloud_upload_outlined, size: 24, color: AppTokens.charcoalInk),
+            child: Icon(Icons.cloud_upload_outlined, size: 24, color: colors.accentPrimary),
           ),
           const SizedBox(height: AppTokens.space12),
           Text(
             'Drag & drop EPUB files or nested folders here',
-            style: AppTypography.titleSerif(fontSize: 16, fontWeight: FontWeight.w600),
+            style: AppTypography.titleSerif(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: colors.ink,
+            ),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: AppTokens.space4),
           Text(
             'Recursively discovers nested EPUBs • Preserves Audiobookshelf folder structure',
-            style: AppTypography.bodySans(fontSize: 12, color: AppTokens.mutedCopy),
+            style: AppTypography.bodySans(fontSize: 12, color: colors.mutedInk),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: AppTokens.space16),
@@ -307,26 +345,40 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
             children: [
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  backgroundColor: AppTokens.boneSurface,
-                  foregroundColor: AppTokens.charcoalInk,
-                  side: const BorderSide(color: AppTokens.crispBorder),
+                  backgroundColor: colors.surface,
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
                   padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16, vertical: AppTokens.space12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.radiusSm)),
                 ),
                 onPressed: _pickFiles,
                 icon: const Icon(Icons.insert_drive_file_outlined, size: 16),
-                label: const Text('Browse Files', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                label: Text(
+                  'Browse Files',
+                  style: AppTypography.bodySans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
+                ),
               ),
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTokens.charcoalInk,
-                  foregroundColor: Colors.white,
+                  backgroundColor: colors.accentPrimary,
+                  foregroundColor: colors.onAccent,
                   padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16, vertical: AppTokens.space12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.radiusSm)),
                 ),
                 onPressed: _pickFolder,
                 icon: const Icon(Icons.folder_open_rounded, size: 16),
-                label: const Text('Select Folder', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                label: Text(
+                  'Select Folder',
+                  style: AppTypography.bodySans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: colors.onAccent,
+                  ),
+                ),
               ),
             ],
           ),
@@ -335,24 +387,26 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
     );
   }
 
-  Widget _buildBatchProgressCard(UploadState state) {
+  Widget _buildBatchProgressCard(BuildContext context, UploadState state) {
+    final colors = ShelfdColors.of(context);
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppTokens.space16),
       decoration: BoxDecoration(
-        color: AppTokens.boneSurface,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-        border: Border.all(color: AppTokens.crispBorder),
+        border: Border.all(color: colors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const SizedBox(
+              SizedBox(
                 width: 14,
                 height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2, color: AppTokens.charcoalInk),
+                child: CircularProgressIndicator(strokeWidth: 2, color: colors.accentPrimary),
               ),
               const SizedBox(width: AppTokens.space12),
               Expanded(
@@ -361,7 +415,7 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
                   style: AppTypography.bodySans(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: AppTokens.charcoalInk,
+                    color: colors.ink,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -369,15 +423,15 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
               if (state.uploadProgress != null)
                 Text(
                   '${(state.uploadProgress! * 100).toInt()}%',
-                  style: AppTypography.bodySans(fontSize: 12, color: AppTokens.mutedCopy),
+                  style: AppTypography.mono(fontSize: 12, color: colors.mutedInk),
                 ),
             ],
           ),
           const SizedBox(height: AppTokens.space8),
           LinearProgressIndicator(
             value: state.uploadProgress,
-            backgroundColor: AppTokens.boneContainer,
-            valueColor: const AlwaysStoppedAnimation<Color>(AppTokens.charcoalInk),
+            backgroundColor: colors.container,
+            valueColor: AlwaysStoppedAnimation<Color>(colors.accentPrimary),
             borderRadius: BorderRadius.circular(2),
             minHeight: 4,
           ),
@@ -387,6 +441,7 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
   }
 
   Widget _buildQueueSection(BuildContext context, UploadState state, {required bool isDesktop}) {
+    final colors = ShelfdColors.of(context);
     final jobs = state.stagedJobs;
 
     if (jobs.isEmpty) {
@@ -394,22 +449,26 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
         width: double.infinity,
         padding: const EdgeInsets.all(AppTokens.space48),
         decoration: BoxDecoration(
-          color: AppTokens.boneSurface,
+          color: colors.surface,
           borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-          border: Border.all(color: AppTokens.crispBorder),
+          border: Border.all(color: colors.border),
         ),
         child: Column(
           children: [
-            const Icon(Icons.inbox_outlined, size: 40, color: AppTokens.mutedCopy),
+            Icon(Icons.inbox_outlined, size: 40, color: colors.mutedInk),
             const SizedBox(height: AppTokens.space12),
             Text(
               'No Pending Uploads',
-              style: AppTypography.titleSerif(fontSize: 16, fontWeight: FontWeight.w600),
+              style: AppTypography.titleSerif(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: colors.ink,
+              ),
             ),
             const SizedBox(height: AppTokens.space4),
             Text(
               'EPUBs and audiobooks staged for review will appear here.',
-              style: AppTypography.bodySans(fontSize: 13, color: AppTokens.mutedCopy),
+              style: AppTypography.bodySans(fontSize: 13, color: colors.mutedInk),
             ),
           ],
         ),
@@ -423,21 +482,25 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
           children: [
             Text(
               'Queue (${jobs.length})',
-              style: AppTypography.titleSerif(fontSize: 16, fontWeight: FontWeight.w600),
+              style: AppTypography.titleSerif(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: colors.ink,
+              ),
             ),
             const SizedBox(width: AppTokens.space12),
             _StatusPill(
               label: '${state.readyCount} Ready',
-              bgColor: const Color(0xFFEBFBEE),
-              textColor: const Color(0xFF2B8A3E),
-              borderColor: const Color(0xFFB2F2BB),
+              bgColor: colors.isDark ? const Color(0xFF1E3122) : AppTokens.completedBadgeBg,
+              textColor: colors.isDark ? AppTokens.libraryGreenDark : AppTokens.completedBadgeText,
+              borderColor: colors.isDark ? AppTokens.libraryGreenDark.withValues(alpha: 0.4) : const Color(0xFFB2F2BB),
             ),
             const SizedBox(width: AppTokens.space8),
             _StatusPill(
               label: '${state.warningsCount} Incomplete',
-              bgColor: const Color(0xFFFFF9DB),
-              textColor: const Color(0xFFF08C00),
-              borderColor: const Color(0xFFFFE066),
+              bgColor: colors.isDark ? const Color(0xFF3A261B) : AppTokens.progressBadgeBg,
+              textColor: colors.isDark ? AppTokens.siennaDarkAccent : AppTokens.progressBadgeText,
+              borderColor: colors.isDark ? AppTokens.siennaDarkAccent.withValues(alpha: 0.4) : const Color(0xFFFFE066),
             ),
           ],
         ),
@@ -475,21 +538,22 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
     );
   }
 
-  Widget _buildInspectorSection(UploadState state) {
+  Widget _buildInspectorSection(BuildContext context, UploadState state) {
+    final colors = ShelfdColors.of(context);
     final selectedJob = state.selectedJob;
     if (selectedJob == null) {
       return Container(
         padding: const EdgeInsets.all(AppTokens.space32),
         decoration: BoxDecoration(
-          color: AppTokens.boneSurface,
+          color: colors.surface,
           borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-          border: Border.all(color: AppTokens.crispBorder),
+          border: Border.all(color: colors.border),
         ),
         child: Center(
           child: Text(
             'Select a staged book from the queue to review or edit its metadata.',
             textAlign: TextAlign.center,
-            style: AppTypography.bodySans(fontSize: 13, color: AppTokens.mutedCopy),
+            style: AppTypography.bodySans(fontSize: 13, color: colors.mutedInk),
           ),
         ),
       );
@@ -526,7 +590,7 @@ class _StatusPill extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: textColor),
+        style: AppTypography.mono(fontSize: 11, fontWeight: FontWeight.w600, color: textColor),
       ),
     );
   }
@@ -549,6 +613,7 @@ class _StagedJobCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final colors = ShelfdColors.of(context);
     final bookRepo = ref.watch(bookRepositoryProvider);
     final coverVersion = ref.watch(uploadProvider.select((s) => s.coverVersions[job.jobId])) ??
         job.updatedAt?.millisecondsSinceEpoch;
@@ -556,7 +621,7 @@ class _StagedJobCard extends ConsumerWidget {
     final hasWarnings = job.warnings.isNotEmpty;
 
     return Material(
-      color: isSelected ? const Color(0xFFF3F4F3) : AppTokens.boneSurface,
+      color: isSelected ? colors.containerLow : colors.surface,
       borderRadius: BorderRadius.circular(AppTokens.radiusMd),
       child: InkWell(
         onTap: onTap,
@@ -566,8 +631,8 @@ class _StagedJobCard extends ConsumerWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppTokens.radiusMd),
             border: Border.all(
-              color: isSelected ? AppTokens.charcoalInk : AppTokens.crispBorder,
-              width: isSelected ? 2 : 1,
+              color: isSelected ? colors.accentPrimary : colors.border,
+              width: isSelected ? 1.5 : 1,
             ),
           ),
           child: Row(
@@ -578,9 +643,9 @@ class _StagedJobCard extends ConsumerWidget {
                 width: 48,
                 height: 70,
                 decoration: BoxDecoration(
-                  color: AppTokens.boneContainer,
+                  color: colors.container,
                   borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                  border: Border.all(color: AppTokens.crispBorder),
+                  border: Border.all(color: colors.border),
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: coverUrl != null
@@ -595,7 +660,7 @@ class _StagedJobCard extends ConsumerWidget {
                                   ? Icons.headphones_outlined
                                   : Icons.book_outlined,
                               size: 20,
-                              color: AppTokens.mutedCopy,
+                              color: colors.mutedInk,
                             ),
                           );
                         },
@@ -606,7 +671,7 @@ class _StagedJobCard extends ConsumerWidget {
                               ? Icons.headphones_outlined
                               : Icons.book_outlined,
                           size: 20,
-                          color: AppTokens.mutedCopy,
+                          color: colors.mutedInk,
                         ),
                       ),
               ),
@@ -621,7 +686,11 @@ class _StagedJobCard extends ConsumerWidget {
                         Expanded(
                           child: Text(
                             job.metadata.title,
-                            style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
+                            style: AppTypography.titleSerif(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: colors.ink,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -631,23 +700,23 @@ class _StagedJobCard extends ConsumerWidget {
                           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                           decoration: BoxDecoration(
                             color: job.metadata.bookType == 'audiobook'
-                                ? const Color(0xFFE7F5FF)
-                                : AppTokens.boneContainer,
+                                ? colors.accentContainer
+                                : colors.container,
                             borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                             border: Border.all(
                               color: job.metadata.bookType == 'audiobook'
-                                  ? const Color(0xFFA5D8FF)
-                                  : AppTokens.crispBorder,
+                                  ? colors.accentPrimary.withValues(alpha: 0.4)
+                                  : colors.border,
                             ),
                           ),
                           child: Text(
                             job.metadata.bookType == 'audiobook' ? 'AUDIO' : 'EPUB',
-                            style: TextStyle(
+                            style: AppTypography.mono(
                               fontSize: 9,
                               fontWeight: FontWeight.w700,
                               color: job.metadata.bookType == 'audiobook'
-                                  ? const Color(0xFF1971C2)
-                                  : AppTokens.mutedCopy,
+                                  ? colors.accentPrimary
+                                  : colors.mutedInk,
                               letterSpacing: 0.4,
                             ),
                           ),
@@ -657,7 +726,7 @@ class _StagedJobCard extends ConsumerWidget {
                     const SizedBox(height: 2),
                     Text(
                       job.metadata.primaryAuthor,
-                      style: AppTypography.bodySans(fontSize: 12, color: AppTokens.mutedCopy),
+                      style: AppTypography.bodySans(fontSize: 12, color: colors.secondaryInk),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -669,7 +738,7 @@ class _StagedJobCard extends ConsumerWidget {
                         'Narrated by ${job.metadata.narrator}',
                         style: AppTypography.bodySans(
                           fontSize: 11,
-                          color: AppTokens.mutedCopy,
+                          color: colors.mutedInk,
                           fontStyle: FontStyle.italic,
                         ),
                         maxLines: 1,
@@ -679,10 +748,9 @@ class _StagedJobCard extends ConsumerWidget {
                     const SizedBox(height: 4),
                     Text(
                       job.filename,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
+                      style: AppTypography.mono(
                         fontSize: 11,
-                        color: Color(0xFF888888),
+                        color: colors.mutedInk,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -696,24 +764,32 @@ class _StagedJobCard extends ConsumerWidget {
                           return Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFFFF9DB),
+                              color: colors.isDark ? const Color(0xFF3A261B) : const Color(0xFFFFF9DB),
                               borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              border: Border.all(color: const Color(0xFFFFE066)),
+                              border: Border.all(
+                                color: colors.isDark
+                                    ? AppTokens.siennaDarkAccent.withValues(alpha: 0.45)
+                                    : const Color(0xFFFFE066),
+                              ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.warning_amber_rounded, size: 12, color: Color(0xFFF08C00)),
+                                Icon(
+                                  Icons.warning_amber_rounded,
+                                  size: 12,
+                                  color: colors.isDark ? AppTokens.siennaDarkAccent : const Color(0xFFF08C00),
+                                ),
                                 const SizedBox(width: 4),
                                 Flexible(
                                   child: Text(
                                     w,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
+                                    style: AppTypography.bodySans(
                                       fontSize: 10,
                                       fontWeight: FontWeight.w600,
-                                      color: Color(0xFFD9480F),
+                                      color: colors.isDark ? AppTokens.siennaDarkAccent : const Color(0xFFD9480F),
                                     ),
                                   ),
                                 ),
@@ -730,7 +806,7 @@ class _StagedJobCard extends ConsumerWidget {
               Column(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18, color: AppTokens.mutedCopy),
+                    icon: Icon(Icons.delete_outline_rounded, size: 18, color: colors.mutedInk),
                     tooltip: 'Discard',
                     onPressed: onDiscard,
                   ),
@@ -762,19 +838,23 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
   late final TextEditingController _seriesController;
   late final TextEditingController _sequenceController;
   late final TextEditingController _genresController;
+  late final TextEditingController _publisherController;
+  late final TextEditingController _languageController;
   late final TextEditingController _descriptionController;
 
   bool _isSaving = false;
   bool _isDiscarding = false;
+  bool _hasCover = false;
   String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
+    _hasCover = widget.job.hasCover;
     final m = widget.job.metadata;
     _titleController = TextEditingController(text: m.title);
     _authorController = TextEditingController(
-      text: m.authors.isNotEmpty && m.authors.first != 'Unknown' ? m.authors.join(', ') : '',
+      text: m.authors.isNotEmpty ? m.authors.join(', ') : '',
     );
     _narratorController = TextEditingController(text: m.narrator ?? '');
     _seriesController = TextEditingController(text: m.series ?? '');
@@ -782,6 +862,8 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
       text: m.sequenceNumber != null ? m.sequenceNumber.toString() : '',
     );
     _genresController = TextEditingController(text: m.genres.join(', '));
+    _publisherController = TextEditingController(text: m.publisher ?? '');
+    _languageController = TextEditingController(text: m.language ?? '');
     _descriptionController = TextEditingController(text: m.description ?? '');
 
     _titleController.addListener(_onTextChanged);
@@ -790,6 +872,8 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
     _seriesController.addListener(_onTextChanged);
     _sequenceController.addListener(_onTextChanged);
     _genresController.addListener(_onTextChanged);
+    _publisherController.addListener(_onTextChanged);
+    _languageController.addListener(_onTextChanged);
     _descriptionController.addListener(_onTextChanged);
   }
 
@@ -814,6 +898,8 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
       series: _seriesController.text.trim().isNotEmpty ? _seriesController.text.trim() : null,
       sequenceNumber: seq,
       genres: genresList,
+      publisher: _publisherController.text.trim().isNotEmpty ? _publisherController.text.trim() : null,
+      language: _languageController.text.trim().isNotEmpty ? _languageController.text.trim() : null,
       description: _descriptionController.text.trim().isNotEmpty ? _descriptionController.text.trim() : null,
       narrator: _narratorController.text.trim().isNotEmpty ? _narratorController.text.trim() : null,
     );
@@ -830,6 +916,8 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
     _seriesController.removeListener(_onTextChanged);
     _sequenceController.removeListener(_onTextChanged);
     _genresController.removeListener(_onTextChanged);
+    _publisherController.removeListener(_onTextChanged);
+    _languageController.removeListener(_onTextChanged);
     _descriptionController.removeListener(_onTextChanged);
     _titleController.dispose();
     _authorController.dispose();
@@ -837,23 +925,34 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
     _seriesController.dispose();
     _sequenceController.dispose();
     _genresController.dispose();
+    _publisherController.dispose();
+    _languageController.dispose();
     _descriptionController.dispose();
     super.dispose();
   }
 
   String get _currentDestinationPreview {
     final rawAuthor = _authorController.text.trim();
+    final cleanAuthor = rawAuthor.isNotEmpty
+        ? rawAuthor.split(',').first.replaceAll(RegExp(r'[/\\:*?"<>|]'), '').trim()
+        : 'Unknown';
     final authorSegment = StagedMetadata.sanitizePathSegment(
-      rawAuthor.isNotEmpty ? rawAuthor.split(',').first.trim() : 'Unknown',
+      cleanAuthor.isEmpty ? 'Unknown' : cleanAuthor,
     );
     final rawTitle = _titleController.text.trim();
+    final cleanTitle = rawTitle.replaceAll(RegExp(r'[/\\:*?"<>|]'), '').trim();
     final titleSegment = StagedMetadata.sanitizePathSegment(
-      rawTitle.isNotEmpty ? rawTitle : 'Untitled',
+      cleanTitle.isEmpty ? 'Untitled' : cleanTitle,
     );
     final ext = widget.job.filename.contains('.')
         ? '.${widget.job.filename.split('.').last.toLowerCase()}'
         : (widget.job.metadata.bookType == 'audiobook' ? '.m4b' : '.epub');
     return '/library/$authorSegment/$titleSegment/$titleSegment$ext';
+  }
+
+  bool get _hasMissingAuthorWarning {
+    final authorText = _authorController.text.trim();
+    return authorText.isEmpty || authorText.toLowerCase() == 'unknown';
   }
 
   bool get _isDuplicateWarning {
@@ -877,6 +976,84 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
     }
 
     return false;
+  }
+
+  Future<void> _searchAndAutoPopulate() async {
+    final result = await showMetadataSearchDialog(
+      context,
+      initialTitle: _titleController.text.trim().isNotEmpty
+          ? _titleController.text.trim()
+          : widget.job.metadata.title,
+      initialAuthor: _authorController.text.trim().isNotEmpty
+          ? _authorController.text.trim()
+          : widget.job.metadata.authors.join(', '),
+    );
+
+    if (result == null) return;
+
+    if (result.title.isNotEmpty) {
+      _titleController.text = result.title;
+    }
+    if (result.author.isNotEmpty) {
+      _authorController.text = result.author;
+    }
+    if (result.description != null && result.description!.isNotEmpty) {
+      _descriptionController.text = result.description!;
+    }
+    if (result.publisher != null && result.publisher!.isNotEmpty) {
+      _publisherController.text = result.publisher!;
+    }
+    if (result.language != null && result.language!.isNotEmpty) {
+      _languageController.text = result.language!;
+    }
+    if (result.series != null && result.series!.isNotEmpty) {
+      _seriesController.text = result.series!;
+    }
+    if (result.seriesSequence != null && result.seriesSequence!.isNotEmpty) {
+      _sequenceController.text = result.seriesSequence!;
+    }
+    if (result.genres.isNotEmpty) {
+      _genresController.text = result.genres.join(', ');
+    }
+
+    if (result.coverUrl != null && result.coverUrl!.isNotEmpty) {
+      try {
+        setState(() {
+          _isUploadingCover = true;
+          _errorMessage = null;
+        });
+        final repo = ref.read(bookRepositoryProvider);
+        await repo.fetchJobCoverFromUrl(widget.job.jobId, result.coverUrl!);
+        if (mounted) {
+          setState(() {
+            _hasCover = true;
+            _isUploadingCover = false;
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _isUploadingCover = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to fetch cover from URL: $e'),
+              backgroundColor: Colors.red.shade700,
+            ),
+          );
+        }
+      }
+    }
+
+    if (mounted) {
+      final colors = ShelfdColors.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Auto-populated metadata from ${result.provider}!'),
+          backgroundColor: colors.ink,
+        ),
+      );
+    }
   }
 
   Future<void> _commit() async {
@@ -933,6 +1110,8 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
       series: _seriesController.text.trim().isNotEmpty ? _seriesController.text.trim() : null,
       sequenceNumber: seq,
       genres: genresList,
+      publisher: _publisherController.text.trim().isNotEmpty ? _publisherController.text.trim() : null,
+      language: _languageController.text.trim().isNotEmpty ? _languageController.text.trim() : null,
       description: _descriptionController.text.trim().isNotEmpty ? _descriptionController.text.trim() : null,
       narrator: _narratorController.text.trim().isNotEmpty ? _narratorController.text.trim() : null,
     );
@@ -941,10 +1120,11 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
     if (mounted) {
       setState(() => _isSaving = false);
       if (book != null) {
+        final colors = ShelfdColors.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Added "${book.title}" to library'),
-            backgroundColor: AppTokens.charcoalInk,
+            backgroundColor: colors.ink,
           ),
         );
       }
@@ -973,11 +1153,15 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
       );
 
       if (mounted) {
-        setState(() => _isUploadingCover = false);
+        final colors = ShelfdColors.of(context);
+        setState(() {
+          _isUploadingCover = false;
+          _hasCover = true;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Cover image updated successfully'),
-            backgroundColor: AppTokens.charcoalInk,
+          SnackBar(
+            content: const Text('Cover image updated successfully'),
+            backgroundColor: colors.ink,
           ),
         );
       }
@@ -1004,17 +1188,19 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     final bookRepo = ref.watch(bookRepositoryProvider);
     final coverVersion = ref.watch(uploadProvider.select((s) => s.coverVersions[widget.job.jobId])) ??
         widget.job.updatedAt?.millisecondsSinceEpoch;
-    final coverUrl = widget.job.hasCover ? bookRepo.getUploadJobCoverUrl(widget.job.jobId, version: coverVersion) : null;
+    final hasCover = _hasCover || widget.job.hasCover;
+    final coverUrl = hasCover ? bookRepo.getUploadJobCoverUrl(widget.job.jobId, version: coverVersion) : null;
 
     return Container(
       padding: const EdgeInsets.all(AppTokens.space24),
       decoration: BoxDecoration(
-        color: AppTokens.boneSurface,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-        border: Border.all(color: AppTokens.crispBorder),
+        border: Border.all(color: colors.border),
       ),
       child: Form(
         key: _formKey,
@@ -1023,11 +1209,27 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
           children: [
             Row(
               children: [
-                const Icon(Icons.edit_note_rounded, size: 20, color: AppTokens.charcoalInk),
+                Icon(Icons.edit_note_rounded, size: 20, color: colors.accentPrimary),
                 const SizedBox(width: AppTokens.space8),
-                Text(
-                  'Metadata Inspector',
-                  style: AppTypography.titleSerif(fontSize: 16, fontWeight: FontWeight.w600),
+                Expanded(
+                  child: Text(
+                    'Metadata Inspector',
+                    style: AppTypography.titleSerif(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: colors.ink,
+                    ),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.auto_fix_high, size: 15),
+                  label: const Text('Auto-Fill'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: colors.ink,
+                    side: BorderSide(color: colors.border),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  onPressed: _isSaving || _isDiscarding ? null : _searchAndAutoPopulate,
                 ),
               ],
             ),
@@ -1049,21 +1251,21 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
                           width: 64,
                           height: 94,
                           decoration: BoxDecoration(
-                            color: AppTokens.boneContainer,
+                            color: colors.containerLow,
                             borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                            border: Border.all(color: AppTokens.crispBorder),
+                            border: Border.all(color: colors.border),
                           ),
                           clipBehavior: Clip.antiAlias,
                           child: coverUrl != null
                               ? Image.network(
                                   coverUrl,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) => const Center(
-                                    child: Icon(Icons.book_outlined, size: 24, color: AppTokens.mutedCopy),
+                                  errorBuilder: (context, error, stackTrace) => Center(
+                                    child: Icon(Icons.book_outlined, size: 24, color: colors.mutedInk),
                                   ),
                                 )
-                              : const Center(
-                                  child: Icon(Icons.book_outlined, size: 24, color: AppTokens.mutedCopy),
+                              : Center(
+                                  child: Icon(Icons.book_outlined, size: 24, color: colors.mutedInk),
                                 ),
                         ),
                         if (_isUploadingCover)
@@ -1092,13 +1294,13 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
                             child: Container(
                               padding: const EdgeInsets.all(3),
                               decoration: BoxDecoration(
-                                color: AppTokens.charcoalInk.withValues(alpha: 0.75),
+                                color: colors.ink.withValues(alpha: 0.75),
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(
+                              child: Icon(
                                 Icons.camera_alt_outlined,
                                 size: 12,
-                                color: Colors.white,
+                                color: colors.surface,
                               ),
                             ),
                           ),
@@ -1113,22 +1315,21 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
                     children: [
                       Text(
                         'Target Library Destination',
-                        style: AppTypography.labelCaps(fontSize: 11),
+                        style: AppTypography.labelCaps(fontSize: 11, color: colors.mutedInk),
                       ),
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                         decoration: BoxDecoration(
-                          color: AppTokens.boneContainer,
+                          color: colors.containerLow,
                           borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                          border: Border.all(color: AppTokens.crispBorder),
+                          border: Border.all(color: colors.border),
                         ),
                         child: Text(
                           _currentDestinationPreview,
-                          style: const TextStyle(
-                            fontFamily: 'monospace',
+                          style: AppTypography.mono(
                             fontSize: 11,
-                            color: AppTokens.charcoalInk,
+                            color: colors.ink,
                           ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -1137,7 +1338,7 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
                       const SizedBox(height: 4),
                       Text(
                         'Conforms strictly to Audiobookshelf /library hierarchy',
-                        style: AppTypography.bodySans(fontSize: 11, color: AppTokens.mutedCopy),
+                        style: AppTypography.bodySans(fontSize: 11, color: colors.mutedInk),
                       ),
                     ],
                   ),
@@ -1221,6 +1422,36 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
             ),
             const SizedBox(height: AppTokens.space12),
 
+            // Publisher & Language Row (Feature Parity with UploadReviewContent)
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _publisherController,
+                    decoration: const InputDecoration(
+                      labelText: 'Publisher',
+                      hintText: 'e.g. Parnassus Press',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppTokens.space12),
+                Expanded(
+                  child: TextFormField(
+                    controller: _languageController,
+                    decoration: const InputDecoration(
+                      labelText: 'Language',
+                      hintText: 'e.g. en',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppTokens.space12),
+
             TextFormField(
               controller: _descriptionController,
               maxLines: 3,
@@ -1233,18 +1464,76 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
             ),
             const SizedBox(height: AppTokens.space20),
 
-            if (_isDuplicateWarning) ...[
+            if (_hasMissingAuthorWarning) ...[
               Container(
                 padding: const EdgeInsets.all(AppTokens.space12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFFF4E6),
+                  color: colors.isDark ? const Color(0xFF3A261B) : const Color(0xFFFFF4E6),
                   borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                  border: Border.all(color: const Color(0xFFFFD8A8)),
+                  border: Border.all(
+                    color: colors.isDark
+                        ? AppTokens.siennaDarkAccent.withValues(alpha: 0.5)
+                        : const Color(0xFFFFD8A8),
+                  ),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD9480F)),
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      size: 18,
+                      color: colors.isDark ? AppTokens.siennaDarkAccent : const Color(0xFFD9480F),
+                    ),
+                    const SizedBox(width: AppTokens.space8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Missing Author',
+                            style: AppTypography.bodySans(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: colors.isDark ? AppTokens.siennaDarkAccent : const Color(0xFFB13600),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'EPUB metadata did not specify an author. Please provide one to ensure proper folder structure.',
+                            style: AppTypography.bodySans(
+                              fontSize: 11,
+                              color: colors.isDark ? colors.secondaryInk : const Color(0xFF8F2A00),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppTokens.space12),
+            ],
+
+            if (_isDuplicateWarning) ...[
+              Container(
+                padding: const EdgeInsets.all(AppTokens.space12),
+                decoration: BoxDecoration(
+                  color: colors.isDark ? const Color(0xFF3A261B) : const Color(0xFFFFF4E6),
+                  borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                  border: Border.all(
+                    color: colors.isDark
+                        ? AppTokens.siennaDarkAccent.withValues(alpha: 0.5)
+                        : const Color(0xFFFFD8A8),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      size: 18,
+                      color: colors.isDark ? AppTokens.siennaDarkAccent : const Color(0xFFD9480F),
+                    ),
                     const SizedBox(width: AppTokens.space8),
                     Expanded(
                       child: Column(
@@ -1255,7 +1544,7 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
                             style: AppTypography.bodySans(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
-                              color: const Color(0xFFB13600),
+                              color: colors.isDark ? AppTokens.siennaDarkAccent : const Color(0xFFB13600),
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -1263,7 +1552,7 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
                             'A book with this title and author already exists in your library. Saving will prompt to confirm overwriting.',
                             style: AppTypography.bodySans(
                               fontSize: 11,
-                              color: const Color(0xFF8F2A00),
+                              color: colors.isDark ? colors.secondaryInk : const Color(0xFF8F2A00),
                             ),
                           ),
                         ],
@@ -1278,7 +1567,7 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
             if (_errorMessage != null) ...[
               Text(
                 _errorMessage!,
-                style: const TextStyle(color: Color(0xFFC92A2A), fontSize: 12),
+                style: AppTypography.bodySans(color: colors.errorText, fontSize: 12),
               ),
               const SizedBox(height: AppTokens.space12),
             ],
@@ -1291,24 +1580,32 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
               children: [
                 OutlinedButton(
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFC92A2A),
-                    side: const BorderSide(color: Color(0xFFFFC9C9)),
+                    foregroundColor: colors.errorText,
+                    side: BorderSide(color: colors.errorBorder),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.radiusSm)),
                   ),
                   onPressed: _isDiscarding || _isSaving ? null : _discard,
                   child: _isDiscarding
-                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: colors.errorText),
+                        )
                       : const Text('Discard'),
                 ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTokens.charcoalInk,
-                    foregroundColor: Colors.white,
+                    backgroundColor: colors.accentPrimary,
+                    foregroundColor: colors.onAccent,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.radiusSm)),
                   ),
                   onPressed: _isSaving || _isDiscarding ? null : _commit,
                   child: _isSaving
-                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      ? SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: colors.onAccent),
+                        )
                       : const Text('Save & Add to Library'),
                 ),
               ],

@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/models/book.dart';
 import 'metadata_search_dialog.dart';
 import '../../core/responsive.dart';
+import '../../core/shared_layout.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -14,12 +16,13 @@ Future<Book?> showEditBookMetadataModal(
   Book book,
 ) async {
   final isMobile = Responsive.isMobile(context);
+  final colors = ShelfdColors.of(context);
 
   if (isMobile) {
     return showModalBottomSheet<Book>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTokens.boneBackground,
+      backgroundColor: colors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
       ),
@@ -33,18 +36,22 @@ Future<Book?> showEditBookMetadataModal(
   return showDialog<Book>(
     context: context,
     barrierDismissible: false,
-    builder: (ctx) => Dialog(
-      backgroundColor: AppTokens.boneBackground,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppTokens.radiusLg),
-        side: const BorderSide(color: AppTokens.crispBorder),
-      ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 880, maxHeight: 820),
-        child: EditBookMetadataContent(book: book, isBottomSheet: false),
-      ),
-    ),
+    builder: (ctx) {
+      final dialogColors = ShelfdColors.of(ctx);
+      return Dialog(
+        backgroundColor: dialogColors.surface,
+        surfaceTintColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTokens.radiusLg),
+          side: BorderSide(color: dialogColors.border),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 880, maxHeight: 820),
+          child: EditBookMetadataContent(book: book, isBottomSheet: false),
+        ),
+      );
+    },
   );
 }
 
@@ -55,7 +62,7 @@ class EditBookMetadataContent extends ConsumerStatefulWidget {
   const EditBookMetadataContent({
     super.key,
     required this.book,
-    required this.isBottomSheet,
+    this.isBottomSheet = false,
   });
 
   @override
@@ -157,15 +164,16 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
       );
 
       if (mounted) {
+        final colors = ShelfdColors.of(context);
         setState(() {
           _isUploadingCover = false;
           _coverVersion++;
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Cover image updated successfully!'),
-            backgroundColor: AppTokens.charcoalInk,
+          SnackBar(
+            content: const Text('Cover image updated successfully!'),
+            backgroundColor: colors.accentPrimary,
           ),
         );
       }
@@ -256,10 +264,11 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
     }
 
     if (mounted) {
+      final colors = ShelfdColors.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Auto-populated metadata from ${result.provider}!'),
-          backgroundColor: AppTokens.charcoalInk,
+          backgroundColor: colors.accentPrimary,
         ),
       );
     }
@@ -313,11 +322,12 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
       );
 
       if (mounted) {
+        final colors = ShelfdColors.of(context);
         Navigator.of(context).pop(updatedBook);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Book metadata and EPUB file saved successfully!'),
-            backgroundColor: AppTokens.charcoalInk,
+          SnackBar(
+            content: const Text('Book metadata and EPUB file saved successfully!'),
+            backgroundColor: colors.accentPrimary,
           ),
         );
       }
@@ -333,6 +343,7 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     final isMobile = widget.isBottomSheet || Responsive.isMobile(context);
     final book = widget.book;
     final coverUrl = book.coverUrl != null
@@ -352,11 +363,11 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: AppTokens.boneContainer,
+              color: colors.container,
               borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              border: Border.all(color: AppTokens.crispBorder),
+              border: Border.all(color: colors.border),
             ),
-            child: const Icon(Icons.edit_note_rounded, color: AppTokens.charcoalInk, size: 20),
+            child: Icon(Icons.edit_note_rounded, color: colors.accentPrimary, size: 20),
           ),
           const SizedBox(width: AppTokens.space12),
           Expanded(
@@ -366,28 +377,32 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
               children: [
                 Text(
                   'Edit Book Metadata',
-                  style: AppTypography.titleSerif(fontSize: 18, fontWeight: FontWeight.w600),
+                  style: AppTypography.titleSerif(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
                 ),
                 Text(
                   'Changes update database records and are written in-place to the EPUB file',
-                  style: AppTypography.bodySans(fontSize: 12, color: AppTokens.mutedCopy),
+                  style: AppTypography.bodySans(fontSize: 12, color: colors.secondaryInk),
                 ),
               ],
             ),
           ),
           OutlinedButton.icon(
-            icon: const Icon(Icons.auto_fix_high, size: 16),
+            icon: Icon(Icons.auto_fix_high, size: 16, color: colors.accentPrimary),
             label: const Text('Auto-Fill'),
             style: OutlinedButton.styleFrom(
-              foregroundColor: AppTokens.charcoalInk,
-              side: const BorderSide(color: AppTokens.crispBorder),
+              foregroundColor: colors.ink,
+              side: BorderSide(color: colors.border),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             ),
             onPressed: _isSaving ? null : _searchAndAutoPopulate,
           ),
           const SizedBox(width: AppTokens.space8),
           IconButton(
-            icon: const Icon(Icons.close_rounded, size: 20),
+            icon: Icon(Icons.close_rounded, size: 20, color: colors.mutedInk),
             onPressed: _isSaving ? null : () => Navigator.of(context).pop(null),
             tooltip: 'Cancel',
           ),
@@ -407,22 +422,16 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
             child: Stack(
               alignment: Alignment.center,
               children: [
-                Container(
+                TactileBookCover(
+                  coverUrl: coverUrl,
+                  title: _titleController.text.isNotEmpty
+                      ? _titleController.text
+                      : 'No Cover Available',
                   height: isMobile ? 180 : 260,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: AppTokens.boneContainer,
-                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                    border: Border.all(color: AppTokens.crispBorder),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: coverUrl != null
-                      ? Image.network(
-                          coverUrl,
-                          fit: BoxFit.contain,
-                          errorBuilder: (ctx, err, stack) => _CoverPlaceholder(title: _titleController.text),
-                        )
-                      : _CoverPlaceholder(title: _titleController.text),
+                  borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                  showFallbackTitle: false,
+                  showSpineCrease: true,
+                  showShadow: true,
                 ),
                 if (_isUploadingCover)
                   Container(
@@ -450,7 +459,7 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: AppTokens.charcoalInk.withValues(alpha: 0.8),
+                        color: AppTokens.espressoInk.withValues(alpha: 0.85),
                         borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                       ),
                       child: const Row(
@@ -475,11 +484,11 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
           children: [
             Expanded(
               child: OutlinedButton.icon(
-                icon: const Icon(Icons.upload_file, size: 14),
+                icon: Icon(Icons.upload_file, size: 14, color: colors.accentPrimary),
                 label: const Text('Upload', style: TextStyle(fontSize: 12)),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTokens.charcoalInk,
-                  side: const BorderSide(color: AppTokens.crispBorder),
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
                   padding: const EdgeInsets.symmetric(vertical: 8),
                 ),
                 onPressed: _isUploadingCover ? null : _pickAndUploadCover,
@@ -488,11 +497,11 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
             const SizedBox(width: AppTokens.space8),
             Expanded(
               child: OutlinedButton.icon(
-                icon: const Icon(Icons.search, size: 14),
+                icon: Icon(Icons.search, size: 14, color: colors.accentPrimary),
                 label: const Text('Search', style: TextStyle(fontSize: 12)),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTokens.charcoalInk,
-                  side: const BorderSide(color: AppTokens.crispBorder),
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
                   padding: const EdgeInsets.symmetric(vertical: 8),
                 ),
                 onPressed: _isSaving || _isUploadingCover ? null : _searchAndAutoPopulate,
@@ -506,16 +515,16 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
         Container(
           padding: const EdgeInsets.all(AppTokens.space12),
           decoration: BoxDecoration(
-            color: AppTokens.boneSurface,
+            color: colors.containerLow,
             borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-            border: Border.all(color: AppTokens.crispBorder),
+            border: Border.all(color: colors.subtleBorder),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  const Icon(Icons.insert_drive_file_outlined, size: 16, color: AppTokens.mutedCopy),
+                  Icon(Icons.insert_drive_file_outlined, size: 16, color: colors.mutedInk),
                   const SizedBox(width: AppTokens.space8),
                   Expanded(
                     child: Text(
@@ -523,7 +532,7 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
                       style: AppTypography.bodySans(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: AppTokens.charcoalInk,
+                        color: colors.ink,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -533,10 +542,9 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
               const SizedBox(height: AppTokens.space8),
               Text(
                 '${book.spine.length} Chapters • ${book.genres.map((g) => g.name).join(', ')}',
-                style: const TextStyle(
-                  fontFamily: 'sans-serif',
+                style: AppTypography.mono(
                   fontSize: 11,
-                  color: AppTokens.mutedCopy,
+                  color: colors.mutedInk,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -557,7 +565,8 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
           TextFormField(
             key: const Key('edit_book_title_field'),
             controller: _titleController,
-            decoration: _inputDecoration('e.g. Clean Architecture'),
+            style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
+            decoration: _inputDecoration(colors, 'e.g. Clean Architecture'),
             validator: (val) {
               if (val == null || val.trim().isEmpty) {
                 return 'Title is required';
@@ -576,7 +585,8 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
           TextFormField(
             key: const Key('edit_book_authors_field'),
             controller: _authorController,
-            decoration: _inputDecoration('e.g. Robert C. Martin, Martin Fowler'),
+            style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
+            decoration: _inputDecoration(colors, 'e.g. Robert C. Martin, Martin Fowler'),
             validator: (val) {
               if (val == null || val.trim().isEmpty) {
                 return 'At least one author is required';
@@ -599,7 +609,8 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
                     TextFormField(
                       key: const Key('edit_book_series_field'),
                       controller: _seriesController,
-                      decoration: _inputDecoration('e.g. Robert C. Martin Series'),
+                      style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
+                      decoration: _inputDecoration(colors, 'e.g. Robert C. Martin Series'),
                     ),
                   ],
                 ),
@@ -614,8 +625,9 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
                     TextFormField(
                       key: const Key('edit_book_sequence_field'),
                       controller: _sequenceController,
+                      style: AppTypography.mono(fontSize: 14, color: colors.ink),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: _inputDecoration('1.0'),
+                      decoration: _inputDecoration(colors, '1.0'),
                     ),
                   ],
                 ),
@@ -636,7 +648,8 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
                     TextFormField(
                       key: const Key('edit_book_genres_field'),
                       controller: _genresController,
-                      decoration: _inputDecoration('e.g. Software, Engineering'),
+                      style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
+                      decoration: _inputDecoration(colors, 'e.g. Software, Engineering'),
                     ),
                   ],
                 ),
@@ -650,7 +663,8 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
                     TextFormField(
                       key: const Key('edit_book_topics_field'),
                       controller: _topicsController,
-                      decoration: _inputDecoration('e.g. Architecture, Design Patterns'),
+                      style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
+                      decoration: _inputDecoration(colors, 'e.g. Architecture, Design Patterns'),
                     ),
                   ],
                 ),
@@ -672,7 +686,8 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
                     TextFormField(
                       key: const Key('edit_book_publisher_field'),
                       controller: _publisherController,
-                      decoration: _inputDecoration('e.g. Prentice Hall'),
+                      style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
+                      decoration: _inputDecoration(colors, 'e.g. Prentice Hall'),
                     ),
                   ],
                 ),
@@ -687,7 +702,8 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
                     TextFormField(
                       key: const Key('edit_book_language_field'),
                       controller: _languageController,
-                      decoration: _inputDecoration('en'),
+                      style: AppTypography.mono(fontSize: 14, color: colors.ink),
+                      decoration: _inputDecoration(colors, 'en'),
                     ),
                   ],
                 ),
@@ -701,8 +717,9 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
           TextFormField(
             key: const Key('edit_book_description_field'),
             controller: _descriptionController,
+            style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
             maxLines: 4,
-            decoration: _inputDecoration('Book overview or synopsis...'),
+            decoration: _inputDecoration(colors, 'Book overview or synopsis...'),
           ),
         ],
       ),
@@ -710,17 +727,17 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
 
     final footer = Container(
       padding: const EdgeInsets.symmetric(horizontal: AppTokens.space24, vertical: AppTokens.space16),
-      decoration: const BoxDecoration(
-        color: AppTokens.boneSurface,
-        border: Border(top: BorderSide(color: AppTokens.crispBorder)),
+      decoration: BoxDecoration(
+        color: colors.containerLow,
+        border: Border(top: BorderSide(color: colors.subtleBorder)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           OutlinedButton(
             style: OutlinedButton.styleFrom(
-              foregroundColor: AppTokens.charcoalInk,
-              side: const BorderSide(color: AppTokens.crispBorder),
+              foregroundColor: colors.ink,
+              side: BorderSide(color: colors.border),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.radiusMd)),
             ),
@@ -731,16 +748,19 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
           FilledButton.icon(
             key: const Key('save_book_metadata_button'),
             style: FilledButton.styleFrom(
-              backgroundColor: AppTokens.charcoalInk,
-              foregroundColor: Colors.white,
+              backgroundColor: colors.accentPrimary,
+              foregroundColor: colors.onAccent,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.radiusMd)),
             ),
             icon: _isSaving
-                ? const SizedBox(
+                ? SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Colors.white)),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation(colors.onAccent),
+                    ),
                   )
                 : const Icon(Icons.check_rounded, size: 18),
             label: Text(_isSaving ? 'Saving & Syncing...' : 'Save & Sync EPUB'),
@@ -755,19 +775,19 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         header,
-        const Divider(height: 1, color: AppTokens.crispBorder),
+        Divider(height: 1, color: colors.subtleBorder),
         if (_errorMessage != null)
           Container(
             padding: const EdgeInsets.all(AppTokens.space12),
             margin: const EdgeInsets.symmetric(horizontal: AppTokens.space24, vertical: AppTokens.space8),
             decoration: BoxDecoration(
-              color: Colors.red.shade50,
+              color: colors.errorBg,
               borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              border: Border.all(color: Colors.red.shade200),
+              border: Border.all(color: colors.errorBorder),
             ),
             child: Text(
               _errorMessage!,
-              style: TextStyle(color: Colors.red.shade900, fontSize: 13),
+              style: AppTypography.bodySans(color: colors.errorText, fontSize: 13),
             ),
           ),
         Flexible(
@@ -779,7 +799,7 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
                     children: [
                       leftSummaryColumn,
                       const SizedBox(height: AppTokens.space20),
-                      const Divider(height: 1, color: AppTokens.crispBorder),
+                      Divider(height: 1, color: colors.subtleBorder),
                       const SizedBox(height: AppTokens.space20),
                       formFields,
                     ],
@@ -799,28 +819,28 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
     );
   }
 
-  InputDecoration _inputDecoration(String hint) {
+  InputDecoration _inputDecoration(ShelfdColors colors, String hint) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(color: AppTokens.mutedCopy, fontSize: 13),
+      hintStyle: AppTypography.bodySans(color: colors.mutedInk, fontSize: 13),
       filled: true,
-      fillColor: AppTokens.boneSurface,
+      fillColor: colors.containerLow,
       contentPadding: const EdgeInsets.symmetric(horizontal: AppTokens.space12, vertical: AppTokens.space12),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-        borderSide: const BorderSide(color: AppTokens.crispBorder),
+        borderSide: BorderSide(color: colors.border),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-        borderSide: const BorderSide(color: AppTokens.crispBorder),
+        borderSide: BorderSide(color: colors.border),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-        borderSide: const BorderSide(color: AppTokens.charcoalInk, width: 1.5),
+        borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-        borderSide: const BorderSide(color: Colors.red),
+        borderSide: BorderSide(color: colors.errorText),
       ),
     );
   }
@@ -839,6 +859,7 @@ class _FieldLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Wrap(
@@ -850,49 +871,20 @@ class _FieldLabel extends StatelessWidget {
             style: AppTypography.bodySans(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: AppTokens.charcoalInk,
+              color: colors.ink,
             ),
           ),
           if (isRequired)
-            const Text(
+            Text(
               '*',
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+              style: TextStyle(color: colors.errorText, fontWeight: FontWeight.bold),
             ),
           if (hint != null)
             Text(
               '($hint)',
-              style: AppTypography.bodySans(fontSize: 11, color: AppTokens.mutedCopy),
+              style: AppTypography.bodySans(fontSize: 11, color: colors.mutedInk),
             ),
         ],
-      ),
-    );
-  }
-}
-
-class _CoverPlaceholder extends StatelessWidget {
-  final String title;
-
-  const _CoverPlaceholder({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppTokens.space16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.menu_book_rounded, size: 48, color: AppTokens.mutedCopy),
-            const SizedBox(height: AppTokens.space8),
-            Text(
-              title.isNotEmpty ? title : 'No Cover Available',
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: AppTypography.bodySans(fontSize: 12, color: AppTokens.mutedCopy),
-            ),
-          ],
-        ),
       ),
     );
   }

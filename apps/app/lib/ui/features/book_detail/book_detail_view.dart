@@ -10,6 +10,7 @@ import '../../core/file_saver/file_saver.dart';
 import '../../core/html_text.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -68,58 +69,67 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
 
     showDialog(
       context: context,
-      builder: (dialogCtx) => AlertDialog(
-        backgroundColor: AppTokens.boneBackground,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-          side: const BorderSide(color: AppTokens.crispBorder),
-        ),
-        title: Text(
-          'Add Bookmark',
-          style: AppTypography.titleSerif(fontSize: 18),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Save your current place in ${book.title}.',
-              style: AppTypography.bodySans(fontSize: 13, color: AppTokens.mutedCopy),
-            ),
-            const SizedBox(height: AppTokens.space16),
-            TextField(
-              controller: titleController,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Bookmark Title',
-                border: OutlineInputBorder(),
+      builder: (dialogCtx) {
+        final colors = ShelfdColors.of(dialogCtx);
+        return AlertDialog(
+          backgroundColor: colors.surface,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+            side: BorderSide(color: colors.border),
+          ),
+          title: Text(
+            'Add Bookmark',
+            style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Save your current place in ${book.title}.',
+                style: AppTypography.bodySans(fontSize: 13, color: colors.secondaryInk),
+              ),
+              const SizedBox(height: AppTokens.space16),
+              TextField(
+                controller: titleController,
+                autofocus: true,
+                style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
+                decoration: const InputDecoration(
+                  labelText: 'Bookmark Title',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: Text(
+                'Cancel',
+                style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
               ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTokens.charcoalInk,
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.accentPrimary,
+                foregroundColor: colors.onAccent,
+              ),
+              onPressed: () {
+                final title = titleController.text.trim();
+                if (title.isNotEmpty) {
+                  ref.read(bookDetailProvider(widget.bookId).notifier).addBookmark(
+                        title: title,
+                        progress: book.readingProgress,
+                      );
+                }
+                Navigator.of(dialogCtx).pop();
+              },
+              child: const Text('Save Bookmark'),
             ),
-            onPressed: () {
-              final title = titleController.text.trim();
-              if (title.isNotEmpty) {
-                ref.read(bookDetailProvider(widget.bookId).notifier).addBookmark(
-                      title: title,
-                      progress: book.readingProgress,
-                    );
-              }
-              Navigator.of(dialogCtx).pop();
-            },
-            child: const Text('Save Bookmark'),
-          ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
 
@@ -145,18 +155,22 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     }
   }
 
-  List<PopupMenuEntry<String>> _buildExportMenuItems() {
+  List<PopupMenuEntry<String>> _buildExportMenuItems(ShelfdColors colors) {
     return [
       PopupMenuItem<String>(
         key: const Key('menu_item_download_epub'),
         value: 'epub',
         child: Row(
           children: [
-            const Icon(Icons.download_rounded, size: 18, color: AppTokens.charcoalInk),
+            Icon(Icons.download_rounded, size: 18, color: colors.ink),
             const SizedBox(width: AppTokens.space12),
             Text(
               'Download EPUB',
-              style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w500),
+              style: AppTypography.bodySans(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: colors.ink,
+              ),
             ),
           ],
         ),
@@ -166,11 +180,15 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         value: 'notebooklm',
         child: Row(
           children: [
-            const Icon(Icons.auto_awesome_rounded, size: 18, color: AppTokens.charcoalInk),
+            Icon(Icons.auto_awesome_rounded, size: 18, color: colors.accentPrimary),
             const SizedBox(width: AppTokens.space12),
             Text(
               'Send to NotebookLM',
-              style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w500),
+              style: AppTypography.bodySans(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: colors.ink,
+              ),
             ),
           ],
         ),
@@ -180,11 +198,15 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         value: 'markdown',
         child: Row(
           children: [
-            const Icon(Icons.description_outlined, size: 18, color: AppTokens.charcoalInk),
+            Icon(Icons.description_outlined, size: 18, color: colors.secondaryInk),
             const SizedBox(width: AppTokens.space12),
             Text(
               'Download Markdown (.md)',
-              style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w500),
+              style: AppTypography.bodySans(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: colors.ink,
+              ),
             ),
           ],
         ),
@@ -355,8 +377,9 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     }
   }
 
-  Color _highlightColor(String colorName) {
-    return KindleHighlightColor.fromName(colorName).cardColor;
+  Color _highlightColor(String colorName, {bool isDark = false}) {
+    final hlColor = KindleHighlightColor.fromName(colorName);
+    return isDark ? hlColor.darkColor : hlColor.cardColor;
   }
 
   bool _hasAudiobook(Book book) {
@@ -430,27 +453,28 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     final detailState = ref.watch(bookDetailProvider(widget.bookId));
     final horizontalPad = Responsive.horizontalPadding(context);
     final isDesktop = Responsive.isDesktop(context);
 
     if (detailState.isLoading && detailState.book == null) {
-      return const Scaffold(
-        backgroundColor: AppTokens.boneBackground,
+      return Scaffold(
+        backgroundColor: colors.background,
         body: Center(
-          child: CircularProgressIndicator(color: AppTokens.charcoalInk),
+          child: CircularProgressIndicator(color: colors.accentPrimary),
         ),
       );
     }
 
     if (detailState.error != null && detailState.book == null) {
       return Scaffold(
-        backgroundColor: AppTokens.boneBackground,
+        backgroundColor: colors.background,
         appBar: AppBar(
-          backgroundColor: AppTokens.boneBackground,
+          backgroundColor: colors.background,
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: AppTokens.charcoalInk),
+            icon: Icon(Icons.arrow_back, color: colors.ink),
             onPressed: () {
               if (context.canPop()) {
                 context.pop();
@@ -466,21 +490,24 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.error_outline_rounded, size: 48, color: Colors.red),
+                Icon(Icons.error_outline_rounded, size: 48, color: colors.errorText),
                 const SizedBox(height: AppTokens.space16),
                 Text(
                   'Failed to load book details',
-                  style: AppTypography.titleSerif(fontSize: 20),
+                  style: AppTypography.titleSerif(fontSize: 20, color: colors.ink),
                 ),
                 const SizedBox(height: AppTokens.space8),
                 Text(
                   detailState.error!,
                   textAlign: TextAlign.center,
-                  style: AppTypography.bodySans(fontSize: 14, color: AppTokens.mutedCopy),
+                  style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
                 ),
                 const SizedBox(height: AppTokens.space24),
                 FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: AppTokens.charcoalInk),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: colors.accentPrimary,
+                    foregroundColor: colors.onAccent,
+                  ),
                   onPressed: () {
                     ref.read(bookDetailProvider(widget.bookId).notifier).loadBook();
                   },
@@ -497,13 +524,13 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     final hasAudio = _hasAudiobook(book);
 
     return Scaffold(
-      backgroundColor: AppTokens.boneBackground,
+      backgroundColor: colors.background,
       appBar: AppBar(
-        backgroundColor: AppTokens.boneBackground,
+        backgroundColor: colors.background,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppTokens.charcoalInk),
+          icon: Icon(Icons.arrow_back, color: colors.ink),
           tooltip: 'Back to Library',
           onPressed: () {
             if (context.canPop()) {
@@ -517,12 +544,16 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           book.title,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: AppTypography.titleSerif(fontSize: 18, fontWeight: FontWeight.w600),
+          style: AppTypography.titleSerif(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: colors.ink,
+          ),
         ),
         actions: [
           IconButton(
             key: const Key('edit_metadata_appbar_button'),
-            icon: const Icon(Icons.edit_note_rounded, color: AppTokens.charcoalInk),
+            icon: Icon(Icons.edit_note_rounded, color: colors.ink),
             tooltip: 'Edit Metadata',
             onPressed: () => showEditBookMetadataModal(context, book),
           ),
@@ -531,27 +562,27 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             enabled: !_isDownloading,
             tooltip: 'Download EPUB',
             position: PopupMenuPosition.under,
-            color: AppTokens.boneSurface,
+            color: colors.surface,
             surfaceTintColor: Colors.transparent,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              side: const BorderSide(color: AppTokens.crispBorder),
+              side: BorderSide(color: colors.border),
             ),
             icon: _isDownloading
-                ? const SizedBox(
+                ? SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: AppTokens.charcoalInk,
+                      color: colors.ink,
                     ),
                   )
-                : const Icon(Icons.download_rounded, color: AppTokens.charcoalInk),
+                : Icon(Icons.download_rounded, color: colors.ink),
             onSelected: (action) => _handleExportMenuSelection(action, book),
-            itemBuilder: (context) => _buildExportMenuItems(),
+            itemBuilder: (context) => _buildExportMenuItems(colors),
           ),
           IconButton(
-            icon: const Icon(Icons.bookmark_add_outlined, color: AppTokens.charcoalInk),
+            icon: Icon(Icons.bookmark_add_outlined, color: colors.ink),
             tooltip: 'Add Bookmark',
             onPressed: () => _showAddBookmarkDialog(context, book),
           ),
@@ -562,7 +593,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 key: const Key('listen_appbar_button'),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTokens.amberAccent,
-                  foregroundColor: AppTokens.charcoalInk,
+                  foregroundColor: AppTokens.espressoInk,
                   padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
                 ),
                 icon: const Icon(Icons.headphones, size: 18),
@@ -575,8 +606,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             child: FilledButton.icon(
               key: const Key('read_appbar_button'),
               style: FilledButton.styleFrom(
-                backgroundColor: AppTokens.charcoalInk,
-                foregroundColor: Colors.white,
+                backgroundColor: colors.accentPrimary,
+                foregroundColor: colors.onAccent,
                 padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16),
               ),
               icon: const Icon(Icons.menu_book_rounded, size: 18),
@@ -595,6 +626,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
   }
 
   Widget _buildDesktopLayout(BuildContext context, Book book, double horizontalPad) {
+    final colors = ShelfdColors.of(context);
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: horizontalPad, vertical: AppTokens.space24),
       child: Row(
@@ -615,8 +647,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _buildTabBar(),
-                  const Divider(height: 1, color: AppTokens.crispBorder),
+                  _buildTabBar(context),
+                  Divider(height: 1, color: colors.subtleBorder),
                   Expanded(
                     child: _buildTabContent(context, book),
                   ),
@@ -637,7 +669,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         children: [
           _buildHeroCard(context, book),
           const SizedBox(height: AppTokens.space20),
-          _buildTabBar(),
+          _buildTabBar(context),
           const SizedBox(height: AppTokens.space16),
           _buildTabContent(context, book),
           const SizedBox(height: AppTokens.space48),
@@ -647,6 +679,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
   }
 
   Widget _buildHeroCard(BuildContext context, Book book) {
+    final colors = ShelfdColors.of(context);
     final progressPercent = (book.readingProgress * 100).toInt();
 
     return BentoCard(
@@ -659,26 +692,15 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 2:3 Cover Aspect Ratio
-              ClipRRect(
-                borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                child: Container(
-                  width: 110,
-                  height: 165,
-                  decoration: BoxDecoration(
-                    color: AppTokens.boneContainer,
-                    border: Border.all(color: AppTokens.crispBorder),
-                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                  ),
-                  child: book.coverUrl != null
-                      ? Image.network(
-                          book.coverUrl!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) =>
-                              _buildCoverFallback(book.title),
-                        )
-                      : _buildCoverFallback(book.title),
-                ),
+              // 2:3 3D Spine-Lit Cover
+              TactileBookCover(
+                coverUrl: book.coverUrl,
+                title: book.title,
+                width: 110,
+                height: 165,
+                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                showSpineCrease: true,
+                showShadow: true,
               ),
               const SizedBox(width: AppTokens.space16),
               // Main Title & Series Info
@@ -691,6 +713,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                       style: AppTypography.titleSerif(
                         fontSize: 20,
                         fontWeight: FontWeight.w700,
+                        color: colors.ink,
                       ),
                     ),
                     const SizedBox(height: AppTokens.space4),
@@ -707,7 +730,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                             book.authorDisplay,
                             style: AppTypography.bodySans(
                               fontSize: 14,
-                              color: AppTokens.mutedCopy,
+                              color: colors.secondaryInk,
                             ),
                           ),
                         ),
@@ -717,7 +740,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                         book.authorDisplay,
                         style: AppTypography.bodySans(
                           fontSize: 14,
-                          color: AppTokens.mutedCopy,
+                          color: colors.secondaryInk,
                         ),
                       ),
                     if (book.series != null) ...[
@@ -733,9 +756,9 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                             vertical: AppTokens.space4,
                           ),
                           decoration: BoxDecoration(
-                            color: AppTokens.matchBadgeBg,
+                            color: colors.accentSecondaryContainer,
                             borderRadius: BorderRadius.circular(AppTokens.radiusPill),
-                            border: Border.all(color: AppTokens.crispBorder),
+                            border: Border.all(color: colors.subtleBorder),
                           ),
                           child: Text(
                             book.seriesSequence != null
@@ -743,7 +766,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                                 : book.series!.name,
                             style: AppTypography.captionSans(
                               fontSize: 11,
-                              color: AppTokens.matchBadgeText,
+                              fontWeight: FontWeight.w600,
+                              color: colors.accentSecondary,
                             ),
                           ),
                         ),
@@ -765,13 +789,18 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 children: [
                   Text(
                     'Reading Progress',
-                    style: AppTypography.captionSans(fontSize: 12),
+                    style: AppTypography.captionSans(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: colors.secondaryInk,
+                    ),
                   ),
                   Text(
                     '$progressPercent%',
-                    style: AppTypography.captionSans(
+                    style: AppTypography.mono(
                       fontSize: 12,
-                      color: AppTokens.mutedCopy,
+                      fontWeight: FontWeight.w600,
+                      color: colors.accentPrimary,
                     ),
                   ),
                 ],
@@ -781,8 +810,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 borderRadius: BorderRadius.circular(AppTokens.radiusPill),
                 child: LinearProgressIndicator(
                   value: book.readingProgress.clamp(0.0, 1.0),
-                  backgroundColor: AppTokens.boneContainer,
-                  valueColor: const AlwaysStoppedAnimation<Color>(AppTokens.charcoalInk),
+                  backgroundColor: colors.container,
+                  valueColor: AlwaysStoppedAnimation<Color>(colors.accentPrimary),
                   minHeight: 6,
                 ),
               ),
@@ -799,7 +828,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 key: const Key('listen_hero_button'),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTokens.amberAccent,
-                  foregroundColor: AppTokens.charcoalInk,
+                  foregroundColor: AppTokens.espressoInk,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                   ),
@@ -819,8 +848,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               child: OutlinedButton.icon(
                 key: const Key('read_hero_button'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTokens.charcoalInk,
-                  side: const BorderSide(color: AppTokens.crispBorder),
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                   ),
@@ -840,8 +869,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               child: FilledButton.icon(
                 key: const Key('read_hero_button'),
                 style: FilledButton.styleFrom(
-                  backgroundColor: AppTokens.charcoalInk,
-                  foregroundColor: Colors.white,
+                  backgroundColor: colors.accentPrimary,
+                  foregroundColor: colors.onAccent,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                   ),
@@ -864,51 +893,53 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               enabled: !_isDownloading,
               tooltip: '',
               position: PopupMenuPosition.under,
-              color: AppTokens.boneSurface,
+              color: colors.surface,
               surfaceTintColor: Colors.transparent,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                side: const BorderSide(color: AppTokens.crispBorder),
+                side: BorderSide(color: colors.border),
               ),
               onSelected: (action) => _handleExportMenuSelection(action, book),
-              itemBuilder: (context) => _buildExportMenuItems(),
+              itemBuilder: (context) => _buildExportMenuItems(colors),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16),
                 decoration: BoxDecoration(
+                  color: colors.containerLow,
                   borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                  border: Border.all(color: AppTokens.crispBorder),
+                  border: Border.all(color: colors.border),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     if (_isDownloading)
-                      const SizedBox(
+                      SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: AppTokens.charcoalInk,
+                          color: colors.ink,
                         ),
                       )
                     else
-                      const Icon(
+                      Icon(
                         Icons.download_rounded,
                         size: 20,
-                        color: AppTokens.charcoalInk,
+                        color: colors.ink,
                       ),
                     const SizedBox(width: AppTokens.space8),
                     Text(
                       _isDownloading ? 'Downloading...' : 'Download EPUB',
-                      style: const TextStyle(
+                      style: AppTypography.bodySans(
+                        fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: AppTokens.charcoalInk,
+                        color: colors.ink,
                       ),
                     ),
                     const SizedBox(width: AppTokens.space4),
-                    const Icon(
+                    Icon(
                       Icons.arrow_drop_down_rounded,
                       size: 20,
-                      color: AppTokens.charcoalInk,
+                      color: colors.ink,
                     ),
                   ],
                 ),
@@ -922,8 +953,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             child: OutlinedButton.icon(
               key: const Key('edit_metadata_sidebar_button'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: AppTokens.charcoalInk,
-                side: const BorderSide(color: AppTokens.crispBorder),
+                foregroundColor: colors.secondaryInk,
+                side: BorderSide(color: colors.subtleBorder),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                 ),
@@ -937,29 +968,34 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             ),
           ),
           const SizedBox(height: AppTokens.space20),
-          const Divider(height: 1, color: AppTokens.crispBorder),
+          Divider(height: 1, color: colors.subtleBorder),
           const SizedBox(height: AppTokens.space16),
 
           // Metadata Specs Grid
           Text(
             'Book Details',
-            style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
+            style: AppTypography.titleSerif(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: colors.ink,
+            ),
           ),
           const SizedBox(height: AppTokens.space12),
-          _buildSpecRow('Chapters', _formatChapterCount(book)),
+          _buildSpecRow(colors, 'Chapters', _formatChapterCount(book), isMono: true),
           if (book.durationSeconds != null && book.durationSeconds! > 0)
-            _buildSpecRow('Audio Length', _formatAudioDuration(book.durationSeconds)),
+            _buildSpecRow(colors, 'Audio Length', _formatAudioDuration(book.durationSeconds), isMono: true),
           if (book.bitrateKbps != null && book.bitrateKbps! > 0)
-            _buildSpecRow('Audio Bitrate', '${book.bitrateKbps} kbps AAC'),
+            _buildSpecRow(colors, 'Audio Bitrate', '${book.bitrateKbps} kbps AAC', isMono: true),
           if (book.publisher != null && book.publisher!.isNotEmpty)
-            _buildSpecRow('Publisher', book.publisher!),
+            _buildSpecRow(colors, 'Publisher', book.publisher!),
           if (book.publishedDate != null && book.publishedDate!.isNotEmpty)
-            _buildSpecRow('Published', book.publishedDate!),
+            _buildSpecRow(colors, 'Published', book.publishedDate!, isMono: true),
           if (book.language != null && book.language!.isNotEmpty)
-            _buildSpecRow('Language', book.language!.toUpperCase()),
-          _buildSpecRow('Format', _formatBookFormat(book)),
+            _buildSpecRow(colors, 'Language', book.language!.toUpperCase(), isMono: true),
+          _buildSpecRow(colors, 'Format', _formatBookFormat(book), isMono: true),
           if (book.genres.isNotEmpty)
             _buildSpecRow(
+              colors,
               'Genres',
               book.genres.map((g) => g.name).join(', '),
             ),
@@ -968,28 +1004,12 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     );
   }
 
-  Widget _buildCoverFallback(String title) {
-    return Container(
-      color: AppTokens.boneContainer,
-      padding: const EdgeInsets.all(AppTokens.space12),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.book_rounded, size: 32, color: AppTokens.mutedCopy),
-          const SizedBox(height: AppTokens.space8),
-          Text(
-            title,
-            maxLines: 2,
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
-            style: AppTypography.titleSerif(fontSize: 11),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSpecRow(String label, String value) {
+  Widget _buildSpecRow(
+    ShelfdColors colors,
+    String label,
+    String value, {
+    bool isMono = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppTokens.space8),
       child: Row(
@@ -999,13 +1019,15 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             width: 90,
             child: Text(
               label,
-              style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
+              style: AppTypography.captionSans(fontSize: 12, color: colors.mutedInk),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: AppTypography.bodySans(fontSize: 12),
+              style: isMono
+                  ? AppTypography.mono(fontSize: 12, color: colors.ink)
+                  : AppTypography.bodySans(fontSize: 12, color: colors.ink),
             ),
           ),
         ],
@@ -1013,26 +1035,28 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     );
   }
 
-  Widget _buildTabBar() {
+  Widget _buildTabBar(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     return Container(
-      color: AppTokens.boneSurface,
+      color: colors.containerLow,
       padding: const EdgeInsets.symmetric(
         horizontal: AppTokens.space12,
         vertical: AppTokens.space8,
       ),
       child: Row(
         children: [
-          _buildTabButton(0, 'Overview', Icons.info_outline_rounded),
+          _buildTabButton(context, 0, 'Overview', Icons.info_outline_rounded),
           const SizedBox(width: AppTokens.space8),
-          _buildTabButton(1, 'Highlights & Bookmarks', Icons.bookmark_outline_rounded),
+          _buildTabButton(context, 1, 'Highlights & Bookmarks', Icons.bookmark_outline_rounded),
           const SizedBox(width: AppTokens.space8),
-          _buildTabButton(2, 'Chat with Book', Icons.auto_awesome_rounded),
+          _buildTabButton(context, 2, 'Chat with Book', Icons.auto_awesome_rounded),
         ],
       ),
     );
   }
 
-  Widget _buildTabButton(int index, String label, IconData icon) {
+  Widget _buildTabButton(BuildContext context, int index, String label, IconData icon) {
+    final colors = ShelfdColors.of(context);
     final isSelected = _selectedTabIndex == index;
     return Expanded(
       child: InkWell(
@@ -1046,10 +1070,10 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           height: AppTokens.minTouchTarget,
           padding: const EdgeInsets.symmetric(horizontal: AppTokens.space8),
           decoration: BoxDecoration(
-            color: isSelected ? AppTokens.boneBackground : Colors.transparent,
+            color: isSelected ? colors.surface : Colors.transparent,
             borderRadius: BorderRadius.circular(AppTokens.radiusMd),
             border: Border.all(
-              color: isSelected ? AppTokens.crispBorder : Colors.transparent,
+              color: isSelected ? colors.border : Colors.transparent,
             ),
           ),
           child: Row(
@@ -1058,7 +1082,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               Icon(
                 icon,
                 size: 16,
-                color: isSelected ? AppTokens.charcoalInk : AppTokens.mutedCopy,
+                color: isSelected ? colors.accentPrimary : colors.mutedInk,
               ),
               const SizedBox(width: AppTokens.space8),
               Flexible(
@@ -1066,10 +1090,10 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
+                  style: AppTypography.bodySans(
                     fontSize: 13,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                    color: isSelected ? AppTokens.charcoalInk : AppTokens.mutedCopy,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                    color: isSelected ? colors.ink : colors.mutedInk,
                   ),
                 ),
               ),
@@ -1135,6 +1159,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
   }
 
   Widget _buildAssociatedFilesSection(BuildContext context, Book book) {
+    final colors = ShelfdColors.of(context);
     final files = _resolveBookFiles(book);
 
     return Column(
@@ -1146,20 +1171,24 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             Expanded(
               child: Text(
                 'Associated Formats & Files',
-                style: AppTypography.titleSerif(fontSize: 18, fontWeight: FontWeight.w600),
+                style: AppTypography.titleSerif(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: colors.ink,
+                ),
               ),
             ),
             const SizedBox(width: AppTokens.space8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: AppTokens.boneContainer,
+                color: colors.containerLow,
                 borderRadius: BorderRadius.circular(AppTokens.radiusPill),
-                border: Border.all(color: AppTokens.crispBorder),
+                border: Border.all(color: colors.subtleBorder),
               ),
               child: Text(
                 '${files.length} files linked',
-                style: AppTypography.captionSans(fontSize: 11, color: AppTokens.mutedCopy),
+                style: AppTypography.mono(fontSize: 11, color: colors.mutedInk),
               ),
             ),
           ],
@@ -1182,23 +1211,23 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             String typeLabel;
 
             if (isAudio) {
-              badgeColor = const Color(0xFFFFF3BF);
-              badgeTextColor = const Color(0xFFD97706);
+              badgeColor = AppTokens.amberAccent.withValues(alpha: colors.isDark ? 0.2 : 0.22);
+              badgeTextColor = colors.isDark ? AppTokens.amberAccent : const Color(0xFFB45309);
               iconData = Icons.headphones;
               typeLabel = 'M4A AUDIOBOOK';
             } else if (isEpub) {
-              badgeColor = const Color(0xFFE7F5FF);
-              badgeTextColor = const Color(0xFF1971C2);
+              badgeColor = colors.accentPrimary.withValues(alpha: 0.14);
+              badgeTextColor = colors.accentPrimary;
               iconData = Icons.menu_book;
               typeLabel = 'EPUB';
             } else if (isPdf) {
-              badgeColor = const Color(0xFFFFE3E3);
-              badgeTextColor = const Color(0xFFE03131);
+              badgeColor = colors.errorBg;
+              badgeTextColor = colors.errorText;
               iconData = Icons.picture_as_pdf;
               typeLabel = 'PDF';
             } else {
-              badgeColor = const Color(0xFFEBFBEE);
-              badgeTextColor = const Color(0xFF2F9E44);
+              badgeColor = colors.accentSecondaryContainer;
+              badgeTextColor = colors.accentSecondary;
               iconData = Icons.image;
               typeLabel = 'IMAGE';
             }
@@ -1206,9 +1235,9 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             return Container(
               padding: const EdgeInsets.all(AppTokens.space12),
               decoration: BoxDecoration(
-                color: AppTokens.boneSurface,
+                color: colors.containerLow,
                 borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                border: Border.all(color: AppTokens.crispBorder),
+                border: Border.all(color: colors.subtleBorder),
               ),
               child: Row(
                 children: [
@@ -1236,7 +1265,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                               ),
                               child: Text(
                                 typeLabel,
-                                style: TextStyle(
+                                style: AppTypography.mono(
                                   fontSize: 9,
                                   fontWeight: FontWeight.w700,
                                   color: badgeTextColor,
@@ -1249,7 +1278,11 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                                 f.filePath,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: AppTypography.bodySans(fontSize: 13, fontWeight: FontWeight.w600),
+                                style: AppTypography.mono(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.ink,
+                                ),
                               ),
                             ),
                           ],
@@ -1263,7 +1296,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                                   : isPdf
                                       ? '${_formatFileSize(f.fileSizeBytes)} • Fixed Layout PDF'
                                       : '${_formatFileSize(f.fileSizeBytes)} • 2:3 Cover Artwork',
-                          style: AppTypography.captionSans(fontSize: 11, color: AppTokens.mutedCopy),
+                          style: AppTypography.mono(fontSize: 11, color: colors.mutedInk),
                         ),
                       ],
                     ),
@@ -1274,7 +1307,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                       key: Key('listen_file_button_$index'),
                       style: FilledButton.styleFrom(
                         backgroundColor: AppTokens.amberAccent,
-                        foregroundColor: AppTokens.charcoalInk,
+                        foregroundColor: AppTokens.espressoInk,
                         visualDensity: VisualDensity.compact,
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                       ),
@@ -1285,8 +1318,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                     FilledButton(
                       key: Key('read_file_button_$index'),
                       style: FilledButton.styleFrom(
-                        backgroundColor: AppTokens.charcoalInk,
-                        foregroundColor: Colors.white,
+                        backgroundColor: colors.accentPrimary,
+                        foregroundColor: colors.onAccent,
                         visualDensity: VisualDensity.compact,
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                       ),
@@ -1296,8 +1329,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                   else
                     OutlinedButton(
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTokens.charcoalInk,
-                        side: const BorderSide(color: AppTokens.crispBorder),
+                        foregroundColor: colors.ink,
+                        side: BorderSide(color: colors.border),
                         visualDensity: VisualDensity.compact,
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                       ),
@@ -1314,6 +1347,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
   }
 
   Widget _buildOverviewTab(BuildContext context, Book book) {
+    final colors = ShelfdColors.of(context);
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppTokens.space24),
       child: Column(
@@ -1322,22 +1356,26 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           // Synopsis Section
           Text(
             'Synopsis',
-            style: AppTypography.titleSerif(fontSize: 18, fontWeight: FontWeight.w600),
+            style: AppTypography.titleSerif(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: colors.ink,
+            ),
           ),
           const SizedBox(height: AppTokens.space12),
           HtmlText(
             html: book.synopsis,
-            style: AppTypography.bodySans(fontSize: 15, lineHeight: 1.6),
+            style: AppTypography.bodySans(fontSize: 15, lineHeight: 1.6, color: colors.ink),
             emptyPlaceholder: 'No synopsis provided for this book.',
           ),
           const SizedBox(height: AppTokens.space24),
-          const Divider(height: 1, color: AppTokens.crispBorder),
+          Divider(height: 1, color: colors.subtleBorder),
           const SizedBox(height: AppTokens.space24),
 
           // Associated Formats & Files Section
           _buildAssociatedFilesSection(context, book),
           const SizedBox(height: AppTokens.space32),
-          const Divider(height: 1, color: AppTokens.crispBorder),
+          Divider(height: 1, color: colors.subtleBorder),
           const SizedBox(height: AppTokens.space24),
 
           // Table of Contents Spine
@@ -1346,7 +1384,11 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             children: [
               Text(
                 'Table of Contents',
-                style: AppTypography.titleSerif(fontSize: 18, fontWeight: FontWeight.w600),
+                style: AppTypography.titleSerif(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: colors.ink,
+                ),
               ),
               Text(
                 book.spine.isNotEmpty
@@ -1358,7 +1400,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                     : book.audioChapters.isNotEmpty
                         ? '${book.audioChapters.length} tracks'
                         : '0 items',
-                style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
+                style: AppTypography.mono(fontSize: 12, color: colors.mutedInk),
               ),
             ],
           ),
@@ -1366,7 +1408,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           if ((book.isFixedLayout ? book.namedSpine.isEmpty : book.spine.isEmpty) && book.audioChapters.isEmpty)
             Text(
               'No chapters cataloged.',
-              style: AppTypography.bodySans(fontSize: 14, color: AppTokens.mutedCopy),
+              style: AppTypography.bodySans(fontSize: 14, color: colors.mutedInk),
             )
           else if (book.isFixedLayout ? book.namedSpine.isNotEmpty : book.spine.isNotEmpty)
             () {
@@ -1376,7 +1418,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: displaySpine.length,
                 separatorBuilder: (context, index) =>
-                    const Divider(height: 1, color: AppTokens.crispBorder),
+                    Divider(height: 1, color: colors.subtleBorder),
                 itemBuilder: (context, index) {
                   final item = displaySpine[index];
                   return ListTile(
@@ -1386,7 +1428,11 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                     ),
                     title: Text(
                       item.title.isNotEmpty ? item.title : 'Chapter ${item.chapterIndex}',
-                      style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w500),
+                      style: AppTypography.bodySans(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: colors.ink,
+                      ),
                     ),
                     subtitle: item.summary.isNotEmpty
                         ? Padding(
@@ -1397,7 +1443,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                               overflow: TextOverflow.ellipsis,
                               style: AppTypography.captionSans(
                                 fontSize: 12,
-                                color: AppTokens.mutedCopy,
+                                color: colors.secondaryInk,
                               ),
                             ),
                           )
@@ -1408,13 +1454,13 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                         if (book.isFixedLayout)
                           Text(
                             'Page ${item.chapterIndex}',
-                            style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
+                            style: AppTypography.mono(fontSize: 12, color: colors.mutedInk),
                           ),
                         const SizedBox(width: AppTokens.space8),
-                        const Icon(
+                        Icon(
                           Icons.chevron_right_rounded,
                           size: 20,
-                          color: AppTokens.mutedCopy,
+                          color: colors.mutedInk,
                         ),
                       ],
                     ),
@@ -1431,7 +1477,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               physics: const NeverScrollableScrollPhysics(),
               itemCount: book.audioChapters.length,
               separatorBuilder: (context, index) =>
-                  const Divider(height: 1, color: AppTokens.crispBorder),
+                  Divider(height: 1, color: colors.subtleBorder),
               itemBuilder: (context, index) {
                 final item = book.audioChapters[index];
                 return ListTile(
@@ -1439,19 +1485,23 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                     horizontal: AppTokens.space8,
                     vertical: AppTokens.space4,
                   ),
-                  leading: const Icon(Icons.headphones_rounded, size: 18, color: AppTokens.charcoalInk),
+                  leading: Icon(Icons.headphones_rounded, size: 18, color: colors.accentPrimary),
                   title: Text(
                     item.title,
-                    style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w500),
+                    style: AppTypography.bodySans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: colors.ink,
+                    ),
                   ),
                   subtitle: Text(
                     _formatAudioDuration(item.durationSec),
-                    style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
+                    style: AppTypography.mono(fontSize: 12, color: colors.mutedInk),
                   ),
-                  trailing: const Icon(
+                  trailing: Icon(
                     Icons.play_arrow_rounded,
                     size: 20,
-                    color: AppTokens.mutedCopy,
+                    color: colors.mutedInk,
                   ),
                   onTap: () {
                     context.go('/books/${book.id}/listen');
@@ -1465,6 +1515,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
   }
 
   Widget _buildHighlightsBookmarksTab(BuildContext context, Book book) {
+    final colors = ShelfdColors.of(context);
     final bookmarks = book.bookmarks;
     final highlights = book.highlights;
 
@@ -1485,14 +1536,14 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           // Filter pills and Add action row
           Row(
             children: [
-              _buildAnnotationFilterChip('all', 'All (${highlights.length + bookmarks.length})'),
+              _buildAnnotationFilterChip(colors, 'all', 'All (${highlights.length + bookmarks.length})'),
               const SizedBox(width: AppTokens.space8),
-              _buildAnnotationFilterChip('highlights', 'Highlights (${highlights.length})'),
+              _buildAnnotationFilterChip(colors, 'highlights', 'Highlights (${highlights.length})'),
               const SizedBox(width: AppTokens.space8),
-              _buildAnnotationFilterChip('bookmarks', 'Bookmarks (${bookmarks.length})'),
+              _buildAnnotationFilterChip(colors, 'bookmarks', 'Bookmarks (${bookmarks.length})'),
               const Spacer(),
               IconButton(
-                icon: const Icon(Icons.bookmark_add_outlined, color: AppTokens.charcoalInk),
+                icon: Icon(Icons.bookmark_add_outlined, color: colors.ink),
                 tooltip: 'Add Bookmark',
                 onPressed: () => _showAddBookmarkDialog(context, book),
               ),
@@ -1511,14 +1562,14 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                           ? Icons.format_quote_rounded
                           : Icons.bookmarks_outlined,
                       size: 44,
-                      color: AppTokens.mutedCopy,
+                      color: colors.mutedInk,
                     ),
                     const SizedBox(height: AppTokens.space12),
                     Text(
                       _annotationFilter == 'highlights'
                           ? 'No highlights yet'
                           : 'No annotations found',
-                      style: AppTypography.titleSerif(fontSize: 16),
+                      style: AppTypography.titleSerif(fontSize: 16, color: colors.ink),
                     ),
                     const SizedBox(height: AppTokens.space4),
                     Text(
@@ -1526,14 +1577,18 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                           ? 'Select text while reading in the reader view to create highlights and add personal notes.'
                           : 'Save your favorite passages or bookmarks as you read.',
                       textAlign: TextAlign.center,
-                      style: AppTypography.bodySans(fontSize: 13, color: AppTokens.mutedCopy),
+                      style: AppTypography.bodySans(fontSize: 13, color: colors.secondaryInk),
                     ),
                     if (_annotationFilter == 'highlights') ...[
                       const SizedBox(height: AppTokens.space16),
                       OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: colors.ink,
+                          side: BorderSide(color: colors.border),
+                        ),
                         icon: const Icon(Icons.menu_book_rounded, size: 16),
                         label: const Text('Start Reading'),
-                        onPressed: () => context.push('/reader/${widget.bookId}/read'),
+                        onPressed: () => context.go('/books/${widget.bookId}/read'),
                       ),
                     ],
                   ],
@@ -1550,9 +1605,9 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               itemBuilder: (context, index) {
                 final item = items[index];
                 if (item is Highlight) {
-                  return _buildHighlightCard(item);
+                  return _buildHighlightCard(context, item);
                 } else if (item is Bookmark) {
-                  return _buildBookmarkCard(item);
+                  return _buildBookmarkCard(context, item);
                 }
                 return const SizedBox.shrink();
               },
@@ -1562,7 +1617,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     );
   }
 
-  Widget _buildAnnotationFilterChip(String key, String label) {
+  Widget _buildAnnotationFilterChip(ShelfdColors colors, String key, String label) {
     final isSelected = _annotationFilter == key;
     return ChoiceChip(
       label: Text(label),
@@ -1574,27 +1629,29 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           });
         }
       },
-      selectedColor: AppTokens.boneContainer,
-      backgroundColor: Colors.transparent,
+      selectedColor: colors.accentContainer,
+      backgroundColor: colors.containerLow,
+      showCheckmark: false,
       side: BorderSide(
-        color: isSelected ? AppTokens.charcoalInk : AppTokens.crispBorder,
+        color: isSelected ? colors.accentPrimary : colors.subtleBorder,
       ),
-      labelStyle: TextStyle(
+      labelStyle: AppTypography.bodySans(
         fontSize: 12,
-        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-        color: isSelected ? AppTokens.charcoalInk : AppTokens.mutedCopy,
+        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+        color: isSelected ? colors.accentPrimary : colors.secondaryInk,
       ),
     );
   }
 
-  Widget _buildHighlightCard(Highlight hl) {
+  Widget _buildHighlightCard(BuildContext context, Highlight hl) {
+    final colors = ShelfdColors.of(context);
     return BentoCard(
       padding: const EdgeInsets.all(AppTokens.space16),
       onTap: () {
         if (hl.chapterId != null && hl.chapterId!.isNotEmpty) {
-          context.push('/reader/${widget.bookId}/read/${hl.chapterId}');
+          context.go('/books/${widget.bookId}/read/${hl.chapterId}');
         } else {
-          context.push('/reader/${widget.bookId}/read');
+          context.go('/books/${widget.bookId}/read');
         }
       },
       child: Row(
@@ -1604,7 +1661,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             width: 4,
             height: 54,
             decoration: BoxDecoration(
-              color: _highlightColor(hl.color),
+              color: _highlightColor(hl.color, isDark: colors.isDark),
               borderRadius: BorderRadius.circular(AppTokens.radiusSm),
             ),
           ),
@@ -1617,6 +1674,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                   '"${hl.selectedText}"',
                   style: AppTypography.titleSerif(
                     fontSize: 14,
+                    color: colors.ink,
                   ),
                 ),
                 if (hl.note != null && hl.note!.isNotEmpty) ...[
@@ -1625,7 +1683,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                     hl.note!,
                     style: AppTypography.bodySans(
                       fontSize: 13,
-                      color: AppTokens.mutedCopy,
+                      color: colors.secondaryInk,
                     ),
                   ),
                 ],
@@ -1634,13 +1692,13 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                   hl.createdAt != null
                       ? 'Highlighted on ${hl.createdAt!.month}/${hl.createdAt!.day}/${hl.createdAt!.year}'
                       : 'Highlighted quote',
-                  style: AppTypography.captionSans(fontSize: 11, color: AppTokens.mutedCopy),
+                  style: AppTypography.mono(fontSize: 11, color: colors.mutedInk),
                 ),
               ],
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.delete_outline_rounded, size: 20, color: AppTokens.mutedCopy),
+            icon: Icon(Icons.delete_outline_rounded, size: 20, color: colors.mutedInk),
             tooltip: 'Delete Highlight',
             onPressed: () {
               ref.read(bookDetailProvider(widget.bookId).notifier).removeHighlight(hl.id);
@@ -1651,15 +1709,23 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     );
   }
 
-  Widget _buildBookmarkCard(Bookmark bm) {
+  Widget _buildBookmarkCard(BuildContext context, Bookmark bm) {
+    final colors = ShelfdColors.of(context);
     final percent = (bm.progress * 100).toInt();
 
     return BentoCard(
       padding: const EdgeInsets.all(AppTokens.space16),
+      onTap: () {
+        if (bm.chapterId != null && bm.chapterId!.isNotEmpty) {
+          context.go('/books/${widget.bookId}/read/${bm.chapterId}');
+        } else {
+          context.go('/books/${widget.bookId}/read');
+        }
+      },
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const Icon(Icons.bookmark_rounded, color: AppTokens.charcoalInk, size: 24),
+          Icon(Icons.bookmark_rounded, color: colors.accentPrimary, size: 24),
           const SizedBox(width: AppTokens.space12),
           Expanded(
             child: Column(
@@ -1667,18 +1733,22 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               children: [
                 Text(
                   bm.title,
-                  style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w600),
+                  style: AppTypography.bodySans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
                 ),
                 const SizedBox(height: AppTokens.space4),
                 Text(
                   '$percent% completed',
-                  style: AppTypography.captionSans(fontSize: 11, color: AppTokens.mutedCopy),
+                  style: AppTypography.mono(fontSize: 11, color: colors.mutedInk),
                 ),
               ],
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.delete_outline_rounded, size: 20, color: AppTokens.mutedCopy),
+            icon: Icon(Icons.delete_outline_rounded, size: 20, color: colors.mutedInk),
             tooltip: 'Delete Bookmark',
             onPressed: () {
               ref.read(bookDetailProvider(widget.bookId).notifier).removeBookmark(bm.id);
@@ -1690,6 +1760,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
   }
 
   Widget _buildChatTab(BuildContext context, Book book) {
+    final colors = ShelfdColors.of(context);
     final chatState = ref.watch(bookChatProvider(widget.bookId));
 
     return Column(
@@ -1700,22 +1771,23 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             horizontal: AppTokens.space20,
             vertical: AppTokens.space12,
           ),
-          decoration: const BoxDecoration(
-            color: AppTokens.boneSurface,
-            border: Border(bottom: BorderSide(color: AppTokens.crispBorder)),
+          decoration: BoxDecoration(
+            color: colors.containerLow,
+            border: Border(bottom: BorderSide(color: colors.subtleBorder)),
           ),
           child: Row(
             children: [
-              const Icon(Icons.auto_awesome_rounded, size: 18, color: AppTokens.charcoalInk),
+              Icon(Icons.auto_awesome_rounded, size: 18, color: colors.accentPrimary),
               const SizedBox(width: AppTokens.space8),
               Expanded(
                 child: Text(
                   'Connected to Shelfd MCP tools: search passages and read chapters on demand',
-                  style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
+                  style: AppTypography.captionSans(fontSize: 12, color: colors.secondaryInk),
                 ),
               ),
               if (chatState.messages.isNotEmpty)
                 TextButton(
+                  style: TextButton.styleFrom(foregroundColor: colors.accentPrimary),
                   onPressed: () {
                     ref.read(bookChatProvider(widget.bookId).notifier).clearChat();
                   },
@@ -1728,17 +1800,17 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         // Chat conversation history
         Expanded(
           child: chatState.messages.isEmpty
-              ? _buildEmptyChatView(book)
+              ? _buildEmptyChatView(context, book)
               : ListView.builder(
                   controller: _chatScrollController,
                   padding: const EdgeInsets.all(AppTokens.space16),
                   itemCount: chatState.messages.length + (chatState.isSending ? 1 : 0),
                   itemBuilder: (context, index) {
                     if (index == chatState.messages.length) {
-                      return _buildTypingIndicator();
+                      return _buildTypingIndicator(context);
                     }
                     final msg = chatState.messages[index];
-                    return _buildChatMessageBubble(msg);
+                    return _buildChatMessageBubble(context, msg);
                   },
                 ),
         ),
@@ -1747,24 +1819,28 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         if (chatState.error != null)
           Container(
             padding: const EdgeInsets.all(AppTokens.space8),
-            color: Colors.red.shade50,
+            color: colors.errorBg,
             child: Row(
               children: [
-                const Icon(Icons.error_outline, size: 16, color: Colors.red),
+                Icon(Icons.error_outline, size: 16, color: colors.errorText),
                 const SizedBox(width: AppTokens.space8),
                 Expanded(
                   child: Text(
                     chatState.error!,
-                    style: const TextStyle(fontSize: 12, color: Colors.red),
+                    style: AppTypography.bodySans(fontSize: 12, color: colors.errorText),
                   ),
                 ),
                 TextButton(
                   onPressed: () {
                     ref.read(bookChatProvider(widget.bookId).notifier).retry();
                   },
-                  child: const Text(
+                  child: Text(
                     'Retry',
-                    style: TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.bold),
+                    style: AppTypography.bodySans(
+                      fontSize: 12,
+                      color: colors.errorText,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
@@ -1774,9 +1850,9 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         // Bottom text input bar
         Container(
           padding: const EdgeInsets.all(AppTokens.space12),
-          decoration: const BoxDecoration(
-            color: AppTokens.boneBackground,
-            border: Border(top: BorderSide(color: AppTokens.crispBorder)),
+          decoration: BoxDecoration(
+            color: colors.surface,
+            border: Border(top: BorderSide(color: colors.subtleBorder)),
           ),
           child: Row(
             children: [
@@ -1784,25 +1860,30 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 child: TextField(
                   controller: _chatController,
                   onSubmitted: (_) => _sendMessage(),
+                  style: AppTypography.bodySans(fontSize: 13, color: colors.ink),
                   decoration: InputDecoration(
                     hintText: 'Ask about characters, themes, or plot points...',
                     hintStyle: AppTypography.bodySans(
                       fontSize: 13,
-                      color: AppTokens.mutedCopy,
+                      color: colors.mutedInk,
                     ),
                     filled: true,
-                    fillColor: AppTokens.boneContainer,
+                    fillColor: colors.containerLow,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: AppTokens.space16,
                       vertical: AppTokens.space12,
                     ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(AppTokens.radiusPill),
-                      borderSide: const BorderSide(color: AppTokens.crispBorder),
+                      borderSide: BorderSide(color: colors.border),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(AppTokens.radiusPill),
-                      borderSide: const BorderSide(color: AppTokens.crispBorder),
+                      borderSide: BorderSide(color: colors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppTokens.radiusPill),
+                      borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
                     ),
                   ),
                 ),
@@ -1810,8 +1891,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               const SizedBox(width: AppTokens.space8),
               IconButton.filled(
                 style: IconButton.styleFrom(
-                  backgroundColor: AppTokens.charcoalInk,
-                  foregroundColor: Colors.white,
+                  backgroundColor: colors.accentPrimary,
+                  foregroundColor: colors.onAccent,
                 ),
                 icon: const Icon(Icons.arrow_upward_rounded),
                 onPressed: chatState.isSending ? null : () => _sendMessage(),
@@ -1823,7 +1904,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     );
   }
 
-  Widget _buildEmptyChatView(Book book) {
+  Widget _buildEmptyChatView(BuildContext context, Book book) {
+    final colors = ShelfdColors.of(context);
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(AppTokens.space24),
@@ -1832,27 +1914,27 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           children: [
             Container(
               padding: const EdgeInsets.all(AppTokens.space16),
-              decoration: const BoxDecoration(
-                color: AppTokens.boneContainer,
+              decoration: BoxDecoration(
+                color: colors.accentContainer,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.auto_awesome_rounded,
                 size: 36,
-                color: AppTokens.charcoalInk,
+                color: colors.accentPrimary,
               ),
             ),
             const SizedBox(height: AppTokens.space16),
             Text(
               'Ask anything about ${book.title}',
               textAlign: TextAlign.center,
-              style: AppTypography.titleSerif(fontSize: 18),
+              style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
             ),
             const SizedBox(height: AppTokens.space8),
             Text(
               'Shelfd uses semantic search to cite relevant chapters and answer questions.',
               textAlign: TextAlign.center,
-              style: AppTypography.bodySans(fontSize: 13, color: AppTokens.mutedCopy),
+              style: AppTypography.bodySans(fontSize: 13, color: colors.secondaryInk),
             ),
             const SizedBox(height: AppTokens.space24),
             Wrap(
@@ -1860,9 +1942,9 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               runSpacing: AppTokens.space8,
               alignment: WrapAlignment.center,
               children: [
-                _buildPromptChip('Summarize the major themes'),
-                _buildPromptChip('Who are the main characters?'),
-                _buildPromptChip('What happens in the opening chapter?'),
+                _buildPromptChip(context, 'Summarize the major themes'),
+                _buildPromptChip(context, 'Who are the main characters?'),
+                _buildPromptChip(context, 'What happens in the opening chapter?'),
               ],
             ),
           ],
@@ -1871,17 +1953,19 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     );
   }
 
-  Widget _buildPromptChip(String prompt) {
+  Widget _buildPromptChip(BuildContext context, String prompt) {
+    final colors = ShelfdColors.of(context);
     return ActionChip(
       label: Text(prompt),
-      backgroundColor: AppTokens.boneBackground,
-      side: const BorderSide(color: AppTokens.crispBorder),
-      labelStyle: AppTypography.bodySans(fontSize: 12),
+      backgroundColor: colors.containerLow,
+      side: BorderSide(color: colors.border),
+      labelStyle: AppTypography.bodySans(fontSize: 12, color: colors.ink),
       onPressed: () => _sendMessage(prompt),
     );
   }
 
-  Widget _buildTypingIndicator() {
+  Widget _buildTypingIndicator(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppTokens.space8),
       child: Row(
@@ -1892,24 +1976,25 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               vertical: AppTokens.space12,
             ),
             decoration: BoxDecoration(
-              color: AppTokens.boneContainer,
+              color: colors.containerLow,
               borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+              border: Border.all(color: colors.subtleBorder),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(
+                SizedBox(
                   width: 14,
                   height: 14,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: AppTokens.charcoalInk,
+                    color: colors.accentPrimary,
                   ),
                 ),
                 const SizedBox(width: AppTokens.space8),
                 Text(
                   'Agent consulting library & retrieving passages...',
-                  style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
+                  style: AppTypography.captionSans(fontSize: 12, color: colors.secondaryInk),
                 ),
               ],
             ),
@@ -1919,46 +2004,48 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     );
   }
 
-  Widget _buildChatMessageBubble(BookChatMessage msg) {
+  Widget _buildChatMessageBubble(BuildContext context, BookChatMessage msg) {
+    final colors = ShelfdColors.of(context);
     final isUser = msg.role == 'user';
-    final textColor = isUser ? Colors.white : AppTokens.charcoalInk;
-    final secondaryTextColor = isUser ? Colors.white70 : AppTokens.mutedCopy;
+    final textColor = isUser ? colors.onAccent : colors.ink;
+    final secondaryTextColor =
+        isUser ? colors.onAccent.withValues(alpha: 0.8) : colors.secondaryInk;
     final codeBgColor = isUser
-        ? Colors.white.withValues(alpha: 0.15)
-        : AppTokens.charcoalInk.withValues(alpha: 0.08);
+        ? colors.onAccent.withValues(alpha: 0.15)
+        : colors.ink.withValues(alpha: 0.08);
 
     final markdownStyleSheet = MarkdownStyleSheet(
-      p: TextStyle(
+      p: AppTypography.bodySans(
         fontSize: 14,
-        height: 1.5,
+        lineHeight: 1.5,
         color: textColor,
       ),
       pPadding: EdgeInsets.zero,
-      h1: TextStyle(
+      h1: AppTypography.titleSerif(
         fontSize: 18,
         fontWeight: FontWeight.bold,
         height: 1.3,
         color: textColor,
       ),
       h1Padding: const EdgeInsets.only(top: AppTokens.space8),
-      h2: TextStyle(
+      h2: AppTypography.titleSerif(
         fontSize: 16,
         fontWeight: FontWeight.bold,
         height: 1.35,
         color: textColor,
       ),
       h2Padding: const EdgeInsets.only(top: AppTokens.space8),
-      h3: TextStyle(
+      h3: AppTypography.titleSerif(
         fontSize: 15,
         fontWeight: FontWeight.w600,
         height: 1.4,
         color: textColor,
       ),
       h3Padding: const EdgeInsets.only(top: AppTokens.space4),
-      h4: TextStyle(
+      h4: AppTypography.bodySans(
         fontSize: 14,
         fontWeight: FontWeight.w600,
-        height: 1.4,
+        lineHeight: 1.4,
         color: textColor,
       ),
       h4Padding: const EdgeInsets.only(top: AppTokens.space4),
@@ -1970,19 +2057,19 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         fontStyle: FontStyle.italic,
         color: textColor,
       ),
-      code: TextStyle(
-        fontFamily: 'monospace',
+      code: AppTypography.mono(
         fontSize: 13,
         color: textColor,
-        backgroundColor: codeBgColor,
-      ),
+      ).copyWith(backgroundColor: codeBgColor),
       codeblockPadding: const EdgeInsets.all(AppTokens.space8),
       codeblockDecoration: BoxDecoration(
-        color: isUser ? Colors.white.withValues(alpha: 0.1) : AppTokens.boneBackground,
+        color: isUser ? colors.onAccent.withValues(alpha: 0.1) : colors.surface,
         borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-        border: Border.all(color: isUser ? Colors.white24 : AppTokens.crispBorder),
+        border: Border.all(
+          color: isUser ? colors.onAccent.withValues(alpha: 0.24) : colors.border,
+        ),
       ),
-      blockquote: TextStyle(
+      blockquote: AppTypography.bodySans(
         fontSize: 14,
         fontStyle: FontStyle.italic,
         color: secondaryTextColor,
@@ -1994,21 +2081,21 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
       blockquoteDecoration: BoxDecoration(
         border: Border(
           left: BorderSide(
-            color: isUser ? Colors.white38 : AppTokens.crispBorder,
+            color: isUser ? colors.onAccent.withValues(alpha: 0.4) : colors.accentPrimary,
             width: 3,
           ),
         ),
       ),
-      listBullet: TextStyle(
+      listBullet: AppTypography.bodySans(
         fontSize: 14,
-        height: 1.5,
+        lineHeight: 1.5,
         color: textColor,
       ),
       listBulletPadding: const EdgeInsets.only(right: 6),
       listIndent: 20.0,
       blockSpacing: AppTokens.space8,
       a: TextStyle(
-        color: isUser ? Colors.white : Colors.blue.shade700,
+        color: isUser ? colors.onAccent : colors.accentPrimary,
         decoration: TextDecoration.underline,
       ),
     );
@@ -2024,19 +2111,20 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               margin: const EdgeInsets.only(right: AppTokens.space8, top: 4),
               width: 28,
               height: 28,
-              decoration: const BoxDecoration(
-                color: AppTokens.charcoalInk,
+              decoration: BoxDecoration(
+                color: colors.accentContainer,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.auto_awesome, size: 14, color: Colors.white),
+              child: Icon(Icons.auto_awesome, size: 14, color: colors.accentPrimary),
             ),
           ],
           Flexible(
             child: Container(
               padding: const EdgeInsets.all(AppTokens.space16),
               decoration: BoxDecoration(
-                color: isUser ? AppTokens.charcoalInk : AppTokens.boneContainer,
+                color: isUser ? colors.accentPrimary : colors.containerLow,
                 borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                border: isUser ? null : Border.all(color: colors.subtleBorder),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2054,13 +2142,13 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                       children: [
                         for (final cit in msg.citations)
                           ActionChip(
-                            avatar: const Icon(Icons.menu_book, size: 14),
+                            avatar: Icon(Icons.menu_book, size: 14, color: colors.accentPrimary),
                             label: Text(
                               _formatCitationLabel(cit),
-                              style: const TextStyle(fontSize: 11),
+                              style: AppTypography.mono(fontSize: 11, color: colors.ink),
                             ),
-                            backgroundColor: AppTokens.boneBackground,
-                            side: const BorderSide(color: AppTokens.crispBorder),
+                            backgroundColor: colors.surface,
+                            side: BorderSide(color: colors.border),
                             onPressed: () {
                               _showCitationDetails(context, cit);
                             },
@@ -2091,13 +2179,15 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
   }
 
   void _showCitationDetails(BuildContext context, BookCitation cit) {
+    final colors = ShelfdColors.of(context);
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: AppTokens.boneBackground,
+      backgroundColor: colors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
       ),
       builder: (bottomSheetContext) {
+        final sheetColors = ShelfdColors.of(bottomSheetContext);
         final title = cit.chapterTitle != null && cit.chapterTitle!.isNotEmpty
             ? cit.chapterTitle!
             : 'Chapter ${cit.chapterIndex}';
@@ -2120,16 +2210,16 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.menu_book, size: 20, color: AppTokens.charcoalInk),
+                    Icon(Icons.menu_book, size: 20, color: sheetColors.accentPrimary),
                     const SizedBox(width: AppTokens.space8),
                     Expanded(
                       child: Text(
                         title,
-                        style: AppTypography.titleSerif(fontSize: 16),
+                        style: AppTypography.titleSerif(fontSize: 16, color: sheetColors.ink),
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close, size: 18),
+                      icon: Icon(Icons.close, size: 18, color: sheetColors.mutedInk),
                       onPressed: () => Navigator.of(bottomSheetContext).pop(),
                     ),
                   ],
@@ -2138,7 +2228,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                   const SizedBox(height: AppTokens.space4),
                   Text(
                     paraLabel,
-                    style: AppTypography.captionSans(fontSize: 12, color: AppTokens.mutedCopy),
+                    style: AppTypography.mono(fontSize: 12, color: sheetColors.mutedInk),
                   ),
                 ],
                 const SizedBox(height: AppTokens.space12),
@@ -2147,13 +2237,17 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(AppTokens.space12),
                     decoration: BoxDecoration(
-                      color: AppTokens.boneContainer,
+                      color: sheetColors.containerLow,
                       borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                      border: Border.all(color: AppTokens.crispBorder),
+                      border: Border.all(color: sheetColors.subtleBorder),
                     ),
                     child: Text(
                       previewText,
-                      style: AppTypography.bodySans(fontSize: 13, lineHeight: 1.4),
+                      style: AppTypography.bodySans(
+                        fontSize: 13,
+                        lineHeight: 1.5,
+                        color: sheetColors.ink,
+                      ),
                     ),
                   ),
                   const SizedBox(height: AppTokens.space16),
@@ -2162,8 +2256,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                   width: double.infinity,
                   child: FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: AppTokens.charcoalInk,
-                      foregroundColor: Colors.white,
+                      backgroundColor: sheetColors.accentPrimary,
+                      foregroundColor: sheetColors.onAccent,
                       padding: const EdgeInsets.symmetric(vertical: AppTokens.space12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(AppTokens.radiusMd),

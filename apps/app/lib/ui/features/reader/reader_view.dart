@@ -122,54 +122,64 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
     KindleHighlightColor? initialColor,
     String? existingHighlightId,
   }) {
+    final readerTheme = AppTheme.buildTheme(ref.read(readerSettingsProvider).themeMode);
+    final colors = readerTheme.extension<ShelfdColors>() ?? ShelfdColors.of(context);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Theme.of(context).cardColor,
+      backgroundColor: colors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
       ),
-      builder: (ctx) => _AddNoteSheet(
-        selectedText: selectedText,
-        initialNote: initialNote,
-        initialColor: initialColor,
-        onSave: (color, note) {
-          Navigator.of(ctx).pop();
-          if (existingHighlightId != null) {
-            ref.read(bookDetailProvider(widget.bookId).notifier).removeHighlight(existingHighlightId);
-          }
-          _createHighlight(
-            selectedText: selectedText,
-            color: color,
-            blocks: blocks,
-            note: note,
-          );
-        },
+      builder: (ctx) => Theme(
+        data: readerTheme,
+        child: _AddNoteSheet(
+          selectedText: selectedText,
+          initialNote: initialNote,
+          initialColor: initialColor,
+          onSave: (color, note) {
+            Navigator.of(ctx).pop();
+            if (existingHighlightId != null) {
+              ref.read(bookDetailProvider(widget.bookId).notifier).removeHighlight(existingHighlightId);
+            }
+            _createHighlight(
+              selectedText: selectedText,
+              color: color,
+              blocks: blocks,
+              note: note,
+            );
+          },
+        ),
       ),
     );
   }
 
   void _showExistingHighlightSheet(Highlight highlight) {
+    final readerTheme = AppTheme.buildTheme(ref.read(readerSettingsProvider).themeMode);
+    final colors = readerTheme.extension<ShelfdColors>() ?? ShelfdColors.of(context);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Theme.of(context).cardColor,
+      backgroundColor: colors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
       ),
-      builder: (ctx) => _ExistingHighlightSheet(
-        highlight: highlight,
-        onDelete: () {
-          Navigator.of(ctx).pop();
-          ref.read(bookDetailProvider(widget.bookId).notifier).removeHighlight(highlight.id);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Highlight deleted'),
-              duration: Duration(seconds: 2),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        },
+      builder: (ctx) => Theme(
+        data: readerTheme,
+        child: _ExistingHighlightSheet(
+          highlight: highlight,
+          onDelete: () {
+            Navigator.of(ctx).pop();
+            ref.read(bookDetailProvider(widget.bookId).notifier).removeHighlight(highlight.id);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Highlight deleted'),
+                duration: Duration(seconds: 2),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -202,10 +212,12 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
   }
 
   void _showTypographySheet() {
+    final readerTheme = AppTheme.buildTheme(ref.read(readerSettingsProvider).themeMode);
+    final colors = readerTheme.extension<ShelfdColors>() ?? ShelfdColors.of(context);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Theme.of(context).cardColor,
+      backgroundColor: colors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
       ),
@@ -227,6 +239,7 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
 
     final settings = ref.watch(readerSettingsProvider);
     final theme = AppTheme.buildTheme(settings.themeMode);
+    final colors = theme.extension<ShelfdColors>() ?? ShelfdColors.of(context);
     final effectiveSpine = _spine.isNotEmpty ? _spine : (book?.spine ?? const []);
     final spineIdx = _getSpineIndex(effectiveSpine);
 
@@ -290,9 +303,10 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
     return Theme(
       data: theme,
       child: Scaffold(
-        backgroundColor: theme.scaffoldBackgroundColor,
+        backgroundColor: colors.background,
         appBar: AppBar(
-          backgroundColor: theme.scaffoldBackgroundColor,
+          backgroundColor: colors.background,
+          foregroundColor: colors.ink,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_rounded),
             onPressed: () {
@@ -307,7 +321,7 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
             displayTitle,
             style: AppTypography.titleSerif(
               fontSize: 16,
-              color: theme.colorScheme.primary,
+              color: colors.ink,
             ),
           ),
           actions: [
@@ -347,11 +361,11 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
           ],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(1),
-            child: Container(color: theme.dividerColor, height: 1),
+            child: Container(color: colors.subtleBorder, height: 1),
           ),
         ),
         endDrawer: Drawer(
-          backgroundColor: theme.scaffoldBackgroundColor,
+          backgroundColor: colors.surface,
           child: SafeArea(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -362,11 +376,11 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                     'Table of Contents',
                     style: AppTypography.titleSerif(
                       fontSize: 20,
-                      color: theme.colorScheme.primary,
+                      color: colors.ink,
                     ),
                   ),
                 ),
-                const Divider(color: AppTokens.crispBorder, height: 1),
+                Divider(color: colors.subtleBorder, height: 1),
                 Expanded(
                   child: effectiveSpine.isNotEmpty
                       ? ListView.builder(
@@ -376,17 +390,17 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                             final isSelected = idx == spineIdx;
                             return ListTile(
                               selected: isSelected,
-                              selectedTileColor: AppTokens.boneContainer,
+                              selectedTileColor: colors.container,
                               title: Text(
                                 item.title,
                                 style: isSelected
                                     ? AppTypography.titleSerif(
                                         fontSize: 15,
-                                        color: theme.colorScheme.primary,
+                                        color: colors.accentPrimary,
                                       )
                                     : AppTypography.bodySans(
                                         fontSize: 14,
-                                        color: theme.colorScheme.onSurface,
+                                        color: colors.ink,
                                       ),
                               ),
                               onTap: () {
@@ -403,17 +417,17 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                             final isSelected = chapterNum == (_currentChapter?.chapterIndex ?? 1);
                             return ListTile(
                               selected: isSelected,
-                              selectedTileColor: AppTokens.boneContainer,
+                              selectedTileColor: colors.container,
                               title: Text(
                                 'Chapter $chapterNum',
                                 style: isSelected
                                     ? AppTypography.titleSerif(
                                         fontSize: 15,
-                                        color: theme.colorScheme.primary,
+                                        color: colors.accentPrimary,
                                       )
                                     : AppTypography.bodySans(
                                         fontSize: 14,
-                                        color: theme.colorScheme.onSurface,
+                                        color: colors.ink,
                                       ),
                               ),
                               onTap: () {
@@ -430,8 +444,8 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
         ),
         bottomNavigationBar: Container(
           decoration: BoxDecoration(
-            color: theme.scaffoldBackgroundColor,
-            border: Border(top: BorderSide(color: theme.dividerColor)),
+            color: colors.background,
+            border: Border(top: BorderSide(color: colors.subtleBorder)),
           ),
           padding: const EdgeInsets.symmetric(horizontal: AppTokens.space20, vertical: 8),
           child: SafeArea(
@@ -439,7 +453,7 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.chevron_left_rounded),
+                  icon: Icon(Icons.chevron_left_rounded, color: onPrev != null ? colors.ink : colors.mutedInk),
                   onPressed: onPrev,
                 ),
                 Expanded(
@@ -448,13 +462,13 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                     textAlign: TextAlign.center,
                     style: AppTypography.bodySans(
                       fontSize: 12,
-                      color: AppTokens.mutedCopy,
+                      color: colors.mutedInk,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.chevron_right_rounded),
+                  icon: Icon(Icons.chevron_right_rounded, color: onNext != null ? colors.ink : colors.mutedInk),
                   onPressed: onNext,
                 ),
               ],
@@ -462,7 +476,7 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
           ),
         ),
         body: _isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? Center(child: CircularProgressIndicator(color: colors.accentPrimary))
             : _error != null
                 ? Center(
                     child: Padding(
@@ -470,11 +484,11 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.error_outline, size: 36, color: Color(0xFFC92A2A)),
+                          Icon(Icons.error_outline, size: 36, color: colors.errorText),
                           const SizedBox(height: AppTokens.space12),
-                          Text('Failed to load chapter', style: AppTypography.titleSerif(fontSize: 18)),
+                          Text('Failed to load chapter', style: AppTypography.titleSerif(fontSize: 18, color: colors.ink)),
                           const SizedBox(height: AppTokens.space8),
-                          Text(_error!, textAlign: TextAlign.center, style: AppTypography.bodySans(fontSize: 13)),
+                          Text(_error!, textAlign: TextAlign.center, style: AppTypography.bodySans(fontSize: 13, color: colors.secondaryInk)),
                           const SizedBox(height: AppTokens.space16),
                           ElevatedButton(
                             onPressed: () => _loadChapter(_activeIdentifier ?? 1),
@@ -606,6 +620,8 @@ class _TypographySheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(readerSettingsProvider);
     final notifier = ref.read(readerSettingsProvider.notifier);
+    final theme = AppTheme.buildTheme(settings.themeMode);
+    final colors = theme.extension<ShelfdColors>() ?? ShelfdColors.of(context);
 
     final themePills = const [
       FilterPillItem(id: 'bone', label: 'Bone'),
@@ -618,62 +634,78 @@ class _TypographySheet extends ConsumerWidget {
       FilterPillItem(id: 'sans', label: 'Sans'),
     ];
 
-    return Padding(
-      padding: const EdgeInsets.all(AppTokens.space24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Reading Typography', style: AppTypography.titleSerif(fontSize: 18)),
-          const SizedBox(height: AppTokens.space20),
-
-          // Theme Selector (DRY FilterPillsRow)
-          Text('Theme Palette', style: AppTypography.labelCaps()),
-          const SizedBox(height: AppTokens.space8),
-          FilterPillsRow(
-            items: themePills,
-            selectedId: settings.themeMode.name,
-            onSelected: (id) {
-              final mode = ReadingThemeMode.values.firstWhere((m) => m.name == id);
-              notifier.setThemeMode(mode);
-            },
-          ),
-          const SizedBox(height: AppTokens.space20),
-
-          // Font Family Selector
-          Text('Font Style', style: AppTypography.labelCaps()),
-          const SizedBox(height: AppTokens.space8),
-          FilterPillsRow(
-            items: fontPills,
-            selectedId: settings.isSerif ? 'serif' : 'sans',
-            onSelected: (id) => notifier.setFontFamily(id == 'serif'),
-          ),
-          const SizedBox(height: AppTokens.space20),
-
-          // Font Size Slider
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Theme(
+      data: theme,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(AppTokens.space24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Font Size', style: AppTypography.labelCaps()),
-              Text('${settings.fontSize.round()} pt', style: AppTypography.bodySans(fontSize: 13)),
-            ],
-          ),
-          Row(
-            children: [
-              const Text('A', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-              Expanded(
-                child: Slider(
-                  value: settings.fontSize,
-                  min: 14.0,
-                  max: 26.0,
-                  divisions: 6,
-                  onChanged: (val) => notifier.setFontSize(val),
-                ),
+              Text('Reading Typography', style: AppTypography.titleSerif(fontSize: 18, color: colors.ink)),
+              const SizedBox(height: AppTokens.space20),
+
+              // Theme Selector (DRY FilterPillsRow)
+              Text('Theme Palette', style: AppTypography.labelCaps(color: colors.mutedInk)),
+              const SizedBox(height: AppTokens.space8),
+              FilterPillsRow(
+                items: themePills,
+                selectedId: settings.themeMode.name,
+                onSelected: (id) {
+                  final mode = ReadingThemeMode.values.firstWhere((m) => m.name == id);
+                  notifier.setThemeMode(mode);
+                },
               ),
-              const Text('A', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: AppTokens.space20),
+
+              // Font Family Selector
+              Text('Font Style', style: AppTypography.labelCaps(color: colors.mutedInk)),
+              const SizedBox(height: AppTokens.space8),
+              FilterPillsRow(
+                items: fontPills,
+                selectedId: settings.isSerif ? 'serif' : 'sans',
+                onSelected: (id) => notifier.setFontFamily(id == 'serif'),
+              ),
+              const SizedBox(height: AppTokens.space20),
+
+              // Font Size Slider
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Font Size', style: AppTypography.labelCaps(color: colors.mutedInk)),
+                  Text('${settings.fontSize.round()} pt', style: AppTypography.mono(fontSize: 13, color: colors.secondaryInk)),
+                ],
+              ),
+              Row(
+                children: [
+                  Text('A', style: AppTypography.titleSerif(fontSize: 13, fontWeight: FontWeight.bold, color: colors.secondaryInk)),
+                  Expanded(
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        activeTrackColor: colors.accentPrimary,
+                        inactiveTrackColor: colors.containerHigh,
+                        thumbColor: colors.accentPrimary,
+                      ),
+                      child: Slider(
+                        value: settings.fontSize,
+                        min: 14.0,
+                        max: 26.0,
+                        divisions: 6,
+                        onChanged: (val) => notifier.setFontSize(val),
+                      ),
+                    ),
+                  ),
+                  Text('A', style: AppTypography.titleSerif(fontSize: 20, fontWeight: FontWeight.bold, color: colors.secondaryInk)),
+                ],
+              ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -699,20 +731,22 @@ class KindleSelectionToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
+
     return TextSelectionToolbar(
       anchorAbove: anchors.primaryAnchor,
       anchorBelow: anchors.secondaryAnchor ?? anchors.primaryAnchor,
       toolbarBuilder: (context, child) {
         return Material(
-          color: AppTokens.boneSurface,
+          color: colors.surface,
           elevation: 6,
-          shadowColor: const Color(0x33000000),
+          shadowColor: colors.cardShadowColor,
           borderRadius: BorderRadius.circular(24),
           clipBehavior: Clip.antiAlias,
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: AppTokens.crispBorder),
+              border: Border.all(color: colors.border),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
             child: child,
@@ -730,17 +764,17 @@ class KindleSelectionToolbar extends StatelessWidget {
           width: 1,
           height: 20,
           margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-          color: Theme.of(context).dividerColor,
+          color: colors.subtleBorder,
         ),
         IconButton(
-          icon: const Icon(Icons.edit_note_rounded, size: 20),
+          icon: Icon(Icons.edit_note_rounded, size: 20, color: colors.ink),
           tooltip: selectedColor != null ? 'Edit Note' : 'Add Note',
           padding: const EdgeInsets.symmetric(horizontal: 8),
           constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           onPressed: onAddNote,
         ),
         IconButton(
-          icon: const Icon(Icons.copy_rounded, size: 18),
+          icon: Icon(Icons.copy_rounded, size: 18, color: colors.ink),
           tooltip: 'Copy',
           padding: const EdgeInsets.symmetric(horizontal: 8),
           constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
@@ -751,10 +785,10 @@ class KindleSelectionToolbar extends StatelessWidget {
             width: 1,
             height: 20,
             margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-            color: Theme.of(context).dividerColor,
+            color: colors.subtleBorder,
           ),
           IconButton(
-            icon: const Icon(Icons.delete_outline_rounded, size: 20, color: Color(0xFFC92A2A)),
+            icon: Icon(Icons.delete_outline_rounded, size: 20, color: colors.errorText),
             tooltip: 'Delete Highlight',
             padding: const EdgeInsets.symmetric(horizontal: 8),
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
@@ -846,7 +880,7 @@ class _AddNoteSheetState extends State<_AddNoteSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = ShelfdColors.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
     return Padding(
@@ -864,9 +898,12 @@ class _AddNoteSheetState extends State<_AddNoteSheet> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(widget.initialNote != null ? 'Edit Note' : 'Add Note', style: AppTypography.titleSerif(fontSize: 18)),
+                Text(
+                  widget.initialNote != null ? 'Edit Note' : 'Add Note',
+                  style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
+                ),
                 IconButton(
-                  icon: const Icon(Icons.close_rounded, size: 20),
+                  icon: Icon(Icons.close_rounded, size: 20, color: colors.mutedInk),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
               ],
@@ -878,7 +915,7 @@ class _AddNoteSheetState extends State<_AddNoteSheet> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: AppTokens.boneContainer,
+                color: colors.containerLow,
                 borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                 border: Border(
                   left: BorderSide(
@@ -893,14 +930,14 @@ class _AddNoteSheetState extends State<_AddNoteSheet> {
                 overflow: TextOverflow.ellipsis,
                 style: AppTypography.bodySans(
                   fontSize: 13,
-                  color: theme.colorScheme.onSurface,
+                  color: colors.ink,
                 ).copyWith(fontStyle: FontStyle.italic),
               ),
             ),
             const SizedBox(height: AppTokens.space16),
 
             // Kindle Color Picker
-            Text('Highlight Color', style: AppTypography.labelCaps()),
+            Text('Highlight Color', style: AppTypography.labelCaps(color: colors.mutedInk)),
             const SizedBox(height: AppTokens.space8),
             Row(
               children: KindleHighlightColor.values.map((c) {
@@ -913,7 +950,7 @@ class _AddNoteSheetState extends State<_AddNoteSheet> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: isSelected ? theme.colorScheme.primary : Colors.transparent,
+                        color: isSelected ? colors.accentPrimary : Colors.transparent,
                         width: 2,
                       ),
                     ),
@@ -943,17 +980,23 @@ class _AddNoteSheetState extends State<_AddNoteSheet> {
               controller: _controller,
               autofocus: true,
               maxLines: 3,
-              style: AppTypography.bodySans(fontSize: 14),
+              style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
               decoration: InputDecoration(
                 hintText: 'Add a personal note or reflection...',
-                hintStyle: AppTypography.bodySans(fontSize: 14, color: AppTokens.mutedCopy),
+                hintStyle: AppTypography.bodySans(fontSize: 14, color: colors.mutedInk),
+                filled: true,
+                fillColor: colors.containerLow,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                  borderSide: const BorderSide(color: AppTokens.crispBorder),
+                  borderSide: BorderSide(color: colors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                  borderSide: BorderSide(color: colors.border),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                  borderSide: BorderSide(color: theme.colorScheme.primary, width: 1.5),
+                  borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
                 ),
                 contentPadding: const EdgeInsets.all(AppTokens.space12),
               ),
@@ -966,6 +1009,7 @@ class _AddNoteSheetState extends State<_AddNoteSheet> {
               children: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
+                  style: TextButton.styleFrom(foregroundColor: colors.secondaryInk),
                   child: const Text('Cancel'),
                 ),
                 const SizedBox(width: AppTokens.space12),
@@ -974,6 +1018,10 @@ class _AddNoteSheetState extends State<_AddNoteSheet> {
                     final note = _controller.text.trim();
                     widget.onSave(_selectedColor, note.isNotEmpty ? note : null);
                   },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: colors.accentPrimary,
+                    foregroundColor: colors.onAccent,
+                  ),
                   icon: const Icon(Icons.check_rounded, size: 16),
                   label: const Text('Save Note'),
                 ),
@@ -997,7 +1045,7 @@ class _ExistingHighlightSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = ShelfdColors.of(context);
     final color = highlight.highlightColor;
 
     return Padding(
@@ -1021,11 +1069,11 @@ class _ExistingHighlightSheet extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text('Highlight', style: AppTypography.titleSerif(fontSize: 18)),
+                  Text('Highlight', style: AppTypography.titleSerif(fontSize: 18, color: colors.ink)),
                 ],
               ),
               IconButton(
-                icon: const Icon(Icons.close_rounded, size: 20),
+                icon: Icon(Icons.close_rounded, size: 20, color: colors.mutedInk),
                 onPressed: () => Navigator.of(context).pop(),
               ),
             ],
@@ -1037,7 +1085,9 @@ class _ExistingHighlightSheet extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(AppTokens.space12),
             decoration: BoxDecoration(
-              color: color.cardColor.withValues(alpha: 0.35),
+              color: colors.isDark
+                  ? color.darkColor.withValues(alpha: 0.25)
+                  : color.cardColor.withValues(alpha: 0.45),
               borderRadius: BorderRadius.circular(AppTokens.radiusMd),
               border: Border(
                 left: BorderSide(
@@ -1050,7 +1100,7 @@ class _ExistingHighlightSheet extends StatelessWidget {
               '“${highlight.selectedText}”',
               style: AppTypography.bodySans(
                 fontSize: 14,
-                color: theme.colorScheme.onSurface,
+                color: colors.ink,
               ).copyWith(fontStyle: FontStyle.italic),
             ),
           ),
@@ -1058,19 +1108,19 @@ class _ExistingHighlightSheet extends StatelessWidget {
 
           // Attached note
           if (highlight.note != null && highlight.note!.isNotEmpty) ...[
-            Text('Note', style: AppTypography.labelCaps()),
+            Text('Note', style: AppTypography.labelCaps(color: colors.mutedInk)),
             const SizedBox(height: AppTokens.space8),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(AppTokens.space12),
               decoration: BoxDecoration(
-                color: AppTokens.boneContainer,
+                color: colors.containerLow,
                 borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                border: Border.all(color: AppTokens.crispBorder),
+                border: Border.all(color: colors.subtleBorder),
               ),
               child: Text(
                 highlight.note!,
-                style: AppTypography.bodySans(fontSize: 14),
+                style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
               ),
             ),
             const SizedBox(height: AppTokens.space16),
@@ -1080,7 +1130,7 @@ class _ExistingHighlightSheet extends StatelessWidget {
           if (highlight.location != null) ...[
             Text(
               'Location: ${highlight.location}',
-              style: AppTypography.labelCaps(color: AppTokens.mutedCopy),
+              style: AppTypography.mono(fontSize: 11, color: colors.mutedInk),
             ),
             const SizedBox(height: AppTokens.space16),
           ],
@@ -1090,8 +1140,8 @@ class _ExistingHighlightSheet extends StatelessWidget {
             alignment: Alignment.centerRight,
             child: TextButton.icon(
               onPressed: onDelete,
-              icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFC92A2A)),
-              label: const Text('Delete Highlight', style: TextStyle(color: Color(0xFFC92A2A))),
+              icon: Icon(Icons.delete_outline_rounded, size: 18, color: colors.errorText),
+              label: Text('Delete Highlight', style: TextStyle(color: colors.errorText)),
             ),
           ),
         ],

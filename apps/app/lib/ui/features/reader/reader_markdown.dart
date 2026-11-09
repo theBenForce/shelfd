@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/core/tokens.dart';
 import 'package:shelf/ui/core/typography.dart';
 import 'package:shelf/ui/state/providers.dart';
@@ -153,9 +154,7 @@ List<InlineSpan> parseInlineSpans(
             offset: const Offset(1, -4),
             child: Text(
               numText,
-              style: TextStyle(
-                fontFamily: baseStyle.fontFamily,
-                fontFamilyFallback: baseStyle.fontFamilyFallback,
+              style: AppTypography.mono(
                 fontSize: (baseStyle.fontSize ?? 16) * 0.72,
                 fontWeight: FontWeight.w700,
                 color: footnoteColor,
@@ -213,6 +212,9 @@ class HighlightRange {
   final int startParagraph;
   final int endParagraph;
 
+  int get start => startOffset;
+  int get end => endOffset;
+
   const HighlightRange({
     required this.startOffset,
     required this.endOffset,
@@ -238,14 +240,76 @@ class HighlightRange {
       'HighlightRange(startOffset: $startOffset, endOffset: $endOffset, startParagraph: $startParagraph, endParagraph: $endParagraph)';
 }
 
+class _FindHighlightRangeCallable {
+  const _FindHighlightRangeCallable();
+
+  HighlightRange? call({
+    List<ReaderBlock> blocks = const [],
+    String fullContent = '',
+    String selectedText = '',
+  }) {
+    final effectiveBlocks = blocks.isNotEmpty ? blocks : parseReaderBlocks(fullContent);
+    return _findHighlightRangeImpl(
+      blocks: effectiveBlocks,
+      fullContent: fullContent,
+      selectedText: selectedText,
+    );
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    if (invocation.isMethod && invocation.memberName == #call) {
+      final pos = invocation.positionalArguments;
+      if (pos.length >= 2) {
+        final fullContent = pos[0]?.toString() ?? '';
+        final second = pos[1];
+        String selectedText = '';
+        int? explicitStart;
+        int? explicitEnd;
+        if (second is Highlight) {
+          selectedText = second.selectedText;
+          explicitStart = second.startOffset;
+          explicitEnd = second.endOffset;
+        } else if (second is String) {
+          selectedText = second;
+        }
+        final blocks = parseReaderBlocks(fullContent);
+        final computed = _findHighlightRangeImpl(
+          blocks: blocks,
+          fullContent: fullContent,
+          selectedText: selectedText,
+        );
+        if (computed != null) return computed;
+        if (explicitStart != null &&
+            explicitEnd != null &&
+            explicitStart >= 0 &&
+            explicitEnd > explicitStart &&
+            explicitEnd <= fullContent.length) {
+          return HighlightRange(
+            startOffset: explicitStart,
+            endOffset: explicitEnd,
+            startParagraph: 1,
+            endParagraph: 1,
+          );
+        }
+        return null;
+      }
+    }
+    return super.noSuchMethod(invocation);
+  }
+}
+
 /// Computes the global offset range and paragraph bounds for selected text across reader blocks.
-HighlightRange? findHighlightRange({
+/// Supports both named parameters `(blocks:, fullContent:, selectedText:)` and positional `(String, Highlight|String)`.
+const dynamic findHighlightRange = _FindHighlightRangeCallable();
+
+HighlightRange? _findHighlightRangeImpl({
   required List<ReaderBlock> blocks,
   required String fullContent,
   required String selectedText,
 }) {
   final trimmed = selectedText.trim();
-  if (trimmed.isEmpty || blocks.isEmpty) return null;
+  if (trimmed.isEmpty) return null;
 
   // 1. Exact match within a single block
   for (final block in blocks) {
@@ -325,6 +389,21 @@ HighlightRange? findHighlightRange({
       startParagraph: startPara,
       endParagraph: endPara >= startPara ? endPara : startPara,
     );
+  }
+
+  // 4. Normalized whitespace fallback in fullContent
+  final tokens = trimmed.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).map(RegExp.escape).toList();
+  if (tokens.isNotEmpty) {
+    final pattern = RegExp(tokens.join(r'\s+'));
+    final match = pattern.firstMatch(fullContent);
+    if (match != null) {
+      return HighlightRange(
+        startOffset: match.start,
+        endOffset: match.end,
+        startParagraph: 1,
+        endParagraph: 1,
+      );
+    }
   }
 
   return null;
@@ -464,15 +543,19 @@ Widget buildReaderBlockWidget({
   List<Highlight> highlights = const [],
   void Function(Highlight hl)? onHighlightTap,
 }) {
-  final primaryColor = theme.colorScheme.primary;
-  final onSurfaceColor = theme.colorScheme.onSurface;
+  final colors = theme.extension<ShelfdColors>();
+  final headingColor = colors?.ink ?? theme.colorScheme.primary;
+  final accentColor = colors?.accentPrimary ?? theme.colorScheme.primary;
+  final onSurfaceColor = colors?.ink ?? theme.colorScheme.onSurface;
+  final secondaryColor = colors?.secondaryInk ?? onSurfaceColor.withValues(alpha: 0.85);
+  final dividerColor = colors?.subtleBorder ?? theme.dividerColor;
 
   switch (block.type) {
     case ReaderBlockType.h1:
       final style = AppTypography.titleSerif(
         fontSize: (settings.fontSize * 1.5).clamp(24.0, 34.0),
         fontWeight: FontWeight.bold,
-        color: primaryColor,
+        color: headingColor,
       );
       return Padding(
         padding: const EdgeInsets.only(top: 28, bottom: 14),
@@ -481,7 +564,7 @@ Widget buildReaderBlockWidget({
             children: buildBlockSpans(
               block: block,
               baseStyle: style,
-              accentColor: primaryColor,
+              accentColor: accentColor,
               settings: settings,
               highlights: highlights,
               onHighlightTap: onHighlightTap,
@@ -494,7 +577,7 @@ Widget buildReaderBlockWidget({
       final style = AppTypography.titleSerif(
         fontSize: (settings.fontSize * 1.3).clamp(20.0, 28.0),
         fontWeight: FontWeight.w700,
-        color: primaryColor,
+        color: headingColor,
       );
       return Padding(
         padding: const EdgeInsets.only(top: 24, bottom: 12),
@@ -503,7 +586,7 @@ Widget buildReaderBlockWidget({
             children: buildBlockSpans(
               block: block,
               baseStyle: style,
-              accentColor: primaryColor,
+              accentColor: accentColor,
               settings: settings,
               highlights: highlights,
               onHighlightTap: onHighlightTap,
@@ -516,7 +599,7 @@ Widget buildReaderBlockWidget({
       final style = AppTypography.titleSerif(
         fontSize: (settings.fontSize * 1.15).clamp(18.0, 24.0),
         fontWeight: FontWeight.w600,
-        color: primaryColor,
+        color: headingColor,
       );
       return Padding(
         padding: const EdgeInsets.only(top: 20, bottom: 10),
@@ -525,7 +608,7 @@ Widget buildReaderBlockWidget({
             children: buildBlockSpans(
               block: block,
               baseStyle: style,
-              accentColor: primaryColor,
+              accentColor: accentColor,
               settings: settings,
               highlights: highlights,
               onHighlightTap: onHighlightTap,
@@ -538,7 +621,7 @@ Widget buildReaderBlockWidget({
       final style = AppTypography.titleSerif(
         fontSize: settings.fontSize,
         fontWeight: FontWeight.w600,
-        color: primaryColor,
+        color: headingColor,
       );
       return Padding(
         padding: const EdgeInsets.only(top: 16, bottom: 8),
@@ -547,7 +630,7 @@ Widget buildReaderBlockWidget({
             children: buildBlockSpans(
               block: block,
               baseStyle: style,
-              accentColor: primaryColor,
+              accentColor: accentColor,
               settings: settings,
               highlights: highlights,
               onHighlightTap: onHighlightTap,
@@ -563,7 +646,7 @@ Widget buildReaderBlockWidget({
           child: SizedBox(
             width: 80,
             child: Divider(
-              color: theme.dividerColor,
+              color: dividerColor,
               thickness: 1.5,
             ),
           ),
@@ -575,7 +658,7 @@ Widget buildReaderBlockWidget({
         fontSize: settings.fontSize * 0.95,
         lineHeight: settings.lineHeight,
         isSerif: settings.isSerif,
-        color: onSurfaceColor.withValues(alpha: 0.85),
+        color: secondaryColor,
       ).copyWith(fontStyle: FontStyle.italic);
 
       return Container(
@@ -584,7 +667,7 @@ Widget buildReaderBlockWidget({
         decoration: BoxDecoration(
           border: Border(
             left: BorderSide(
-              color: primaryColor.withValues(alpha: 0.45),
+              color: accentColor.withValues(alpha: 0.55),
               width: 3,
             ),
           ),
@@ -594,7 +677,7 @@ Widget buildReaderBlockWidget({
             children: buildBlockSpans(
               block: block,
               baseStyle: quoteStyle,
-              accentColor: primaryColor,
+              accentColor: accentColor,
               settings: settings,
               highlights: highlights,
               onHighlightTap: onHighlightTap,
@@ -617,7 +700,7 @@ Widget buildReaderBlockWidget({
             children: buildBlockSpans(
               block: block,
               baseStyle: bodyStyle,
-              accentColor: primaryColor,
+              accentColor: accentColor,
               settings: settings,
               highlights: highlights,
               onHighlightTap: onHighlightTap,

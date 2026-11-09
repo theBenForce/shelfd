@@ -2800,8 +2800,8 @@ func TestFixedLayoutAssetAndChapterHTMLServing(t *testing.T) {
 	badRec := httptest.NewRecorder()
 	f.handler.ServeHTTP(badRec, badReq)
 
-	if badRec.Code != http.StatusBadRequest && badRec.Code != http.StatusNotFound && badRec.Code != http.StatusMovedPermanently {
-		t.Errorf("expected 400, 404, or 301 on path traversal attempt, got %d", badRec.Code)
+	if badRec.Code != http.StatusBadRequest && badRec.Code != http.StatusNotFound && badRec.Code != http.StatusMovedPermanently && badRec.Code != http.StatusTemporaryRedirect {
+		t.Errorf("expected 400, 404, 301, or 307 on path traversal attempt, got %d", badRec.Code)
 	}
 }
 

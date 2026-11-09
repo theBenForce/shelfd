@@ -101,5 +101,119 @@ void main() {
       expect(selectedResult!.author, 'Isaac Asimov');
       expect(selectedResult!.provider, 'openlibrary');
     });
+
+    testWidgets('renders search dialog in ReadingThemeMode.dark with Apple and Google badges',
+        (tester) async {
+      final mockResults = [
+        {
+          'provider': 'googlebooks',
+          'title': 'Dune',
+          'author': 'Frank Herbert',
+          'series': 'Dune Chronicles',
+          'series_sequence': '1',
+          'description': 'Arrakis.',
+          'cover_url': null,
+          'publisher': 'Chilton Books',
+          'published_year': 1965,
+          'isbn': '9780441172719',
+          'genres': ['Science Fiction'],
+        },
+        {
+          'provider': 'apple',
+          'title': 'Dune Messiah',
+          'author': 'Frank Herbert',
+          'series': 'Dune Chronicles',
+          'series_sequence': '2',
+          'description': 'Sequel.',
+          'cover_url': null,
+          'publisher': 'Putnam',
+          'published_year': 1969,
+          'isbn': '9780441172696',
+          'genres': ['Science Fiction'],
+        },
+      ];
+
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/v1/metadata/search') {
+          return http.Response(jsonEncode(mockResults), 200, headers: {
+            'content-type': 'application/json',
+          });
+        }
+        return http.Response('{}', 200);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            bookRepositoryProvider.overrideWithValue(bookRepo),
+            storageServiceProvider.overrideWithValue(storageService),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () {
+                    showMetadataSearchDialog(
+                      context,
+                      initialTitle: 'Dune',
+                      initialAuthor: 'Frank Herbert',
+                    );
+                  },
+                  child: const Text('Open Search Dark'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Search Dark'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Google Books'), findsOneWidget);
+      expect(find.text('Apple Books'), findsOneWidget);
+      expect(find.text('Series: Dune Chronicles #1'), findsOneWidget);
+      expect(find.text('• ISBN: 9780441172719'), findsOneWidget);
+    });
+
+    testWidgets('MetadataSearchDialogContent defaults isBottomSheet to false and renders No metadata matches found',
+        (tester) async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/v1/metadata/search') {
+          return http.Response(jsonEncode([]), 200, headers: {
+            'content-type': 'application/json',
+          });
+        }
+        return http.Response('{}', 200);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            bookRepositoryProvider.overrideWithValue(bookRepo),
+            storageServiceProvider.overrideWithValue(storageService),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: const Scaffold(
+              body: MetadataSearchDialogContent(
+                initialTitle: 'Obscure Manuscript',
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('No metadata matches found'), findsOneWidget);
+    });
   });
 }

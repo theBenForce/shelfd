@@ -302,6 +302,46 @@ void main() {
     expect(find.textContaining('Chapter 5: Demographic Threat • 8 mins left'), findsOneWidget);
     expect(find.textContaining('Chapter 01M22YCE6D6GZJAXZC8A39AVKE • 8 mins left'), findsNothing);
   });
+
+  testWidgets('ReaderView typography sheet switches to Dark OLED and Sepia themes cleanly',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'reader_theme_mode': 'dark'});
+    final prefs = await SharedPreferences.getInstance();
+
+    const testChapter = Chapter(
+      id: 'chap-dark-1',
+      bookId: 'book-42',
+      chapterIndex: 1,
+      title: 'Night Watch',
+      content: 'The scriptorium was lit only by a single candle.',
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+          home: const ReaderView(
+            bookId: 'book-42',
+            chapterIndex: 1,
+            initialChapter: testChapter,
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    // Open typography sheet in Dark OLED mode
+    await tester.tap(find.byIcon(Icons.text_fields_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Reading Typography'), findsOneWidget);
+    expect(find.text('Dark OLED'), findsOneWidget);
+    expect(find.text('Sepia'), findsOneWidget);
+  });
 }
 
 class _MockBookDetailNotifier extends BookDetailNotifier {

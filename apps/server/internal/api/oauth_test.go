@@ -129,6 +129,11 @@ func TestOAuthAuthorizeAndTokenExchangeWithPKCE(t *testing.T) {
 	if !strings.Contains(bodyStr, "Authorize Stitch Agent") {
 		t.Errorf("expected HTML body to mention 'Authorize Stitch Agent', got: %s", bodyStr)
 	}
+	for _, token := range []string{"--bg: #FBF9F4", "--accent: #8E4A26", "@media (prefers-color-scheme: dark)", "--bg: #161412", "Newsreader", "Work Sans"} {
+		if !strings.Contains(bodyStr, token) {
+			t.Errorf("expected OAuth consent HTML to contain Tactile Scriptorium token %q", token)
+		}
+	}
 
 	// 3. POST /oauth/authorize -> Approve with valid credentials & PKCE S256 challenge
 	codeVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"

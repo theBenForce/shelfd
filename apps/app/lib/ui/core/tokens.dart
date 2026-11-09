@@ -65,4 +65,59 @@ class AppTokens {
   static const Color amberGlow = Color(0xFFFFC589);
   static const Color terracottaAccent = Color(0xFFD97736);
   static const Color antiqueCream = Color(0xFFF3C99D);
+
+  // Tactile Scriptorium — Editorial Accents (Burnt Sienna & Library Green)
+  static const Color siennaPrimary = Color(0xFF8E4A26);
+  static const Color siennaContainer = Color(0xFFAA603A);
+  static const Color siennaLightTint = Color(0xFFF7ECE6);
+  static const Color siennaDarkAccent = Color(0xFFD98A5F);
+  static const Color libraryGreen = Color(0xFF3A5A40);
+  static const Color libraryGreenContainer = Color(0xFFBCE0C1);
+  static const Color libraryGreenDark = Color(0xFF81B28A);
+
+  // Tactile Scriptorium — Warm Parchment & Archival Bone Hierarchy
+  static const Color warmParchment = Color(0xFFFBF9F4);
+  static const Color warmSurfaceLowest = Color(0xFFFFFFFF);
+  static const Color warmSurfaceLow = Color(0xFFF5F3EE);
+  static const Color warmSurfaceContainer = Color(0xFFEFECE6);
+  static const Color warmSurfaceHigh = Color(0xFFE9E6DF);
+  static const Color warmSurfaceHighest = Color(0xFFE2DFD8);
+  static const Color espressoInk = Color(0xFF1E1B18);
+  static const Color espressoSecondary = Color(0xFF53433C);
+  static const Color espressoMuted = Color(0xFF756860);
+  static const Color ghostBorder = Color(0xFFE3DDD3);
+  static const Color subtleGhostBorder = Color(0xFFEDE8DF);
+
+  // Tactile Scriptorium — Sepia Archival Vellum Extensions
+  static const Color sepiaContainerLow = Color(0xFFEFE6D1);
+  static const Color sepiaContainer = Color(0xFFE6DBC2);
+  static const Color sepiaContainerHigh = Color(0xFFDCD0B4);
+  static const Color sepiaContainerHighest = Color(0xFFD2C4A5);
+  static const Color sepiaMuted = Color(0xFF866D59);
+  static const Color sepiaSubtleBorder = Color(0xFFE8DEC6);
+
+  // Tactile Scriptorium — Warm Dark Walnut Hierarchy
+  static const Color walnutBackground = Color(0xFF161412);
+  static const Color walnutSurface = Color(0xFF1E1B18);
+  static const Color walnutContainerLow = Color(0xFF23201C);
+  static const Color walnutContainer = Color(0xFF292521);
+  static const Color walnutElevated = Color(0xFF322D28);
+  static const Color walnutHighest = Color(0xFF3B352F);
+  static const Color walnutInk = Color(0xFFEDE7DF);
+  static const Color walnutSecondary = Color(0xFFBDB3A7);
+  static const Color walnutMuted = Color(0xFF8C8277);
+  static const Color walnutBorder = Color(0xFF332E29);
+  static const Color walnutSubtleBorder = Color(0xFF282420);
+
+  // Semantic Status & Badge Tokens
+  static const Color progressBadgeBg = Color(0xFFF7ECE6);
+  static const Color progressBadgeText = Color(0xFF8E4A26);
+  static const Color completedBadgeBg = Color(0xFFEDF3EC);
+  static const Color completedBadgeText = Color(0xFF3A5A40);
+  static const Color errorBgLight = Color(0xFFFEF2F2);
+  static const Color errorBorderLight = Color(0xFFFECACA);
+  static const Color errorTextLight = Color(0xFFB91C1C);
+  static const Color errorBgDark = Color(0xFF2D1618);
+  static const Color errorBorderDark = Color(0xFF5C262A);
+  static const Color errorTextDark = Color(0xFFFCA5A5);
 }

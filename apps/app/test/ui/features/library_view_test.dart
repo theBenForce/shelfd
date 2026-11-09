@@ -519,6 +519,41 @@ void main() {
     expect(mockRepo.scanTriggered, isTrue);
     expect(find.text('Scanning library for new books...'), findsOneWidget);
   });
+
+  testWidgets('LibraryView adapts colors in ReadingThemeMode.dark and ReadingThemeMode.sepia',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final testBooks = [
+      const Book(
+        id: 'b1',
+        title: 'Project Hail Mary',
+        authors: [Author(id: 'a1', name: 'Andy Weir')],
+        readingProgress: 0.42,
+      ),
+    ];
+
+    for (final mode in [ReadingThemeMode.dark, ReadingThemeMode.sepia]) {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(prefs),
+            libraryProvider.overrideWith(() => FakeLibraryNotifier(testBooks)),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(mode),
+            home: const LibraryView(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Project Hail Mary'), findsWidgets);
+      expect(find.text('Andy Weir'), findsOneWidget);
+      expect(find.text('42% read'), findsOneWidget);
+    }
+  });
 }
 
 class MockScanBookRepo implements BookRepository {

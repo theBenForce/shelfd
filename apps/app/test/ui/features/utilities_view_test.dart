@@ -11,6 +11,8 @@ import 'package:shelf/data/models/topic.dart';
 import 'package:shelf/data/repositories/book_repository.dart';
 import 'package:shelf/data/services/api_service.dart';
 import 'package:shelf/data/services/storage_service.dart';
+import 'package:shelf/ui/core/shared_layout.dart';
+import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/utilities/utilities_view.dart';
 import 'package:shelf/ui/state/providers.dart';
 
@@ -149,8 +151,9 @@ void main() {
         overrides: [
           bookRepositoryProvider.overrideWithValue(mockRepo),
         ],
-        child: const MaterialApp(
-          home: UtilitiesView(),
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const UtilitiesView(),
         ),
       ),
     );
@@ -164,9 +167,10 @@ void main() {
     expect(find.text('Matching Identifier (ISBN)'), findsOneWidget);
     expect(find.text('100% Match'), findsOneWidget);
 
-    // Verify books in group
+    // Verify books in group and TactileBookCover thumbnails
     expect(find.text('Dune'), findsOneWidget);
     expect(find.text('Dune (Special Edition)'), findsOneWidget);
+    expect(find.byType(TactileBookCover), findsNWidgets(2));
     expect(find.text('PRIMARY'), findsOneWidget); // First book selected by default
 
     // Tap on the second book to make it primary
@@ -212,8 +216,9 @@ void main() {
         overrides: [
           bookRepositoryProvider.overrideWithValue(mockRepo),
         ],
-        child: const MaterialApp(
-          home: UtilitiesView(),
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+          home: const UtilitiesView(),
         ),
       ),
     );

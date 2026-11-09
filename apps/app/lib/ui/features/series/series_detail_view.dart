@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../data/models/book.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -93,6 +94,7 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     final horizontalPad = Responsive.horizontalPadding(context);
     final title = _seriesName ??
         (widget.seriesName != null && widget.seriesName!.isNotEmpty
@@ -102,7 +104,7 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
                 : 'Series'));
 
     return Scaffold(
-      backgroundColor: AppTokens.boneBackground,
+      backgroundColor: colors.background,
       appBar: ShelfdTopBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
@@ -131,44 +133,70 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
                     padding: const EdgeInsets.symmetric(vertical: AppTokens.space16),
                     child: Row(
                       children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: colors.container,
+                            borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                            border: Border.all(color: colors.subtleBorder),
+                          ),
+                          child: Icon(
+                            Icons.collections_bookmark_rounded,
+                            color: colors.accentPrimary,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: AppTokens.space16),
                         Expanded(
                           child: Text(
                             title,
                             style: AppTypography.titleSerif(
                               fontSize: 26,
                               fontWeight: FontWeight.w600,
+                              color: colors.ink,
                             ),
                           ),
                         ),
                         if (_books.isNotEmpty)
                           StatusBadge(
                             label: '${_books.length} Books',
-                            backgroundColor: AppTokens.boneContainer,
-                            textColor: AppTokens.mutedCopy,
+                            backgroundColor: colors.container,
+                            textColor: colors.secondaryInk,
                           ),
                       ],
                     ),
                   ),
-                  const Divider(color: AppTokens.crispBorder, height: 1),
+                  Divider(color: colors.subtleBorder, height: 1),
                   Expanded(
                     child: _isLoading
-                        ? const Center(child: CircularProgressIndicator())
+                        ? Center(child: CircularProgressIndicator(color: colors.accentPrimary))
                         : _error != null
                             ? Center(
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    const Icon(
+                                    Icon(
                                       Icons.error_outline_rounded,
                                       size: 48,
-                                      color: Color(0xFFC92A2A),
+                                      color: colors.errorText,
                                     ),
                                     const SizedBox(height: AppTokens.space16),
-                                    Text('Unable to load series books', style: AppTypography.titleSerif(fontSize: 18)),
+                                    Text(
+                                      'Unable to load series books',
+                                      style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
+                                    ),
                                     const SizedBox(height: AppTokens.space8),
-                                    Text(_error!, style: AppTypography.bodySans(fontSize: 14)),
+                                    Text(
+                                      _error!,
+                                      style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
+                                    ),
                                     const SizedBox(height: AppTokens.space16),
                                     OutlinedButton(
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: colors.ink,
+                                        side: BorderSide(color: colors.border),
+                                      ),
                                       onPressed: _loadSeriesBooks,
                                       child: const Text('Retry'),
                                     ),
@@ -179,7 +207,7 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
                                 ? Center(
                                     child: Text(
                                       'No books found in this series',
-                                      style: AppTypography.bodySans(color: AppTokens.mutedCopy),
+                                      style: AppTypography.bodySans(color: colors.mutedInk),
                                     ),
                                   )
                                 : GridView.builder(
@@ -221,6 +249,7 @@ class _SeriesBookCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppTokens.radiusMd),
@@ -228,54 +257,38 @@ class _SeriesBookCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: Stack(
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: AppTokens.boneContainer,
-                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                    border: Border.all(color: AppTokens.crispBorder),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x0A000000),
-                        blurRadius: 8,
-                        offset: Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: book.coverUrl != null && book.coverUrl!.isNotEmpty
-                      ? Image.network(
-                          book.coverUrl!,
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                          height: double.infinity,
-                          errorBuilder: (context, error, stackTrace) =>
-                              _buildPlaceholder(),
-                        )
-                      : _buildPlaceholder(),
-                ),
-                if (book.seriesSequence != null)
-                  Positioned(
-                    top: AppTokens.space8,
-                    left: AppTokens.space8,
-                    child: Container(
+            child: TactileBookCover(
+              coverUrl: book.coverUrl,
+              title: book.title,
+              showFallbackTitle: false,
+              showSpineCrease: true,
+              showShadow: true,
+              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+              topLeftBadge: book.seriesSequence != null
+                  ? Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: AppTokens.charcoalInk.withValues(alpha: 0.85),
+                        color: AppTokens.espressoInk.withValues(alpha: 0.88),
                         borderRadius: BorderRadius.circular(AppTokens.radiusPill),
                       ),
                       child: Text(
                         '#${book.seriesSequence!.toStringAsFixed(book.seriesSequence!.truncateToDouble() == book.seriesSequence! ? 0 : 1)}',
-                        style: const TextStyle(
+                        style: AppTypography.mono(
                           color: Colors.white,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                    ),
-                  ),
-              ],
+                    )
+                  : null,
+              bottomOverlay: book.readingProgress > 0
+                  ? LinearProgressIndicator(
+                      value: book.readingProgress.clamp(0.0, 1.0),
+                      minHeight: 3,
+                      backgroundColor: colors.containerHigh.withValues(alpha: 0.6),
+                      valueColor: AlwaysStoppedAnimation<Color>(colors.accentPrimary),
+                    )
+                  : null,
             ),
           ),
           const SizedBox(height: AppTokens.space8),
@@ -286,6 +299,7 @@ class _SeriesBookCard extends StatelessWidget {
             style: AppTypography.titleSerif(
               fontSize: 14,
               fontWeight: FontWeight.w600,
+              color: colors.ink,
             ),
           ),
           const SizedBox(height: 2),
@@ -295,29 +309,7 @@ class _SeriesBookCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: AppTypography.bodySans(
               fontSize: 12,
-              color: AppTokens.mutedCopy,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPlaceholder() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.book_outlined, size: 36, color: AppTokens.mutedCopy),
-          const SizedBox(height: AppTokens.space8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppTokens.space8),
-            child: Text(
-              book.title,
-              textAlign: TextAlign.center,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: AppTypography.captionSans(fontSize: 11),
+              color: colors.secondaryInk,
             ),
           ),
         ],

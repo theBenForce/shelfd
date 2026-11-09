@@ -6,12 +6,15 @@ class DuplicateGroup {
   final double confidence;
   final List<Book> books;
 
+  String get reason => matchReason;
+
   const DuplicateGroup({
-    required this.id,
-    required this.matchReason,
-    required this.confidence,
+    this.id = 'dup_group_default',
+    String? matchReason,
+    String? reason,
+    this.confidence = 1.0,
     required this.books,
-  });
+  }) : matchReason = matchReason ?? reason ?? 'Duplicate detected';
 
   factory DuplicateGroup.fromJson(Map<String, dynamic> json) {
     final rawBooks = json['books'] as List<dynamic>? ?? [];
@@ -35,14 +38,19 @@ class DuplicateGroup {
 
 class DuplicateScanResult {
   final List<DuplicateGroup> groups;
-  final int totalGroups;
+  final int? _totalGroups;
   final int totalDuplicateBooks;
+
+  int get totalGroups => _totalGroups ?? groups.length;
+  int get totalDuplicates => totalDuplicateBooks;
 
   const DuplicateScanResult({
     required this.groups,
-    required this.totalGroups,
-    required this.totalDuplicateBooks,
-  });
+    int? totalGroups,
+    int? totalDuplicateBooks,
+    int? totalDuplicates,
+  })  : _totalGroups = totalGroups,
+        totalDuplicateBooks = totalDuplicateBooks ?? totalDuplicates ?? 0;
 
   factory DuplicateScanResult.fromJson(Map<String, dynamic> json) {
     final rawGroups = json['groups'] as List<dynamic>? ?? [];

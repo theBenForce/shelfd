@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../data/models/book.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -255,22 +256,25 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
         final canPrev = _currentSpreadIndex > 0;
         final canNext = _currentSpreadIndex < spreads.length - 1;
 
-        final theme = Theme.of(context);
+        final colors = ShelfdColors.of(context);
 
         return Focus(
           focusNode: _focusNode,
           autofocus: true,
           onKeyEvent: _handleKeyEvent,
           child: Scaffold(
-            backgroundColor: theme.scaffoldBackgroundColor,
+            backgroundColor: colors.background,
             body: SafeArea(
               child: Stack(
                 children: [
                   // Stage / Reading Viewport
                   Positioned.fill(
                     child: currentSpread == null
-                        ? const Center(
-                            child: Text('No pages found', style: TextStyle(color: Colors.white70)),
+                        ? Center(
+                            child: Text(
+                              'No pages found',
+                              style: AppTypography.bodySans(color: colors.mutedInk),
+                            ),
                           )
                         : GestureDetector(
                             behavior: HitTestBehavior.translucent,
@@ -292,7 +296,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                       bottom: 0,
                       child: Center(
                         child: Material(
-                          color: Colors.black45,
+                          color: Colors.black54,
                           shape: const CircleBorder(),
                           clipBehavior: Clip.antiAlias,
                           child: IconButton(
@@ -312,7 +316,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                       bottom: 0,
                       child: Center(
                         child: Material(
-                          color: Colors.black45,
+                          color: Colors.black54,
                           shape: const CircleBorder(),
                           clipBehavior: Clip.antiAlias,
                           child: IconButton(
@@ -354,19 +358,19 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   }
 
   Widget _buildTopBar(BuildContext context, FixedSpread? spread, int totalSpreads) {
-    final theme = Theme.of(context);
+    final colors = ShelfdColors.of(context);
 
     return Container(
       height: 60,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.95),
-        border: Border(bottom: BorderSide(color: theme.dividerColor)),
+        color: colors.surface.withValues(alpha: 0.95),
+        border: Border(bottom: BorderSide(color: colors.subtleBorder)),
       ),
       child: Row(
         children: [
           IconButton(
-            icon: Icon(Icons.arrow_back_rounded, color: theme.colorScheme.onSurface),
+            icon: Icon(Icons.arrow_back_rounded, color: colors.ink),
             tooltip: 'Back to Library',
             onPressed: () {
               if (widget.onClose != null) {
@@ -386,13 +390,13 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
               children: [
                 Text(
                   widget.book.title,
-                  style: AppTypography.titleSerif(fontSize: 15, color: theme.colorScheme.onSurface),
+                  style: AppTypography.titleSerif(fontSize: 15, color: colors.ink),
                   overflow: TextOverflow.ellipsis,
                 ),
                 if (spread != null)
                   Text(
                     '${spread.label} of ${widget.book.spine.length}',
-                    style: AppTypography.bodySans(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                    style: AppTypography.mono(fontSize: 12, color: colors.secondaryInk),
                   ),
               ],
             ),
@@ -406,7 +410,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   : _spreadMode == SpreadMode.twoPage
                       ? Icons.menu_book_rounded
                       : Icons.crop_portrait_rounded,
-              color: theme.colorScheme.onSurface,
+              color: colors.ink,
             ),
             tooltip: _spreadMode == SpreadMode.auto
                 ? 'Spread Mode: Auto (Responsive)'
@@ -428,7 +432,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
 
           // Bookmark Button
           IconButton(
-            icon: Icon(Icons.bookmark_add_outlined, color: theme.colorScheme.onSurface),
+            icon: Icon(Icons.bookmark_add_outlined, color: colors.ink),
             tooltip: 'Bookmark Page',
             onPressed: () {
               if (spread == null) return;
@@ -452,7 +456,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
           // Table of Contents
           Builder(
             builder: (ctx) => IconButton(
-              icon: Icon(Icons.list_rounded, color: theme.colorScheme.onSurface),
+              icon: Icon(Icons.list_rounded, color: colors.ink),
               tooltip: 'Table of Contents',
               onPressed: () => Scaffold.of(ctx).openEndDrawer(),
             ),
@@ -463,7 +467,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   }
 
   Widget _buildBottomBar(BuildContext context, FixedSpread? spread, int totalSpreads) {
-    final theme = Theme.of(context);
+    final colors = ShelfdColors.of(context);
     final canPrev = _currentSpreadIndex > 0;
     final canNext = _currentSpreadIndex < totalSpreads - 1;
 
@@ -471,22 +475,22 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
       height: 64,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.95),
-        border: Border(top: BorderSide(color: theme.dividerColor)),
+        color: colors.surface.withValues(alpha: 0.95),
+        border: Border(top: BorderSide(color: colors.subtleBorder)),
       ),
       child: Row(
         children: [
           IconButton(
-            icon: Icon(Icons.chevron_left_rounded, color: theme.colorScheme.onSurface),
+            icon: Icon(Icons.chevron_left_rounded, color: colors.ink),
             tooltip: 'Previous',
             onPressed: canPrev ? () => _goToSpread(_currentSpreadIndex - 1, totalSpreads) : null,
           ),
           Expanded(
             child: SliderTheme(
               data: SliderTheme.of(context).copyWith(
-                activeTrackColor: theme.colorScheme.primary,
-                inactiveTrackColor: theme.dividerColor,
-                thumbColor: theme.colorScheme.primary,
+                activeTrackColor: colors.accentPrimary,
+                inactiveTrackColor: colors.border,
+                thumbColor: colors.accentPrimary,
                 trackHeight: 3,
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
               ),
@@ -500,14 +504,14 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
             ),
           ),
           IconButton(
-            icon: Icon(Icons.chevron_right_rounded, color: theme.colorScheme.onSurface),
+            icon: Icon(Icons.chevron_right_rounded, color: colors.ink),
             tooltip: 'Next',
             onPressed: canNext ? () => _goToSpread(_currentSpreadIndex + 1, totalSpreads) : null,
           ),
           const SizedBox(width: 8),
           Text(
             spread != null ? spread.label : '',
-            style: AppTypography.bodySans(fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
+            style: AppTypography.mono(fontSize: 12, color: colors.secondaryInk),
           ),
         ],
       ),
@@ -626,9 +630,9 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                       Colors.black54,
-                       Colors.black12,
-                       Colors.black54,
+                      Colors.black54,
+                      Colors.black12,
+                      Colors.black54,
                     ],
                   ),
                 ),
@@ -658,14 +662,13 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   }
 
   Widget _buildTocDrawer(BuildContext context, List<FixedSpread> spreads) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final colors = ShelfdColors.of(context);
     final spine = widget.book.spine;
     final namedSpine = widget.book.namedSpine;
     final displayItems = namedSpine.isNotEmpty ? namedSpine : spine;
 
     return Drawer(
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: colors.surface,
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -674,10 +677,10 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
               padding: const EdgeInsets.all(AppTokens.space20),
               child: Text(
                 namedSpine.isNotEmpty ? 'Table of Contents' : 'Pages',
-                style: AppTypography.titleSerif(fontSize: 20, color: theme.colorScheme.onSurface),
+                style: AppTypography.titleSerif(fontSize: 20, color: colors.ink),
               ),
             ),
-            Divider(color: theme.dividerColor, height: 1),
+            Divider(color: colors.subtleBorder, height: 1),
             Expanded(
               child: ListView.builder(
                 itemCount: displayItems.length,
@@ -688,21 +691,21 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
 
                   return ListTile(
                     selected: isCurrent,
-                    selectedTileColor: isDark ? const Color(0xFF2A2A32) : theme.cardColor,
+                    selectedTileColor: colors.container,
                     title: Text(
                       item.title.isNotEmpty ? item.title : 'Page ${item.chapterIndex}',
                       style: isCurrent
-                          ? AppTypography.titleSerif(fontSize: 14, color: theme.colorScheme.primary)
-                          : AppTypography.bodySans(fontSize: 14, color: theme.colorScheme.onSurface),
+                          ? AppTypography.titleSerif(fontSize: 14, color: colors.accentPrimary)
+                          : AppTypography.bodySans(fontSize: 14, color: colors.ink),
                     ),
                     subtitle: Text(
                       namedSpine.isNotEmpty
                           ? 'Page ${item.chapterIndex}'
                           : (item.isGatefold ? 'Gatefold Spread' : (item.pageSpread ?? 'Standard Page')),
-                      style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+                      style: AppTypography.mono(fontSize: 11, color: colors.mutedInk),
                     ),
                     trailing: isCurrent
-                        ? Icon(Icons.check_rounded, size: 18, color: theme.colorScheme.primary)
+                        ? Icon(Icons.check_rounded, size: 18, color: colors.accentPrimary)
                         : null,
                     onTap: () {
                       Navigator.of(context).pop();
