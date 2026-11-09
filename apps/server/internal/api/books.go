@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/audio"
+	"github.com/shelfd/shelfd/internal/config"
 	"github.com/shelfd/shelfd/internal/epub"
 	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/repository"
@@ -34,6 +36,7 @@ type BookHandler struct {
 	uploadWorker *worker.UploadWorker
 	aiClient     ai.Client
 	toolInvoker  ai.ToolInvoker
+	notebookLM   config.NotebookLMConfig
 	dataDir      string
 	libraryDir   string
 	hub          *events.Hub
@@ -43,6 +46,11 @@ type BookHandler struct {
 // SetToolInvoker sets the in-process tool invoker for agentic book chat.
 func (h *BookHandler) SetToolInvoker(invoker ai.ToolInvoker) {
 	h.toolInvoker = invoker
+}
+
+// SetNotebookLMConfig sets the NotebookLM integration configuration for exporting/pushing books.
+func (h *BookHandler) SetNotebookLMConfig(cfg config.NotebookLMConfig) {
+	h.notebookLM = cfg
 }
 
 func NewBookHandler(
@@ -598,6 +606,426 @@ func (h *BookHandler) DownloadBook(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, no-transform")
 
 	http.ServeFile(w, r, filePath)
+}
+
+// NotebookLMSendResponse represents the response returned by POST /api/v1/books/{id}/notebooklm.
+type NotebookLMSendResponse struct {
+	Status       string `json:"status"`
+	NotebookURL  string `json:"notebook_url"`
+	FileName     string `json:"file_name"`
+	DownloadPath string `json:"download_path,omitempty"`
+	Message      string `json:"message"`
+}
+
+func notebookLMFilename(book *repository.Book) string {
+	cleanTitle := ""
+	if book != nil {
+		cleanTitle = sanitizeDownloadFilename(book.Title)
+		if cleanTitle == "" {
+			cleanTitle = sanitizeDownloadFilename(book.ID)
+		}
+	}
+	if cleanTitle == "" {
+		cleanTitle = "book"
+	}
+	return fmt.Sprintf("%s.md", cleanTitle)
+}
+
+func (h *BookHandler) compileBookNotebookLMMarkdown(ctx context.Context, book *repository.Book) string {
+	var sb strings.Builder
+
+	title := strings.TrimSpace(book.Title)
+	if title == "" {
+		title = "Untitled Book"
+	}
+	sb.WriteString(fmt.Sprintf("# %s\n\n", title))
+
+	authors, _ := h.repo.GetBookAuthors(ctx, book.ID)
+	genres, _ := h.repo.GetBookGenres(ctx, book.ID)
+	topics, _ := h.repo.GetBookTopics(ctx, book.ID)
+	seriesList, _ := h.repo.GetBookSeries(ctx, book.ID)
+	highlights, _ := h.repo.ListHighlightsByBookID(ctx, book.ID)
+	chapters, _ := h.repo.GetChaptersByBookID(ctx, book.ID)
+
+	sb.WriteString("## Book Metadata\n\n")
+	sb.WriteString(fmt.Sprintf("- **Title**: %s\n", title))
+	if len(authors) > 0 {
+		names := make([]string, 0, len(authors))
+		for _, a := range authors {
+			if strings.TrimSpace(a.Name) != "" {
+				names = append(names, strings.TrimSpace(a.Name))
+			}
+		}
+		if len(names) > 0 {
+			sb.WriteString(fmt.Sprintf("- **Author(s)**: %s\n", strings.Join(names, ", ")))
+		}
+	}
+	if len(seriesList) > 0 {
+		parts := make([]string, 0, len(seriesList))
+		for _, s := range seriesList {
+			if strings.TrimSpace(s.Name) == "" {
+				continue
+			}
+			if s.SequenceNumber != nil {
+				parts = append(parts, fmt.Sprintf("%s (#%g)", strings.TrimSpace(s.Name), *s.SequenceNumber))
+			} else {
+				parts = append(parts, strings.TrimSpace(s.Name))
+			}
+		}
+		if len(parts) > 0 {
+			sb.WriteString(fmt.Sprintf("- **Series**: %s\n", strings.Join(parts, ", ")))
+		}
+	}
+	if book.Publisher != nil && strings.TrimSpace(*book.Publisher) != "" {
+		sb.WriteString(fmt.Sprintf("- **Publisher**: %s\n", strings.TrimSpace(*book.Publisher)))
+	}
+	if book.PublishedDate != nil && strings.TrimSpace(*book.PublishedDate) != "" {
+		sb.WriteString(fmt.Sprintf("- **Published**: %s\n", strings.TrimSpace(*book.PublishedDate)))
+	}
+	if book.Language != nil && strings.TrimSpace(*book.Language) != "" {
+		sb.WriteString(fmt.Sprintf("- **Language**: %s\n", strings.TrimSpace(*book.Language)))
+	}
+	if book.Identifier != nil && strings.TrimSpace(*book.Identifier) != "" {
+		sb.WriteString(fmt.Sprintf("- **Identifier**: %s\n", strings.TrimSpace(*book.Identifier)))
+	}
+	if len(genres) > 0 {
+		names := make([]string, 0, len(genres))
+		for _, g := range genres {
+			if strings.TrimSpace(g.Name) != "" {
+				names = append(names, strings.TrimSpace(g.Name))
+			}
+		}
+		if len(names) > 0 {
+			sb.WriteString(fmt.Sprintf("- **Genres**: %s\n", strings.Join(names, ", ")))
+		}
+	}
+	if len(topics) > 0 {
+		names := make([]string, 0, len(topics))
+		for _, t := range topics {
+			if strings.TrimSpace(t.Name) != "" {
+				names = append(names, strings.TrimSpace(t.Name))
+			}
+		}
+		if len(names) > 0 {
+			sb.WriteString(fmt.Sprintf("- **Topics**: %s\n", strings.Join(names, ", ")))
+		}
+	}
+
+	if book.Description != nil && strings.TrimSpace(*book.Description) != "" {
+		sb.WriteString("\n## Synopsis\n\n")
+		sb.WriteString(strings.TrimSpace(*book.Description))
+		sb.WriteString("\n")
+	}
+
+	if len(highlights) > 0 {
+		sb.WriteString("\n## Highlights & Notes\n\n")
+		for _, hl := range highlights {
+			text := strings.TrimSpace(hl.SelectedText)
+			if text == "" {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("> %s\n", strings.ReplaceAll(text, "\n", "\n> ")))
+			if hl.Note != nil && strings.TrimSpace(*hl.Note) != "" {
+				sb.WriteString(fmt.Sprintf("\n- **Note**: %s\n", strings.TrimSpace(*hl.Note)))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// Check if DB chapters have non-empty content; otherwise fall back to live EPUB extraction
+	hasChapterContent := false
+	for _, ch := range chapters {
+		if strings.TrimSpace(ch.ContentPlain) != "" {
+			hasChapterContent = true
+			break
+		}
+	}
+
+	if !hasChapterContent {
+		if epubPath := h.resolveBookFilePath(book); epubPath != "" {
+			if reader, err := epub.Open(epubPath); err == nil {
+				if parsedChapters, pErr := reader.ExtractChapters(); pErr == nil && len(parsedChapters) > 0 {
+					chapters = make([]*repository.Chapter, 0, len(parsedChapters))
+					for _, pc := range parsedChapters {
+						chapters = append(chapters, &repository.Chapter{
+							BookID:       book.ID,
+							ChapterIndex: pc.Index,
+							Title:        pc.Title,
+							ContentPlain: pc.ContentPlain,
+						})
+					}
+				}
+				reader.Close()
+			}
+		}
+	}
+
+	if len(chapters) > 0 {
+		sb.WriteString("\n## Chapters\n")
+		for _, ch := range chapters {
+			content := strings.TrimSpace(ch.ContentPlain)
+			if content == "" && ch.Summary == "" {
+				continue
+			}
+			chHeading := fmt.Sprintf("Chapter %d", ch.ChapterIndex)
+			if ch.Title != nil && strings.TrimSpace(*ch.Title) != "" {
+				chHeading = fmt.Sprintf("Chapter %d: %s", ch.ChapterIndex, strings.TrimSpace(*ch.Title))
+			}
+			sb.WriteString(fmt.Sprintf("\n### %s\n\n", chHeading))
+			if strings.TrimSpace(ch.Summary) != "" {
+				sb.WriteString(fmt.Sprintf("*Summary: %s*\n\n", strings.TrimSpace(ch.Summary)))
+			}
+			if content != "" {
+				sb.WriteString(content)
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	return sb.String()
+}
+
+// ExportBookNotebookLM handles GET /api/v1/books/{id}/notebooklm and serves a compiled
+// NotebookLM-optimized Markdown document containing metadata, highlights, and chapter content.
+func (h *BookHandler) ExportBookNotebookLM(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book: %v", err))
+		return
+	}
+
+	markdown := h.compileBookNotebookLMMarkdown(r.Context(), book)
+	filename := notebookLMFilename(book)
+
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("Cache-Control", "private, no-transform")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(markdown))
+}
+
+// SendBookToNotebookLM handles POST /api/v1/books/{id}/notebooklm.
+// If a server-side NotebookLM webhook or Google Discovery Engine endpoint is configured,
+// it pushes the compiled Markdown document directly; otherwise it returns a client_handoff
+// response so the client can download the Markdown bundle and open NotebookLM.
+func (h *BookHandler) SendBookToNotebookLM(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book: %v", err))
+		return
+	}
+
+	filename := notebookLMFilename(book)
+	downloadPath := fmt.Sprintf("/api/v1/books/%s/notebooklm", book.ID)
+	defaultNotebookURL := h.notebookLM.ResolvedNotebookURL()
+
+	// Zero-config fallback: instruct client to download the Markdown bundle and open NotebookLM
+	if !h.notebookLM.IsConfigured() {
+		writeJSON(w, http.StatusOK, NotebookLMSendResponse{
+			Status:       "client_handoff",
+			NotebookURL:  defaultNotebookURL,
+			FileName:     filename,
+			DownloadPath: downloadPath,
+			Message:      fmt.Sprintf("Prepared %q for NotebookLM. Upload the downloaded Markdown file as a source.", filename),
+		})
+		return
+	}
+
+	markdown := h.compileBookNotebookLMMarkdown(r.Context(), book)
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// Mode 1: Webhook / Bridge URL push
+	if webhookURL := strings.TrimSpace(h.notebookLM.WebhookURL); webhookURL != "" {
+		if err := config.ValidateSSRF(webhookURL); err != nil {
+			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Invalid NotebookLM webhook URL: %v", err))
+			return
+		}
+
+		payload, _ := json.Marshal(map[string]any{
+			"book_id":      book.ID,
+			"title":        book.Title,
+			"file_name":    filename,
+			"content_type": "text/markdown",
+			"content":      markdown,
+		})
+
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, webhookURL, bytes.NewReader(payload))
+		if err != nil {
+			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Failed to create NotebookLM webhook request: %v", err))
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if apiKey := strings.TrimSpace(h.notebookLM.APIKey); apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("NotebookLM webhook request failed: %v", err))
+			return
+		}
+		defer resp.Body.Close()
+
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("NotebookLM upstream returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody))))
+			return
+		}
+
+		notebookURL := defaultNotebookURL
+		message := fmt.Sprintf("Sent %q to NotebookLM.", book.Title)
+		var parsedResp struct {
+			NotebookURL string `json:"notebook_url"`
+			URL         string `json:"url"`
+			Message     string `json:"message"`
+		}
+		if len(respBody) > 0 && json.Unmarshal(respBody, &parsedResp) == nil {
+			if strings.TrimSpace(parsedResp.NotebookURL) != "" {
+				notebookURL = strings.TrimSpace(parsedResp.NotebookURL)
+			} else if strings.TrimSpace(parsedResp.URL) != "" {
+				notebookURL = strings.TrimSpace(parsedResp.URL)
+			}
+			if strings.TrimSpace(parsedResp.Message) != "" {
+				message = strings.TrimSpace(parsedResp.Message)
+			}
+		}
+
+		writeJSON(w, http.StatusOK, NotebookLMSendResponse{
+			Status:       "sent",
+			NotebookURL:  notebookURL,
+			FileName:     filename,
+			DownloadPath: downloadPath,
+			Message:      message,
+		})
+		return
+	}
+
+	// Mode 2: Google Cloud Discovery Engine (NotebookLM Enterprise API) push
+	location := strings.TrimSpace(h.notebookLM.Location)
+	if location == "" {
+		location = "global"
+	}
+	baseEndpoint := strings.TrimRight(strings.TrimSpace(h.notebookLM.Endpoint), "/")
+	if baseEndpoint == "" {
+		baseEndpoint = fmt.Sprintf("https://%s-discoveryengine.googleapis.com", location)
+	}
+	if err := config.ValidateSSRF(baseEndpoint); err != nil {
+		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Invalid NotebookLM endpoint URL: %v", err))
+		return
+	}
+
+	projectID := strings.TrimSpace(h.notebookLM.ProjectID)
+	apiKey := strings.TrimSpace(h.notebookLM.APIKey)
+
+	// Step 1: Create Notebook
+	createURL := fmt.Sprintf("%s/v1alpha/projects/%s/locations/%s/notebooks", baseEndpoint, projectID, location)
+	createPayload, _ := json.Marshal(map[string]string{"title": book.Title})
+	createReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, createURL, bytes.NewReader(createPayload))
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Failed to build NotebookLM create request: %v", err))
+		return
+	}
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+	createResp, err := client.Do(createReq)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("NotebookLM create request failed: %v", err))
+		return
+	}
+	defer createResp.Body.Close()
+
+	createBody, _ := io.ReadAll(io.LimitReader(createResp.Body, 1<<20))
+	if createResp.StatusCode < 200 || createResp.StatusCode >= 300 {
+		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("NotebookLM create notebook returned HTTP %d: %s", createResp.StatusCode, strings.TrimSpace(string(createBody))))
+		return
+	}
+
+	var createdNotebook struct {
+		Name       string `json:"name"`
+		NotebookID string `json:"notebookId"`
+	}
+	_ = json.Unmarshal(createBody, &createdNotebook)
+	notebookID := strings.TrimSpace(createdNotebook.NotebookID)
+	if notebookID == "" && createdNotebook.Name != "" {
+		parts := strings.Split(strings.TrimRight(createdNotebook.Name, "/"), "/")
+		notebookID = parts[len(parts)-1]
+	}
+
+	// Step 2: Upload Markdown Source if notebookID was returned
+	if notebookID != "" {
+		uploadURL := fmt.Sprintf("%s/upload/v1alpha/projects/%s/locations/%s/notebooks/%s/sources:uploadFile", baseEndpoint, projectID, location, notebookID)
+		uploadReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, uploadURL, strings.NewReader(markdown))
+		if err != nil {
+			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Failed to build NotebookLM upload request: %v", err))
+			return
+		}
+		uploadReq.Header.Set("Authorization", "Bearer "+apiKey)
+		uploadReq.Header.Set("Content-Type", "text/markdown")
+		uploadReq.Header.Set("X-Goog-Upload-File-Name", filename)
+		uploadReq.Header.Set("X-Goog-Upload-Protocol", "raw")
+
+		uploadResp, err := client.Do(uploadReq)
+		if err != nil {
+			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("NotebookLM source upload failed: %v", err))
+			return
+		}
+		defer uploadResp.Body.Close()
+		uploadBody, _ := io.ReadAll(io.LimitReader(uploadResp.Body, 1<<20))
+		if uploadResp.StatusCode < 200 || uploadResp.StatusCode >= 300 {
+			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("NotebookLM source upload returned HTTP %d: %s", uploadResp.StatusCode, strings.TrimSpace(string(uploadBody))))
+			return
+		}
+	}
+
+	notebookURL := defaultNotebookURL
+	if notebookID != "" && notebookURL == config.DefaultNotebookLMURL {
+		notebookURL = fmt.Sprintf("https://notebooklm.google.com/notebook/%s", notebookID)
+	}
+
+	writeJSON(w, http.StatusOK, NotebookLMSendResponse{
+		Status:       "sent",
+		NotebookURL:  notebookURL,
+		FileName:     filename,
+		DownloadPath: downloadPath,
+		Message:      fmt.Sprintf("Sent %q to NotebookLM.", book.Title),
+	})
 }
 
 func (h *BookHandler) GetBookAsset(w http.ResponseWriter, r *http.Request) {

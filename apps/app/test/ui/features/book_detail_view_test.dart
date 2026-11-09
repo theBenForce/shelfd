@@ -9,6 +9,9 @@ import 'package:shelf/data/models/book_chat.dart';
 import 'package:shelf/data/models/bookmark.dart';
 import 'package:shelf/data/models/highlight.dart';
 import 'package:shelf/data/models/series.dart';
+import 'package:shelf/data/repositories/book_repository.dart';
+import 'package:shelf/data/services/api_service.dart';
+import 'package:shelf/data/services/storage_service.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/book_detail/book_detail_view.dart';
 import 'package:shelf/ui/state/providers.dart';
@@ -431,6 +434,133 @@ void main() {
     expect(find.text('Page 3'), findsOneWidget);
     expect(find.text('Page 5'), findsOneWidget);
   });
+
+  testWidgets('BookDetailView Download EPUB dropdown opens and shows multiple export options', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final mockRepo = _MockBookRepository(prefs);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookRepositoryProvider.overrideWithValue(mockRepo),
+          bookDetailProvider('book-42').overrideWith(() => _MockBookDetailNotifier(testBook)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const BookDetailView(bookId: 'book-42'),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Open the Hero Card Download EPUB dropdown menu
+    await tester.tap(find.byKey(const Key('download_hero_menu_button')));
+    await tester.pumpAndSettle();
+
+    // Verify all dropdown options are rendered
+    expect(find.byKey(const Key('menu_item_download_epub')), findsOneWidget);
+    expect(find.byKey(const Key('menu_item_send_notebooklm')), findsOneWidget);
+    expect(find.byKey(const Key('menu_item_download_markdown')), findsOneWidget);
+    expect(find.text('Send to NotebookLM'), findsOneWidget);
+    expect(find.text('Download Markdown (.md)'), findsOneWidget);
+
+    // Select "Send to NotebookLM"
+    await tester.tap(find.byKey(const Key('menu_item_send_notebooklm')));
+    await tester.pumpAndSettle();
+
+    expect(mockRepo.sendToNotebookLMCalledWith, 'book-42');
+    expect(mockRepo.downloadNotebookLMCalledWith, 'book-42');
+    expect(find.textContaining('NotebookLM'), findsOneWidget);
+  });
+
+  testWidgets('BookDetailView AppBar Download EPUB dropdown triggers EPUB and Markdown downloads', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final mockRepo = _MockBookRepository(prefs);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookRepositoryProvider.overrideWithValue(mockRepo),
+          bookDetailProvider('book-42').overrideWith(() => _MockBookDetailNotifier(testBook)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const BookDetailView(bookId: 'book-42'),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Open the AppBar dropdown menu via tooltip
+    await tester.tap(find.byTooltip('Download EPUB'));
+    await tester.pumpAndSettle();
+
+    // Select "Download EPUB"
+    await tester.tap(find.byKey(const Key('menu_item_download_epub')));
+    await tester.pumpAndSettle();
+
+    expect(mockRepo.downloadEpubCalledWith, 'book-42');
+
+    // Open AppBar dropdown again and select "Download Markdown (.md)"
+    await tester.tap(find.byTooltip('Download EPUB'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('menu_item_download_markdown')));
+    await tester.pumpAndSettle();
+
+    expect(mockRepo.downloadNotebookLMCalledWith, 'book-42');
+  });
+}
+
+class _MockBookRepository extends BookRepository {
+  String? downloadEpubCalledWith;
+  String? downloadNotebookLMCalledWith;
+  String? sendToNotebookLMCalledWith;
+
+  _MockBookRepository(SharedPreferences prefs)
+      : super(
+          apiService: ApiService(baseUrl: 'http://localhost:8080'),
+          storageService: StorageService(prefs),
+        );
+
+  @override
+  Future<List<int>> downloadBookEpub(String bookId) async {
+    downloadEpubCalledWith = bookId;
+    return [0x50, 0x4B, 0x03, 0x04];
+  }
+
+  @override
+  Future<List<int>> downloadBookNotebookLM(String bookId) async {
+    downloadNotebookLMCalledWith = bookId;
+    return '# The Left Hand of Darkness\n'.codeUnits;
+  }
+
+  @override
+  Future<NotebookLMSendResult> sendBookToNotebookLM(String bookId) async {
+    sendToNotebookLMCalledWith = bookId;
+    return const NotebookLMSendResult(
+      status: 'client_handoff',
+      notebookUrl: 'https://notebooklm.google.com/',
+      fileName: 'The Left Hand of Darkness.md',
+      message: 'Exported The Left Hand of Darkness.md for NotebookLM — upload it as a source!',
+    );
+  }
 }
 
 class _MockBookDetailNotifier extends BookDetailNotifier {

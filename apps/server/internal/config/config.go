@@ -14,13 +14,14 @@ import (
 
 // Config represents the Shelfd server configuration matching TECHNICAL_DESIGN_DOCUMENT.md.
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Storage  StorageConfig  `yaml:"storage"`
-	AI       AIConfig       `yaml:"ai"`
-	MCP      MCPConfig      `yaml:"mcp"`
-	Auth     AuthConfig     `yaml:"auth"`
-	Logging  LoggingConfig  `yaml:"logging"`
+	Server     ServerConfig     `yaml:"server"`
+	Database   DatabaseConfig   `yaml:"database"`
+	Storage    StorageConfig    `yaml:"storage"`
+	AI         AIConfig         `yaml:"ai"`
+	MCP        MCPConfig        `yaml:"mcp"`
+	NotebookLM NotebookLMConfig `yaml:"notebooklm"`
+	Auth       AuthConfig       `yaml:"auth"`
+	Logging    LoggingConfig    `yaml:"logging"`
 }
 
 type ServerConfig struct {
@@ -105,6 +106,53 @@ type MCPConfig struct {
 	Path    string `yaml:"path"`
 }
 
+// NotebookLMConfig defines optional server-side integration settings for sending books to NotebookLM
+// via a webhook/bridge service or Google Cloud Discovery Engine (NotebookLM Enterprise API).
+type NotebookLMConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	WebhookURL  string `yaml:"webhook_url"`
+	Endpoint    string `yaml:"endpoint"`
+	ProjectID   string `yaml:"project_id"`
+	Location    string `yaml:"location"`
+	APIKey      string `yaml:"api_key"`
+	NotebookURL string `yaml:"notebook_url"`
+}
+
+// DefaultNotebookLMURL is the default consumer web URL for Google NotebookLM.
+const DefaultNotebookLMURL = "https://notebooklm.google.com/"
+
+// IsConfigured reports whether server-side push to NotebookLM (via webhook or GCP Enterprise API) is configured.
+func (n NotebookLMConfig) IsConfigured() bool {
+	if strings.TrimSpace(n.WebhookURL) != "" {
+		return true
+	}
+	if strings.TrimSpace(n.ProjectID) != "" && strings.TrimSpace(n.APIKey) != "" {
+		return true
+	}
+	return false
+}
+
+// ResolvedNotebookURL returns the configured target NotebookLM web URL or DefaultNotebookLMURL.
+func (n NotebookLMConfig) ResolvedNotebookURL() string {
+	if u := strings.TrimSpace(n.NotebookURL); u != "" {
+		return u
+	}
+	return DefaultNotebookLMURL
+}
+
+func (n NotebookLMConfig) String() string {
+	maskedKey := ""
+	if n.APIKey != "" {
+		if len(n.APIKey) > 7 {
+			maskedKey = n.APIKey[:3] + "****" + n.APIKey[len(n.APIKey)-4:]
+		} else {
+			maskedKey = "****"
+		}
+	}
+	return fmt.Sprintf("NotebookLMConfig{Enabled:%v, WebhookURL:%s, Endpoint:%s, ProjectID:%s, Location:%s, APIKey:%s, NotebookURL:%s}",
+		n.Enabled, n.WebhookURL, n.Endpoint, n.ProjectID, n.Location, maskedKey, n.NotebookURL)
+}
+
 type AuthConfig struct {
 	AdminUsername string `yaml:"admin_username"`
 	AdminPassword string `yaml:"admin_password"`
@@ -159,6 +207,11 @@ func DefaultConfig() *Config {
 		MCP: MCPConfig{
 			Enabled: true,
 			Path:    "/mcp",
+		},
+		NotebookLM: NotebookLMConfig{
+			Enabled:     false,
+			Location:    "global",
+			NotebookURL: DefaultNotebookLMURL,
 		},
 		Auth: AuthConfig{
 			AdminUsername: "admin",
@@ -433,6 +486,18 @@ func (c *Config) Validate() error {
 	if err := ValidateSSRF(c.AI.Chat.BaseURL); err != nil {
 		return fmt.Errorf("ai.chat.base_url contains %w", err)
 	}
+	if err := ValidateSSRF(c.NotebookLM.WebhookURL); err != nil {
+		return fmt.Errorf("notebooklm.webhook_url contains %w", err)
+	}
+	if err := ValidateSSRF(c.NotebookLM.Endpoint); err != nil {
+		return fmt.Errorf("notebooklm.endpoint contains %w", err)
+	}
+	if strings.TrimSpace(c.NotebookLM.Location) == "" {
+		c.NotebookLM.Location = "global"
+	}
+	if strings.TrimSpace(c.NotebookLM.NotebookURL) == "" {
+		c.NotebookLM.NotebookURL = DefaultNotebookLMURL
+	}
 
 	if c.Logging.Level == "" {
 		c.Logging.Level = "info"
@@ -597,6 +662,30 @@ func ApplyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("SHELFD_MCP_PATH"); v != "" {
 		cfg.MCP.Path = v
+	}
+
+	if v := os.Getenv("SHELFD_NOTEBOOKLM_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.NotebookLM.Enabled = b
+		}
+	}
+	if v := os.Getenv("SHELFD_NOTEBOOKLM_WEBHOOK_URL"); v != "" {
+		cfg.NotebookLM.WebhookURL = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("SHELFD_NOTEBOOKLM_ENDPOINT"); v != "" {
+		cfg.NotebookLM.Endpoint = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("SHELFD_NOTEBOOKLM_PROJECT_ID"); v != "" {
+		cfg.NotebookLM.ProjectID = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("SHELFD_NOTEBOOKLM_LOCATION"); v != "" {
+		cfg.NotebookLM.Location = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("SHELFD_NOTEBOOKLM_API_KEY"); v != "" {
+		cfg.NotebookLM.APIKey = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("SHELFD_NOTEBOOKLM_URL"); v != "" {
+		cfg.NotebookLM.NotebookURL = strings.TrimSpace(v)
 	}
 
 	if v := os.Getenv("SHELFD_ADMIN_USERNAME"); v != "" {

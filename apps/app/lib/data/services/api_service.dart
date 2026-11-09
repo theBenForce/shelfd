@@ -28,6 +28,45 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $message';
 }
 
+class NotebookLMSendResult {
+  final String status;
+  final String notebookUrl;
+  final String? fileName;
+  final String? downloadPath;
+  final String? message;
+
+  const NotebookLMSendResult({
+    required this.status,
+    required this.notebookUrl,
+    this.fileName,
+    this.downloadPath,
+    this.message,
+  });
+
+  bool get isSent => status == 'sent';
+  bool get isClientHandoff => status == 'client_handoff';
+
+  factory NotebookLMSendResult.fromJson(Map<String, dynamic> json) {
+    return NotebookLMSendResult(
+      status: json['status'] as String? ?? 'client_handoff',
+      notebookUrl: json['notebook_url'] as String? ?? 'https://notebooklm.google.com/',
+      fileName: json['file_name'] as String?,
+      downloadPath: json['download_path'] as String?,
+      message: json['message'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'status': status,
+      'notebook_url': notebookUrl,
+      if (fileName != null) 'file_name': fileName,
+      if (downloadPath != null) 'download_path': downloadPath,
+      if (message != null) 'message': message,
+    };
+  }
+}
+
 sealed class ShelfdEvent {
   const ShelfdEvent();
 }
@@ -322,6 +361,40 @@ class ApiService {
     }
     return response.bodyBytes;
   }
+
+  String getBookNotebookLMUrl(String bookId) {
+    if (token != null && token!.isNotEmpty) {
+      return _uri('/api/v1/books/$bookId/notebooklm', {'token': token!}).toString();
+    }
+    return _uri('/api/v1/books/$bookId/notebooklm').toString();
+  }
+
+  Future<List<int>> downloadBookNotebookLM(String bookId) async {
+    final response = await client.get(
+      _uri('/api/v1/books/$bookId/notebooklm'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    return response.bodyBytes;
+  }
+
+  Future<NotebookLMSendResult> sendBookToNotebookLM(String bookId) async {
+    final response = await client.post(
+      _uri('/api/v1/books/$bookId/notebooklm'),
+      headers: _headers(),
+      body: jsonEncode(<String, dynamic>{}),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return NotebookLMSendResult.fromJson(data);
+  }
+
+  Future<NotebookLMSendResult> sendToNotebookLM(String bookId) =>
+      sendBookToNotebookLM(bookId);
 
   Future<Chapter> getChapter(String bookId, dynamic chapterIdentifier) async {
     final response = await client.get(
