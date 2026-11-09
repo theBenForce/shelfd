@@ -210,4 +210,31 @@ void main() {
     final textField = tester.widget<TextField>(find.byType(TextField));
     expect(textField.controller?.text, 'Topic:"Bullet Journal" ');
   });
+
+  testWidgets('LibraryFilterBar renders in ReadingThemeMode.dark with book count badges',
+      (tester) async {
+    final notifier = _FakeLibraryNotifier(authors: sampleAuthors);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          libraryProvider.overrideWith(() => notifier),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+          home: const Scaffold(
+            body: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: LibraryFilterBar(),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField), 'author:');
+    await tester.pump();
+
+    expect(find.text('Ryder Carroll'), findsOneWidget);
+    expect(find.text('3 books'), findsOneWidget);
+  });
 }

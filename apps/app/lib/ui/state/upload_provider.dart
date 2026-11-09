@@ -71,8 +71,28 @@ class UploadState {
     );
   }
 
-  int get readyCount => stagedJobs.where((j) => j.warnings.isEmpty).length;
-  int get warningsCount => stagedJobs.where((j) => j.warnings.isNotEmpty).length;
+  static bool _isJobIncomplete(StagedUploadJob j) {
+    if (j.warnings.isNotEmpty) return true;
+    if (j.metadata.authors.isEmpty ||
+        (j.metadata.authors.length == 1 &&
+            j.metadata.authors.first.trim().toLowerCase() == 'unknown')) {
+      return true;
+    }
+    final t = j.metadata.title.trim();
+    if (t.isEmpty || t.toLowerCase() == 'untitled') {
+      return true;
+    }
+    return false;
+  }
+
+  List<StagedUploadJob> get readyJobs =>
+      stagedJobs.where((j) => !_isJobIncomplete(j)).toList();
+
+  List<StagedUploadJob> get incompleteJobs =>
+      stagedJobs.where(_isJobIncomplete).toList();
+
+  int get readyCount => readyJobs.length;
+  int get warningsCount => incompleteJobs.length;
 
   UploadState copyWith({
     bool? isUploading,

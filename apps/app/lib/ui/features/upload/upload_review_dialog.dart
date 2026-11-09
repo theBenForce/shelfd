@@ -6,6 +6,7 @@ import '../../../data/models/upload_job.dart';
 import '../book_detail/metadata_search_dialog.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -16,12 +17,13 @@ Future<Book?> showUploadReviewModal(
   StagedUploadJob job,
 ) async {
   final isMobile = Responsive.isMobile(context);
+  final colors = ShelfdColors.of(context);
 
   if (isMobile) {
     return showModalBottomSheet<Book>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTokens.boneBackground,
+      backgroundColor: colors.background,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
       ),
@@ -36,11 +38,11 @@ Future<Book?> showUploadReviewModal(
     context: context,
     barrierDismissible: false,
     builder: (ctx) => Dialog(
-      backgroundColor: AppTokens.boneBackground,
+      backgroundColor: colors.background,
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppTokens.radiusLg),
-        side: const BorderSide(color: AppTokens.crispBorder),
+        side: BorderSide(color: colors.border),
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 880, maxHeight: 780),
@@ -90,7 +92,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
     final m = widget.job.metadata;
     _titleController = TextEditingController(text: m.title);
     _authorController = TextEditingController(
-      text: m.authors.isNotEmpty && m.authors.first != 'Unknown' ? m.authors.join(', ') : '',
+      text: m.authors.isNotEmpty ? m.authors.join(', ') : '',
     );
     _narratorController = TextEditingController(text: m.narrator ?? '');
     _seriesController = TextEditingController(text: m.series ?? '');
@@ -169,12 +171,16 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
 
   String get _currentDestinationPreview {
     final rawAuthor = _authorController.text.trim();
+    final cleanAuthor = rawAuthor.isNotEmpty
+        ? rawAuthor.split(',').first.replaceAll(RegExp(r'[/\\:*?"<>|]'), '').trim()
+        : 'Unknown';
     final authorSegment = StagedMetadata.sanitizePathSegment(
-      rawAuthor.isNotEmpty ? rawAuthor.split(',').first.trim() : 'Unknown',
+      cleanAuthor.isEmpty ? 'Unknown' : cleanAuthor,
     );
     final rawTitle = _titleController.text.trim();
+    final cleanTitle = rawTitle.replaceAll(RegExp(r'[/\\:*?"<>|]'), '').trim();
     final titleSegment = StagedMetadata.sanitizePathSegment(
-      rawTitle.isNotEmpty ? rawTitle : 'Untitled',
+      cleanTitle.isEmpty ? 'Untitled' : cleanTitle,
     );
     final ext = widget.job.filename.contains('.')
         ? '.${widget.job.filename.split('.').last.toLowerCase()}'
@@ -330,14 +336,15 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
       );
 
       if (mounted) {
+        final colors = ShelfdColors.of(context);
         setState(() {
           _isUploadingCover = false;
           _hasCover = true;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Cover image updated successfully'),
-            backgroundColor: AppTokens.charcoalInk,
+          SnackBar(
+            content: const Text('Cover image updated successfully'),
+            backgroundColor: colors.ink,
           ),
         );
       }
@@ -422,10 +429,11 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
     }
 
     if (mounted) {
+      final colors = ShelfdColors.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Auto-populated metadata from ${result.provider}!'),
-          backgroundColor: AppTokens.charcoalInk,
+          backgroundColor: colors.ink,
         ),
       );
     }
@@ -433,6 +441,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     final isMobile = widget.isBottomSheet || Responsive.isMobile(context);
     final bookRepo = ref.watch(bookRepositoryProvider);
     final coverVersion = ref.watch(uploadProvider.select((s) => s.coverVersions[widget.job.jobId])) ??
@@ -453,11 +462,11 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: AppTokens.boneContainer,
+              color: colors.containerLow,
               borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              border: Border.all(color: AppTokens.crispBorder),
+              border: Border.all(color: colors.border),
             ),
-            child: const Icon(Icons.edit_note_rounded, color: AppTokens.charcoalInk, size: 20),
+            child: Icon(Icons.edit_note_rounded, color: colors.accentPrimary, size: 20),
           ),
           const SizedBox(width: AppTokens.space12),
           Expanded(
@@ -469,11 +478,15 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                   widget.job.metadata.bookType == 'audiobook'
                       ? 'Review Staged Audiobook'
                       : 'Review Staged EPUB',
-                  style: AppTypography.titleSerif(fontSize: 18, fontWeight: FontWeight.w600),
+                  style: AppTypography.titleSerif(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
                 ),
                 Text(
                   'Verify and adjust metadata before adding to /library',
-                  style: AppTypography.bodySans(fontSize: 12, color: AppTokens.mutedCopy),
+                  style: AppTypography.bodySans(fontSize: 12, color: colors.mutedInk),
                 ),
               ],
             ),
@@ -482,15 +495,15 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
             icon: const Icon(Icons.auto_fix_high, size: 16),
             label: const Text('Auto-Fill'),
             style: OutlinedButton.styleFrom(
-              foregroundColor: AppTokens.charcoalInk,
-              side: const BorderSide(color: AppTokens.crispBorder),
+              foregroundColor: colors.ink,
+              side: BorderSide(color: colors.border),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             ),
             onPressed: _isSaving || _isDiscarding ? null : _searchAndAutoPopulate,
           ),
           const SizedBox(width: AppTokens.space8),
           IconButton(
-            icon: const Icon(Icons.close_rounded, size: 20),
+            icon: Icon(Icons.close_rounded, size: 20, color: colors.mutedInk),
             onPressed: _isSaving || _isDiscarding ? null : () => Navigator.of(context).pop(null),
             tooltip: 'Cancel',
           ),
@@ -514,9 +527,9 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                   height: isMobile ? 160 : 260,
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    color: AppTokens.boneContainer,
+                    color: colors.containerLow,
                     borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                    border: Border.all(color: AppTokens.crispBorder),
+                    border: Border.all(color: colors.border),
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: coverUrl != null
@@ -553,17 +566,21 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: AppTokens.charcoalInk.withValues(alpha: 0.8),
+                        color: colors.ink.withValues(alpha: 0.8),
                         borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.camera_alt_outlined, size: 14, color: Colors.white),
-                          SizedBox(width: 4),
+                          Icon(Icons.camera_alt_outlined, size: 14, color: colors.surface),
+                          const SizedBox(width: 4),
                           Text(
                             'Change',
-                            style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
+                            style: AppTypography.bodySans(
+                              color: colors.surface,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ],
                       ),
@@ -581,8 +598,8 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                 icon: const Icon(Icons.upload_file, size: 14),
                 label: const Text('Upload', style: TextStyle(fontSize: 12)),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTokens.charcoalInk,
-                  side: const BorderSide(color: AppTokens.crispBorder),
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
                   padding: const EdgeInsets.symmetric(vertical: 8),
                 ),
                 onPressed: _isUploadingCover ? null : _pickAndUploadCover,
@@ -594,8 +611,8 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                 icon: const Icon(Icons.search, size: 14),
                 label: const Text('Search', style: TextStyle(fontSize: 12)),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTokens.charcoalInk,
-                  side: const BorderSide(color: AppTokens.crispBorder),
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
                   padding: const EdgeInsets.symmetric(vertical: 8),
                 ),
                 onPressed: _isSaving || _isDiscarding || _isUploadingCover ? null : _searchAndAutoPopulate,
@@ -609,32 +626,32 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
         Container(
           padding: const EdgeInsets.all(AppTokens.space12),
           decoration: BoxDecoration(
-            color: AppTokens.boneSurface,
+            color: colors.surface,
             borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-            border: Border.all(color: AppTokens.crispBorder),
+            border: Border.all(color: colors.border),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  const Icon(Icons.insert_drive_file_outlined, size: 16, color: AppTokens.mutedCopy),
+                  Icon(Icons.insert_drive_file_outlined, size: 16, color: colors.mutedInk),
                   const SizedBox(width: AppTokens.space8),
                   Expanded(
                     child: Text(
                       widget.job.filename,
-                      style: AppTypography.bodySans(
+                      style: AppTypography.mono(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: AppTokens.charcoalInk,
+                        color: colors.ink,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const StatusBadge(
+                  StatusBadge(
                     label: 'Staged',
-                    backgroundColor: AppTokens.boneContainer,
-                    textColor: AppTokens.mutedCopy,
+                    backgroundColor: colors.container,
+                    textColor: colors.mutedInk,
                   ),
                 ],
               ),
@@ -648,14 +665,22 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
           Container(
             padding: const EdgeInsets.all(AppTokens.space12),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFF4E6),
+              color: colors.isDark ? const Color(0xFF3A261B) : const Color(0xFFFFF4E6),
               borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              border: Border.all(color: const Color(0xFFFFD8A8)),
+              border: Border.all(
+                color: colors.isDark
+                    ? AppTokens.siennaDarkAccent.withValues(alpha: 0.5)
+                    : const Color(0xFFFFD8A8),
+              ),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD9480F)),
+                Icon(
+                  Icons.warning_amber_rounded,
+                  size: 18,
+                  color: colors.isDark ? AppTokens.siennaDarkAccent : const Color(0xFFD9480F),
+                ),
                 const SizedBox(width: AppTokens.space8),
                 Expanded(
                   child: Column(
@@ -666,7 +691,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                         style: AppTypography.bodySans(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
-                          color: const Color(0xFFB13600),
+                          color: colors.isDark ? AppTokens.siennaDarkAccent : const Color(0xFFB13600),
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -674,7 +699,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                         'EPUB metadata did not specify an author. Please provide one to ensure proper folder structure.',
                         style: AppTypography.bodySans(
                           fontSize: 11,
-                          color: const Color(0xFF8F2A00),
+                          color: colors.isDark ? colors.secondaryInk : const Color(0xFF8F2A00),
                         ),
                       ),
                     ],
@@ -690,14 +715,22 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
           Container(
             padding: const EdgeInsets.all(AppTokens.space12),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFF4E6),
+              color: colors.isDark ? const Color(0xFF3A261B) : const Color(0xFFFFF4E6),
               borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              border: Border.all(color: const Color(0xFFFFD8A8)),
+              border: Border.all(
+                color: colors.isDark
+                    ? AppTokens.siennaDarkAccent.withValues(alpha: 0.5)
+                    : const Color(0xFFFFD8A8),
+              ),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD9480F)),
+                Icon(
+                  Icons.warning_amber_rounded,
+                  size: 18,
+                  color: colors.isDark ? AppTokens.siennaDarkAccent : const Color(0xFFD9480F),
+                ),
                 const SizedBox(width: AppTokens.space8),
                 Expanded(
                   child: Column(
@@ -708,7 +741,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                         style: AppTypography.bodySans(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
-                          color: const Color(0xFFB13600),
+                          color: colors.isDark ? AppTokens.siennaDarkAccent : const Color(0xFFB13600),
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -716,7 +749,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                         'A book with this title and author already exists in your library. Saving will prompt to confirm overwriting.',
                         style: AppTypography.bodySans(
                           fontSize: 11,
-                          color: const Color(0xFF8F2A00),
+                          color: colors.isDark ? colors.secondaryInk : const Color(0xFF8F2A00),
                         ),
                       ),
                     ],
@@ -733,23 +766,24 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
         Container(
           padding: const EdgeInsets.all(AppTokens.space12),
           decoration: BoxDecoration(
-            color: AppTokens.charcoalInk,
+            color: colors.containerLow,
             borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+            border: Border.all(color: colors.border),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  const Icon(Icons.folder_outlined, size: 14, color: Color(0xFFADB5BD)),
+                  Icon(Icons.folder_outlined, size: 14, color: colors.mutedInk),
                   const SizedBox(width: 6),
                   Text(
                     'DESTINATION PATH',
-                    style: TextStyle(
+                    style: AppTypography.labelCaps(
                       fontSize: 10,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.8,
-                      color: Colors.grey.shade400,
+                      color: colors.mutedInk,
                     ),
                   ),
                 ],
@@ -757,10 +791,9 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
               const SizedBox(height: 6),
               SelectableText(
                 _currentDestinationPreview,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
+                style: AppTypography.mono(
                   fontSize: 11,
-                  color: Color(0xFF69DB7C),
+                  color: colors.accentSecondary,
                   height: 1.4,
                 ),
               ),
@@ -913,17 +946,17 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
         horizontal: AppTokens.space24,
         vertical: AppTokens.space16,
       ),
-      decoration: const BoxDecoration(
-        color: AppTokens.boneSurface,
-        border: Border(top: BorderSide(color: AppTokens.crispBorder)),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(top: BorderSide(color: colors.border)),
       ),
       child: Row(
         children: [
           // Discard Button
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFC92A2A),
-              side: const BorderSide(color: Color(0xFFFFC9C9)),
+              foregroundColor: colors.errorText,
+              side: BorderSide(color: colors.errorBorder),
               minimumSize: const Size(100, AppTokens.minTouchTarget),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(AppTokens.radiusSm),
@@ -931,10 +964,10 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
             ),
             onPressed: _isSaving || _isDiscarding ? null : _discard,
             icon: _isDiscarding
-                ? const SizedBox(
+                ? SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFC92A2A)),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: colors.errorText),
                   )
                 : const Icon(Icons.delete_outline_rounded, size: 18),
             label: const Text('Discard'),
@@ -962,30 +995,30 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.grey.shade400,
+                color: colors.border,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
           ),
         header,
-        const Divider(color: AppTokens.crispBorder, height: 1),
+        Divider(color: colors.border, height: 1),
         if (_errorMessage != null)
           Container(
             margin: const EdgeInsets.all(AppTokens.space16),
             padding: const EdgeInsets.all(AppTokens.space12),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFF5F5),
+              color: colors.errorBg,
               borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              border: Border.all(color: const Color(0xFFFFC9C9)),
+              border: Border.all(color: colors.errorBorder),
             ),
             child: Row(
               children: [
-                const Icon(Icons.error_outline_rounded, size: 18, color: Color(0xFFC92A2A)),
+                Icon(Icons.error_outline_rounded, size: 18, color: colors.errorText),
                 const SizedBox(width: AppTokens.space8),
                 Expanded(
                   child: Text(
                     _errorMessage!,
-                    style: const TextStyle(fontSize: 12, color: Color(0xFFC92A2A)),
+                    style: AppTypography.bodySans(fontSize: 12, color: colors.errorText),
                   ),
                 ),
               ],
@@ -1000,7 +1033,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                     children: [
                       leftSummaryColumn,
                       const SizedBox(height: AppTokens.space20),
-                      const Divider(color: AppTokens.crispBorder),
+                      Divider(color: colors.border),
                       const SizedBox(height: AppTokens.space20),
                       formFields,
                     ],
@@ -1033,25 +1066,31 @@ class _CoverPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
+
     return Container(
-      color: AppTokens.boneContainer,
+      color: colors.containerLow,
       padding: const EdgeInsets.all(AppTokens.space16),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.auto_stories_rounded, size: 48, color: AppTokens.mutedCopy),
+          Icon(Icons.auto_stories_rounded, size: 48, color: colors.mutedInk),
           const SizedBox(height: AppTokens.space8),
           Text(
             title,
             textAlign: TextAlign.center,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: AppTypography.titleSerif(fontSize: 13, fontWeight: FontWeight.w600),
+            style: AppTypography.titleSerif(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: colors.ink,
+            ),
           ),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             'No cover extracted',
-            style: TextStyle(fontSize: 11, color: AppTokens.mutedCopy),
+            style: AppTypography.bodySans(fontSize: 11, color: colors.mutedInk),
           ),
         ],
       ),

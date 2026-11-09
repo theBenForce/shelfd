@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/models/metadata_search_result.dart';
 import '../../core/responsive.dart';
+import '../../core/shared_layout.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -13,12 +15,13 @@ Future<MetadataSearchResult?> showMetadataSearchDialog(
   String? initialAuthor,
 }) async {
   final isMobile = Responsive.isMobile(context);
+  final colors = ShelfdColors.of(context);
 
   if (isMobile) {
     return showModalBottomSheet<MetadataSearchResult>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTokens.boneBackground,
+      backgroundColor: colors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
       ),
@@ -35,22 +38,26 @@ Future<MetadataSearchResult?> showMetadataSearchDialog(
 
   return showDialog<MetadataSearchResult>(
     context: context,
-    builder: (ctx) => Dialog(
-      backgroundColor: AppTokens.boneBackground,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppTokens.radiusLg),
-        side: const BorderSide(color: AppTokens.crispBorder),
-      ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760, maxHeight: 750),
-        child: MetadataSearchDialogContent(
-          initialTitle: initialTitle,
-          initialAuthor: initialAuthor,
-          isBottomSheet: false,
+    builder: (ctx) {
+      final dialogColors = ShelfdColors.of(ctx);
+      return Dialog(
+        backgroundColor: dialogColors.surface,
+        surfaceTintColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTokens.radiusLg),
+          side: BorderSide(color: dialogColors.border),
         ),
-      ),
-    ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760, maxHeight: 750),
+          child: MetadataSearchDialogContent(
+            initialTitle: initialTitle,
+            initialAuthor: initialAuthor,
+            isBottomSheet: false,
+          ),
+        ),
+      );
+    },
   );
 }
 
@@ -63,7 +70,7 @@ class MetadataSearchDialogContent extends ConsumerStatefulWidget {
     super.key,
     this.initialTitle,
     this.initialAuthor,
-    required this.isBottomSheet,
+    this.isBottomSheet = false,
   });
 
   @override
@@ -139,6 +146,7 @@ class _MetadataSearchDialogContentState
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     return Container(
       padding: const EdgeInsets.all(AppTokens.space24),
       child: Column(
@@ -148,7 +156,7 @@ class _MetadataSearchDialogContentState
           // Header
           Row(
             children: [
-              const Icon(Icons.auto_fix_high, color: AppTokens.charcoalInk, size: 24),
+              Icon(Icons.auto_fix_high, color: colors.accentPrimary, size: 24),
               const SizedBox(width: AppTokens.space12),
               Expanded(
                 child: Column(
@@ -156,18 +164,18 @@ class _MetadataSearchDialogContentState
                   children: [
                     Text(
                       'Search Metadata',
-                      style: AppTypography.titleSerif(fontSize: 20),
+                      style: AppTypography.titleSerif(fontSize: 20, color: colors.ink),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       'Search Open Library, Google Books, and Apple Books to autofill details.',
-                      style: AppTypography.bodySans(fontSize: 13),
+                      style: AppTypography.bodySans(fontSize: 13, color: colors.secondaryInk),
                     ),
                   ],
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.close),
+                icon: Icon(Icons.close, color: colors.mutedInk),
                 onPressed: () => Navigator.of(context).pop(),
                 splashRadius: 20,
               ),
@@ -181,22 +189,28 @@ class _MetadataSearchDialogContentState
               Expanded(
                 child: TextField(
                   controller: _queryController,
+                  style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
                   decoration: InputDecoration(
                     hintText: 'Search title, author, or ISBN...',
-                    prefixIcon: const Icon(Icons.search, size: 20),
+                    hintStyle: AppTypography.bodySans(fontSize: 14, color: colors.mutedInk),
+                    prefixIcon: Icon(Icons.search, size: 20, color: colors.mutedInk),
                     filled: true,
-                    fillColor: AppTokens.boneSurface,
+                    fillColor: colors.containerLow,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: AppTokens.space16,
                       vertical: AppTokens.space12,
                     ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                      borderSide: const BorderSide(color: AppTokens.crispBorder),
+                      borderSide: BorderSide(color: colors.border),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                      borderSide: const BorderSide(color: AppTokens.crispBorder),
+                      borderSide: BorderSide(color: colors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                      borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
                     ),
                   ),
                   onSubmitted: (_) => _performSearch(),
@@ -207,12 +221,14 @@ class _MetadataSearchDialogContentState
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
                   decoration: BoxDecoration(
-                    color: AppTokens.boneSurface,
-                    border: Border.all(color: AppTokens.crispBorder),
+                    color: colors.containerLow,
+                    border: Border.all(color: colors.border),
                     borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                   ),
                   child: DropdownButton<String>(
                     value: _selectedProvider,
+                    dropdownColor: colors.surface,
+                    style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('All Providers')),
                       DropdownMenuItem(value: 'openlibrary', child: Text('Open Library')),
@@ -231,19 +247,19 @@ class _MetadataSearchDialogContentState
               const SizedBox(width: AppTokens.space12),
               ElevatedButton.icon(
                 icon: _isLoading
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: Colors.white,
+                          color: colors.onAccent,
                         ),
                       )
                     : const Icon(Icons.search, size: 18),
                 label: const Text('Search'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTokens.charcoalInk,
-                  foregroundColor: Colors.white,
+                  backgroundColor: colors.accentPrimary,
+                  foregroundColor: colors.onAccent,
                   padding: const EdgeInsets.symmetric(
                     horizontal: AppTokens.space20,
                     vertical: AppTokens.space16,
@@ -262,38 +278,38 @@ class _MetadataSearchDialogContentState
             Container(
               padding: const EdgeInsets.all(AppTokens.space12),
               decoration: BoxDecoration(
-                color: Colors.red.shade50,
+                color: colors.errorBg,
                 borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                border: Border.all(color: Colors.red.shade200),
+                border: Border.all(color: colors.errorBorder),
               ),
               child: Text(
                 _errorMessage!,
-                style: TextStyle(color: Colors.red.shade900, fontSize: 13),
+                style: AppTypography.bodySans(color: colors.errorText, fontSize: 13),
               ),
             ),
 
           // Results area
           Expanded(
             child: _isLoading && (_results == null || _results!.isEmpty)
-                ? const Center(child: CircularProgressIndicator())
+                ? Center(child: CircularProgressIndicator(color: colors.accentPrimary))
                 : _results == null
                     ? Center(
                         child: Text(
                           'Type a title or author above and press Search.',
-                          style: AppTypography.bodySans(fontSize: 14),
+                          style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
                         ),
                       )
                     : _results!.isEmpty
                         ? Center(
                             child: Text(
-                              'No matching books found.',
-                              style: AppTypography.bodySans(fontSize: 14),
+                              'No metadata matches found.',
+                              style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
                             ),
                           )
                         : ListView.separated(
                             itemCount: _results!.length,
                             separatorBuilder: (ctx, i) =>
-                                const Divider(height: 1, color: AppTokens.crispBorder),
+                                Divider(height: 1, color: colors.subtleBorder),
                             itemBuilder: (ctx, i) {
                               final item = _results![i];
                               return _SearchResultTile(
@@ -320,6 +336,7 @@ class _SearchResultTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     return InkWell(
       onTap: onSelect,
       borderRadius: BorderRadius.circular(AppTokens.radiusMd),
@@ -332,28 +349,15 @@ class _SearchResultTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Cover thumbnail
-            ClipRRect(
+            TactileBookCover(
+              coverUrl: result.coverUrl,
+              title: result.title,
+              width: 52,
+              height: 76,
               borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              child: Container(
-                width: 52,
-                height: 76,
-                color: AppTokens.boneContainer,
-                child: result.coverUrl != null && result.coverUrl!.isNotEmpty
-                    ? Image.network(
-                        result.coverUrl!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (ctx, _, __) => const Icon(
-                          Icons.book,
-                          color: AppTokens.mutedCopy,
-                          size: 28,
-                        ),
-                      )
-                    : const Icon(
-                        Icons.book,
-                        color: AppTokens.mutedCopy,
-                        size: 28,
-                      ),
-              ),
+              showFallbackTitle: false,
+              showSpineCrease: true,
+              showShadow: false,
             ),
             const SizedBox(width: AppTokens.space16),
 
@@ -367,7 +371,7 @@ class _SearchResultTile extends StatelessWidget {
                       Expanded(
                         child: Text(
                           result.title,
-                          style: AppTypography.titleSerif(fontSize: 16),
+                          style: AppTypography.titleSerif(fontSize: 16, color: colors.ink),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -382,6 +386,7 @@ class _SearchResultTile extends StatelessWidget {
                     style: AppTypography.bodySans(
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
+                      color: colors.secondaryInk,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -398,30 +403,34 @@ class _SearchResultTile extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: AppTokens.boneContainer,
+                            color: colors.container,
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
                             'Series: ${result.series}${result.seriesSequence != null ? ' #${result.seriesSequence}' : ''}',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                            style: AppTypography.mono(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: colors.ink,
+                            ),
                           ),
                         ),
                       if (result.publishedYear != null)
                         Text(
                           '${result.publishedYear}',
-                          style: AppTypography.bodySans(fontSize: 12),
+                          style: AppTypography.mono(fontSize: 12, color: colors.secondaryInk),
                         ),
                       if (result.publisher != null && result.publisher!.isNotEmpty)
                         Text(
                           '• ${result.publisher}',
-                          style: AppTypography.bodySans(fontSize: 12),
+                          style: AppTypography.bodySans(fontSize: 12, color: colors.secondaryInk),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       if (result.isbn != null && result.isbn!.isNotEmpty)
                         Text(
                           '• ISBN: ${result.isbn}',
-                          style: AppTypography.bodySans(fontSize: 12),
+                          style: AppTypography.mono(fontSize: 12, color: colors.mutedInk),
                         ),
                     ],
                   ),
@@ -434,7 +443,7 @@ class _SearchResultTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: AppTypography.bodySans(
                         fontSize: 12,
-                        color: AppTokens.mutedCopy,
+                        color: colors.mutedInk,
                       ),
                     ),
                   ],
@@ -447,7 +456,8 @@ class _SearchResultTile extends StatelessWidget {
             OutlinedButton(
               onPressed: onSelect,
               style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: AppTokens.crispBorder),
+                foregroundColor: colors.ink,
+                side: BorderSide(color: colors.border),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
               child: const Text('Apply'),
@@ -466,22 +476,23 @@ class _ProviderBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     String label = provider;
-    Color bg = AppTokens.boneContainer;
-    Color fg = AppTokens.mutedCopy;
+    Color bg = colors.container;
+    Color fg = colors.mutedInk;
 
     if (provider == 'openlibrary') {
       label = 'Open Library';
-      bg = const Color(0xFFE8F0FE);
-      fg = const Color(0xFF1967D2);
+      bg = colors.accentContainer;
+      fg = colors.accentPrimary;
     } else if (provider == 'googlebooks') {
       label = 'Google Books';
-      bg = const Color(0xFFFEF7E0);
-      fg = const Color(0xFFB06000);
+      bg = AppTokens.amberAccent.withValues(alpha: colors.isDark ? 0.22 : 0.2);
+      fg = colors.isDark ? AppTokens.amberAccent : const Color(0xFFB45309);
     } else if (provider == 'apple') {
       label = 'Apple Books';
-      bg = const Color(0xFFF3E8FD);
-      fg = const Color(0xFF7627BB);
+      bg = colors.accentSecondaryContainer;
+      fg = colors.accentSecondary;
     }
 
     return Container(
@@ -492,7 +503,7 @@ class _ProviderBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(
+        style: AppTypography.mono(
           fontSize: 11,
           fontWeight: FontWeight.w600,
           color: fg,

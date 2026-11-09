@@ -6,6 +6,7 @@ import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/paginated_books.dart';
 import 'package:shelf/data/models/series.dart';
 import 'package:shelf/data/repositories/book_repository.dart';
+import 'package:shelf/ui/core/shared_layout.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/series/series_detail_view.dart';
 import 'package:shelf/ui/state/providers.dart';
@@ -111,10 +112,11 @@ void main() {
     expect(find.text('3 Books in Series'), findsOneWidget);
     expect(find.text('3 Books'), findsOneWidget);
 
-    // Verify books are displayed
-    expect(find.text('The Lightning Thief'), findsWidgets);
-    expect(find.text('The Sea of Monsters'), findsWidgets);
-    expect(find.text('The Ultimate Guide'), findsWidgets);
+    // Verify books are displayed with TactileBookCover
+    expect(find.byType(TactileBookCover), findsNWidgets(3));
+    expect(find.text('The Lightning Thief'), findsOneWidget);
+    expect(find.text('The Sea of Monsters'), findsOneWidget);
+    expect(find.text('The Ultimate Guide'), findsOneWidget);
 
     // Verify sequence badges #1 and #2
     expect(find.text('#1'), findsOneWidget);

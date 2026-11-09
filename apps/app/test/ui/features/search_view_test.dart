@@ -65,5 +65,44 @@ void main() {
 
     // Verify read action
     expect(find.text('Read Chapter at this passage →'), findsOneWidget);
+
+    // Verify search icon uses Burnt Sienna accentPrimary instead of electric purple
+    final iconWidget = tester.widget<Icon>(find.byIcon(Icons.auto_awesome_rounded));
+    expect(iconWidget.color, ShelfdColors.bone.accentPrimary);
+  });
+
+  testWidgets('SearchView adapts to Dark and Sepia themes', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final testHits = [
+      const SemanticSearchHit(
+        bookId: 'b-1',
+        bookTitle: 'Dune',
+        authorName: 'Frank Herbert',
+        chapterIndex: 3,
+        chapterTitle: 'Arrakis',
+        summary: 'Paul contemplates the desert planet.',
+        score: 0.91,
+      ),
+    ];
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          searchProvider.overrideWith(() => FakeSearchNotifier(testHits)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+          home: const SearchView(),
+        ),
+      ),
+    );
+
+    final iconWidget = tester.widget<Icon>(find.byIcon(Icons.auto_awesome_rounded));
+    expect(iconWidget.color, ShelfdColors.dark.accentPrimary);
+    expect(find.text('Chapter 3: Arrakis'), findsOneWidget);
+    expect(find.text('Read Chapter at this passage →'), findsOneWidget);
   });
 }

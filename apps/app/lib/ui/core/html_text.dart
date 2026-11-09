@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'theme.dart';
 import 'tokens.dart';
 import 'typography.dart';
 
@@ -77,8 +78,8 @@ String decodeHtmlEntities(String text) {
 
 String _sanitizeHtml(String html) {
   return html
-      .replaceAll(RegExp(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', caseSensitive: false), '')
-      .replaceAll(RegExp(r'<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>', caseSensitive: false), '');
+      .replaceAll(RegExp(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', caseSensitive: false, dotAll: true), '')
+      .replaceAll(RegExp(r'<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>', caseSensitive: false, dotAll: true), '');
 }
 
 final _blockTagRegex = RegExp(
@@ -243,11 +244,14 @@ TextStyle _resolveStyle(_StyleContext ctx, TextStyle baseStyle, Color? linkColor
     style = style.copyWith(decoration: TextDecoration.lineThrough);
   }
   if (ctx.code) {
-    style = style.copyWith(fontFamily: 'monospace');
+    style = style.copyWith(
+      fontFamily: AppTypography.technicalMonoFamily,
+      fontFamilyFallback: AppTypography.monoFallbacks,
+    );
   }
   if (ctx.href != null) {
     style = style.copyWith(
-      color: linkColor ?? Colors.blue,
+      color: linkColor ?? AppTokens.siennaPrimary,
       decoration: TextDecoration.underline,
     );
   }
@@ -350,15 +354,21 @@ class HtmlText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final effectiveStyle = style ?? AppTypography.bodySans(fontSize: 15, lineHeight: 1.6);
-    final primaryColor = theme.colorScheme.primary;
+    final colors = ShelfdColors.of(context);
+    final baseDefault = AppTypography.bodySans(
+      fontSize: 15,
+      lineHeight: 1.6,
+      color: colors.ink,
+    );
+    final effectiveStyle = style != null
+        ? (style!.color != null ? style! : style!.copyWith(color: colors.ink))
+        : baseDefault;
 
     final trimmed = html.trim();
     if (trimmed.isEmpty) {
       return Text(
         emptyPlaceholder,
-        style: placeholderStyle ?? effectiveStyle.copyWith(color: AppTokens.mutedCopy),
+        style: placeholderStyle ?? effectiveStyle.copyWith(color: colors.mutedInk),
       );
     }
 
@@ -366,12 +376,12 @@ class HtmlText extends StatelessWidget {
     if (blocks.isEmpty) {
       return Text(
         emptyPlaceholder,
-        style: placeholderStyle ?? effectiveStyle.copyWith(color: AppTokens.mutedCopy),
+        style: placeholderStyle ?? effectiveStyle.copyWith(color: colors.mutedInk),
       );
     }
 
     if (blocks.length == 1) {
-      return _buildBlockWidget(context, blocks.first, effectiveStyle, primaryColor);
+      return _buildBlockWidget(context, blocks.first, effectiveStyle, colors);
     }
 
     return Column(
@@ -379,7 +389,7 @@ class HtmlText extends StatelessWidget {
       children: [
         for (int i = 0; i < blocks.length; i++) ...[
           if (i > 0) SizedBox(height: paragraphSpacing),
-          _buildBlockWidget(context, blocks[i], effectiveStyle, primaryColor),
+          _buildBlockWidget(context, blocks[i], effectiveStyle, colors),
         ],
       ],
     );
@@ -389,8 +399,9 @@ class HtmlText extends StatelessWidget {
     BuildContext context,
     HtmlBlock block,
     TextStyle baseStyle,
-    Color primaryColor,
+    ShelfdColors colors,
   ) {
+    final linkColor = colors.accentPrimary;
     switch (block.type) {
       case HtmlBlockType.paragraph:
         return Text.rich(
@@ -398,7 +409,7 @@ class HtmlText extends StatelessWidget {
             children: parseHtmlInlineSpans(
               block.htmlContent,
               baseStyle,
-              linkColor: primaryColor,
+              linkColor: linkColor,
             ),
           ),
         );
@@ -407,11 +418,11 @@ class HtmlText extends StatelessWidget {
         final h1Style = AppTypography.titleSerif(
           fontSize: 22.0,
           fontWeight: FontWeight.bold,
-          color: primaryColor,
+          color: colors.ink,
         );
         return Text.rich(
           TextSpan(
-            children: parseHtmlInlineSpans(block.htmlContent, h1Style, linkColor: primaryColor),
+            children: parseHtmlInlineSpans(block.htmlContent, h1Style, linkColor: linkColor),
           ),
         );
 
@@ -419,11 +430,11 @@ class HtmlText extends StatelessWidget {
         final h2Style = AppTypography.titleSerif(
           fontSize: 19.0,
           fontWeight: FontWeight.bold,
-          color: primaryColor,
+          color: colors.ink,
         );
         return Text.rich(
           TextSpan(
-            children: parseHtmlInlineSpans(block.htmlContent, h2Style, linkColor: primaryColor),
+            children: parseHtmlInlineSpans(block.htmlContent, h2Style, linkColor: linkColor),
           ),
         );
 
@@ -431,25 +442,25 @@ class HtmlText extends StatelessWidget {
         final h3Style = AppTypography.titleSerif(
           fontSize: 16.0,
           fontWeight: FontWeight.w600,
-          color: primaryColor,
+          color: colors.ink,
         );
         return Text.rich(
           TextSpan(
-            children: parseHtmlInlineSpans(block.htmlContent, h3Style, linkColor: primaryColor),
+            children: parseHtmlInlineSpans(block.htmlContent, h3Style, linkColor: linkColor),
           ),
         );
 
       case HtmlBlockType.blockquote:
         final quoteStyle = baseStyle.copyWith(
           fontStyle: FontStyle.italic,
-          color: AppTokens.mutedCopy,
+          color: colors.secondaryInk,
         );
         return Container(
           padding: const EdgeInsets.only(left: AppTokens.space12, top: 4, bottom: 4),
           decoration: BoxDecoration(
             border: Border(
               left: BorderSide(
-                color: Theme.of(context).dividerColor,
+                color: colors.accentPrimary.withValues(alpha: 0.45),
                 width: 3,
               ),
             ),
@@ -459,7 +470,7 @@ class HtmlText extends StatelessWidget {
               children: parseHtmlInlineSpans(
                 block.htmlContent,
                 quoteStyle,
-                linkColor: primaryColor,
+                linkColor: linkColor,
               ),
             ),
           ),
@@ -482,7 +493,7 @@ class HtmlText extends StatelessWidget {
                     children: parseHtmlInlineSpans(
                       block.htmlContent,
                       baseStyle,
-                      linkColor: primaryColor,
+                      linkColor: linkColor,
                     ),
                   ),
                 ),
@@ -492,7 +503,7 @@ class HtmlText extends StatelessWidget {
         );
 
       case HtmlBlockType.divider:
-        return const Divider(height: 1, color: AppTokens.crispBorder);
+        return Divider(height: 1, color: colors.border);
     }
   }
 }

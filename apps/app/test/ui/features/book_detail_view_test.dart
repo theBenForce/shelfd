@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
@@ -12,6 +13,7 @@ import 'package:shelf/data/models/series.dart';
 import 'package:shelf/data/repositories/book_repository.dart';
 import 'package:shelf/data/services/api_service.dart';
 import 'package:shelf/data/services/storage_service.dart';
+import 'package:shelf/ui/core/shared_layout.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/book_detail/book_detail_view.dart';
 import 'package:shelf/ui/state/providers.dart';
@@ -89,7 +91,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    // Verify title, author, and series
+    // Verify title, author, series, and TactileBookCover
+    expect(find.byType(TactileBookCover), findsOneWidget);
     expect(find.text('The Left Hand of Darkness'), findsWidgets);
     expect(find.text('Ursula K. Le Guin'), findsOneWidget);
     expect(find.text('Hainish Cycle #4'), findsOneWidget);
@@ -97,6 +100,7 @@ void main() {
     // Verify reading progress & CTA
     expect(find.text('Reading Progress'), findsOneWidget);
     expect(find.text('65%'), findsOneWidget);
+    expect(find.text('2 chapters'), findsOneWidget);
     expect(find.text('Resume Reading'), findsOneWidget);
     expect(find.text('Download EPUB'), findsOneWidget);
     expect(find.byTooltip('Download EPUB'), findsOneWidget);
@@ -525,6 +529,100 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(mockRepo.downloadNotebookLMCalledWith, 'book-42');
+  });
+
+  testWidgets('BookDetailView tapping Bookmark card navigates to reader view', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    String? navigatedRoute;
+
+    final router = GoRouter(
+      initialLocation: '/books/book-42',
+      routes: [
+        GoRoute(
+          path: '/books/:id',
+          builder: (context, state) => BookDetailView(bookId: state.pathParameters['id']!),
+        ),
+        GoRoute(
+          path: '/books/:id/read',
+          builder: (context, state) {
+            navigatedRoute = state.uri.toString();
+            return const Scaffold(body: Text('Reader Target'));
+          },
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookDetailProvider('book-42').overrideWith(() => _MockBookDetailNotifier(testBook)),
+        ],
+        child: MaterialApp.router(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          routerConfig: router,
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await tester.tap(find.text('Highlights & Bookmarks'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Mid-Parade passage'));
+    await tester.pumpAndSettle();
+
+    expect(navigatedRoute, '/books/book-42/read');
+    expect(find.text('Reader Target'), findsOneWidget);
+  });
+
+  testWidgets('BookDetailView and EditBookMetadataModal adapt to ReadingThemeMode.dark and ReadingThemeMode.sepia',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    for (final mode in [ReadingThemeMode.dark, ReadingThemeMode.sepia]) {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(prefs),
+            bookDetailProvider('book-42').overrideWith(() => _MockBookDetailNotifier(testBook)),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(mode),
+            home: const BookDetailView(bookId: 'book-42'),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text('The Left Hand of Darkness'), findsWidgets);
+      expect(find.text('65%'), findsOneWidget);
+
+      // Open Edit Book Metadata modal in this theme
+      await tester.tap(find.text('Edit Metadata').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Edit Book Metadata'), findsOneWidget);
+      expect(find.text('Save & Sync EPUB'), findsOneWidget);
+
+      // Close modal
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+    }
   });
 }
 

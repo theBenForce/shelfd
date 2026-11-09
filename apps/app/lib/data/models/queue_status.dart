@@ -8,17 +8,19 @@ class QueueStatus {
   final bool isActive;
   final String? currentBook;
   final String? currentChapter;
+  final String? currentTask;
 
   const QueueStatus({
-    required this.totalChapters,
-    required this.indexedChapters,
-    required this.pendingChapters,
-    required this.pendingUploads,
+    this.totalChapters = 0,
+    this.indexedChapters = 0,
+    this.pendingChapters = 0,
+    this.pendingUploads = 0,
     this.stagedUploads = 0,
-    required this.progressPercent,
-    required this.isActive,
+    this.progressPercent = 0.0,
+    this.isActive = false,
     this.currentBook,
     this.currentChapter,
+    this.currentTask,
   });
 
   factory QueueStatus.fromJson(Map<String, dynamic> json) {
@@ -32,6 +34,7 @@ class QueueStatus {
       isActive: json['is_active'] as bool? ?? false,
       currentBook: json['current_book'] as String?,
       currentChapter: json['current_chapter'] as String?,
+      currentTask: json['current_task'] as String?,
     );
   }
 
@@ -46,6 +49,7 @@ class QueueStatus {
       'is_active': isActive,
       if (currentBook != null) 'current_book': currentBook,
       if (currentChapter != null) 'current_chapter': currentChapter,
+      if (currentTask != null) 'current_task': currentTask,
     };
   }
 }

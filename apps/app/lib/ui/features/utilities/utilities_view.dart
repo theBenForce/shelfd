@@ -4,6 +4,7 @@ import '../../../data/models/book.dart';
 import '../../../data/models/duplicate_group.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -42,19 +43,22 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
       builder: (dialogCtx) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            final colors = context.shelfdColors;
             return AlertDialog(
-              backgroundColor: AppTokens.boneSurface,
+              backgroundColor: colors.surface,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                side: const BorderSide(color: AppTokens.crispBorder),
+                borderRadius: BorderRadius.circular(AppTokens.radiusLg),
+                side: BorderSide(color: colors.border),
               ),
               title: Row(
                 children: [
-                  const Icon(Icons.merge_type_rounded,
-                      size: 22, color: AppTokens.charcoalInk),
+                  Icon(Icons.merge_type_rounded,
+                      size: 22, color: colors.accentPrimary),
                   const SizedBox(width: AppTokens.space8),
-                  Text('Merge Options',
-                      style: AppTypography.titleSerif(fontSize: 18)),
+                  Text(
+                    'Merge Options',
+                    style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
+                  ),
                 ],
               ),
               content: SizedBox(
@@ -66,69 +70,105 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                     Text(
                       'Configure how duplicate copies are consolidated into the selected primary book:',
                       style: AppTypography.bodySans(
-                          fontSize: 13, color: AppTokens.mutedCopy),
+                          fontSize: 13, color: colors.secondaryInk),
                     ),
                     const SizedBox(height: AppTokens.space16),
                     CheckboxListTile(
                       value: transferBookmarks,
-                      title: const Text('Transfer Bookmarks',
-                          style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w500)),
-                      subtitle: const Text(
-                          'Move all reading bookmarks from duplicate books to primary book',
-                          style: TextStyle(
-                              fontSize: 12, color: AppTokens.mutedCopy)),
+                      title: Text(
+                        'Transfer Bookmarks',
+                        style: AppTypography.bodySans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: colors.ink,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Move all reading bookmarks from duplicate books to primary book',
+                        style: AppTypography.captionSans(
+                          fontSize: 12,
+                          color: colors.mutedInk,
+                        ),
+                      ),
                       contentPadding: EdgeInsets.zero,
                       controlAffinity: ListTileControlAffinity.leading,
-                      activeColor: AppTokens.charcoalInk,
+                      activeColor: colors.accentPrimary,
+                      checkColor: colors.onAccent,
                       onChanged: (val) {
                         setDialogState(() => transferBookmarks = val ?? true);
                       },
                     ),
                     CheckboxListTile(
                       value: transferHighlights,
-                      title: const Text('Transfer Highlights & Notes',
-                          style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w500)),
-                      subtitle: const Text(
-                          'Retain all annotations and highlighted passages',
-                          style: TextStyle(
-                              fontSize: 12, color: AppTokens.mutedCopy)),
+                      title: Text(
+                        'Transfer Highlights & Notes',
+                        style: AppTypography.bodySans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: colors.ink,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Retain all annotations and highlighted passages',
+                        style: AppTypography.captionSans(
+                          fontSize: 12,
+                          color: colors.mutedInk,
+                        ),
+                      ),
                       contentPadding: EdgeInsets.zero,
                       controlAffinity: ListTileControlAffinity.leading,
-                      activeColor: AppTokens.charcoalInk,
+                      activeColor: colors.accentPrimary,
+                      checkColor: colors.onAccent,
                       onChanged: (val) {
                         setDialogState(() => transferHighlights = val ?? true);
                       },
                     ),
                     CheckboxListTile(
                       value: mergeMetadata,
-                      title: const Text('Merge Missing Metadata',
-                          style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w500)),
-                      subtitle: const Text(
-                          'Fill missing descriptions, publishers, dates, and taxonomy from duplicates',
-                          style: TextStyle(
-                              fontSize: 12, color: AppTokens.mutedCopy)),
+                      title: Text(
+                        'Merge Missing Metadata',
+                        style: AppTypography.bodySans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: colors.ink,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Fill missing descriptions, publishers, dates, and taxonomy from duplicates',
+                        style: AppTypography.captionSans(
+                          fontSize: 12,
+                          color: colors.mutedInk,
+                        ),
+                      ),
                       contentPadding: EdgeInsets.zero,
                       controlAffinity: ListTileControlAffinity.leading,
-                      activeColor: AppTokens.charcoalInk,
+                      activeColor: colors.accentPrimary,
+                      checkColor: colors.onAccent,
                       onChanged: (val) {
                         setDialogState(() => mergeMetadata = val ?? true);
                       },
                     ),
                     CheckboxListTile(
                       value: deleteFiles,
-                      title: const Text('Delete Duplicate EPUB Files',
-                          style: TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w500)),
-                      subtitle: const Text(
-                          'Permanently remove redundant duplicate files from disk to free storage',
-                          style: TextStyle(
-                              fontSize: 12, color: AppTokens.mutedCopy)),
+                      title: Text(
+                        'Delete Duplicate EPUB Files',
+                        style: AppTypography.bodySans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: colors.ink,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Permanently remove redundant duplicate files from disk to free storage',
+                        style: AppTypography.captionSans(
+                          fontSize: 12,
+                          color: colors.mutedInk,
+                        ),
+                      ),
                       contentPadding: EdgeInsets.zero,
                       controlAffinity: ListTileControlAffinity.leading,
-                      activeColor: AppTokens.charcoalInk,
+                      activeColor: colors.accentPrimary,
+                      checkColor: colors.onAccent,
                       onChanged: (val) {
                         setDialogState(() => deleteFiles = val ?? true);
                       },
@@ -139,13 +179,19 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(dialogCtx).pop(),
-                  child: const Text('Cancel',
-                      style: TextStyle(color: AppTokens.mutedCopy)),
+                  child: Text(
+                    'Cancel',
+                    style: AppTypography.bodySans(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: colors.secondaryInk,
+                    ),
+                  ),
                 ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTokens.charcoalInk,
-                    foregroundColor: Colors.white,
+                    backgroundColor: colors.accentPrimary,
+                    foregroundColor: colors.onAccent,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                     ),
@@ -187,9 +233,10 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
   Widget build(BuildContext context) {
     final state = ref.watch(duplicateBooksProvider);
     final isMobile = Responsive.isMobile(context);
+    final colors = context.shelfdColors;
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: colors.background,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: EdgeInsets.symmetric(
@@ -210,6 +257,7 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                   // Notifications / Banners
                   if (state.errorMessage != null) ...[
                     _buildAlertBanner(
+                      context,
                       message: state.errorMessage!,
                       isError: true,
                       onDismiss: () => ref
@@ -220,6 +268,7 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                   ],
                   if (state.successMessage != null) ...[
                     _buildAlertBanner(
+                      context,
                       message: state.successMessage!,
                       isError: false,
                       onDismiss: () => ref
@@ -230,20 +279,20 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                   ],
 
                   // Stats & Overview Banner
-                  _buildOverviewCard(state),
+                  _buildOverviewCard(context, state),
                   const SizedBox(height: AppTokens.space24),
 
                   // Content Area
                   if (state.isScanning) ...[
-                    _buildScanningState(),
+                    _buildScanningState(context),
                   ] else if (state.result != null &&
                       state.result!.groups.isNotEmpty) ...[
-                    _buildDuplicateGroupsList(state),
+                    _buildDuplicateGroupsList(context, state),
                   ] else if (state.result != null &&
                       state.result!.groups.isEmpty) ...[
-                    _buildCleanState(),
+                    _buildCleanState(context),
                   ] else ...[
-                    _buildInitialScanPrompt(),
+                    _buildInitialScanPrompt(context),
                   ],
                 ],
               ),
@@ -256,6 +305,7 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
 
   Widget _buildHeader(BuildContext context, DuplicateBooksState state) {
     final isMobile = Responsive.isMobile(context);
+    final colors = context.shelfdColors;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -270,6 +320,7 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                 style: AppTypography.titleSerif(
                   fontSize: isMobile ? 24 : 30,
                   fontWeight: FontWeight.w700,
+                  color: colors.ink,
                 ),
               ),
               const SizedBox(height: AppTokens.space4),
@@ -277,7 +328,7 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                 'Consolidate duplicates, clean library metadata, and optimize storage.',
                 style: AppTypography.bodySans(
                   fontSize: 14,
-                  color: AppTokens.mutedCopy,
+                  color: colors.secondaryInk,
                 ),
               ),
             ],
@@ -297,15 +348,22 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
     );
   }
 
-  Widget _buildAlertBanner({
+  Widget _buildAlertBanner(
+    BuildContext context, {
     required String message,
     required bool isError,
     required VoidCallback onDismiss,
   }) {
-    final bg = isError ? const Color(0xFFFFF5F5) : const Color(0xFFEBFBEE);
-    final border = isError ? const Color(0xFFFFC9C9) : const Color(0xFFB2F2BB);
-    final iconColor =
-        isError ? const Color(0xFFE03131) : const Color(0xFF2F9E44);
+    final colors = context.shelfdColors;
+    final bg = isError
+        ? colors.errorBg
+        : (colors.isDark
+            ? colors.accentSecondaryContainer
+            : AppTokens.completedBadgeBg);
+    final border = isError
+        ? colors.errorBorder
+        : colors.accentSecondary.withValues(alpha: 0.35);
+    final fgColor = isError ? colors.errorText : colors.accentSecondary;
 
     return Container(
       padding: const EdgeInsets.symmetric(
@@ -322,22 +380,21 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                   ? Icons.error_outline_rounded
                   : Icons.check_circle_outline_rounded,
               size: 20,
-              color: iconColor),
+              color: fgColor),
           const SizedBox(width: AppTokens.space12),
           Expanded(
             child: Text(
               message,
-              style: TextStyle(
+              style: AppTypography.bodySans(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
-                color:
-                    isError ? const Color(0xFFC92A2A) : const Color(0xFF2B8A3E),
+                color: fgColor,
               ),
             ),
           ),
           IconButton(
             icon: const Icon(Icons.close_rounded, size: 16),
-            color: iconColor,
+            color: fgColor,
             visualDensity: VisualDensity.compact,
             padding: EdgeInsets.zero,
             onPressed: onDismiss,
@@ -347,7 +404,8 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
     );
   }
 
-  Widget _buildOverviewCard(DuplicateBooksState state) {
+  Widget _buildOverviewCard(BuildContext context, DuplicateBooksState state) {
+    final colors = context.shelfdColors;
     final totalGroups = state.result?.totalGroups ?? 0;
     final totalDuplicates = state.result?.totalDuplicateBooks ?? 0;
 
@@ -359,12 +417,13 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: AppTokens.boneContainer,
+              color: colors.containerLow,
               borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+              border: Border.all(color: colors.subtleBorder),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.copy_all_rounded,
-              color: AppTokens.charcoalInk,
+              color: colors.accentPrimary,
               size: 24,
             ),
           ),
@@ -378,7 +437,10 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                     Text(
                       'Duplicate Books Finder',
                       style: AppTypography.titleSerif(
-                          fontSize: 16, fontWeight: FontWeight.w700),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: colors.ink,
+                      ),
                     ),
                     const SizedBox(width: AppTokens.space8),
                     StatusBadge(
@@ -390,11 +452,13 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                                   ? '$totalGroups Groups Found'
                                   : 'Library Clean',
                       backgroundColor: totalGroups > 0
-                          ? const Color(0xFFFFF3BF)
-                          : const Color(0xFFEBFBEE),
+                          ? colors.accentContainer
+                          : (colors.isDark
+                              ? colors.accentSecondaryContainer
+                              : AppTokens.completedBadgeBg),
                       textColor: totalGroups > 0
-                          ? const Color(0xFFD9480F)
-                          : const Color(0xFF2B8A3E),
+                          ? colors.accentPrimary
+                          : colors.accentSecondary,
                     ),
                   ],
                 ),
@@ -402,16 +466,16 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                 Text(
                   'Identifies matching ISBN identifiers, exact title/author pairs, and subtitle variations to merge redundant catalog entries.',
                   style: AppTypography.bodySans(
-                      fontSize: 13, color: AppTokens.mutedCopy),
+                      fontSize: 13, color: colors.secondaryInk),
                 ),
               ],
             ),
           ),
           if (state.result != null) ...[
             const SizedBox(width: AppTokens.space24),
-            _buildStatPill('Groups', '$totalGroups'),
+            _buildStatPill(context, 'Groups', '$totalGroups'),
             const SizedBox(width: AppTokens.space12),
-            _buildStatPill('Redundant Copies',
+            _buildStatPill(context, 'Redundant Copies',
                 '${totalDuplicates > 0 ? totalDuplicates - totalGroups : 0}'),
           ],
         ],
@@ -419,30 +483,32 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
     );
   }
 
-  Widget _buildStatPill(String label, String value) {
+  Widget _buildStatPill(BuildContext context, String label, String value) {
+    final colors = context.shelfdColors;
     return Container(
       padding: const EdgeInsets.symmetric(
           horizontal: AppTokens.space16, vertical: AppTokens.space8),
       decoration: BoxDecoration(
-        color: AppTokens.boneContainer,
+        color: colors.containerLow,
         borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+        border: Border.all(color: colors.subtleBorder),
       ),
       child: Column(
         children: [
           Text(
             value,
-            style: const TextStyle(
+            style: AppTypography.mono(
               fontSize: 18,
               fontWeight: FontWeight.w700,
-              color: AppTokens.charcoalInk,
+              color: colors.ink,
             ),
           ),
           Text(
             label,
-            style: const TextStyle(
+            style: AppTypography.captionSans(
               fontSize: 11,
               fontWeight: FontWeight.w500,
-              color: AppTokens.mutedCopy,
+              color: colors.mutedInk,
             ),
           ),
         ],
@@ -450,27 +516,31 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
     );
   }
 
-  Widget _buildScanningState() {
+  Widget _buildScanningState(BuildContext context) {
+    final colors = context.shelfdColors;
     return BentoCard(
       padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
       child: Center(
         child: Column(
           children: [
-            const CircularProgressIndicator(
+            CircularProgressIndicator(
               strokeWidth: 3,
-              color: AppTokens.charcoalInk,
+              color: colors.accentPrimary,
             ),
             const SizedBox(height: AppTokens.space20),
             Text(
               'Scanning library for duplicate books...',
               style: AppTypography.titleSerif(
-                  fontSize: 16, fontWeight: FontWeight.w600),
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: colors.ink,
+              ),
             ),
             const SizedBox(height: AppTokens.space8),
             Text(
               'Analyzing ISBN identifiers, author attributions, and title variations.',
               style: AppTypography.bodySans(
-                  fontSize: 13, color: AppTokens.mutedCopy),
+                  fontSize: 13, color: colors.secondaryInk),
             ),
           ],
         ),
@@ -478,7 +548,8 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
     );
   }
 
-  Widget _buildCleanState() {
+  Widget _buildCleanState(BuildContext context) {
+    final colors = context.shelfdColors;
     return BentoCard(
       padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
       child: Center(
@@ -487,13 +558,15 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
             Container(
               width: 56,
               height: 56,
-              decoration: const BoxDecoration(
-                color: Color(0xFFEBFBEE),
+              decoration: BoxDecoration(
+                color: colors.isDark
+                    ? colors.accentSecondaryContainer
+                    : AppTokens.completedBadgeBg,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.check_circle_outline_rounded,
-                color: Color(0xFF2B8A3E),
+                color: colors.accentSecondary,
                 size: 32,
               ),
             ),
@@ -501,16 +574,23 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
             Text(
               'No Duplicate Books Found',
               style: AppTypography.titleSerif(
-                  fontSize: 18, fontWeight: FontWeight.w700),
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: colors.ink,
+              ),
             ),
             const SizedBox(height: AppTokens.space8),
             Text(
               'All books in your library have distinct identifiers and unique titles.',
               style: AppTypography.bodySans(
-                  fontSize: 13, color: AppTokens.mutedCopy),
+                  fontSize: 13, color: colors.secondaryInk),
             ),
             const SizedBox(height: AppTokens.space20),
             OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: colors.ink,
+                side: BorderSide(color: colors.border),
+              ),
               onPressed: () =>
                   ref.read(duplicateBooksProvider.notifier).scanForDuplicates(),
               icon: const Icon(Icons.sync_rounded, size: 16),
@@ -522,25 +602,28 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
     );
   }
 
-  Widget _buildInitialScanPrompt() {
+  Widget _buildInitialScanPrompt(BuildContext context) {
+    final colors = context.shelfdColors;
     return BentoCard(
       padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
       child: Center(
         child: Column(
           children: [
-            const Icon(Icons.search_rounded,
-                size: 40, color: AppTokens.mutedCopy),
+            Icon(Icons.search_rounded, size: 40, color: colors.mutedInk),
             const SizedBox(height: AppTokens.space16),
             Text(
               'Duplicate Detection Ready',
               style: AppTypography.titleSerif(
-                  fontSize: 18, fontWeight: FontWeight.w700),
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: colors.ink,
+              ),
             ),
             const SizedBox(height: AppTokens.space8),
             Text(
               'Scan your collection to discover and merge duplicate books.',
               style: AppTypography.bodySans(
-                  fontSize: 13, color: AppTokens.mutedCopy),
+                  fontSize: 13, color: colors.secondaryInk),
             ),
             const SizedBox(height: AppTokens.space20),
             PrimaryButton(
@@ -555,7 +638,9 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
     );
   }
 
-  Widget _buildDuplicateGroupsList(DuplicateBooksState state) {
+  Widget _buildDuplicateGroupsList(
+      BuildContext context, DuplicateBooksState state) {
+    final colors = context.shelfdColors;
     final groups = state.result!.groups;
 
     return Column(
@@ -567,12 +652,15 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
             Text(
               'Detected Duplicate Sets (${groups.length})',
               style: AppTypography.titleSerif(
-                  fontSize: 18, fontWeight: FontWeight.w700),
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: colors.ink,
+              ),
             ),
             Text(
               'Select primary copy before merging',
               style: AppTypography.bodySans(
-                  fontSize: 12, color: AppTokens.mutedCopy),
+                  fontSize: 12, color: colors.mutedInk),
             ),
           ],
         ),
@@ -608,17 +696,16 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
     required String selectedPrimaryId,
     required bool isMerging,
   }) {
+    final colors = context.shelfdColors;
     final confidencePct = (group.confidence * 100).toInt();
-    final confidenceColor = group.confidence >= 0.95
-        ? const Color(0xFF2B8A3E)
-        : group.confidence >= 0.85
-            ? const Color(0xFFD9480F)
-            : const Color(0xFF1971C2);
-    final confidenceBg = group.confidence >= 0.95
-        ? const Color(0xFFEBFBEE)
-        : group.confidence >= 0.85
-            ? const Color(0xFFFFF3BF)
-            : const Color(0xFFE7F5FF);
+    final isHighConfidence = group.confidence >= 0.95;
+    final confidenceColor =
+        isHighConfidence ? colors.accentSecondary : colors.accentPrimary;
+    final confidenceBg = isHighConfidence
+        ? (colors.isDark
+            ? colors.accentSecondaryContainer
+            : AppTokens.completedBadgeBg)
+        : colors.accentContainer;
 
     return BentoCard(
       padding: const EdgeInsets.all(AppTokens.space20),
@@ -642,6 +729,7 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                       style: AppTypography.titleSerif(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
+                        color: colors.ink,
                       ),
                     ),
                     const SizedBox(width: AppTokens.space8),
@@ -657,8 +745,8 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
                   visualDensity: VisualDensity.compact,
-                  foregroundColor: AppTokens.charcoalInk,
-                  side: const BorderSide(color: AppTokens.crispBorder),
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
                 ),
                 onPressed: isMerging
                     ? null
@@ -688,7 +776,7 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
           Text(
             'The selected primary book will be preserved. Bookmarks, highlights, and missing metadata will be transferred from other versions.',
             style: AppTypography.bodySans(
-                fontSize: 12, color: AppTokens.mutedCopy),
+                fontSize: 12, color: colors.secondaryInk),
           ),
           const SizedBox(height: AppTokens.space16),
 
@@ -699,6 +787,7 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
             children: group.books.map((book) {
               final isPrimary = book.id == selectedPrimaryId;
               return _buildBookCandidateCard(
+                context: context,
                 book: book,
                 isPrimary: isPrimary,
                 onSelect: () {
@@ -715,10 +804,13 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
   }
 
   Widget _buildBookCandidateCard({
+    required BuildContext context,
     required Book book,
     required bool isPrimary,
     required VoidCallback onSelect,
   }) {
+    final colors = context.shelfdColors;
+
     return InkWell(
       onTap: onSelect,
       borderRadius: BorderRadius.circular(AppTokens.radiusMd),
@@ -726,9 +818,9 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
         width: 340,
         padding: const EdgeInsets.all(AppTokens.space12),
         decoration: BoxDecoration(
-          color: isPrimary ? AppTokens.boneSurface : Colors.transparent,
+          color: isPrimary ? colors.containerLow : colors.surface,
           border: Border.all(
-            color: isPrimary ? AppTokens.charcoalInk : AppTokens.crispBorder,
+            color: isPrimary ? colors.accentPrimary : colors.border,
             width: isPrimary ? 2 : 1,
           ),
           borderRadius: BorderRadius.circular(AppTokens.radiusMd),
@@ -737,28 +829,16 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Cover Image Thumbnail
-            Container(
+            SizedBox(
               width: 54,
               height: 78,
-              decoration: BoxDecoration(
-                color: AppTokens.boneContainer,
+              child: TactileBookCover(
+                coverUrl: book.coverUrl,
+                title: book.title,
+                showFallbackTitle: false,
                 borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                border: Border.all(color: AppTokens.crispBorder),
+                showShadow: false,
               ),
-              clipBehavior: Clip.antiAlias,
-              child: book.coverUrl != null && book.coverUrl!.isNotEmpty
-                  ? Image.network(
-                      book.coverUrl!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Center(
-                        child: Icon(Icons.book_rounded,
-                            size: 24, color: AppTokens.mutedCopy),
-                      ),
-                    )
-                  : const Center(
-                      child: Icon(Icons.book_rounded,
-                          size: 24, color: AppTokens.mutedCopy),
-                    ),
             ),
             const SizedBox(width: AppTokens.space12),
 
@@ -775,8 +855,8 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                             : Icons.radio_button_off,
                         size: 16,
                         color: isPrimary
-                            ? AppTokens.charcoalInk
-                            : AppTokens.mutedCopy,
+                            ? colors.accentPrimary
+                            : colors.mutedInk,
                       ),
                       const SizedBox(width: AppTokens.space4),
                       if (isPrimary)
@@ -784,16 +864,16 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: AppTokens.charcoalInk,
+                            color: colors.accentPrimary,
                             borderRadius:
                                 BorderRadius.circular(AppTokens.radiusPill),
                           ),
-                          child: const Text(
+                          child: Text(
                             'PRIMARY',
-                            style: TextStyle(
+                            style: AppTypography.mono(
                               fontSize: 9,
                               fontWeight: FontWeight.w700,
-                              color: Colors.white,
+                              color: colors.onAccent,
                               letterSpacing: 0.5,
                             ),
                           ),
@@ -806,6 +886,7 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                     style: AppTypography.titleSerif(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
+                      color: colors.ink,
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
@@ -815,7 +896,7 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                     book.authorDisplay,
                     style: AppTypography.bodySans(
                       fontSize: 12,
-                      color: AppTokens.mutedCopy,
+                      color: colors.secondaryInk,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -827,14 +908,17 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                     spacing: 6,
                     runSpacing: 4,
                     children: [
-                      _buildSmallBadge(_formatFileSize(book.fileSizeBytes)),
+                      _buildSmallBadge(
+                          context, _formatFileSize(book.fileSizeBytes)),
                       if (book.publishedDate != null &&
                           book.publishedDate!.isNotEmpty)
-                        _buildSmallBadge(book.publishedDate!),
+                        _buildSmallBadge(context, book.publishedDate!),
                       if (book.bookmarks.isNotEmpty)
-                        _buildSmallBadge('${book.bookmarks.length} 🔖'),
+                        _buildSmallBadge(
+                            context, '${book.bookmarks.length} 🔖'),
                       if (book.highlights.isNotEmpty)
-                        _buildSmallBadge('${book.highlights.length} ✏️'),
+                        _buildSmallBadge(
+                            context, '${book.highlights.length} ✏️'),
                     ],
                   ),
                 ],
@@ -846,19 +930,20 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
     );
   }
 
-  Widget _buildSmallBadge(String text) {
+  Widget _buildSmallBadge(BuildContext context, String text) {
+    final colors = context.shelfdColors;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: AppTokens.boneContainer,
+        color: colors.container,
         borderRadius: BorderRadius.circular(AppTokens.radiusSm),
       ),
       child: Text(
         text,
-        style: const TextStyle(
+        style: AppTypography.mono(
           fontSize: 10,
           fontWeight: FontWeight.w500,
-          color: AppTokens.charcoalInk,
+          color: colors.secondaryInk,
         ),
       ),
     );

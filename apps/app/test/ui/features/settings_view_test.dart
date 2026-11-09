@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shelf/data/models/queue_status.dart';
 import 'package:shelf/data/services/api_service.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/settings/settings_view.dart';
@@ -250,5 +251,37 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(prefs.getString('shelfd_theme_mode'), 'dark');
+  });
+
+  testWidgets('SettingsView renders AI Indexing status and Host URL in Dark theme', (tester) async {
+    setLargeViewport(tester);
+
+    const queueStatus = QueueState(
+      status: QueueStatus(
+        totalChapters: 20,
+        indexedChapters: 15,
+        pendingChapters: 5,
+        progressPercent: 75.0,
+        currentBook: 'Dune',
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          queueProvider.overrideWith(() => FakeQueueNotifier(queueStatus)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+          home: const SettingsView(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('AI Indexing & Vectors'), findsOneWidget);
+    expect(find.text('75%'), findsOneWidget);
+    expect(find.textContaining('Host:'), findsOneWidget);
   });
 }

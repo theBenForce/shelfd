@@ -6,11 +6,13 @@ import 'features/audiobook/audiobook_player_view.dart';
 import 'features/authors/author_detail_view.dart';
 import 'features/book_detail/book_detail_view.dart';
 import 'features/connect/connect_view.dart';
+import 'features/genres/genre_detail_view.dart';
 import 'features/library/library_view.dart';
 import 'features/reader/reader_view.dart';
 import 'features/search/search_view.dart';
 import 'features/series/series_detail_view.dart';
 import 'features/settings/settings_view.dart';
+import 'features/topics/topic_detail_view.dart';
 import 'features/upload/uploads_view.dart';
 import 'features/utilities/utilities_view.dart';
 
@@ -112,12 +114,38 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
             builder: (context, state) => const LibraryView(
               mode: LibraryViewMode.genres,
             ),
+            routes: [
+              GoRoute(
+                path: ':genreId',
+                builder: (context, state) {
+                  final genreId = state.pathParameters['genreId'] ?? '';
+                  final genreName = state.uri.queryParameters['name'];
+                  return GenreDetailView(
+                    genreId: genreId,
+                    genreName: genreName,
+                  );
+                },
+              ),
+            ],
           ),
           GoRoute(
             path: '/topics',
             builder: (context, state) => const LibraryView(
               mode: LibraryViewMode.topics,
             ),
+            routes: [
+              GoRoute(
+                path: ':topicId',
+                builder: (context, state) {
+                  final topicId = state.pathParameters['topicId'] ?? '';
+                  final topicName = state.uri.queryParameters['name'];
+                  return TopicDetailView(
+                    topicId: topicId,
+                    topicName: topicName,
+                  );
+                },
+              ),
+            ],
           ),
           GoRoute(
             path: '/search',

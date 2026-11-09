@@ -58,21 +58,51 @@ class MiniPlayerBar extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12, vertical: 8),
               child: Row(
                 children: [
-                  // Book cover thumbnail
+                  // Book cover thumbnail with physical sleeve crease
                   ClipRRect(
                     borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                     child: Container(
                       width: 40,
                       height: 40,
-                      color: AppTokens.obsidianContainer,
-                      child: book.coverUrl != null
-                          ? Image.network(
-                              book.coverUrl!,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) =>
-                                  const Icon(Icons.headphones, color: AppTokens.amberAccent, size: 20),
-                            )
-                          : const Icon(Icons.headphones, color: AppTokens.amberAccent, size: 20),
+                      decoration: BoxDecoration(
+                        color: AppTokens.obsidianSurface,
+                        borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                        border: Border.all(color: AppTokens.obsidianBorder, width: 0.8),
+                      ),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          book.coverUrl != null
+                              ? Image.network(
+                                  book.coverUrl!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      const Icon(Icons.headphones, color: AppTokens.amberAccent, size: 20),
+                                )
+                              : const Icon(Icons.headphones, color: AppTokens.amberAccent, size: 20),
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: 4,
+                            child: IgnorePointer(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.centerLeft,
+                                    end: Alignment.centerRight,
+                                    colors: [
+                                      Colors.black.withValues(alpha: 0.35),
+                                      Colors.white.withValues(alpha: 0.12),
+                                      Colors.transparent,
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   const SizedBox(width: AppTokens.space12),

@@ -258,22 +258,45 @@ var consentPageTemplate = template.Must(template.New("consent").Parse(`<!DOCTYPE
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Authorize {{.ClientName}} — Shelfd</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #F8F6F0;
+      --bg: #FBF9F4;
       --card-bg: #FFFFFF;
-      --ink: #1F1F1F;
-      --muted: #666660;
-      --border: #E5E0D5;
-      --accent: #2B2622;
-      --accent-hover: #403A35;
-      --error-bg: #FFF0F0;
-      --error-border: #FFC9C9;
-      --error-text: #C92A2A;
+      --surface-low: #F5F3EE;
+      --ink: #1E1B18;
+      --secondary-ink: #53433C;
+      --muted: #756860;
+      --border: #E3DDD3;
+      --accent: #8E4A26;
+      --accent-hover: #AA603A;
+      --accent-tint: #F7ECE6;
+      --error-bg: #FEF2F2;
+      --error-border: #FECACA;
+      --error-text: #B91C1C;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161412;
+        --card-bg: #1E1B18;
+        --surface-low: #23201C;
+        --ink: #EDE7DF;
+        --secondary-ink: #BDB3A7;
+        --muted: #8C8277;
+        --border: #332E29;
+        --accent: #D98A5F;
+        --accent-hover: #E59B73;
+        --accent-tint: #3A261B;
+        --error-bg: #2D1618;
+        --error-border: #5C262A;
+        --error-text: #FCA5A5;
+      }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: "Work Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background-color: var(--bg);
       color: var(--ink);
       display: flex;
@@ -285,11 +308,11 @@ var consentPageTemplate = template.Must(template.New("consent").Parse(`<!DOCTYPE
     .card {
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 14px;
       max-width: 440px;
       width: 100%;
       padding: 36px 32px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+      box-shadow: 0 8px 28px rgba(30, 27, 24, 0.06);
     }
     .brand {
       display: flex;
@@ -301,35 +324,37 @@ var consentPageTemplate = template.Must(template.New("consent").Parse(`<!DOCTYPE
       width: 36px;
       height: 36px;
       background: var(--accent);
-      color: var(--bg);
+      color: #FBF9F4;
       border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-weight: bold;
+      font-family: "Newsreader", Georgia, serif;
+      font-weight: 700;
       font-size: 18px;
     }
     .brand-name {
-      font-family: Georgia, serif;
+      font-family: "Newsreader", Georgia, serif;
       font-size: 22px;
       font-weight: 600;
-      letter-spacing: -0.5px;
+      letter-spacing: -0.4px;
+      color: var(--ink);
     }
     h1 {
-      font-family: Georgia, serif;
+      font-family: "Newsreader", Georgia, serif;
       font-size: 24px;
       font-weight: 600;
       margin-bottom: 8px;
       color: var(--ink);
     }
     p.desc {
-      color: var(--muted);
+      color: var(--secondary-ink);
       font-size: 14px;
       line-height: 1.5;
       margin-bottom: 20px;
     }
     .scope-box {
-      background: #FDFBF7;
+      background: var(--surface-low);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 12px 14px;
@@ -355,19 +380,22 @@ var consentPageTemplate = template.Must(template.New("consent").Parse(`<!DOCTYPE
     }
     label {
       display: block;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.6px;
       color: var(--muted);
       margin-bottom: 6px;
     }
     input[type="text"], input[type="password"] {
       width: 100%;
       padding: 10px 12px;
+      background: var(--surface-low);
+      color: var(--ink);
       border: 1px solid var(--border);
-      border-radius: 6px;
+      border-radius: 8px;
       font-size: 14px;
+      font-family: inherit;
       outline: none;
       transition: border-color 0.15s ease;
     }
@@ -382,9 +410,10 @@ var consentPageTemplate = template.Must(template.New("consent").Parse(`<!DOCTYPE
     button {
       flex: 1;
       padding: 12px;
-      border-radius: 6px;
+      border-radius: 8px;
       font-size: 14px;
       font-weight: 600;
+      font-family: inherit;
       cursor: pointer;
       transition: background 0.15s ease;
       border: none;
@@ -399,10 +428,10 @@ var consentPageTemplate = template.Must(template.New("consent").Parse(`<!DOCTYPE
     .btn-secondary {
       background: transparent;
       border: 1px solid var(--border);
-      color: var(--muted);
+      color: var(--secondary-ink);
     }
     .btn-secondary:hover {
-      background: #F8F6F0;
+      background: var(--surface-low);
     }
   </style>
 </head>

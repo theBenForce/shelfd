@@ -68,9 +68,10 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                     selected: isSelected,
                     selectedColor: AppTokens.amberAccent,
                     backgroundColor: AppTokens.obsidianElevated,
-                    labelStyle: TextStyle(
-                      color: isSelected ? AppTokens.charcoalInk : Colors.white,
+                    labelStyle: AppTypography.mono(
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
+                      color: isSelected ? AppTokens.charcoalInk : Colors.white,
                     ),
                     onSelected: (_) {
                       ref.read(audioPlayerProvider.notifier).setSpeed(s);
@@ -212,7 +213,7 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                   children: [
                     const SizedBox(height: AppTokens.space8),
 
-                    // Hero Cover Artwork with ambient glow
+                    // Hero Cover Artwork with ambient glow & physical sleeve crease
                     Center(
                       child: Container(
                         width: isCompact ? 180 : 240,
@@ -221,23 +222,70 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                           borderRadius: BorderRadius.circular(AppTokens.radiusLg),
                           boxShadow: [
                             BoxShadow(
-                              color: AppTokens.amberAccent.withValues(alpha: 0.15),
+                              color: AppTokens.amberAccent.withValues(alpha: 0.16),
                               blurRadius: 36,
                               spreadRadius: 4,
-                              offset: const Offset(0, 12),
+                              offset: const Offset(0, 14),
+                            ),
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              blurRadius: 20,
+                              offset: const Offset(0, 10),
                             ),
                           ],
                         ),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(AppTokens.radiusLg),
-                          child: book.coverUrl != null
-                              ? Image.network(
-                                  book.coverUrl!,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      _buildCoverFallback(book.title),
-                                )
-                              : _buildCoverFallback(book.title),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              book.coverUrl != null
+                                  ? Image.network(
+                                      book.coverUrl!,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stackTrace) =>
+                                          _buildCoverFallback(book.title),
+                                    )
+                                  : _buildCoverFallback(book.title),
+                              // Left-edge physical audiobook sleeve crease
+                              Positioned(
+                                left: 0,
+                                top: 0,
+                                bottom: 0,
+                                width: 14,
+                                child: IgnorePointer(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.centerLeft,
+                                        end: Alignment.centerRight,
+                                        colors: [
+                                          Colors.black.withValues(alpha: 0.38),
+                                          Colors.white.withValues(alpha: 0.14),
+                                          Colors.black.withValues(alpha: 0.18),
+                                          Colors.transparent,
+                                        ],
+                                        stops: const [0.0, 0.28, 0.55, 1.0],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              // Subtle studio edge highlight
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(AppTokens.radiusLg),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.08),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -373,7 +421,11 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                             icon: const Icon(Icons.speed, size: 16),
                             label: Text(
                               '${playerState.speed.toStringAsFixed(playerState.speed.truncateToDouble() == playerState.speed ? 0 : 2)}x',
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                              style: AppTypography.mono(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppTokens.antiqueCream,
+                              ),
                             ),
                             onPressed: () => _showSpeedPicker(context, playerState.speed),
                           ),
@@ -400,7 +452,17 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                               playerState.sleepTimerRemaining != null
                                   ? '${playerState.sleepTimerRemaining!.inMinutes}m'
                                   : 'Sleep',
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                              style: playerState.sleepTimerRemaining != null
+                                  ? AppTypography.mono(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTokens.amberAccent,
+                                    )
+                                  : AppTypography.bodySans(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTokens.antiqueCream,
+                                    ),
                             ),
                             onPressed: () => _showChapterDrawer(context, book),
                           ),

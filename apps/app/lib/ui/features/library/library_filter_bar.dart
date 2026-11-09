@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -258,6 +259,7 @@ class _LibraryFilterBarState extends ConsumerState<LibraryFilterBar> {
 
     return OverlayEntry(
       builder: (context) {
+        final colors = ShelfdColors.of(context);
         return Positioned(
           width: size.width,
           child: CompositedTransformFollower(
@@ -265,15 +267,22 @@ class _LibraryFilterBarState extends ConsumerState<LibraryFilterBar> {
             showWhenUnlinked: false,
             offset: Offset(0, size.height + AppTokens.space4),
             child: Material(
-              elevation: 4,
-              shadowColor: Colors.black12,
+              elevation: 8,
+              shadowColor: colors.cardShadowColor,
               borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              color: AppTokens.boneSurface,
+              color: colors.surface,
               child: Container(
                 decoration: BoxDecoration(
-                  color: AppTokens.boneSurface,
+                  color: colors.surface,
                   borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                  border: Border.all(color: AppTokens.crispBorder),
+                  border: Border.all(color: colors.border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: colors.cardShadowColor,
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
                 ),
                 constraints: const BoxConstraints(maxHeight: 280),
                 child: ClipRRect(
@@ -288,7 +297,7 @@ class _LibraryFilterBarState extends ConsumerState<LibraryFilterBar> {
                       return InkWell(
                         onTap: () => _selectSuggestion(item),
                         child: Container(
-                          color: isHighlighted ? AppTokens.boneContainer : Colors.transparent,
+                          color: isHighlighted ? colors.containerHigh : Colors.transparent,
                           padding: const EdgeInsets.symmetric(
                             horizontal: AppTokens.space16,
                             vertical: AppTokens.space8,
@@ -298,7 +307,7 @@ class _LibraryFilterBarState extends ConsumerState<LibraryFilterBar> {
                               Icon(
                                 item.icon,
                                 size: 16,
-                                color: isHighlighted ? AppTokens.charcoalInk : AppTokens.mutedCopy,
+                                color: isHighlighted ? colors.accentPrimary : colors.mutedInk,
                               ),
                               const SizedBox(width: AppTokens.space12),
                               Expanded(
@@ -307,7 +316,7 @@ class _LibraryFilterBarState extends ConsumerState<LibraryFilterBar> {
                                   style: AppTypography.bodySans(
                                     fontSize: 14,
                                     fontWeight: isHighlighted ? FontWeight.w600 : FontWeight.w400,
-                                    color: AppTokens.charcoalInk,
+                                    color: colors.ink,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -315,9 +324,10 @@ class _LibraryFilterBarState extends ConsumerState<LibraryFilterBar> {
                               if (item.count != null)
                                 Text(
                                   '${item.count} ${item.count == 1 ? 'book' : 'books'}',
-                                  style: AppTypography.captionSans(
-                                    fontSize: 12,
-                                    color: AppTokens.mutedCopy,
+                                  style: AppTypography.mono(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                    color: isHighlighted ? colors.secondaryInk : colors.mutedInk,
                                   ),
                                 ),
                             ],
@@ -344,6 +354,7 @@ class _LibraryFilterBarState extends ConsumerState<LibraryFilterBar> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     ref.listen<String>(libraryProvider.select((s) => s.searchQuery), (prev, next) {
       if (next != _controller.text) {
         _controller.value = TextEditingValue(
@@ -363,26 +374,26 @@ class _LibraryFilterBarState extends ConsumerState<LibraryFilterBar> {
         textInputAction: TextInputAction.search,
         style: AppTypography.bodySans(
           fontSize: 14,
-          color: AppTokens.charcoalInk,
+          color: colors.ink,
         ),
         decoration: InputDecoration(
           hintText: widget.hintText ?? 'Filter by title, author:"name", genre:"...", topic:"..."',
           hintStyle: AppTypography.bodySans(
             fontSize: 14,
-            color: AppTokens.mutedCopy.withValues(alpha: 0.7),
+            color: colors.mutedInk.withValues(alpha: 0.8),
           ),
           filled: true,
-          fillColor: AppTokens.boneSurface,
-          prefixIcon: const Icon(
+          fillColor: colors.containerLow,
+          prefixIcon: Icon(
             Icons.search_rounded,
-            color: AppTokens.mutedCopy,
+            color: colors.mutedInk,
             size: 20,
           ),
           suffixIcon: hasText
               ? IconButton(
                   icon: const Icon(Icons.close_rounded, size: 18),
                   tooltip: 'Clear filter',
-                  color: AppTokens.mutedCopy,
+                  color: colors.mutedInk,
                   onPressed: _clearSearch,
                 )
               : null,
@@ -392,15 +403,15 @@ class _LibraryFilterBarState extends ConsumerState<LibraryFilterBar> {
           ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-            borderSide: const BorderSide(color: AppTokens.crispBorder),
+            borderSide: BorderSide(color: colors.subtleBorder),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-            borderSide: const BorderSide(color: AppTokens.crispBorder),
+            borderSide: BorderSide(color: colors.subtleBorder),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-            borderSide: const BorderSide(color: AppTokens.charcoalInk, width: 1.5),
+            borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
           ),
         ),
       ),

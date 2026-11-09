@@ -162,6 +162,9 @@ void main() {
 
     // Metadata Inspector
     expect(find.text('Metadata Inspector'), findsOneWidget);
+    expect(find.text('Auto-Fill'), findsOneWidget);
+    expect(find.text('Publisher'), findsOneWidget);
+    expect(find.text('Language'), findsOneWidget);
     expect(find.text('Target Library Destination'), findsOneWidget);
     expect(find.text('/library/Frank Herbert/Dune/Dune.epub'), findsOneWidget);
     expect(find.text('Save & Add to Library'), findsOneWidget);
@@ -220,5 +223,50 @@ void main() {
     expect(find.text('Narrator (optional)'), findsOneWidget);
     expect(find.text('George Guidall'), findsOneWidget);
     expect(find.text('/library/Victor Hugo/Les Misérables/Les Misérables.mp3'), findsOneWidget);
+  });
+
+  testWidgets('UploadsView adapts cleanly to Dark and Sepia themes with missing author warning', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+
+    const incompleteJob = StagedUploadJob(
+      jobId: 'job-missing-author',
+      status: 'staged',
+      filename: 'mystery:book?.epub',
+      metadata: StagedMetadata(
+        title: 'Mystery: A Novel?',
+        authors: [],
+      ),
+      hasCover: false,
+      warnings: ['No author found in EPUB metadata'],
+    );
+
+    const state = UploadState(
+      stagedJobs: [incompleteJob],
+      selectedJobId: 'job-missing-author',
+      autoCommit: false,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          uploadProvider.overrideWith(() => FakeUploadNotifier(state)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+          home: const UploadsView(),
+        ),
+      ),
+    );
+
+    expect(find.text('Missing Author'), findsOneWidget);
+    expect(find.text('/library/Unknown/Mystery A Novel/Mystery A Novel.epub'), findsOneWidget);
   });
 }

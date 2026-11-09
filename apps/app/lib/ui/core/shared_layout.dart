@@ -9,6 +9,7 @@ import '../../data/models/topic.dart';
 import '../features/audiobook/widgets/mini_player_bar.dart';
 import '../state/providers.dart';
 import 'responsive.dart';
+import 'theme.dart';
 import 'tokens.dart';
 import 'typography.dart';
 
@@ -39,28 +40,40 @@ class BentoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cardWidget = Card(
-      elevation: 0,
-      margin: EdgeInsets.zero,
-      color: backgroundColor ?? theme.cardColor,
-      shape: RoundedRectangleBorder(
+    final colors = ShelfdColors.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-        side: BorderSide(color: theme.dividerColor),
+        boxShadow: [
+          BoxShadow(
+            color: colors.cardShadowColor,
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-        child: Container(
-          width: width,
-          height: height,
-          padding: padding,
-          child: child,
+      child: Card(
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        color: backgroundColor ?? colors.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+          side: BorderSide(color: colors.subtleBorder),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+          child: Container(
+            width: width,
+            height: height,
+            padding: padding,
+            child: child,
+          ),
         ),
       ),
     );
-
-    return cardWidget;
   }
 }
 
@@ -85,7 +98,7 @@ class FilterPillsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = ShelfdColors.of(context);
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
@@ -98,18 +111,18 @@ class FilterPillsRow extends StatelessWidget {
                 item.label,
                 style: AppTypography.bodySans(
                   fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                  color: isSelected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurfaceVariant,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  color: isSelected ? colors.onAccent : colors.secondaryInk,
                 ),
               ),
               selected: isSelected,
               onSelected: (_) => onSelected(item.id),
-              selectedColor: theme.colorScheme.primary,
-              backgroundColor: theme.colorScheme.surface,
+              selectedColor: colors.accentPrimary,
+              backgroundColor: colors.containerLow,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(AppTokens.radiusPill),
                 side: BorderSide(
-                  color: isSelected ? theme.colorScheme.primary : theme.dividerColor,
+                  color: isSelected ? colors.accentPrimary : colors.subtleBorder,
                 ),
               ),
               showCheckmark: false,
@@ -136,18 +149,32 @@ class StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
+    final isDefaultMatchColors =
+        backgroundColor == AppTokens.matchBadgeBg &&
+        textColor == AppTokens.matchBadgeText;
+    final effectiveBg = (colors.isDark && isDefaultMatchColors)
+        ? colors.accentSecondaryContainer
+        : backgroundColor;
+    final effectiveText = (colors.isDark && isDefaultMatchColors)
+        ? colors.accentSecondary
+        : textColor;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppTokens.space8, vertical: AppTokens.space4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTokens.space8,
+        vertical: AppTokens.space4,
+      ),
       decoration: BoxDecoration(
-        color: backgroundColor,
+        color: effectiveBg,
         borderRadius: BorderRadius.circular(AppTokens.radiusPill),
       ),
       child: Text(
         label,
-        style: TextStyle(
+        style: AppTypography.mono(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: textColor,
+          color: effectiveText,
           letterSpacing: 0.2,
         ),
       ),
@@ -176,33 +203,42 @@ class AuthorAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: AppTokens.boneContainer,
+        color: colors.container,
         shape: BoxShape.circle,
-        border: Border.all(color: AppTokens.crispBorder),
+        border: Border.all(color: colors.border, width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: colors.cardShadowColor,
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       clipBehavior: Clip.antiAlias,
       child: photoUrl != null && photoUrl!.isNotEmpty
           ? Image.network(
               photoUrl!,
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => _buildInitials(),
+              errorBuilder: (context, error, stackTrace) =>
+                  _buildInitials(colors),
             )
-          : _buildInitials(),
+          : _buildInitials(colors),
     );
   }
 
-  Widget _buildInitials() {
+  Widget _buildInitials(ShelfdColors colors) {
     return Center(
       child: Text(
         initials,
         style: AppTypography.titleSerif(
           fontSize: size * 0.38,
           fontWeight: FontWeight.w700,
-          color: AppTokens.charcoalInk,
+          color: colors.accentPrimary,
         ),
       ),
     );
@@ -229,12 +265,16 @@ class PrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
+    final effectiveBg = backgroundColor ?? colors.accentPrimary;
+    final effectiveFg = foregroundColor ?? colors.onAccent;
+
     return SizedBox(
       height: AppTokens.minTouchTarget,
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: backgroundColor ?? AppTokens.charcoalInk,
-          foregroundColor: foregroundColor ?? Colors.white,
+          backgroundColor: effectiveBg,
+          foregroundColor: effectiveFg,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppTokens.radiusSm),
@@ -243,10 +283,13 @@ class PrimaryButton extends StatelessWidget {
         ),
         onPressed: isLoading ? null : onPressed,
         child: isLoading
-            ? const SizedBox(
+            ? SizedBox(
                 width: 20,
                 height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: effectiveFg,
+                ),
               )
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -258,7 +301,11 @@ class PrimaryButton extends StatelessWidget {
                   ],
                   Text(
                     label,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                    style: AppTypography.bodySans(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: effectiveFg,
+                    ),
                   ),
                 ],
               ),
@@ -272,13 +319,15 @@ class ShelfdTopBar extends StatelessWidget implements PreferredSizeWidget {
   final String? subtitle;
   final List<Widget>? actions;
   final Widget? leading;
+  final VoidCallback? onOpenUploads;
 
   const ShelfdTopBar({
     super.key,
-    required this.title,
+    this.title = 'Shelfd',
     this.subtitle,
     this.actions,
     this.leading,
+    this.onOpenUploads,
   });
 
   @override
@@ -286,13 +335,22 @@ class ShelfdTopBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     return AppBar(
+      backgroundColor: colors.background,
+      foregroundColor: colors.ink,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      scrolledUnderElevation: 0,
       leading: leading,
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(title, style: AppTypography.titleSerif(fontSize: 20)),
+          Text(
+            title,
+            style: AppTypography.titleSerif(fontSize: 20, color: colors.ink),
+          ),
           if (subtitle != null) ...[
             const SizedBox(height: 2),
             Row(
@@ -300,8 +358,8 @@ class ShelfdTopBar extends StatelessWidget implements PreferredSizeWidget {
                 Container(
                   width: 6,
                   height: 6,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF2B8A3E),
+                  decoration: BoxDecoration(
+                    color: colors.accentSecondary,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -311,7 +369,10 @@ class ShelfdTopBar extends StatelessWidget implements PreferredSizeWidget {
                     subtitle!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppTypography.bodySans(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    style: AppTypography.bodySans(
+                      fontSize: 11,
+                      color: colors.mutedInk,
+                    ),
                   ),
                 ),
               ],
@@ -319,32 +380,45 @@ class ShelfdTopBar extends StatelessWidget implements PreferredSizeWidget {
           ],
         ],
       ),
-      actions: actions,
+      actions: actions ??
+          (onOpenUploads != null
+              ? [ShelfdUploadsBadgeButton(onPressed: onOpenUploads)]
+              : null),
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
-        child: Container(color: Theme.of(context).dividerColor, height: 1),
+        child: Container(color: colors.subtleBorder, height: 1),
       ),
     );
   }
 }
 
 class ShelfdUploadsBadgeButton extends ConsumerWidget {
-  const ShelfdUploadsBadgeButton({super.key});
+  final VoidCallback? onPressed;
+
+  const ShelfdUploadsBadgeButton({super.key, this.onPressed});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final colors = ShelfdColors.of(context);
     final queue = ref.watch(queueProvider);
     final count = queue.status?.stagedUploads ?? 0;
     return IconButton(
       tooltip: count > 0 ? '$count staged uploads' : 'Uploads',
       icon: Badge(
         isLabelVisible: count > 0,
-        label: Text('$count', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10)),
-        backgroundColor: const Color(0xFFF08C00),
-        textColor: Colors.white,
-        child: const Icon(Icons.cloud_upload_outlined, size: 22),
+        label: Text(
+          '$count',
+          style: AppTypography.mono(
+            fontWeight: FontWeight.w700,
+            fontSize: 10,
+            color: colors.onAccent,
+          ),
+        ),
+        backgroundColor: colors.accentPrimary,
+        textColor: colors.onAccent,
+        child: Icon(Icons.cloud_upload_outlined, size: 22, color: colors.ink),
       ),
-      onPressed: () => context.go('/uploads'),
+      onPressed: onPressed ?? () => context.go('/uploads'),
     );
   }
 }
@@ -411,40 +485,57 @@ class ShelfdBottomNav extends ConsumerWidget {
     final idx = _calculateIndex();
     final queueStatus = ref.watch(queueProvider).status;
     final stagedCount = queueStatus?.stagedUploads ?? 0;
-
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final colors = ShelfdColors.of(context);
 
     return Container(
       decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: theme.dividerColor, width: 1)),
+        border: Border(top: BorderSide(color: colors.subtleBorder, width: 1)),
       ),
       child: NavigationBar(
         selectedIndex: idx,
         onDestinationSelected: _handleTap,
-        backgroundColor: theme.scaffoldBackgroundColor,
+        backgroundColor: colors.containerLow,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
         height: 64,
-        indicatorColor: isDark ? const Color(0xFF262626) : AppTokens.boneContainer,
+        indicatorColor: colors.containerHigh,
         destinations: [
           NavigationDestination(
-            icon: const Icon(Icons.menu_book_outlined),
-            selectedIcon: Icon(Icons.menu_book_rounded, color: theme.colorScheme.onSurface),
+            icon: Icon(Icons.menu_book_outlined, color: colors.secondaryInk),
+            selectedIcon: Icon(
+              Icons.menu_book_rounded,
+              color: colors.accentPrimary,
+            ),
             label: 'Books',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.collections_bookmark_outlined),
-            selectedIcon: Icon(Icons.collections_bookmark_rounded, color: theme.colorScheme.onSurface),
+            icon: Icon(
+              Icons.collections_bookmark_outlined,
+              color: colors.secondaryInk,
+            ),
+            selectedIcon: Icon(
+              Icons.collections_bookmark_rounded,
+              color: colors.accentPrimary,
+            ),
             label: 'Series',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.people_outline_rounded),
-            selectedIcon: Icon(Icons.people_rounded, color: theme.colorScheme.onSurface),
+            icon: Icon(
+              Icons.people_outline_rounded,
+              color: colors.secondaryInk,
+            ),
+            selectedIcon: Icon(
+              Icons.people_rounded,
+              color: colors.accentPrimary,
+            ),
             label: 'Authors',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.saved_search_outlined),
-            selectedIcon: Icon(Icons.saved_search_rounded, color: theme.colorScheme.onSurface),
+            icon: Icon(Icons.saved_search_outlined, color: colors.secondaryInk),
+            selectedIcon: Icon(
+              Icons.saved_search_rounded,
+              color: colors.accentPrimary,
+            ),
             label: 'Search',
           ),
           NavigationDestination(
@@ -452,32 +543,52 @@ class ShelfdBottomNav extends ConsumerWidget {
               isLabelVisible: stagedCount > 0,
               label: Text(
                 '$stagedCount',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10),
+                style: AppTypography.mono(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 10,
+                  color: colors.onAccent,
+                ),
               ),
-              backgroundColor: const Color(0xFFF08C00),
-              textColor: Colors.white,
-              child: const Icon(Icons.cloud_upload_outlined),
+              backgroundColor: colors.accentPrimary,
+              textColor: colors.onAccent,
+              child: Icon(
+                Icons.cloud_upload_outlined,
+                color: colors.secondaryInk,
+              ),
             ),
             selectedIcon: Badge(
               isLabelVisible: stagedCount > 0,
               label: Text(
                 '$stagedCount',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10),
+                style: AppTypography.mono(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 10,
+                  color: colors.onAccent,
+                ),
               ),
-              backgroundColor: const Color(0xFFF08C00),
-              textColor: Colors.white,
-              child: Icon(Icons.cloud_upload_rounded, color: theme.colorScheme.onSurface),
+              backgroundColor: colors.accentPrimary,
+              textColor: colors.onAccent,
+              child: Icon(
+                Icons.cloud_upload_rounded,
+                color: colors.accentPrimary,
+              ),
             ),
             label: 'Uploads',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.handyman_outlined),
-            selectedIcon: Icon(Icons.handyman_rounded, color: theme.colorScheme.onSurface),
+            icon: Icon(Icons.handyman_outlined, color: colors.secondaryInk),
+            selectedIcon: Icon(
+              Icons.handyman_rounded,
+              color: colors.accentPrimary,
+            ),
             label: 'Utilities',
           ),
           NavigationDestination(
-            icon: const Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings_rounded, color: theme.colorScheme.onSurface),
+            icon: Icon(Icons.settings_outlined, color: colors.secondaryInk),
+            selectedIcon: Icon(
+              Icons.settings_rounded,
+              color: colors.accentPrimary,
+            ),
             label: 'Settings',
           ),
         ],
@@ -523,18 +634,29 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = ShelfdColors.of(context);
     final p = widget.currentPath ?? '';
-    final isBooks = p.startsWith('/books') || p == '/library' || p.startsWith('/book/');
+    final isBooks =
+        p.startsWith('/books') || p == '/library' || p.startsWith('/book/');
     final isSeries = p.startsWith('/series');
     final isAuthors = p.startsWith('/authors') || p.startsWith('/author');
     final isGenres = p.startsWith('/genres') || p.startsWith('/genre');
     final isTopics = p.startsWith('/topics') || p.startsWith('/topic');
-    final isSearch = p.startsWith('/search') || (widget.currentPath == null && widget.currentIndex == 1);
+    final isSearch =
+        p.startsWith('/search') ||
+        (widget.currentPath == null && widget.currentIndex == 1);
     final isUploads = p.startsWith('/uploads');
     final isUtilities = p.startsWith('/utilities');
-    final isSettings = p.startsWith('/settings') || (widget.currentPath == null && widget.currentIndex == 2);
-    final isLibraryActive = isBooks || isSeries || isAuthors || isGenres || isTopics || (widget.currentPath == null && widget.currentIndex == 0);
+    final isSettings =
+        p.startsWith('/settings') ||
+        (widget.currentPath == null && widget.currentIndex == 2);
+    final isLibraryActive =
+        isBooks ||
+        isSeries ||
+        isAuthors ||
+        isGenres ||
+        isTopics ||
+        (widget.currentPath == null && widget.currentIndex == 0);
     final queueStatus = ref.watch(queueProvider).status;
     final stagedCount = queueStatus?.stagedUploads ?? 0;
 
@@ -542,9 +664,9 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
       width: AppTokens.sidebarWidth,
       height: double.infinity,
       decoration: BoxDecoration(
-        color: theme.scaffoldBackgroundColor,
+        color: colors.containerLow,
         border: Border(
-          right: BorderSide(color: theme.dividerColor, width: 1),
+          right: BorderSide(color: colors.subtleBorder, width: 1),
         ),
       ),
       padding: const EdgeInsets.symmetric(
@@ -561,12 +683,12 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primary,
+                  color: colors.accentPrimary,
                   borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                 ),
                 child: Icon(
                   Icons.auto_stories_rounded,
-                  color: theme.colorScheme.onPrimary,
+                  color: colors.onAccent,
                   size: 20,
                 ),
               ),
@@ -581,14 +703,14 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                       style: AppTypography.titleSerif(
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
-                        color: theme.colorScheme.onSurface,
+                        color: colors.ink,
                       ),
                     ),
                     Text(
                       'Your Digital Vellum',
                       style: AppTypography.bodySans(
                         fontSize: 11,
-                        color: theme.colorScheme.onSurfaceVariant,
+                        color: colors.mutedInk,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -614,9 +736,11 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                     trailing: IconButton(
                       visualDensity: VisualDensity.compact,
                       icon: Icon(
-                        _isLibraryExpanded ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_right_rounded,
+                        _isLibraryExpanded
+                            ? Icons.keyboard_arrow_down_rounded
+                            : Icons.keyboard_arrow_right_rounded,
                         size: 20,
-                        color: AppTokens.mutedCopy,
+                        color: colors.mutedInk,
                       ),
                       onPressed: () {
                         setState(() {
@@ -640,7 +764,13 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                       icon: Icons.menu_book_outlined,
                       selectedIcon: Icons.menu_book_rounded,
                       label: 'Books',
-                      isSelected: isBooks || (isLibraryActive && !isSeries && !isAuthors && !isGenres && !isTopics),
+                      isSelected:
+                          isBooks ||
+                          (isLibraryActive &&
+                              !isSeries &&
+                              !isAuthors &&
+                              !isGenres &&
+                              !isTopics),
                       onTap: () => _navigate('/books', 0),
                     ),
                     _SideNavSubItem(
@@ -690,18 +820,27 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                     isSelected: isUploads,
                     trailing: stagedCount > 0
                         ? Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFFFF9DB),
-                              border: Border.all(color: const Color(0xFFFFE066)),
+                              color: colors.accentPrimary.withValues(
+                                alpha: 0.14,
+                              ),
+                              border: Border.all(
+                                color: colors.accentPrimary.withValues(
+                                  alpha: 0.35,
+                                ),
+                              ),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
                               '$stagedCount',
-                              style: const TextStyle(
+                              style: AppTypography.mono(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFFF08C00),
+                                color: colors.accentPrimary,
                               ),
                             ),
                           )
@@ -742,25 +881,34 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
               height: 40,
               child: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  backgroundColor: AppTokens.charcoalInk,
-                  foregroundColor: Colors.white,
+                  backgroundColor: colors.accentPrimary,
+                  foregroundColor: colors.onAccent,
                   side: BorderSide.none,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTokens.space12,
+                  ),
                 ),
                 onPressed: widget.isRescanning ? null : widget.onRescan,
                 icon: widget.isRescanning
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: colors.onAccent,
+                        ),
                       )
                     : const Icon(Icons.sync_rounded, size: 18),
                 label: Text(
                   widget.isRescanning ? 'Scanning...' : 'Rescan Library',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  style: AppTypography.bodySans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: colors.onAccent,
+                  ),
                 ),
               ),
             ),
@@ -771,17 +919,17 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: theme.brightness == Brightness.dark ? const Color(0xFF262626) : AppTokens.boneContainer,
+              color: colors.container,
               borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              border: Border.all(color: theme.dividerColor),
+              border: Border.all(color: colors.subtleBorder),
             ),
             child: Row(
               children: [
                 Container(
                   width: 8,
                   height: 8,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF2B8A3E),
+                  decoration: BoxDecoration(
+                    color: colors.accentSecondary,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -792,7 +940,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                     style: AppTypography.bodySans(
                       fontSize: 11,
                       fontWeight: FontWeight.w500,
-                      color: theme.colorScheme.onSurfaceVariant,
+                      color: colors.secondaryInk,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -825,11 +973,10 @@ class _SideNavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final selectedBg = isDark ? const Color(0xFF262626) : AppTokens.boneContainer;
-    final unselectedColor = theme.colorScheme.onSurfaceVariant;
-    final activeColor = theme.colorScheme.onSurface;
+    final colors = ShelfdColors.of(context);
+    final selectedBg = colors.containerHigh;
+    final unselectedColor = colors.secondaryInk;
+    final activeColor = colors.ink;
 
     return Material(
       color: isSelected ? selectedBg : Colors.transparent,
@@ -842,13 +989,13 @@ class _SideNavItem extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-            border: isSelected ? Border.all(color: theme.dividerColor) : null,
+            border: isSelected ? Border.all(color: colors.subtleBorder) : null,
           ),
           child: Row(
             children: [
               Icon(
                 isSelected ? selectedIcon : icon,
-                color: isSelected ? activeColor : unselectedColor,
+                color: isSelected ? colors.accentPrimary : unselectedColor,
                 size: 22,
               ),
               const SizedBox(width: AppTokens.space12),
@@ -869,7 +1016,7 @@ class _SideNavItem extends StatelessWidget {
                   width: 4,
                   height: 16,
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.primary,
+                    color: colors.accentPrimary,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -898,10 +1045,11 @@ class _SideNavSubItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     return Padding(
       padding: const EdgeInsets.only(left: AppTokens.space16, top: 2, bottom: 2),
       child: Material(
-        color: isSelected ? AppTokens.boneContainer : Colors.transparent,
+        color: isSelected ? colors.container : Colors.transparent,
         borderRadius: BorderRadius.circular(AppTokens.radiusMd),
         child: InkWell(
           onTap: onTap,
@@ -911,13 +1059,15 @@ class _SideNavSubItem extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              border: isSelected ? Border.all(color: AppTokens.crispBorder) : null,
+              border: isSelected
+                  ? Border.all(color: colors.subtleBorder)
+                  : null,
             ),
             child: Row(
               children: [
                 Icon(
                   isSelected ? selectedIcon : icon,
-                  color: isSelected ? AppTokens.charcoalInk : AppTokens.mutedCopy,
+                  color: isSelected ? colors.accentPrimary : colors.mutedInk,
                   size: 18,
                 ),
                 const SizedBox(width: AppTokens.space8),
@@ -926,8 +1076,10 @@ class _SideNavSubItem extends StatelessWidget {
                     label,
                     style: AppTypography.bodySans(
                       fontSize: 13,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                      color: isSelected ? AppTokens.charcoalInk : AppTokens.mutedCopy,
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.w400,
+                      color: isSelected ? colors.ink : colors.secondaryInk,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -937,7 +1089,7 @@ class _SideNavSubItem extends StatelessWidget {
                     width: 4,
                     height: 14,
                     decoration: BoxDecoration(
-                      color: AppTokens.charcoalInk,
+                      color: colors.accentPrimary,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -955,6 +1107,7 @@ class _QueueStatusCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final colors = ShelfdColors.of(context);
     final queueState = ref.watch(queueProvider);
     final status = queueState.status;
 
@@ -963,16 +1116,19 @@ class _QueueStatusCard extends ConsumerWidget {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: AppTokens.boneContainer.withValues(alpha: 0.5),
+            color: colors.container.withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-            border: Border.all(color: AppTokens.crispBorder.withValues(alpha: 0.6)),
+            border: Border.all(color: colors.subtleBorder),
           ),
           child: Row(
             children: [
-              const SizedBox(
+              SizedBox(
                 width: 12,
                 height: 12,
-                child: CircularProgressIndicator(strokeWidth: 1.5, color: AppTokens.mutedCopy),
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: colors.mutedInk,
+                ),
               ),
               const SizedBox(width: AppTokens.space8),
               Expanded(
@@ -980,7 +1136,7 @@ class _QueueStatusCard extends ConsumerWidget {
                   'Checking queue...',
                   style: AppTypography.bodySans(
                     fontSize: 11,
-                    color: AppTokens.mutedCopy,
+                    color: colors.mutedInk,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -992,19 +1148,26 @@ class _QueueStatusCard extends ConsumerWidget {
       return const SizedBox.shrink();
     }
 
-    final isActive = status.isActive || status.pendingChapters > 0 || status.pendingUploads > 0;
+    final isActive =
+        status.isActive ||
+        status.pendingChapters > 0 ||
+        status.pendingUploads > 0;
 
     if (!isActive) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: AppTokens.boneContainer.withValues(alpha: 0.5),
+          color: colors.container.withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-          border: Border.all(color: AppTokens.crispBorder.withValues(alpha: 0.6)),
+          border: Border.all(color: colors.subtleBorder),
         ),
         child: Row(
           children: [
-            const Icon(Icons.check_circle_outline_rounded, size: 14, color: Color(0xFF2B8A3E)),
+            Icon(
+              Icons.check_circle_outline_rounded,
+              size: 14,
+              color: colors.accentSecondary,
+            ),
             const SizedBox(width: AppTokens.space8),
             Expanded(
               child: Text(
@@ -1012,7 +1175,7 @@ class _QueueStatusCard extends ConsumerWidget {
                 style: AppTypography.bodySans(
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
-                  color: AppTokens.mutedCopy,
+                  color: colors.mutedInk,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1023,15 +1186,29 @@ class _QueueStatusCard extends ConsumerWidget {
     }
 
     final libraryState = ref.watch(libraryProvider);
-    final resolvedBook = resolveBookTitle(status.currentBook, libraryState.books);
-    final progress = (status.progressPercent / 100.0).clamp(0.0, 1.0);
+    final resolvedBook = resolveBookTitle(
+      status.currentBook,
+      libraryState.books,
+    );
+    final effectivePercent = status.progressPercent > 0
+        ? status.progressPercent
+        : (status.totalChapters > 0 &&
+                  status.pendingChapters < status.totalChapters
+              ? ((status.totalChapters - status.pendingChapters) /
+                        status.totalChapters) *
+                    100.0
+              : 0.0);
+    final progress = (effectivePercent / 100.0).clamp(0.0, 1.0);
     final title = (resolvedBook != null && resolvedBook.isNotEmpty)
         ? resolvedBook
-        : (status.pendingUploads > 0 ? 'Processing uploads...' : 'Indexing library passages...');
+        : (status.pendingUploads > 0
+              ? 'Processing uploads...'
+              : 'Indexing library passages...');
 
-    final subtext = (status.currentChapter != null && status.currentChapter!.isNotEmpty)
+    final subtext =
+        (status.currentChapter != null && status.currentChapter!.isNotEmpty)
         ? status.currentChapter!
-        : '${status.indexedChapters} of ${status.totalChapters} indexed (${status.progressPercent.toStringAsFixed(0)}%)';
+        : '${status.indexedChapters} of ${status.totalChapters} indexed (${effectivePercent.toStringAsFixed(0)}%)';
 
     return InkWell(
       onTap: () => ref.read(queueProvider.notifier).refresh(),
@@ -1039,14 +1216,14 @@ class _QueueStatusCard extends ConsumerWidget {
       child: Container(
         padding: const EdgeInsets.all(AppTokens.space12),
         decoration: BoxDecoration(
-          color: AppTokens.boneSurface,
+          color: colors.surface,
           borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-          border: Border.all(color: AppTokens.crispBorder),
-          boxShadow: const [
+          border: Border.all(color: colors.subtleBorder),
+          boxShadow: [
             BoxShadow(
-              color: Color(0x0A000000),
-              blurRadius: 4,
-              offset: Offset(0, 2),
+              color: colors.cardShadowColor,
+              blurRadius: 8,
+              offset: const Offset(0, 2),
             ),
           ],
         ),
@@ -1059,13 +1236,13 @@ class _QueueStatusCard extends ConsumerWidget {
                 Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFF4E6),
+                    color: colors.accentPrimary.withValues(alpha: 0.14),
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.auto_awesome_rounded,
                     size: 14,
-                    color: Color(0xFFD9480F),
+                    color: colors.accentPrimary,
                   ),
                 ),
                 const SizedBox(width: AppTokens.space8),
@@ -1075,16 +1252,16 @@ class _QueueStatusCard extends ConsumerWidget {
                     style: AppTypography.bodySans(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: AppTokens.charcoalInk,
+                      color: colors.ink,
                     ),
                   ),
                 ),
                 Text(
-                  '${status.progressPercent.toStringAsFixed(0)}%',
-                  style: AppTypography.bodySans(
+                  '${effectivePercent.toStringAsFixed(0)}%',
+                  style: AppTypography.mono(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: const Color(0xFFD9480F),
+                    color: colors.accentPrimary,
                   ),
                 ),
               ],
@@ -1095,8 +1272,8 @@ class _QueueStatusCard extends ConsumerWidget {
               child: LinearProgressIndicator(
                 value: progress,
                 minHeight: 4,
-                backgroundColor: AppTokens.boneContainer,
-                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFD9480F)),
+                backgroundColor: colors.container,
+                valueColor: AlwaysStoppedAnimation<Color>(colors.accentPrimary),
               ),
             ),
             const SizedBox(height: AppTokens.space8),
@@ -1105,7 +1282,7 @@ class _QueueStatusCard extends ConsumerWidget {
               style: AppTypography.bodySans(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: AppTokens.charcoalInk,
+                color: colors.ink,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -1115,7 +1292,7 @@ class _QueueStatusCard extends ConsumerWidget {
               subtext,
               style: AppTypography.bodySans(
                 fontSize: 10,
-                color: AppTokens.mutedCopy,
+                color: colors.mutedInk,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -1154,9 +1331,11 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDesktop = Responsive.isDesktop(context);
+    final colors = ShelfdColors.of(context);
 
     if (isDesktop) {
       return Scaffold(
+        backgroundColor: colors.background,
         body: Row(
           children: [
             ShelfdSideNav(
@@ -1182,6 +1361,7 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
     }
 
     return Scaffold(
+      backgroundColor: colors.background,
       appBar: appBar,
       body: Column(
         children: [
@@ -1194,6 +1374,273 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
         onTap: onNavTap,
         currentPath: currentPath,
         onNavigate: onNavigate,
+      ),
+    );
+  }
+}
+
+/// Tactile 3D book cover with left-edge book-spine crease, ambient shadow,
+/// multi-volume series stack backing plates, and warm editorial cloth fallback.
+class TactileBookCover extends StatelessWidget {
+  final String? coverUrl;
+  final String title;
+  final String? subtitle;
+  final Map<String, String>? headers;
+  final BorderRadiusGeometry borderRadius;
+  final double? aspectRatio;
+  final double? width;
+  final double? height;
+  final bool showSpineCrease;
+  final bool showShadow;
+  final bool isSeries;
+  final bool showFallbackTitle;
+  final Widget? topRightBadge;
+  final Widget? topLeftBadge;
+  final Widget? bottomOverlay;
+  final IconData fallbackIcon;
+
+  const TactileBookCover({
+    super.key,
+    required this.coverUrl,
+    required this.title,
+    this.subtitle,
+    this.headers,
+    this.borderRadius = const BorderRadius.all(
+      Radius.circular(AppTokens.radiusSm),
+    ),
+    this.aspectRatio,
+    this.width,
+    this.height,
+    this.showSpineCrease = true,
+    this.showShadow = true,
+    this.isSeries = false,
+    this.showFallbackTitle = true,
+    this.topRightBadge,
+    this.topLeftBadge,
+    this.bottomOverlay,
+    this.fallbackIcon = Icons.auto_stories_rounded,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
+    final hasCover = coverUrl != null && coverUrl!.trim().isNotEmpty;
+
+    Widget coverStack = Stack(
+      fit: StackFit.expand,
+      children: [
+        if (isSeries) ...[
+          Positioned(
+            top: 4,
+            bottom: 4,
+            left: 8,
+            right: 0,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.containerHigh,
+                borderRadius: borderRadius,
+                border: Border.all(color: colors.border, width: 1),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 2,
+            bottom: 2,
+            left: 4,
+            right: 3,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.container,
+                borderRadius: borderRadius,
+                border: Border.all(color: colors.border, width: 1),
+              ),
+            ),
+          ),
+        ],
+        Padding(
+          padding: isSeries
+              ? const EdgeInsets.only(right: 6)
+              : EdgeInsets.zero,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.container,
+              borderRadius: borderRadius,
+              border: Border.all(color: colors.subtleBorder, width: 1),
+              boxShadow: showShadow
+                  ? [
+                      BoxShadow(
+                        color: colors.cardShadowColor,
+                        blurRadius: 14,
+                        offset: const Offset(0, 6),
+                      ),
+                      BoxShadow(
+                        color: colors.cardShadowColor.withValues(
+                          alpha: colors.isDark ? 0.36 : 0.12,
+                        ),
+                        blurRadius: 3,
+                        offset: const Offset(2, 2),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: ClipRRect(
+              borderRadius: borderRadius,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  hasCover
+                      ? Image.network(
+                          coverUrl!,
+                          headers: headers,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          height: double.infinity,
+                          errorBuilder: (context, error, stackTrace) =>
+                              _buildEditorialFallback(colors),
+                        )
+                      : _buildEditorialFallback(colors),
+                  if (showSpineCrease)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.centerLeft,
+                              end: Alignment.centerRight,
+                              stops: const [
+                                0.0,
+                                0.025,
+                                0.055,
+                                0.085,
+                                0.12,
+                                1.0,
+                              ],
+                              colors: [
+                                Colors.black.withValues(alpha: 0.28),
+                                Colors.white.withValues(alpha: 0.22),
+                                Colors.black.withValues(alpha: 0.18),
+                                Colors.white.withValues(alpha: 0.08),
+                                Colors.transparent,
+                                Colors.transparent,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (topLeftBadge != null)
+                    Positioned(
+                      top: AppTokens.space8,
+                      left: AppTokens.space8,
+                      child: topLeftBadge!,
+                    ),
+                  if (topRightBadge != null)
+                    Positioned(
+                      top: AppTokens.space8,
+                      right: AppTokens.space8,
+                      child: topRightBadge!,
+                    ),
+                  if (bottomOverlay != null)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: bottomOverlay!,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+
+    if (aspectRatio != null) {
+      coverStack = AspectRatio(aspectRatio: aspectRatio!, child: coverStack);
+    }
+    if (width != null || height != null) {
+      coverStack = SizedBox(width: width, height: height, child: coverStack);
+    }
+    return coverStack;
+  }
+
+  Widget _buildEditorialFallback(ShelfdColors colors) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [colors.container, colors.containerHigh],
+        ),
+      ),
+      padding: const EdgeInsets.all(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: colors.accentPrimary.withValues(alpha: 0.28),
+            width: 1,
+          ),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isCompact = constraints.maxHeight < 95;
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isCompact || !showFallbackTitle) ...[
+                  Icon(
+                    isSeries
+                        ? Icons.collections_bookmark_rounded
+                        : fallbackIcon,
+                    size: showFallbackTitle ? 20 : 28,
+                    color: colors.accentPrimary.withValues(alpha: 0.75),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: 24,
+                    height: 1,
+                    color: colors.accentPrimary.withValues(alpha: 0.35),
+                  ),
+                  if (showFallbackTitle) const SizedBox(height: 6),
+                ],
+                if (showFallbackTitle) ...[
+                  Flexible(
+                    child: Text(
+                      title,
+                      maxLines: isCompact ? 2 : 3,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.titleSerif(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: colors.ink,
+                        height: 1.2,
+                      ),
+                    ),
+                  ),
+                  if (!isCompact &&
+                      subtitle != null &&
+                      subtitle!.trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle!,
+                      maxLines: 1,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.captionSans(
+                        fontSize: 10,
+                        color: colors.mutedInk,
+                      ),
+                    ),
+                  ],
+                ],
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -1214,19 +1661,20 @@ class ShelfdGridCard extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (item) {
       case BookGridItem(:final book):
-        return _buildBookCard(book);
+        return _buildBookCard(context, book);
       case SeriesGridItem(:final series):
-        return _buildSeriesCard(series);
+        return _buildSeriesCard(context, series);
       case AuthorGridItem(:final author):
-        return _buildAuthorCard(author);
+        return _buildAuthorCard(context, author);
       case GenreGridItem(:final genre):
-        return _buildGenreCard(genre);
+        return _buildGenreCard(context, genre);
       case TopicGridItem(:final topic):
-        return _buildTopicCard(topic);
+        return _buildTopicCard(context, topic);
     }
   }
 
-  Widget _buildBookCard(Book book) {
+  Widget _buildBookCard(BuildContext context, Book book) {
+    final colors = ShelfdColors.of(context);
     final progressPercent = (book.readingProgress * 100).round();
 
     return BentoCard(
@@ -1236,29 +1684,27 @@ class ShelfdGridCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: AppTokens.boneContainer,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(AppTokens.radiusMd),
-                ),
-                border: const Border(
-                  bottom: BorderSide(color: AppTokens.crispBorder),
-                ),
+            child: TactileBookCover(
+              coverUrl: book.coverUrl,
+              title: book.title,
+              showFallbackTitle: false,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(AppTokens.radiusMd),
               ),
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(AppTokens.radiusMd),
-                ),
-                child: book.coverUrl != null && book.coverUrl!.isNotEmpty
-                    ? Image.network(
-                        book.coverUrl!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            _CoverFallback(title: book.title),
-                      )
-                    : _CoverFallback(title: book.title),
-              ),
+              showSpineCrease: true,
+              showShadow: false,
+              bottomOverlay: progressPercent > 0
+                  ? LinearProgressIndicator(
+                      value: book.readingProgress.clamp(0.0, 1.0),
+                      minHeight: 3,
+                      backgroundColor: colors.containerHigh.withValues(
+                        alpha: 0.6,
+                      ),
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        colors.accentPrimary,
+                      ),
+                    )
+                  : null,
             ),
           ),
           Padding(
@@ -1271,21 +1717,28 @@ class ShelfdGridCard extends StatelessWidget {
                   book.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
+                  style: AppTypography.titleSerif(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
                 ),
                 const SizedBox(height: AppTokens.space4),
                 Text(
                   book.authorDisplay,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: AppTypography.bodySans(fontSize: 12),
+                  style: AppTypography.bodySans(
+                    fontSize: 12,
+                    color: colors.secondaryInk,
+                  ),
                 ),
                 if (progressPercent > 0) ...[
                   const SizedBox(height: AppTokens.space8),
                   StatusBadge(
                     label: '$progressPercent% read',
-                    backgroundColor: AppTokens.matchBadgeBg,
-                    textColor: AppTokens.matchBadgeText,
+                    backgroundColor: colors.accentSecondaryContainer,
+                    textColor: colors.accentSecondary,
                   ),
                 ],
               ],
@@ -1296,8 +1749,11 @@ class ShelfdGridCard extends StatelessWidget {
     );
   }
 
-  Widget _buildSeriesCard(Series series) {
-    final bookCountLabel = series.bookCount == 1 ? '1 Book' : '${series.bookCount} Books';
+  Widget _buildSeriesCard(BuildContext context, Series series) {
+    final colors = ShelfdColors.of(context);
+    final bookCountLabel = series.bookCount == 1
+        ? '1 Book'
+        : '${series.bookCount} Books';
 
     return BentoCard(
       onTap: onTap,
@@ -1306,59 +1762,42 @@ class ShelfdGridCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: AppTokens.boneContainer,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(AppTokens.radiusMd),
-                ),
-                border: const Border(
-                  bottom: BorderSide(color: AppTokens.crispBorder),
-                ),
+            child: TactileBookCover(
+              coverUrl: series.coverUrl,
+              title: series.name,
+              isSeries: true,
+              showFallbackTitle: false,
+              showSpineCrease: true,
+              showShadow: false,
+              fallbackIcon: Icons.collections_bookmark_rounded,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(AppTokens.radiusMd),
               ),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  ClipRRect(
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(AppTokens.radiusMd),
+              topRightBadge: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTokens.espressoInk.withValues(alpha: 0.88),
+                  borderRadius: BorderRadius.circular(AppTokens.radiusPill),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.collections_bookmark_outlined,
+                      size: 12,
+                      color: Colors.white,
                     ),
-                    child: series.coverUrl != null && series.coverUrl!.isNotEmpty
-                        ? Image.network(
-                            series.coverUrl!,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) =>
-                                _SeriesFallback(name: series.name),
-                          )
-                        : _SeriesFallback(name: series.name),
-                  ),
-                  Positioned(
-                    top: AppTokens.space8,
-                    right: AppTokens.space8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTokens.charcoalInk.withValues(alpha: 0.85),
-                        borderRadius: BorderRadius.circular(AppTokens.radiusPill),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.collections_bookmark_outlined, size: 12, color: Colors.white),
-                          const SizedBox(width: 4),
-                          Text(
-                            bookCountLabel,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+                    const SizedBox(width: 4),
+                    Text(
+                      bookCountLabel,
+                      style: AppTypography.mono(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -1372,14 +1811,18 @@ class ShelfdGridCard extends StatelessWidget {
                   series.name,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
+                  style: AppTypography.titleSerif(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
                 ),
                 const SizedBox(height: AppTokens.space4),
                 Text(
                   'Series',
                   style: AppTypography.captionSans(
                     fontSize: 11,
-                    color: AppTokens.mutedCopy,
+                    color: colors.mutedInk,
                   ),
                 ),
               ],
@@ -1390,178 +1833,169 @@ class ShelfdGridCard extends StatelessWidget {
     );
   }
 
-  Widget _buildAuthorCard(Author author) {
-    final bookCountLabel = author.bookCount == 1 ? '1 Book' : '${author.bookCount} Books';
+  Widget _buildAuthorCard(BuildContext context, Author author) {
+    final colors = ShelfdColors.of(context);
+    final bookCountLabel = author.bookCount == 1
+        ? '1 Book'
+        : '${author.bookCount} Books';
 
     return BentoCard(
       onTap: onTap,
-      padding: const EdgeInsets.all(AppTokens.space16),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          AuthorAvatar(
-            name: author.name,
-            photoUrl: author.photoUrl,
-            size: 72,
-          ),
-          const SizedBox(height: AppTokens.space12),
-          Text(
-            author.name,
-            maxLines: 2,
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
-            style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: AppTokens.space8),
-          StatusBadge(
-            label: bookCountLabel,
-            backgroundColor: AppTokens.boneContainer,
-            textColor: AppTokens.mutedCopy,
-          ),
-        ],
+      padding: const EdgeInsets.all(AppTokens.space12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxHeight < 170;
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AuthorAvatar(
+                name: author.name,
+                photoUrl: author.photoUrl,
+                size: isCompact ? 52 : 72,
+              ),
+              SizedBox(height: isCompact ? AppTokens.space8 : AppTokens.space12),
+              Flexible(
+                child: Text(
+                  author.name,
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.titleSerif(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppTokens.space8),
+              StatusBadge(
+                label: bookCountLabel,
+                backgroundColor: colors.container,
+                textColor: colors.secondaryInk,
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildGenreCard(Genre genre) {
-    final bookCountLabel = genre.bookCount == 1 ? '1 Book' : '${genre.bookCount} Books';
+  Widget _buildGenreCard(BuildContext context, Genre genre) {
+    final colors = ShelfdColors.of(context);
+    final bookCountLabel = genre.bookCount == 1
+        ? '1 Book'
+        : '${genre.bookCount} Books';
 
     return BentoCard(
       onTap: onTap,
-      padding: const EdgeInsets.all(AppTokens.space16),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: AppTokens.boneContainer,
-              shape: BoxShape.circle,
-              border: Border.all(color: AppTokens.crispBorder),
-            ),
-            child: const Icon(
-              Icons.category_outlined,
-              size: 28,
-              color: AppTokens.charcoalInk,
-            ),
-          ),
-          const SizedBox(height: AppTokens.space12),
-          Text(
-            genre.name,
-            maxLines: 2,
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
-            style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: AppTokens.space8),
-          StatusBadge(
-            label: bookCountLabel,
-            backgroundColor: AppTokens.boneContainer,
-            textColor: AppTokens.mutedCopy,
-          ),
-        ],
+      padding: const EdgeInsets.all(AppTokens.space12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxHeight < 150;
+          final circleSize = isCompact ? 44.0 : 56.0;
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: circleSize,
+                height: circleSize,
+                decoration: BoxDecoration(
+                  color: colors.container,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: colors.subtleBorder),
+                ),
+                child: Icon(
+                  Icons.category_outlined,
+                  size: isCompact ? 22 : 26,
+                  color: colors.accentPrimary,
+                ),
+              ),
+              SizedBox(height: isCompact ? AppTokens.space8 : AppTokens.space12),
+              Flexible(
+                child: Text(
+                  genre.name,
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.titleSerif(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppTokens.space8),
+              StatusBadge(
+                label: bookCountLabel,
+                backgroundColor: colors.container,
+                textColor: colors.secondaryInk,
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildTopicCard(Topic topic) {
-    final bookCountLabel = topic.bookCount == 1 ? '1 Book' : '${topic.bookCount} Books';
+  Widget _buildTopicCard(BuildContext context, Topic topic) {
+    final colors = ShelfdColors.of(context);
+    final bookCountLabel = topic.bookCount == 1
+        ? '1 Book'
+        : '${topic.bookCount} Books';
 
     return BentoCard(
       onTap: onTap,
-      padding: const EdgeInsets.all(AppTokens.space16),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: AppTokens.boneContainer,
-              shape: BoxShape.circle,
-              border: Border.all(color: AppTokens.crispBorder),
-            ),
-            child: const Icon(
-              Icons.label_outline_rounded,
-              size: 28,
-              color: AppTokens.charcoalInk,
-            ),
-          ),
-          const SizedBox(height: AppTokens.space12),
-          Text(
-            topic.name,
-            maxLines: 2,
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
-            style: AppTypography.titleSerif(fontSize: 14, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: AppTokens.space8),
-          StatusBadge(
-            label: bookCountLabel,
-            backgroundColor: AppTokens.boneContainer,
-            textColor: AppTokens.mutedCopy,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CoverFallback extends StatelessWidget {
-  final String title;
-
-  const _CoverFallback({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: AppTokens.boneContainer,
-      padding: const EdgeInsets.all(AppTokens.space16),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.book_rounded, size: 36, color: AppTokens.mutedCopy),
-          const SizedBox(height: AppTokens.space8),
-          Text(
-            title,
-            maxLines: 3,
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
-            style: AppTypography.titleSerif(fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SeriesFallback extends StatelessWidget {
-  final String name;
-
-  const _SeriesFallback({required this.name});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: AppTokens.boneContainer,
-      padding: const EdgeInsets.all(AppTokens.space16),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.collections_bookmark_rounded, size: 36, color: AppTokens.mutedCopy),
-          const SizedBox(height: AppTokens.space8),
-          Text(
-            name,
-            maxLines: 3,
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
-            style: AppTypography.titleSerif(fontSize: 12),
-          ),
-        ],
+      padding: const EdgeInsets.all(AppTokens.space12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxHeight < 150;
+          final circleSize = isCompact ? 44.0 : 56.0;
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: circleSize,
+                height: circleSize,
+                decoration: BoxDecoration(
+                  color: colors.container,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: colors.subtleBorder),
+                ),
+                child: Icon(
+                  Icons.label_outline_rounded,
+                  size: isCompact ? 22 : 26,
+                  color: colors.accentPrimary,
+                ),
+              ),
+              SizedBox(height: isCompact ? AppTokens.space8 : AppTokens.space12),
+              Flexible(
+                child: Text(
+                  topic.name,
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.titleSerif(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppTokens.space8),
+              StatusBadge(
+                label: bookCountLabel,
+                backgroundColor: colors.container,
+                textColor: colors.secondaryInk,
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1569,200 +2003,245 @@ class _SeriesFallback extends StatelessWidget {
 
 void showShelfdSettingsModal(
   BuildContext context, {
-  required Future<void> Function() onLogout,
+  Future<void> Function()? onLogout,
 }) {
+  final modalColors = ShelfdColors.of(context);
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
-    backgroundColor: AppTokens.boneBackground,
+    backgroundColor: modalColors.surface,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
-    ),
-    builder: (ctx) => SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppTokens.space24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.settings_outlined, size: 24, color: AppTokens.charcoalInk),
-                const SizedBox(width: AppTokens.space12),
-                Text('Settings', style: AppTypography.titleSerif(fontSize: 20)),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.close_rounded),
-                  onPressed: () => Navigator.of(ctx).pop(),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppTokens.space16),
-            const Divider(color: AppTokens.crispBorder, height: 1),
-            const SizedBox(height: AppTokens.space16),
-            Row(
-              children: [
-                const Icon(Icons.dns_outlined, size: 20, color: AppTokens.mutedCopy),
-                const SizedBox(width: AppTokens.space12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Homelab Server',
-                        style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w600),
-                      ),
-                      Text(
-                        'Connected to Shelfd Homelab Daemon',
-                        style: AppTypography.bodySans(fontSize: 12, color: AppTokens.mutedCopy),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF2B8A3E),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppTokens.space16),
-            Consumer(
-              builder: (context, ref, _) {
-                final queueState = ref.watch(queueProvider);
-                final status = queueState.status;
-                if (status == null) return const SizedBox.shrink();
-
-                final libraryState = ref.watch(libraryProvider);
-                final resolvedBook = resolveBookTitle(status.currentBook, libraryState.books);
-                final progress = (status.progressPercent / 100.0).clamp(0.0, 1.0);
-
-                return Container(
-                  padding: const EdgeInsets.all(AppTokens.space12),
-                  decoration: BoxDecoration(
-                    color: AppTokens.boneSurface,
-                    borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                    border: Border.all(color: AppTokens.crispBorder),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.auto_awesome_rounded, size: 16, color: Color(0xFFD9480F)),
-                          const SizedBox(width: AppTokens.space8),
-                          Text(
-                            'AI Passage Indexing & Vectors',
-                            style: AppTypography.bodySans(fontSize: 13, fontWeight: FontWeight.w600),
-                          ),
-                          const Spacer(),
-                          Text(
-                            '${status.progressPercent.toStringAsFixed(0)}%',
-                            style: AppTypography.bodySans(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: const Color(0xFFD9480F),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: AppTokens.space8),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(2),
-                        child: LinearProgressIndicator(
-                          value: progress,
-                          minHeight: 4,
-                          backgroundColor: AppTokens.boneContainer,
-                          valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFD9480F)),
-                        ),
-                      ),
-                      const SizedBox(height: AppTokens.space8),
-                      Text(
-                        '${status.indexedChapters} of ${status.totalChapters} chapters processed (${status.pendingChapters} pending)',
-                        style: AppTypography.bodySans(fontSize: 12, color: AppTokens.mutedCopy),
-                      ),
-                      if (resolvedBook != null && resolvedBook.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          'Now processing: $resolvedBook',
-                          style: AppTypography.bodySans(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: AppTokens.charcoalInk,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ],
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: AppTokens.space24),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTokens.charcoalInk,
-                side: const BorderSide(color: AppTokens.crispBorder),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              icon: const Icon(Icons.cloud_upload_outlined, size: 18),
-              label: const Text('Uploads & Staged Queue'),
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                GoRouter.of(context).go('/uploads');
-              },
-            ),
-            const SizedBox(height: AppTokens.space12),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTokens.charcoalInk,
-                side: const BorderSide(color: AppTokens.crispBorder),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              icon: const Icon(Icons.handyman_outlined, size: 18),
-              label: const Text('Library Utilities & Merge'),
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                GoRouter.of(context).go('/utilities');
-              },
-            ),
-            const SizedBox(height: AppTokens.space12),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTokens.charcoalInk,
-                side: const BorderSide(color: AppTokens.crispBorder),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              icon: const Icon(Icons.lock_reset_outlined, size: 18),
-              label: const Text('Change Password & Account Settings'),
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                GoRouter.of(context).go('/settings');
-              },
-            ),
-            const SizedBox(height: AppTokens.space12),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFC92A2A),
-                side: const BorderSide(color: Color(0xFFFFC9C9)),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              icon: const Icon(Icons.logout_rounded, size: 18),
-              label: const Text('Disconnect / Sign Out'),
-              onPressed: () async {
-                Navigator.of(ctx).pop();
-                await onLogout();
-              },
-            ),
-          ],
-        ),
+      borderRadius: BorderRadius.vertical(
+        top: Radius.circular(AppTokens.radiusLg),
       ),
     ),
+    builder: (ctx) {
+      final colors = ShelfdColors.of(ctx);
+      return SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppTokens.space24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.settings_outlined, size: 24, color: colors.ink),
+                  const SizedBox(width: AppTokens.space12),
+                  Text(
+                    'Settings',
+                    style: AppTypography.titleSerif(
+                      fontSize: 20,
+                      color: colors.ink,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: Icon(Icons.close_rounded, color: colors.mutedInk),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppTokens.space16),
+              Divider(color: colors.subtleBorder, height: 1),
+              const SizedBox(height: AppTokens.space16),
+              Row(
+                children: [
+                  Icon(Icons.dns_outlined, size: 20, color: colors.mutedInk),
+                  const SizedBox(width: AppTokens.space12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Homelab Server',
+                          style: AppTypography.bodySans(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: colors.ink,
+                          ),
+                        ),
+                        Text(
+                          'Connected to Shelfd Homelab Daemon',
+                          style: AppTypography.bodySans(
+                            fontSize: 12,
+                            color: colors.mutedInk,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: colors.accentSecondary,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppTokens.space16),
+              Consumer(
+                builder: (context, ref, _) {
+                  final queueState = ref.watch(queueProvider);
+                  final status = queueState.status;
+                  if (status == null) return const SizedBox.shrink();
+
+                  final libraryState = ref.watch(libraryProvider);
+                  final resolvedBook = resolveBookTitle(
+                    status.currentBook,
+                    libraryState.books,
+                  );
+                  final effectivePercent = status.progressPercent > 0
+                      ? status.progressPercent
+                      : (status.totalChapters > 0 &&
+                                status.pendingChapters < status.totalChapters
+                            ? ((status.totalChapters - status.pendingChapters) /
+                                      status.totalChapters) *
+                                  100.0
+                            : 0.0);
+                  final progress = (effectivePercent / 100.0).clamp(
+                    0.0,
+                    1.0,
+                  );
+
+                  return Container(
+                    padding: const EdgeInsets.all(AppTokens.space12),
+                    decoration: BoxDecoration(
+                      color: colors.containerLow,
+                      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                      border: Border.all(color: colors.subtleBorder),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.auto_awesome_rounded,
+                              size: 16,
+                              color: colors.accentPrimary,
+                            ),
+                            const SizedBox(width: AppTokens.space8),
+                            Text(
+                              'AI Passage Indexing & Vectors',
+                              style: AppTypography.bodySans(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: colors.ink,
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '${effectivePercent.toStringAsFixed(0)}%',
+                              style: AppTypography.mono(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: colors.accentPrimary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppTokens.space8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: LinearProgressIndicator(
+                            value: progress,
+                            minHeight: 4,
+                            backgroundColor: colors.container,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              colors.accentPrimary,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: AppTokens.space8),
+                        Text(
+                          '${status.indexedChapters} of ${status.totalChapters} chapters processed (${status.pendingChapters} pending)',
+                          style: AppTypography.bodySans(
+                            fontSize: 12,
+                            color: colors.mutedInk,
+                          ),
+                        ),
+                        if (resolvedBook != null &&
+                            resolvedBook.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Now processing: $resolvedBook',
+                            style: AppTypography.bodySans(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: colors.ink,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: AppTokens.space24),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                icon: const Icon(Icons.cloud_upload_outlined, size: 18),
+                label: const Text('Uploads & Staged Queue'),
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  GoRouter.of(context).go('/uploads');
+                },
+              ),
+              const SizedBox(height: AppTokens.space12),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                icon: const Icon(Icons.handyman_outlined, size: 18),
+                label: const Text('Library Utilities & Merge'),
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  GoRouter.of(context).go('/utilities');
+                },
+              ),
+              const SizedBox(height: AppTokens.space12),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                icon: const Icon(Icons.lock_reset_outlined, size: 18),
+                label: const Text('Change Password & Account Settings'),
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  GoRouter.of(context).go('/settings');
+                },
+              ),
+              const SizedBox(height: AppTokens.space12),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: colors.errorText,
+                  side: BorderSide(color: colors.errorBorder),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                icon: const Icon(Icons.logout_rounded, size: 18),
+                label: const Text('Disconnect / Sign Out'),
+                onPressed: () async {
+                  Navigator.of(ctx).pop();
+                  await onLogout?.call();
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    },
   );
 }
-
-

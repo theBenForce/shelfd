@@ -2,6 +2,7 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -28,6 +29,8 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
+
     return DropTarget(
       onDragEntered: (_) => setState(() => _isDragging = true),
       onDragExited: (_) => setState(() => _isDragging = false),
@@ -72,15 +75,16 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
         if (context.mounted) {
           final count = await ref.read(uploadProvider.notifier).uploadEpubFiles(pickedList);
           if (context.mounted) {
+            final snackColors = ShelfdColors.of(context);
             final currentPath = GoRouterState.of(context).uri.path;
             if (currentPath != '/uploads') {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('Staged $count item(s) for review'),
-                  backgroundColor: AppTokens.charcoalInk,
+                  backgroundColor: snackColors.ink,
                   action: SnackBarAction(
                     label: 'View in Uploads',
-                    textColor: const Color(0xFFFFD43B),
+                    textColor: snackColors.accentPrimary,
                     onPressed: () => context.go('/uploads'),
                   ),
                 ),
@@ -95,7 +99,7 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
           if (_isDragging)
             Positioned.fill(
               child: Container(
-                color: Colors.black.withValues(alpha: 0.45),
+                color: Colors.black.withValues(alpha: colors.isDark ? 0.65 : 0.45),
                 padding: const EdgeInsets.all(AppTokens.space24),
                 child: Center(
                   child: ConstrainedBox(
@@ -103,17 +107,17 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
                     child: Container(
                       padding: const EdgeInsets.all(AppTokens.space32),
                       decoration: BoxDecoration(
-                        color: AppTokens.boneSurface,
+                        color: colors.surface,
                         borderRadius: BorderRadius.circular(AppTokens.radiusLg),
                         border: Border.all(
-                          color: AppTokens.charcoalInk,
+                          color: colors.accentPrimary,
                           width: 2,
                         ),
-                        boxShadow: const [
+                        boxShadow: [
                           BoxShadow(
-                            color: Color(0x2A000000),
+                            color: colors.cardShadowColor,
                             blurRadius: 24,
-                            offset: Offset(0, 12),
+                            offset: const Offset(0, 12),
                           ),
                         ],
                       ),
@@ -124,14 +128,14 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
                             width: 64,
                             height: 64,
                             decoration: BoxDecoration(
-                              color: AppTokens.boneContainer,
+                              color: colors.containerLow,
                               shape: BoxShape.circle,
-                              border: Border.all(color: AppTokens.crispBorder),
+                              border: Border.all(color: colors.border),
                             ),
-                            child: const Icon(
+                            child: Icon(
                               Icons.cloud_upload_outlined,
                               size: 32,
-                              color: AppTokens.charcoalInk,
+                              color: colors.accentPrimary,
                             ),
                           ),
                           const SizedBox(height: AppTokens.space16),
@@ -141,6 +145,7 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
                             style: AppTypography.titleSerif(
                               fontSize: 22,
                               fontWeight: FontWeight.w600,
+                              color: colors.ink,
                             ),
                           ),
                           const SizedBox(height: AppTokens.space8),
@@ -149,7 +154,7 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
                             textAlign: TextAlign.center,
                             style: AppTypography.bodySans(
                               fontSize: 13,
-                              color: AppTokens.mutedCopy,
+                              color: colors.mutedInk,
                             ),
                           ),
                           const SizedBox(height: AppTokens.space20),
@@ -168,8 +173,8 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
                           const SizedBox(height: AppTokens.space24),
                           OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: AppTokens.charcoalInk,
-                              side: const BorderSide(color: AppTokens.crispBorder),
+                              foregroundColor: colors.ink,
+                              side: BorderSide(color: colors.border),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: AppTokens.space20,
                                 vertical: AppTokens.space12,
@@ -183,9 +188,13 @@ class _ShelfdDropTargetState extends ConsumerState<ShelfdDropTarget> {
                               pickAndUploadEpub(context, ref);
                             },
                             icon: const Icon(Icons.folder_open_rounded, size: 18),
-                            label: const Text(
+                            label: Text(
                               'Browse Local Files',
-                              style: TextStyle(fontWeight: FontWeight.w600),
+                              style: AppTypography.bodySans(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: colors.ink,
+                              ),
                             ),
                           ),
                         ],
@@ -208,22 +217,24 @@ class _FormatBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
+
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AppTokens.space8,
         vertical: AppTokens.space4,
       ),
       decoration: BoxDecoration(
-        color: AppTokens.boneContainer,
+        color: colors.containerLow,
         borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-        border: Border.all(color: AppTokens.crispBorder),
+        border: Border.all(color: colors.border),
       ),
       child: Text(
         label,
-        style: const TextStyle(
+        style: AppTypography.mono(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: AppTokens.mutedCopy,
+          color: colors.secondaryInk,
           letterSpacing: 0.2,
         ),
       ),

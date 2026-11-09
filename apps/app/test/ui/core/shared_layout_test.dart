@@ -557,5 +557,127 @@ void main() {
       expect(find.text('Library Utilities & Merge'), findsOneWidget);
       expect(find.text('Change Password & Account Settings'), findsOneWidget);
     });
+
+    testWidgets('TactileBookCover renders editorial fallback, series stack, and badges', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const Scaffold(
+            body: Center(
+              child: TactileBookCover(
+                coverUrl: null,
+                title: 'The Name of the Rose',
+                subtitle: 'Umberto Eco',
+                width: 180,
+                height: 260,
+                isSeries: true,
+                topRightBadge: Text('3 Books'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('The Name of the Rose'), findsOneWidget);
+      expect(find.text('Umberto Eco'), findsOneWidget);
+      expect(find.text('3 Books'), findsOneWidget);
+      expect(find.byIcon(Icons.collections_bookmark_rounded), findsOneWidget);
+    });
+
+    testWidgets('Shared layout components adapt cleanly across Dark and Sepia themes', (tester) async {
+      final bookItem = BookGridItem(
+        const Book(
+          id: 'b1',
+          title: 'Hyperion',
+          readingProgress: 0.64,
+          authors: [Author(id: 'a1', name: 'Dan Simmons')],
+        ),
+      );
+
+      for (final mode in [ReadingThemeMode.sepia, ReadingThemeMode.dark]) {
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              queueProvider.overrideWith(() => FakeQueueNotifier()),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.buildTheme(mode),
+              home: Scaffold(
+                body: Row(
+                  children: [
+                    ShelfdSideNav(currentIndex: 0, onTap: (_) {}),
+                    Expanded(
+                      child: Center(
+                        child: SizedBox(
+                          width: 200,
+                          height: 320,
+                          child: ShelfdGridCard(item: bookItem, onTap: () {}),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+
+        expect(find.text('Hyperion'), findsWidgets);
+        expect(find.text('Dan Simmons'), findsOneWidget);
+        expect(find.text('64% read'), findsOneWidget);
+      }
+    });
+
+    testWidgets('ShelfdTopBar default title, onOpenUploads badge, optional onLogout, and QueueStatus fallback percent', (tester) async {
+      bool openedUploads = false;
+      const status = QueueStatus(
+        pendingChapters: 2,
+        totalChapters: 4,
+        currentBook: 'book-42',
+        currentTask: 'embedding',
+        stagedUploads: 4,
+        isActive: true,
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            queueProvider.overrideWith(() => FakeQueueNotifier(const QueueState(status: status))),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              appBar: ShelfdTopBar(
+                onOpenUploads: () => openedUploads = true,
+              ),
+              body: Column(
+                children: [
+                  Expanded(
+                    child: ShelfdSideNav(currentIndex: 0, onTap: (_) {}),
+                  ),
+                  Builder(
+                    builder: (context) => ElevatedButton(
+                      onPressed: () => showShelfdSettingsModal(context),
+                      child: const Text('Open Settings Without Logout'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('4'), findsWidgets);
+      expect(find.text('50%'), findsOneWidget);
+
+      await tester.tap(find.byType(ShelfdUploadsBadgeButton));
+      await tester.pump();
+      expect(openedUploads, isTrue);
+
+      await tester.tap(find.text('Open Settings Without Logout'));
+      await tester.pumpAndSettle();
+      expect(find.text('Disconnect / Sign Out'), findsOneWidget);
+    });
   });
 }

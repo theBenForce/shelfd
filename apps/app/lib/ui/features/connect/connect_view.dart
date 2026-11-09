@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -49,36 +50,45 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
     // show a dialog allowing immediate QR paste/simulation
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Scan Server QR Code', style: AppTypography.titleSerif(fontSize: 18)),
-        content: const Text(
-          'Camera scanner active or paste your pairing connect URL from the Shelfd web dashboard.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
+      builder: (ctx) {
+        final dialogColors = ctx.shelfdColors;
+        return AlertDialog(
+          backgroundColor: dialogColors.surface,
+          title: Text(
+            'Scan Server QR Code',
+            style: AppTypography.titleSerif(fontSize: 18, color: dialogColors.ink),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTokens.charcoalInk,
-              foregroundColor: Colors.white,
+          content: Text(
+            'Camera scanner active or paste your pairing connect URL from the Shelfd web dashboard.',
+            style: AppTypography.bodySans(fontSize: 14, color: dialogColors.secondaryInk),
+          ),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: dialogColors.secondaryInk),
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
             ),
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              final defaultUrl = resolveDefaultServerUrl();
-              _urlController.text = defaultUrl;
-              try {
-                final info = await ref.read(authRepositoryProvider).testConnection(defaultUrl);
-                if (info.defaultUsername != null && info.defaultUsername!.isNotEmpty && mounted) {
-                  _userController.text = info.defaultUsername!;
-                }
-              } catch (_) {}
-            },
-            child: const Text('Use Discovered Server'),
-          ),
-        ],
-      ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: dialogColors.accentPrimary,
+                foregroundColor: dialogColors.onAccent,
+              ),
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                final defaultUrl = resolveDefaultServerUrl();
+                _urlController.text = defaultUrl;
+                try {
+                  final info = await ref.read(authRepositoryProvider).testConnection(defaultUrl);
+                  if (info.defaultUsername != null && info.defaultUsername!.isNotEmpty && mounted) {
+                    _userController.text = info.defaultUsername!;
+                  }
+                } catch (_) {}
+              },
+              child: const Text('Use Discovered Server'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -101,8 +111,10 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
   Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
     final horizontalPad = Responsive.horizontalPadding(context);
+    final colors = context.shelfdColors;
 
     return Scaffold(
+      backgroundColor: colors.background,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -120,13 +132,20 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
                         width: 56,
                         height: 56,
                         decoration: BoxDecoration(
-                          color: AppTokens.charcoalInk,
-                          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                          color: colors.accentPrimary,
+                          borderRadius: BorderRadius.circular(AppTokens.radiusLg),
+                          boxShadow: [
+                            BoxShadow(
+                              color: colors.cardShadowColor,
+                              blurRadius: 16,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
                         ),
-                        child: const Icon(
+                        child: Icon(
                           Icons.bookmark_outline_rounded,
-                          color: AppTokens.boneBackground,
-                          size: 32,
+                          color: colors.onAccent,
+                          size: 30,
                         ),
                       ),
                     ),
@@ -134,13 +153,17 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
                     Text(
                       'Connect to your Library',
                       textAlign: TextAlign.center,
-                      style: AppTypography.titleSerif(fontSize: 28),
+                      style: AppTypography.displaySerif(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w600,
+                        color: colors.ink,
+                      ),
                     ),
                     const SizedBox(height: AppTokens.space8),
                     Text(
                       'Pair with your self-hosted Shelfd homelab daemon or Audiobookshelf companion server',
                       textAlign: TextAlign.center,
-                      style: AppTypography.bodySans(fontSize: 14),
+                      style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
                     ),
                     const SizedBox(height: AppTokens.space32),
 
@@ -153,24 +176,24 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
                             width: 56,
                             height: 56,
                             decoration: BoxDecoration(
-                              color: AppTokens.boneContainer,
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                              color: colors.accentContainer,
+                              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                             ),
-                            child: const Icon(
+                            child: Icon(
                               Icons.qr_code_scanner_rounded,
-                              size: 32,
-                              color: AppTokens.charcoalInk,
+                              size: 30,
+                              color: colors.accentPrimary,
                             ),
                           ),
                           const SizedBox(height: AppTokens.space12),
                           Text(
                             'Scan Server QR Code',
-                            style: AppTypography.titleSerif(fontSize: 18),
+                            style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
                           ),
                           const SizedBox(height: AppTokens.space4),
                           Text(
                             'Instant pairing via camera or mobile scanner',
-                            style: AppTypography.bodySans(fontSize: 13),
+                            style: AppTypography.bodySans(fontSize: 13, color: colors.secondaryInk),
                           ),
                         ],
                       ),
@@ -181,15 +204,15 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
                     // Divider
                     Row(
                       children: [
-                        const Expanded(child: Divider(color: AppTokens.crispBorder)),
+                        Expanded(child: Divider(color: colors.border)),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
                           child: Text(
                             'Or connect manually',
-                            style: AppTypography.labelCaps(fontSize: 11),
+                            style: AppTypography.labelCaps(fontSize: 11, color: colors.mutedInk),
                           ),
                         ),
-                        const Expanded(child: Divider(color: AppTokens.crispBorder)),
+                        Expanded(child: Divider(color: colors.border)),
                       ],
                     ),
 
@@ -200,13 +223,13 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
                       Container(
                         padding: const EdgeInsets.all(AppTokens.space12),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFEBE8),
+                          color: colors.errorBg,
                           borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                          border: Border.all(color: const Color(0xFFFFC9C2)),
+                          border: Border.all(color: colors.errorBorder),
                         ),
                         child: Text(
                           authState.error!,
-                          style: const TextStyle(color: Color(0xFFC92A2A), fontSize: 13),
+                          style: AppTypography.bodySans(fontSize: 13, color: colors.errorText),
                         ),
                       ),
                       const SizedBox(height: AppTokens.space16),
@@ -215,15 +238,24 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
                     // Manual Inputs
                     TextFormField(
                       controller: _urlController,
+                      style: AppTypography.mono(fontSize: 13, color: colors.ink),
                       decoration: InputDecoration(
                         labelText: 'Server URL',
                         hintText: 'http://192.168.1.100:8080',
                         helperText: kIsWeb ? 'Connected to self-hosted API origin' : null,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                          borderSide: const BorderSide(color: AppTokens.crispBorder),
+                          borderSide: BorderSide(color: colors.border),
                         ),
-                        prefixIcon: const Icon(Icons.lan_outlined),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                          borderSide: BorderSide(color: colors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                          borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
+                        ),
+                        prefixIcon: Icon(Icons.lan_outlined, color: colors.mutedInk),
                       ),
                       validator: (v) => (v == null || v.isEmpty) ? 'Server URL required' : null,
                     ),
@@ -231,14 +263,23 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
 
                     TextFormField(
                       controller: _userController,
+                      style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
                       decoration: InputDecoration(
                         labelText: 'Username',
                         hintText: 'admin',
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                          borderSide: const BorderSide(color: AppTokens.crispBorder),
+                          borderSide: BorderSide(color: colors.border),
                         ),
-                        prefixIcon: const Icon(Icons.person_outline),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                          borderSide: BorderSide(color: colors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                          borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
+                        ),
+                        prefixIcon: Icon(Icons.person_outline, color: colors.mutedInk),
                       ),
                       validator: (v) => (v == null || v.isEmpty) ? 'Username required' : null,
                     ),
@@ -247,17 +288,29 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
                     TextFormField(
                       controller: _passwordController,
                       obscureText: _obscurePassword,
+                      style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
                       decoration: InputDecoration(
                         labelText: 'Password',
                         hintText: '••••••••',
                         helperText: kIsWeb ? 'Check container logs on first startup for generated password' : null,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                          borderSide: const BorderSide(color: AppTokens.crispBorder),
+                          borderSide: BorderSide(color: colors.border),
                         ),
-                        prefixIcon: const Icon(Icons.lock_outline),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                          borderSide: BorderSide(color: colors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                          borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
+                        ),
+                        prefixIcon: Icon(Icons.lock_outline, color: colors.mutedInk),
                         suffixIcon: IconButton(
-                          icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
+                          icon: Icon(
+                            _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                            color: colors.mutedInk,
+                          ),
                           onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                         ),
                       ),
@@ -278,12 +331,12 @@ class _ConnectViewState extends ConsumerState<ConnectView> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.shield_outlined, size: 16, color: AppTokens.mutedCopy),
+                        Icon(Icons.shield_outlined, size: 16, color: colors.mutedInk),
                         const SizedBox(width: AppTokens.space8),
                         Flexible(
                           child: Text(
                             'Direct connection to your private server. No third-party cloud.',
-                            style: AppTypography.bodySans(fontSize: 12),
+                            style: AppTypography.captionSans(fontSize: 12, color: colors.mutedInk),
                             textAlign: TextAlign.center,
                           ),
                         ),

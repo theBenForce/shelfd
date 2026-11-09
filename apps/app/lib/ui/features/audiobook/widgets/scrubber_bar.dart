@@ -34,7 +34,7 @@ class _ScrubberBarState extends State<ScrubberBar> {
     final minutes = d.inMinutes.remainder(60);
     final seconds = d.inSeconds.remainder(60);
     if (hours > 0) {
-      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+      return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
     }
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
@@ -94,25 +94,25 @@ class _ScrubberBarState extends State<ScrubberBar> {
             children: [
               Text(
                 elapsedText,
-                style: AppTypography.captionSans(
+                style: AppTypography.mono(
                   fontSize: 12,
-                  color: AppTokens.antiqueCream.withValues(alpha: 0.8),
+                  color: AppTokens.antiqueCream.withValues(alpha: 0.85),
                 ),
               ),
               if (widget.chapterDuration != null && widget.chapterDuration! > Duration.zero) ...[
                 Text(
                   'Chapter ${_formatDuration(widget.chapterPosition ?? Duration.zero)} / ${_formatDuration(widget.chapterDuration!)}',
-                  style: AppTypography.captionSans(
+                  style: AppTypography.mono(
                     fontSize: 11,
-                    color: AppTokens.mutedCopy,
+                    color: AppTokens.antiqueCream.withValues(alpha: 0.6),
                   ),
                 ),
               ],
               Text(
                 remainingText,
-                style: AppTypography.captionSans(
+                style: AppTypography.mono(
                   fontSize: 12,
-                  color: AppTokens.antiqueCream.withValues(alpha: 0.8),
+                  color: AppTokens.antiqueCream.withValues(alpha: 0.85),
                 ),
               ),
             ],

@@ -251,7 +251,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     return chapters.first;
   }
 
-  Future<void> loadBook(Book book, {double? initialPosition, bool autoPlay = false}) async {
+  Future<void> loadBook(Book book, {String? fileId, double? initialPosition, bool autoPlay = false}) async {
     try {
       state = state.copyWith(
         book: book,

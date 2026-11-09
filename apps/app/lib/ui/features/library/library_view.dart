@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/app_shell.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
+import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -119,6 +120,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = ShelfdColors.of(context);
     final libraryState = ref.watch(libraryProvider);
     final queueState = ref.watch(queueProvider);
     final isRescanning = queueState.isLoading;
@@ -240,23 +242,24 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                     children: [
                       Text(
                         pageTitle,
-                        style: AppTypography.titleSerif(
+                        style: AppTypography.displaySerif(
                           fontSize: 32,
                           fontWeight: FontWeight.w600,
+                          color: colors.ink,
                         ),
                       ),
                       const SizedBox(width: AppTokens.space12),
                       StatusBadge(
                         label: badgeLabel,
-                        backgroundColor: AppTokens.boneContainer,
-                        textColor: AppTokens.mutedCopy,
+                        backgroundColor: colors.container,
+                        textColor: colors.secondaryInk,
                       ),
                       const Spacer(),
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTokens.charcoalInk,
-                          side: const BorderSide(color: AppTokens.crispBorder),
-                          backgroundColor: AppTokens.boneSurface,
+                          foregroundColor: colors.ink,
+                          side: BorderSide(color: colors.border),
+                          backgroundColor: colors.surface,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                           ),
@@ -267,26 +270,30 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                         ),
                         onPressed: isRescanning ? null : handleScan,
                         icon: isRescanning
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 16,
                                 height: 16,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: AppTokens.charcoalInk,
+                                  color: colors.accentPrimary,
                                 ),
                               )
-                            : const Icon(Icons.sync_rounded, size: 18),
+                            : Icon(Icons.sync_rounded, size: 18, color: colors.accentPrimary),
                         label: Text(
                           isRescanning ? 'Scanning...' : 'Rescan Library',
-                          style: const TextStyle(fontWeight: FontWeight.w600),
+                          style: AppTypography.bodySans(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: colors.ink,
+                          ),
                         ),
                       ),
                       const SizedBox(width: AppTokens.space12),
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTokens.charcoalInk,
-                          side: const BorderSide(color: AppTokens.crispBorder),
-                          backgroundColor: AppTokens.boneSurface,
+                          foregroundColor: colors.ink,
+                          side: BorderSide(color: colors.border),
+                          backgroundColor: colors.surface,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                           ),
@@ -296,10 +303,14 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                           ),
                         ),
                         onPressed: () => pickAndUploadEpub(context, ref),
-                        icon: const Icon(Icons.upload_file_outlined, size: 18),
-                        label: const Text(
+                        icon: Icon(Icons.upload_file_outlined, size: 18, color: colors.accentPrimary),
+                        label: Text(
                           'Upload EPUB',
-                          style: TextStyle(fontWeight: FontWeight.w600),
+                          style: AppTypography.bodySans(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: colors.ink,
+                          ),
                         ),
                       ),
                     ],
@@ -355,12 +366,12 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
               ),
             ),
           ),
-          const Divider(color: AppTokens.crispBorder, height: 1),
+          Divider(color: colors.subtleBorder, height: 1),
 
           // Main Book Grid Content
           Expanded(
             child: libraryState.isLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? Center(child: CircularProgressIndicator(color: colors.accentPrimary))
                 : libraryState.error != null
                     ? Center(
                         child: Padding(
@@ -368,35 +379,39 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.error_outline_rounded,
                                 size: 48,
-                                color: Color(0xFFC92A2A),
+                                color: colors.errorText,
                               ),
                               const SizedBox(height: AppTokens.space16),
                               Text(
                                 'Unable to load library',
-                                style: AppTypography.titleSerif(fontSize: 20),
+                                style: AppTypography.titleSerif(fontSize: 20, color: colors.ink),
                               ),
                               const SizedBox(height: AppTokens.space8),
                               Text(
                                 libraryState.error!,
                                 textAlign: TextAlign.center,
-                                style: AppTypography.bodySans(fontSize: 14),
+                                style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
                               ),
                               const SizedBox(height: AppTokens.space16),
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   OutlinedButton(
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: colors.ink,
+                                      side: BorderSide(color: colors.border),
+                                    ),
                                     onPressed: () => ref.read(libraryProvider.notifier).loadLibrary(),
                                     child: const Text('Retry'),
                                   ),
                                   const SizedBox(width: AppTokens.space12),
                                   ElevatedButton(
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppTokens.charcoalInk,
-                                      foregroundColor: Colors.white,
+                                      backgroundColor: colors.accentPrimary,
+                                      foregroundColor: colors.onAccent,
                                     ),
                                     onPressed: () => context.go('/connect'),
                                     child: const Text('Reconnect / Sign In'),
@@ -465,6 +480,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
   }
 
   Widget _buildSeriesContent(BuildContext context, LibraryState state, double horizontalPad) {
+    final colors = ShelfdColors.of(context);
     final seriesItems = state.seriesGridItems;
     if (seriesItems.isEmpty) {
       return Center(
@@ -473,21 +489,21 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(
+              Icon(
                 Icons.collections_bookmark_outlined,
                 size: 48,
-                color: AppTokens.mutedCopy,
+                color: colors.mutedInk,
               ),
               const SizedBox(height: AppTokens.space16),
               Text(
                 'No series found',
-                style: AppTypography.titleSerif(fontSize: 20),
+                style: AppTypography.titleSerif(fontSize: 20, color: colors.ink),
               ),
               const SizedBox(height: AppTokens.space8),
               Text(
                 'Books with series metadata will be grouped together here.',
                 textAlign: TextAlign.center,
-                style: AppTypography.bodySans(fontSize: 14),
+                style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
               ),
             ],
           ),
@@ -525,6 +541,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
   }
 
   Widget _buildAuthorsContent(BuildContext context, LibraryState state, double horizontalPad) {
+    final colors = ShelfdColors.of(context);
     final authorItems = state.authorGridItems;
     if (authorItems.isEmpty) {
       return Center(
@@ -533,21 +550,21 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(
+              Icon(
                 Icons.person_outline_rounded,
                 size: 48,
-                color: AppTokens.mutedCopy,
+                color: colors.mutedInk,
               ),
               const SizedBox(height: AppTokens.space16),
               Text(
                 'No authors found',
-                style: AppTypography.titleSerif(fontSize: 20),
+                style: AppTypography.titleSerif(fontSize: 20, color: colors.ink),
               ),
               const SizedBox(height: AppTokens.space8),
               Text(
                 'Books in your library will be organized by author here.',
                 textAlign: TextAlign.center,
-                style: AppTypography.bodySans(fontSize: 14),
+                style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
               ),
             ],
           ),
@@ -585,6 +602,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
   }
 
   Widget _buildGenresContent(BuildContext context, LibraryState state, double horizontalPad) {
+    final colors = ShelfdColors.of(context);
     final genreItems = state.genreGridItems;
     if (genreItems.isEmpty) {
       return Center(
@@ -593,21 +611,21 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(
+              Icon(
                 Icons.category_outlined,
                 size: 48,
-                color: AppTokens.mutedCopy,
+                color: colors.mutedInk,
               ),
               const SizedBox(height: AppTokens.space16),
               Text(
                 'No genres found',
-                style: AppTypography.titleSerif(fontSize: 20),
+                style: AppTypography.titleSerif(fontSize: 20, color: colors.ink),
               ),
               const SizedBox(height: AppTokens.space8),
               Text(
                 'Books in your library with genre tags will appear here.',
                 textAlign: TextAlign.center,
-                style: AppTypography.bodySans(fontSize: 14),
+                style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
               ),
             ],
           ),
@@ -646,6 +664,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
   }
 
   Widget _buildTopicsContent(BuildContext context, LibraryState state, double horizontalPad) {
+    final colors = ShelfdColors.of(context);
     final topicItems = state.topicGridItems;
     if (topicItems.isEmpty) {
       return Center(
@@ -654,21 +673,21 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(
+              Icon(
                 Icons.label_outline_rounded,
                 size: 48,
-                color: AppTokens.mutedCopy,
+                color: colors.mutedInk,
               ),
               const SizedBox(height: AppTokens.space16),
               Text(
                 'No topics found',
-                style: AppTypography.titleSerif(fontSize: 20),
+                style: AppTypography.titleSerif(fontSize: 20, color: colors.ink),
               ),
               const SizedBox(height: AppTokens.space8),
               Text(
                 'Books in your library with topic tags will appear here.',
                 textAlign: TextAlign.center,
-                style: AppTypography.bodySans(fontSize: 14),
+                style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
               ),
             ],
           ),
@@ -707,6 +726,7 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
   }
 
   Widget _buildBooksContent(BuildContext context, LibraryState state, double horizontalPad) {
+    final colors = ShelfdColors.of(context);
     final items = state.groupedBookItems;
     if (items.isEmpty) {
       final isFiltered = state.searchQuery.trim().isNotEmpty || state.activeFilter != 'all';
@@ -717,28 +737,28 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(
+                Icon(
                   Icons.search_off_rounded,
                   size: 48,
-                  color: AppTokens.mutedCopy,
+                  color: colors.mutedInk,
                 ),
                 const SizedBox(height: AppTokens.space16),
                 Text(
                   'No matching books',
-                  style: AppTypography.titleSerif(fontSize: 20),
+                  style: AppTypography.titleSerif(fontSize: 20, color: colors.ink),
                 ),
                 const SizedBox(height: AppTokens.space8),
                 Text(
                   'Try searching for different terms or clear your search filter.',
                   textAlign: TextAlign.center,
-                  style: AppTypography.bodySans(fontSize: 14),
+                  style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
                 ),
                 const SizedBox(height: AppTokens.space16),
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTokens.charcoalInk,
-                    side: const BorderSide(color: AppTokens.crispBorder),
-                    backgroundColor: AppTokens.boneSurface,
+                    foregroundColor: colors.ink,
+                    side: BorderSide(color: colors.border),
+                    backgroundColor: colors.surface,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                     ),
@@ -750,10 +770,14 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                   onPressed: () {
                     ref.read(libraryProvider.notifier).setSearchQuery('');
                   },
-                  icon: const Icon(Icons.clear_all_rounded, size: 18),
-                  label: const Text(
+                  icon: Icon(Icons.clear_all_rounded, size: 18, color: colors.accentPrimary),
+                  label: Text(
                     'Clear search',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+                    style: AppTypography.bodySans(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: colors.ink,
+                    ),
                   ),
                 ),
               ],
@@ -768,28 +792,28 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(
+              Icon(
                 Icons.menu_book_outlined,
                 size: 48,
-                color: AppTokens.mutedCopy,
+                color: colors.mutedInk,
               ),
               const SizedBox(height: AppTokens.space16),
               Text(
                 'Your shelf is quiet',
-                style: AppTypography.titleSerif(fontSize: 20),
+                style: AppTypography.titleSerif(fontSize: 20, color: colors.ink),
               ),
               const SizedBox(height: AppTokens.space8),
               Text(
                 'Place EPUBs into your /library directory or tap refresh to scan.',
                 textAlign: TextAlign.center,
-                style: AppTypography.bodySans(fontSize: 14),
+                style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
               ),
               const SizedBox(height: AppTokens.space16),
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTokens.charcoalInk,
-                  side: const BorderSide(color: AppTokens.crispBorder),
-                  backgroundColor: AppTokens.boneSurface,
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
+                  backgroundColor: colors.surface,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                   ),
@@ -799,10 +823,14 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                   ),
                 ),
                 onPressed: () => pickAndUploadEpub(context, ref),
-                icon: const Icon(Icons.upload_file_outlined, size: 18),
-                label: const Text(
+                icon: Icon(Icons.upload_file_outlined, size: 18, color: colors.accentPrimary),
+                label: Text(
                   'Upload EPUB',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+                  style: AppTypography.bodySans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
                 ),
               ),
             ],
@@ -855,13 +883,16 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
               ),
             ),
             if (state.isLoadingMore)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: AppTokens.space16),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppTokens.space16),
                 child: Center(
                   child: SizedBox(
                     width: 24,
                     height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: colors.accentPrimary,
+                    ),
                   ),
                 ),
               ),

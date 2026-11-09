@@ -95,11 +95,48 @@ void main() {
     expect(find.text('2 Books by Author'), findsOneWidget);
     expect(find.text('2 Books'), findsOneWidget);
 
-    // Verify AuthorAvatar is rendered
+    // Verify AuthorAvatar and TactileBookCover are rendered
     expect(find.byType(AuthorAvatar), findsOneWidget);
+    expect(find.byType(TactileBookCover), findsNWidgets(2));
 
-    // Verify books are rendered
-    expect(find.text('Clifford at the Circus'), findsWidgets);
-    expect(find.text('Clifford the Big Red Dog'), findsWidgets);
+    // Verify books are rendered once (no duplicate title inside fallback cover)
+    expect(find.text('Clifford at the Circus'), findsOneWidget);
+    expect(find.text('Clifford the Big Red Dog'), findsOneWidget);
+  });
+
+  testWidgets('AuthorDetailView renders in ReadingThemeMode.dark', (tester) async {
+    const author = Author(id: 'a1', name: 'Ursula K. Le Guin', bookCount: 1);
+    final books = [
+      const Book(
+        id: 'b1',
+        title: 'A Wizard of Earthsea',
+        authors: [author],
+        readingProgress: 0.5,
+      ),
+    ];
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          bookRepositoryProvider.overrideWithValue(
+            _MockAuthorBookRepository(books: books, authors: [author]),
+          ),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+          home: const AuthorDetailView(
+            authorId: 'a1',
+            authorName: 'Ursula K. Le Guin',
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('Ursula K. Le Guin'), findsWidgets);
+    expect(find.text('A Wizard of Earthsea'), findsOneWidget);
+    expect(find.byType(TactileBookCover), findsOneWidget);
   });
 }

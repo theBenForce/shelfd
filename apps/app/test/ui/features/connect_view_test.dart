@@ -69,4 +69,27 @@ void main() {
     expect(find.text('https://shelfd.thebenforce.com'), findsOneWidget);
     expect(find.text('customuser'), findsOneWidget);
   });
+
+  testWidgets('ConnectView renders in Dark theme and opens Scan Server QR Code dialog', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+          home: const ConnectView(),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Scan Server QR Code'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Use Discovered Server'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+  });
 }

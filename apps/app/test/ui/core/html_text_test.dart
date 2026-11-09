@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shelf/ui/core/html_text.dart';
+import 'package:shelf/ui/core/theme.dart';
+import 'package:shelf/ui/core/tokens.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -226,6 +228,30 @@ void main() {
         (s) => s.text?.contains('What Are the Odds?') ?? false,
       );
       expect(italicSpan.style?.fontStyle, FontStyle.italic);
+    });
+
+    testWidgets('adapts text, blockquote, and divider colors to Dark and Sepia themes', (tester) async {
+      const htmlContent = '<h1>Heading</h1><blockquote>Archival quote</blockquote><hr/><p>Body paragraph</p>';
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+          home: const Scaffold(
+            body: HtmlText(html: htmlContent),
+          ),
+        ),
+      );
+
+      final divider = tester.widget<Divider>(find.byType(Divider));
+      expect(divider.color, AppTokens.walnutBorder);
+
+      final richTexts = tester.widgetList<RichText>(find.byType(RichText)).toList();
+      expect(richTexts.length, 3);
+      final headingSpan = (richTexts[0].text as TextSpan).children!.first as TextSpan;
+      expect(headingSpan.style?.color, AppTokens.walnutInk);
+
+      final quoteSpan = (richTexts[1].text as TextSpan).children!.first as TextSpan;
+      expect(quoteSpan.style?.color, AppTokens.walnutSecondary);
     });
   });
 }
