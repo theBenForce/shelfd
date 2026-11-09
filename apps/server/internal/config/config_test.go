@@ -669,5 +669,114 @@ func TestSplitModelEndpointsSSRFValidation(t *testing.T) {
 	}
 }
 
+func TestNotebookLMConfig(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		cfg := config.DefaultConfig()
+		if cfg.NotebookLM.IsConfigured() {
+			t.Errorf("expected default NotebookLM config to not be configured")
+		}
+		if cfg.NotebookLM.ResolvedNotebookURL() != "https://notebooklm.google.com/" {
+			t.Errorf("expected default ResolvedNotebookURL https://notebooklm.google.com/, got %s", cfg.NotebookLM.ResolvedNotebookURL())
+		}
+		if cfg.NotebookLM.Location != "global" {
+			t.Errorf("expected default Location global, got %s", cfg.NotebookLM.Location)
+		}
+	})
 
+	t.Run("yaml_parsing_and_masking", func(t *testing.T) {
+		yamlData := `
+notebooklm:
+  enabled: true
+  webhook_url: "https://bridge.example.com/notebooklm"
+  project_id: "my-gcp-project"
+  location: "us-central1"
+  api_key: "nlm-secret-token-9876"
+  notebook_url: "https://notebooklm.google.com/notebook/custom"
+`
+		cfg, err := config.Parse([]byte(yamlData))
+		if err != nil {
+			t.Fatalf("unexpected error parsing notebooklm yaml: %v", err)
+		}
+		if !cfg.NotebookLM.Enabled {
+			t.Errorf("expected NotebookLM.Enabled to be true")
+		}
+		if !cfg.NotebookLM.IsConfigured() {
+			t.Errorf("expected NotebookLM.IsConfigured() to be true")
+		}
+		if cfg.NotebookLM.WebhookURL != "https://bridge.example.com/notebooklm" {
+			t.Errorf("unexpected WebhookURL: %s", cfg.NotebookLM.WebhookURL)
+		}
+		if cfg.NotebookLM.ResolvedNotebookURL() != "https://notebooklm.google.com/notebook/custom" {
+			t.Errorf("unexpected ResolvedNotebookURL: %s", cfg.NotebookLM.ResolvedNotebookURL())
+		}
+		str := cfg.NotebookLM.String()
+		if strings.Contains(str, "nlm-secret-token-9876") {
+			t.Errorf("expected String() to mask APIKey, got %s", str)
+		}
+		if !strings.Contains(str, "nlm****9876") {
+			t.Errorf("expected String() to contain masked key nlm****9876, got %s", str)
+		}
+	})
 
+	t.Run("env_overrides", func(t *testing.T) {
+		os.Setenv("SHELFD_NOTEBOOKLM_ENABLED", "true")
+		os.Setenv("SHELFD_NOTEBOOKLM_WEBHOOK_URL", "https://hook.example.com/push")
+		os.Setenv("SHELFD_NOTEBOOKLM_ENDPOINT", "https://us-discoveryengine.googleapis.com")
+		os.Setenv("SHELFD_NOTEBOOKLM_PROJECT_ID", "env-project-123")
+		os.Setenv("SHELFD_NOTEBOOKLM_LOCATION", "us")
+		os.Setenv("SHELFD_NOTEBOOKLM_API_KEY", "env-api-key-12345")
+		os.Setenv("SHELFD_NOTEBOOKLM_URL", "https://notebooklm.google.com/notebook/env")
+		defer func() {
+			os.Unsetenv("SHELFD_NOTEBOOKLM_ENABLED")
+			os.Unsetenv("SHELFD_NOTEBOOKLM_WEBHOOK_URL")
+			os.Unsetenv("SHELFD_NOTEBOOKLM_ENDPOINT")
+			os.Unsetenv("SHELFD_NOTEBOOKLM_PROJECT_ID")
+			os.Unsetenv("SHELFD_NOTEBOOKLM_LOCATION")
+			os.Unsetenv("SHELFD_NOTEBOOKLM_API_KEY")
+			os.Unsetenv("SHELFD_NOTEBOOKLM_URL")
+		}()
+
+		cfg := config.DefaultConfig()
+		config.ApplyEnvOverrides(cfg)
+
+		if !cfg.NotebookLM.Enabled {
+			t.Errorf("expected Enabled true")
+		}
+		if cfg.NotebookLM.WebhookURL != "https://hook.example.com/push" {
+			t.Errorf("unexpected WebhookURL: %s", cfg.NotebookLM.WebhookURL)
+		}
+		if cfg.NotebookLM.Endpoint != "https://us-discoveryengine.googleapis.com" {
+			t.Errorf("unexpected Endpoint: %s", cfg.NotebookLM.Endpoint)
+		}
+		if cfg.NotebookLM.ProjectID != "env-project-123" {
+			t.Errorf("unexpected ProjectID: %s", cfg.NotebookLM.ProjectID)
+		}
+		if cfg.NotebookLM.Location != "us" {
+			t.Errorf("unexpected Location: %s", cfg.NotebookLM.Location)
+		}
+		if cfg.NotebookLM.APIKey != "env-api-key-12345" {
+			t.Errorf("unexpected APIKey: %s", cfg.NotebookLM.APIKey)
+		}
+		if cfg.NotebookLM.ResolvedNotebookURL() != "https://notebooklm.google.com/notebook/env" {
+			t.Errorf("unexpected NotebookURL: %s", cfg.NotebookLM.ResolvedNotebookURL())
+		}
+	})
+
+	t.Run("ssrf_validation", func(t *testing.T) {
+		badWebhookYAML := `
+notebooklm:
+  webhook_url: "http://169.254.169.254/latest/meta-data"
+`
+		if _, err := config.Parse([]byte(badWebhookYAML)); err == nil || !strings.Contains(err.Error(), "prohibited cloud metadata") {
+			t.Errorf("expected SSRF error for webhook_url, got: %v", err)
+		}
+
+		badEndpointYAML := `
+notebooklm:
+  endpoint: "http://metadata.google.internal/v1alpha"
+`
+		if _, err := config.Parse([]byte(badEndpointYAML)); err == nil || !strings.Contains(err.Error(), "prohibited cloud metadata") {
+			t.Errorf("expected SSRF error for endpoint, got: %v", err)
+		}
+	})
+}

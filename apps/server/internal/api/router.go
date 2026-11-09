@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/shelfd/shelfd/internal/ai"
+	"github.com/shelfd/shelfd/internal/config"
 	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
@@ -20,6 +21,7 @@ type RouterConfig struct {
 	UploadWorker    *worker.UploadWorker
 	AIClient        ai.Client
 	ToolInvoker     ai.ToolInvoker
+	NotebookLM      config.NotebookLMConfig
 	Hub             *events.Hub
 	DataDir         string
 	LibraryDir      string
@@ -45,6 +47,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	if cfg.ToolInvoker != nil {
 		bookHandler.SetToolInvoker(cfg.ToolInvoker)
 	}
+	bookHandler.SetNotebookLMConfig(cfg.NotebookLM)
 	taxHandler := NewTaxonomyHandler(cfg.Repo, cfg.LibraryDir, cfg.DataDir, logger)
 	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, cfg.Hub, logger)
 	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version, cfg.DefaultUsername)
@@ -85,6 +88,8 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("POST /api/v1/books/{id}/cover", auth(http.HandlerFunc(bookHandler.UploadBookCover)))
 	mux.Handle("POST /api/v1/books/{id}/cover/fetch", auth(http.HandlerFunc(metadataHandler.FetchBookCover)))
 	mux.Handle("GET /api/v1/books/{id}/download", auth(http.HandlerFunc(bookHandler.DownloadBook)))
+	mux.Handle("GET /api/v1/books/{id}/notebooklm", auth(http.HandlerFunc(bookHandler.ExportBookNotebookLM)))
+	mux.Handle("POST /api/v1/books/{id}/notebooklm", auth(http.HandlerFunc(bookHandler.SendBookToNotebookLM)))
 	mux.Handle("GET /api/v1/books/{id}/cover", auth(http.HandlerFunc(bookHandler.GetBookCover)))
 	mux.Handle("GET /api/v1/books/{id}/assets/{path...}", auth(http.HandlerFunc(bookHandler.GetBookAsset)))
 	mux.Handle("GET /api/v1/books/{id}/chapters/{index}/html", auth(http.HandlerFunc(bookHandler.GetChapterHTML)))

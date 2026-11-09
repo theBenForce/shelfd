@@ -123,6 +123,75 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     );
   }
 
+  String _sanitizeBookFileName(String rawTitle, String extension) {
+    final trimmed = rawTitle.trim();
+    final sanitized = trimmed.replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '_').trim();
+    final cleanTitle = sanitized.isNotEmpty ? sanitized : 'book';
+    final cleanExt = extension.startsWith('.') ? extension.substring(1) : extension;
+    return '$cleanTitle.$cleanExt';
+  }
+
+  void _handleExportMenuSelection(String action, Book book) {
+    switch (action) {
+      case 'epub':
+        _downloadEpub(book);
+        break;
+      case 'notebooklm':
+        _sendToNotebookLM(book);
+        break;
+      case 'markdown':
+        _downloadMarkdown(book);
+        break;
+    }
+  }
+
+  List<PopupMenuEntry<String>> _buildExportMenuItems() {
+    return [
+      PopupMenuItem<String>(
+        key: const Key('menu_item_download_epub'),
+        value: 'epub',
+        child: Row(
+          children: [
+            const Icon(Icons.download_rounded, size: 18, color: AppTokens.charcoalInk),
+            const SizedBox(width: AppTokens.space12),
+            Text(
+              'Download EPUB',
+              style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+      ),
+      PopupMenuItem<String>(
+        key: const Key('menu_item_send_notebooklm'),
+        value: 'notebooklm',
+        child: Row(
+          children: [
+            const Icon(Icons.auto_awesome_rounded, size: 18, color: AppTokens.charcoalInk),
+            const SizedBox(width: AppTokens.space12),
+            Text(
+              'Send to NotebookLM',
+              style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+      ),
+      PopupMenuItem<String>(
+        key: const Key('menu_item_download_markdown'),
+        value: 'markdown',
+        child: Row(
+          children: [
+            const Icon(Icons.description_outlined, size: 18, color: AppTokens.charcoalInk),
+            const SizedBox(width: AppTokens.space12),
+            Text(
+              'Download Markdown (.md)',
+              style: AppTypography.bodySans(fontSize: 14, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+      ),
+    ];
+  }
+
   Future<void> _downloadEpub(Book book) async {
     if (_isDownloading) return;
     setState(() {
@@ -132,12 +201,13 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     try {
       final repo = ref.read(bookRepositoryProvider);
       final bytes = await repo.downloadBookEpub(book.id);
-      final rawTitle = book.title.trim();
-      final sanitized = rawTitle.replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '_').trim();
-      final cleanTitle = sanitized.isNotEmpty ? sanitized : 'book';
-      final fileName = '$cleanTitle.epub';
+      final fileName = _sanitizeBookFileName(book.title, 'epub');
 
-      final saved = await saveDownloadedFile(bytes, fileName);
+      final saved = await saveDownloadedFile(
+        bytes,
+        fileName,
+        mimeType: 'application/epub+zip',
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -153,6 +223,124 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to download EPUB: $e'),
+            backgroundColor: Colors.red.shade800,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _downloadMarkdown(Book book) async {
+    if (_isDownloading) return;
+    setState(() {
+      _isDownloading = true;
+    });
+
+    try {
+      final repo = ref.read(bookRepositoryProvider);
+      final bytes = await repo.downloadBookNotebookLM(book.id);
+      final fileName = _sanitizeBookFileName(book.title, 'md');
+
+      final saved = await saveDownloadedFile(
+        bytes,
+        fileName,
+        mimeType: 'text/markdown;charset=utf-8',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              saved ? 'Downloaded $fileName' : 'Download canceled',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to download Markdown: $e'),
+            backgroundColor: Colors.red.shade800,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _sendToNotebookLM(Book book) async {
+    if (_isDownloading) return;
+    setState(() {
+      _isDownloading = true;
+    });
+
+    try {
+      final repo = ref.read(bookRepositoryProvider);
+      final result = await repo.sendBookToNotebookLM(book.id);
+      final targetUrl = result.notebookUrl.isNotEmpty
+          ? result.notebookUrl
+          : 'https://notebooklm.google.com/';
+
+      if (result.status == 'sent') {
+        await openExternalUrl(targetUrl);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                (result.message != null && result.message!.isNotEmpty)
+                    ? result.message!
+                    : 'Sent "${book.title}" to NotebookLM',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } else {
+        // Default client_handoff flow: download compiled NotebookLM Markdown bundle and open NotebookLM
+        final bytes = await repo.downloadBookNotebookLM(book.id);
+        final fileName = (result.fileName != null && result.fileName!.isNotEmpty)
+            ? result.fileName!
+            : _sanitizeBookFileName(book.title, 'md');
+
+        await saveDownloadedFile(
+          bytes,
+          fileName,
+          mimeType: 'text/markdown;charset=utf-8',
+        );
+        await openExternalUrl(targetUrl);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                (result.message != null && result.message!.isNotEmpty)
+                    ? result.message!
+                    : 'Exported $fileName for NotebookLM — upload it as a source!',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to send to NotebookLM: $e'),
             backgroundColor: Colors.red.shade800,
             behavior: SnackBarBehavior.floating,
           ),
@@ -338,7 +526,17 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             tooltip: 'Edit Metadata',
             onPressed: () => showEditBookMetadataModal(context, book),
           ),
-          IconButton(
+          PopupMenuButton<String>(
+            key: const Key('download_appbar_menu_button'),
+            enabled: !_isDownloading,
+            tooltip: 'Download EPUB',
+            position: PopupMenuPosition.under,
+            color: AppTokens.boneSurface,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+              side: const BorderSide(color: AppTokens.crispBorder),
+            ),
             icon: _isDownloading
                 ? const SizedBox(
                     width: 18,
@@ -349,8 +547,8 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                     ),
                   )
                 : const Icon(Icons.download_rounded, color: AppTokens.charcoalInk),
-            tooltip: 'Download EPUB',
-            onPressed: _isDownloading ? null : () => _downloadEpub(book),
+            onSelected: (action) => _handleExportMenuSelection(action, book),
+            itemBuilder: (context) => _buildExportMenuItems(),
           ),
           IconButton(
             icon: const Icon(Icons.bookmark_add_outlined, color: AppTokens.charcoalInk),
@@ -661,29 +859,60 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           SizedBox(
             width: double.infinity,
             height: AppTokens.minTouchTarget,
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTokens.charcoalInk,
+            child: PopupMenuButton<String>(
+              key: const Key('download_hero_menu_button'),
+              enabled: !_isDownloading,
+              tooltip: '',
+              position: PopupMenuPosition.under,
+              color: AppTokens.boneSurface,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                 side: const BorderSide(color: AppTokens.crispBorder),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                ),
               ),
-              icon: _isDownloading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
+              onSelected: (action) => _handleExportMenuSelection(action, book),
+              itemBuilder: (context) => _buildExportMenuItems(),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                  border: Border.all(color: AppTokens.crispBorder),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (_isDownloading)
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppTokens.charcoalInk,
+                        ),
+                      )
+                    else
+                      const Icon(
+                        Icons.download_rounded,
+                        size: 20,
                         color: AppTokens.charcoalInk,
                       ),
-                    )
-                  : const Icon(Icons.download_rounded, size: 20),
-              label: Text(
-                _isDownloading ? 'Downloading...' : 'Download EPUB',
-                style: const TextStyle(fontWeight: FontWeight.w600),
+                    const SizedBox(width: AppTokens.space8),
+                    Text(
+                      _isDownloading ? 'Downloading...' : 'Download EPUB',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: AppTokens.charcoalInk,
+                      ),
+                    ),
+                    const SizedBox(width: AppTokens.space4),
+                    const Icon(
+                      Icons.arrow_drop_down_rounded,
+                      size: 20,
+                      color: AppTokens.charcoalInk,
+                    ),
+                  ],
+                ),
               ),
-              onPressed: _isDownloading ? null : () => _downloadEpub(book),
             ),
           ),
           const SizedBox(height: AppTokens.space8),

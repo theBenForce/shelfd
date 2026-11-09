@@ -252,6 +252,7 @@ func main() {
 		UploadWorker:    uploadWorker,
 		AIClient:        aiClient,
 		ToolInvoker:     toolExecutor,
+		NotebookLM:      cfg.NotebookLM,
 		Hub:             eventHub,
 		DataDir:         cfg.Storage.DataDir,
 		LibraryDir:      cfg.Storage.LibraryDir,

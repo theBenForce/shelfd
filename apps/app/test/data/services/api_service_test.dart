@@ -567,5 +567,107 @@ void main() {
       final bytes = await apiService.downloadBookEpub('book-123');
       expect(bytes, epubBytes);
     });
+
+    test('getBookNotebookLMUrl returns formatted URL with token', () {
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', token: 'test-token');
+      final url = apiService.getBookNotebookLMUrl('book-123');
+      expect(url, 'http://localhost:8080/api/v1/books/book-123/notebooklm?token=test-token');
+    });
+
+    test('downloadBookNotebookLM returns markdown bytes on success', () async {
+      final mdBytes = utf8.encode('# Dune\n\n## Chapters\n\n### Chapter 1\nArrakis.');
+      final mockClient = MockClient((request) async {
+        expect(request.method, 'GET');
+        expect(request.url.path, '/api/v1/books/book-123/notebooklm');
+        expect(request.headers['authorization'], 'Bearer test-token');
+        return http.Response.bytes(
+          mdBytes,
+          200,
+          headers: {
+            'content-type': 'text/markdown; charset=utf-8',
+            'content-disposition': 'attachment; filename="Dune.md"',
+          },
+        );
+      });
+
+      final apiService = ApiService(
+        baseUrl: 'http://localhost:8080',
+        token: 'test-token',
+        client: mockClient,
+      );
+      final bytes = await apiService.downloadBookNotebookLM('book-123');
+      expect(utf8.decode(bytes), contains('# Dune'));
+      expect(utf8.decode(bytes), contains('### Chapter 1'));
+    });
+
+    test('sendBookToNotebookLM parses client_handoff response', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.method, 'POST');
+        expect(request.url.path, '/api/v1/books/book-123/notebooklm');
+        expect(request.headers['authorization'], 'Bearer test-token');
+        return http.Response(
+          jsonEncode({
+            'status': 'client_handoff',
+            'notebook_url': 'https://notebooklm.google.com/',
+            'file_name': 'Dune.md',
+            'download_path': '/api/v1/books/book-123/notebooklm',
+            'message': 'NotebookLM bundle ready for download.',
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final apiService = ApiService(
+        baseUrl: 'http://localhost:8080',
+        token: 'test-token',
+        client: mockClient,
+      );
+      final result = await apiService.sendBookToNotebookLM('book-123');
+      expect(result.status, 'client_handoff');
+      expect(result.isClientHandoff, isTrue);
+      expect(result.isSent, isFalse);
+      expect(result.notebookUrl, 'https://notebooklm.google.com/');
+      expect(result.fileName, 'Dune.md');
+      expect(result.downloadPath, '/api/v1/books/book-123/notebooklm');
+    });
+
+    test('sendBookToNotebookLM parses sent response and throws ApiException on 502 error', () async {
+      var shouldFail = false;
+      final mockClient = MockClient((request) async {
+        expect(request.method, 'POST');
+        expect(request.url.path, '/api/v1/books/book-123/notebooklm');
+        if (shouldFail) {
+          return http.Response(jsonEncode({'error': 'Upstream NotebookLM error'}), 502);
+        }
+        return http.Response(
+          jsonEncode({
+            'status': 'sent',
+            'notebook_url': 'https://notebooklm.google.com/notebook/nb-456',
+            'file_name': 'Dune.md',
+            'message': 'Uploaded to NotebookLM',
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final apiService = ApiService(
+        baseUrl: 'http://localhost:8080',
+        token: 'test-token',
+        client: mockClient,
+      );
+      final result = await apiService.sendToNotebookLM('book-123');
+      expect(result.status, 'sent');
+      expect(result.isSent, isTrue);
+      expect(result.isClientHandoff, isFalse);
+      expect(result.notebookUrl, 'https://notebooklm.google.com/notebook/nb-456');
+
+      shouldFail = true;
+      expect(
+        () => apiService.sendBookToNotebookLM('book-123'),
+        throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 502)),
+      );
+    });
   });
 }
