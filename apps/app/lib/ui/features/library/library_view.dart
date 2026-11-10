@@ -70,7 +70,11 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                   : widget.mode == LibraryViewMode.topics
                       ? 'topics'
                       : (widget.initialFilter ?? 'all');
-      ref.read(libraryProvider.notifier).setFilter(newFilter);
+      Future.microtask(() {
+        if (mounted) {
+          ref.read(libraryProvider.notifier).setFilter(newFilter);
+        }
+      });
     } else {
       final current = (widget.initialFilter != null && widget.initialFilter!.isNotEmpty)
           ? widget.initialFilter!
@@ -79,7 +83,11 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
           ? oldWidget.initialFilter!
           : 'all';
       if (current != old) {
-        ref.read(libraryProvider.notifier).setFilter(current);
+        Future.microtask(() {
+          if (mounted) {
+            ref.read(libraryProvider.notifier).setFilter(current);
+          }
+        });
       }
     }
   }

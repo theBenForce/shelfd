@@ -367,6 +367,7 @@ void main() {
               ),
             ),
           );
+          await tester.pumpAndSettle();
           expect(viaOf, equals(viaExt));
           expect(viaOf!.isDark, mode == ReadingThemeMode.dark);
         }
@@ -615,11 +616,16 @@ void main() {
 
     group('Feature 4: Library Catalog & Structured Filter Bar', () {
       testWidgets('F04-T1-01: LibraryView renders books grid with maxCrossAxisExtent 200 and aspect ratio 0.55', (tester) async {
+        const standaloneBook = Book(
+          id: 'book-42',
+          title: 'The Left Hand of Darkness',
+          authors: [Author(id: 'auth-1', name: 'Ursula K. Le Guin', bookCount: 5)],
+        );
         await tester.pumpWidget(
           ProviderScope(
             overrides: [
               sharedPreferencesProvider.overrideWithValue(prefs),
-              libraryProvider.overrideWith(() => _FakeLibraryNotifier(const LibraryState(books: [sampleBook]))),
+              libraryProvider.overrideWith(() => _FakeLibraryNotifier(const LibraryState(books: [standaloneBook]))),
             ],
             child: MaterialApp(
               theme: AppTheme.buildTheme(ReadingThemeMode.bone),
@@ -627,6 +633,7 @@ void main() {
             ),
           ),
         );
+        await tester.pumpAndSettle();
         expect(find.text('The Left Hand of Darkness'), findsWidgets);
         final grid = tester.widget<GridView>(find.byType(GridView));
         final delegate = grid.gridDelegate as SliverGridDelegateWithMaxCrossAxisExtent;
@@ -711,6 +718,7 @@ void main() {
               ),
             ),
           );
+          await tester.pumpAndSettle();
           expect(find.byType(GridView), findsOneWidget);
         }
       });
@@ -1722,6 +1730,7 @@ void main() {
             ),
           ),
         );
+        await tester.pumpAndSettle();
         expect(lightFallback, ShelfdColors.bone);
 
         await tester.pumpWidget(
@@ -1735,6 +1744,7 @@ void main() {
             ),
           ),
         );
+        await tester.pumpAndSettle();
         expect(sepiaFallback, ShelfdColors.sepia);
 
         await tester.pumpWidget(
@@ -1748,6 +1758,7 @@ void main() {
             ),
           ),
         );
+        await tester.pumpAndSettle();
         expect(darkFallback, ShelfdColors.dark);
       });
 
@@ -2908,6 +2919,7 @@ void main() {
             ),
           ),
         );
+        await tester.pumpAndSettle();
         final card = tester.widget<Card>(find.byType(Card));
         final expectedColors = AppTheme.buildTheme(mode).extension<ShelfdColors>()!;
         expect(card.color, expectedColors.surface);
@@ -3139,6 +3151,7 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
       expect(resolvedDarkFallback, equals(ShelfdColors.dark));
 
       await tester.pumpWidget(
@@ -3155,6 +3168,7 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
       expect(resolvedSepiaFallback, equals(ShelfdColors.sepia));
     });
 
