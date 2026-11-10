@@ -164,12 +164,14 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           children: [
             Icon(Icons.download_rounded, size: 18, color: colors.ink),
             const SizedBox(width: AppTokens.space12),
-            Text(
-              'Download EPUB',
-              style: AppTypography.bodySans(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: colors.ink,
+            Flexible(
+              child: Text(
+                'Download EPUB',
+                style: AppTypography.bodySans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: colors.ink,
+                ),
               ),
             ),
           ],
@@ -182,12 +184,14 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           children: [
             Icon(Icons.auto_awesome_rounded, size: 18, color: colors.accentPrimary),
             const SizedBox(width: AppTokens.space12),
-            Text(
-              'Send to NotebookLM',
-              style: AppTypography.bodySans(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: colors.ink,
+            Flexible(
+              child: Text(
+                'Send to NotebookLM',
+                style: AppTypography.bodySans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: colors.ink,
+                ),
               ),
             ),
           ],
@@ -200,12 +204,14 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           children: [
             Icon(Icons.description_outlined, size: 18, color: colors.secondaryInk),
             const SizedBox(width: AppTokens.space12),
-            Text(
-              'Download Markdown (.md)',
-              style: AppTypography.bodySans(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: colors.ink,
+            Flexible(
+              child: Text(
+                'Download Markdown (.md)',
+                style: AppTypography.bodySans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: colors.ink,
+                ),
               ),
             ),
           ],

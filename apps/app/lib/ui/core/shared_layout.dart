@@ -1401,7 +1401,7 @@ class TactileBookCover extends StatelessWidget {
 
   const TactileBookCover({
     super.key,
-    required this.coverUrl,
+    this.coverUrl,
     required this.title,
     this.subtitle,
     this.headers,
@@ -1565,83 +1565,103 @@ class TactileBookCover extends StatelessWidget {
   }
 
   Widget _buildEditorialFallback(ShelfdColors colors) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [colors.container, colors.containerHigh],
-        ),
-      ),
-      padding: const EdgeInsets.all(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: colors.accentPrimary.withValues(alpha: 0.28),
-            width: 1,
+    return LayoutBuilder(
+      builder: (context, outerConstraints) {
+        final isTiny =
+            outerConstraints.maxWidth < 60 || outerConstraints.maxHeight < 75;
+        return Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [colors.container, colors.containerHigh],
+            ),
           ),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isCompact = constraints.maxHeight < 95;
-            return Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!isCompact || !showFallbackTitle) ...[
-                  Icon(
-                    isSeries
-                        ? Icons.collections_bookmark_rounded
-                        : fallbackIcon,
-                    size: showFallbackTitle ? 20 : 28,
-                    color: colors.accentPrimary.withValues(alpha: 0.75),
-                  ),
-                  const SizedBox(height: 6),
-                  Container(
-                    width: 24,
-                    height: 1,
-                    color: colors.accentPrimary.withValues(alpha: 0.35),
-                  ),
-                  if (showFallbackTitle) const SizedBox(height: 6),
-                ],
-                if (showFallbackTitle) ...[
-                  Flexible(
-                    child: Text(
-                      title,
-                      maxLines: isCompact ? 2 : 3,
-                      textAlign: TextAlign.center,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTypography.titleSerif(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: colors.ink,
-                        height: 1.2,
-                      ),
+          padding: EdgeInsets.all(isTiny ? 4 : 8),
+          child: Container(
+            padding: EdgeInsets.symmetric(
+              horizontal: isTiny ? 2 : 8,
+              vertical: isTiny ? 2 : 8,
+            ),
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: colors.accentPrimary.withValues(alpha: 0.28),
+                width: 1,
+              ),
+              borderRadius: BorderRadius.circular(isTiny ? 2 : 4),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isCompact = constraints.maxHeight < 95;
+                if (isTiny && !showFallbackTitle) {
+                  return Center(
+                    child: Icon(
+                      isSeries
+                          ? Icons.collections_bookmark_rounded
+                          : fallbackIcon,
+                      size: 16,
+                      color: colors.accentPrimary.withValues(alpha: 0.75),
                     ),
-                  ),
-                  if (!isCompact &&
-                      subtitle != null &&
-                      subtitle!.trim().isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle!,
-                      maxLines: 1,
-                      textAlign: TextAlign.center,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTypography.captionSans(
-                        fontSize: 10,
-                        color: colors.mutedInk,
+                  );
+                }
+                return Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!isCompact || !showFallbackTitle) ...[
+                      Icon(
+                        isSeries
+                            ? Icons.collections_bookmark_rounded
+                            : fallbackIcon,
+                        size: showFallbackTitle ? 20 : 28,
+                        color: colors.accentPrimary.withValues(alpha: 0.75),
                       ),
-                    ),
+                      const SizedBox(height: 6),
+                      Container(
+                        width: 24,
+                        height: 1,
+                        color: colors.accentPrimary.withValues(alpha: 0.35),
+                      ),
+                      if (showFallbackTitle) const SizedBox(height: 6),
+                    ],
+                    if (showFallbackTitle) ...[
+                      Flexible(
+                        child: Text(
+                          title,
+                          maxLines: isCompact ? 2 : 3,
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTypography.titleSerif(
+                            fontSize: isTiny ? 9 : 12,
+                            fontWeight: FontWeight.w600,
+                            color: colors.ink,
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
+                      if (!isCompact &&
+                          subtitle != null &&
+                          subtitle!.trim().isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle!,
+                          maxLines: 1,
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTypography.captionSans(
+                            fontSize: 10,
+                            color: colors.mutedInk,
+                          ),
+                        ),
+                      ],
+                    ],
                   ],
-                ],
-              ],
-            );
-          },
-        ),
-      ),
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 }

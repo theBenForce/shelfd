@@ -141,7 +141,7 @@ class _ChapterDrawerSheetState extends ConsumerState<ChapterDrawerSheet> {
   Widget build(BuildContext context) {
     final playerState = ref.watch(audioPlayerProvider);
     final effectiveBookId = widget.bookId ?? widget.book?.id ?? playerState.book?.id ?? '';
-    final detailBook = effectiveBookId.isNotEmpty
+    final detailBook = (widget.book == null && effectiveBookId.isNotEmpty)
         ? ref.watch(bookDetailProvider(effectiveBookId)).book
         : null;
 
