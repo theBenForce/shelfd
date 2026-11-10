@@ -535,6 +535,10 @@ class LibraryNotifier extends Notifier<LibraryState> {
         isLoading: false,
       );
     } catch (e) {
+      if (e is ApiException && e.statusCode == 401) {
+        await ref.read(storageServiceProvider).clearAuthToken();
+        ref.read(apiServiceProvider).updateConnection(newToken: '');
+      }
       state = state.copyWith(isLoading: false, error: e.toString());
     }
   }

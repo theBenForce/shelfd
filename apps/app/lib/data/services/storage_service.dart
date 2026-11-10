@@ -37,6 +37,10 @@ class StorageService {
     }
   }
 
+  Future<void> clearAuthToken() async {
+    await _prefs.remove(_keyAuthToken);
+  }
+
   Future<void> clearServerConnection() async {
     await _prefs.remove(_keyServerUrl);
     await _prefs.remove(_keyAuthToken);

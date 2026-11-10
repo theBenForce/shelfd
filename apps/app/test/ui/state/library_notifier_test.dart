@@ -156,4 +156,49 @@ void main() {
     expect(state.books.length, 1);
     expect(state.books.first.title, 'Dune (Updated Edition)');
   });
+
+  test('LibraryNotifier.loadLibrary clears stored auth token on 401 Unauthorized', () async {
+    SharedPreferences.setMockInitialValues({
+      'shelfd_server_url': 'http://localhost:8080',
+      'shelfd_auth_token': 'expired-jwt-token',
+      'shelfd_saved_username': 'admin',
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final storageService = StorageService(prefs);
+
+    final mockClient = MockClient((request) async {
+      return http.Response(
+        jsonEncode({'error': 'Invalid or expired authorization token'}),
+        401,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    final apiService = ApiService(
+      baseUrl: 'http://localhost:8080',
+      token: 'expired-jwt-token',
+      client: mockClient,
+    );
+    final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+    final container = ProviderContainer(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        storageServiceProvider.overrideWithValue(storageService),
+        apiServiceProvider.overrideWithValue(apiService),
+        bookRepositoryProvider.overrideWithValue(bookRepo),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(libraryProvider.notifier).loadLibrary();
+
+    final state = container.read(libraryProvider);
+    expect(state.error, contains('401'));
+    expect(storageService.getAuthToken(), isNull);
+    expect(storageService.getServerUrl(), 'http://localhost:8080');
+    expect(storageService.getSavedUsername(), 'admin');
+    expect(apiService.token, isEmpty);
+  });
 }
+

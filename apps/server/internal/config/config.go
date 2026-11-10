@@ -610,6 +610,8 @@ func ApplyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("SHELFD_JWT_SECRET"); v != "" {
 		cfg.Server.JWTSecret = v
+	} else if v := os.Getenv("SHELFD_SERVER_JWT_SECRET"); v != "" {
+		cfg.Server.JWTSecret = v
 	} else if v := os.Getenv("JWT_SECRET"); v != "" {
 		cfg.Server.JWTSecret = v
 	}
