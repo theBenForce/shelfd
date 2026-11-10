@@ -1542,12 +1542,21 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           // Filter pills and Add action row
           Row(
             children: [
-              _buildAnnotationFilterChip(colors, 'all', 'All (${highlights.length + bookmarks.length})'),
-              const SizedBox(width: AppTokens.space8),
-              _buildAnnotationFilterChip(colors, 'highlights', 'Highlights (${highlights.length})'),
-              const SizedBox(width: AppTokens.space8),
-              _buildAnnotationFilterChip(colors, 'bookmarks', 'Bookmarks (${bookmarks.length})'),
-              const Spacer(),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildAnnotationFilterChip(colors, 'all', 'All (${highlights.length + bookmarks.length})'),
+                      const SizedBox(width: AppTokens.space8),
+                      _buildAnnotationFilterChip(colors, 'highlights', 'Highlights (${highlights.length})'),
+                      const SizedBox(width: AppTokens.space8),
+                      _buildAnnotationFilterChip(colors, 'bookmarks', 'Bookmarks (${bookmarks.length})'),
+                    ],
+                  ),
+                ),
+              ),
               IconButton(
                 icon: Icon(Icons.bookmark_add_outlined, color: colors.ink),
                 tooltip: 'Add Bookmark',

@@ -172,13 +172,21 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
   String get _currentDestinationPreview {
     final rawAuthor = _authorController.text.trim();
     final cleanAuthor = rawAuthor.isNotEmpty
-        ? rawAuthor.split(',').first.replaceAll(RegExp(r'[/\\:*?"<>|]'), '').trim()
+        ? rawAuthor
+            .split(',')
+            .first
+            .replaceAll(RegExp(r'[/\\:*?"<>|]'), '')
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .trim()
         : 'Unknown';
     final authorSegment = StagedMetadata.sanitizePathSegment(
       cleanAuthor.isEmpty ? 'Unknown' : cleanAuthor,
     );
     final rawTitle = _titleController.text.trim();
-    final cleanTitle = rawTitle.replaceAll(RegExp(r'[/\\:*?"<>|]'), '').trim();
+    final cleanTitle = rawTitle
+        .replaceAll(RegExp(r'[/\\:*?"<>|]'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
     final titleSegment = StagedMetadata.sanitizePathSegment(
       cleanTitle.isEmpty ? 'Untitled' : cleanTitle,
     );
