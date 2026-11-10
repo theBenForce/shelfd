@@ -1,3 +1,10 @@
+# [1.17.0](https://github.com/theBenForce/shelfd/compare/v1.16.0...v1.17.0) (2026-11-10)
+
+
+### Features
+
+* **ai:** make embedder batch size and client timeouts configurable ([#72](https://github.com/theBenForce/shelfd/issues/72)) ([18a7605](https://github.com/theBenForce/shelfd/commit/18a76051e544172498784534acc7b72cb46feb71))
+
 # [1.16.0](https://github.com/theBenForce/shelfd/compare/v1.15.0...v1.16.0) (2026-11-10)
 
 
