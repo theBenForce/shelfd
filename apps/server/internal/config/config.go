@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -52,11 +53,13 @@ type StorageConfig struct {
 
 // ModelEndpointConfig defines the endpoint, provider, authentication, and model settings for an AI capability.
 type ModelEndpointConfig struct {
-	Provider   string `yaml:"provider"`
-	BaseURL    string `yaml:"base_url"`
-	APIKey     string `yaml:"api_key"`
-	Model      string `yaml:"model"`
-	Dimensions int    `yaml:"dimensions,omitempty"`
+	Provider       string `yaml:"provider"`
+	BaseURL        string `yaml:"base_url"`
+	APIKey         string `yaml:"api_key"`
+	Model          string `yaml:"model"`
+	Dimensions     int    `yaml:"dimensions,omitempty"`
+	BatchSize      int    `yaml:"batch_size,omitempty"`
+	TimeoutSeconds int    `yaml:"timeout_seconds,omitempty"`
 }
 
 func (m ModelEndpointConfig) String() string {
@@ -68,8 +71,8 @@ func (m ModelEndpointConfig) String() string {
 			maskedKey = "****"
 		}
 	}
-	return fmt.Sprintf("ModelEndpointConfig{Provider:%s, BaseURL:%s, APIKey:%s, Model:%s, Dimensions:%d}",
-		m.Provider, m.BaseURL, maskedKey, m.Model, m.Dimensions)
+	return fmt.Sprintf("ModelEndpointConfig{Provider:%s, BaseURL:%s, APIKey:%s, Model:%s, Dimensions:%d, BatchSize:%d, TimeoutSeconds:%d}",
+		m.Provider, m.BaseURL, maskedKey, m.Model, m.Dimensions, m.BatchSize, m.TimeoutSeconds)
 }
 
 // DefaultBaseURLForProvider returns the canonical default URL for known providers.
@@ -93,6 +96,8 @@ type AIConfig struct {
 	APIKey              string `yaml:"api_key"`
 	EmbeddingModel      string `yaml:"embedding_model"`
 	EmbeddingDimensions int    `yaml:"embedding_dimensions"`
+	EmbeddingBatchSize  int    `yaml:"embedding_batch_size,omitempty"`
+	TimeoutSeconds      int    `yaml:"timeout_seconds,omitempty"`
 	ChatModel           string `yaml:"chat_model"`
 	SummaryModel        string `yaml:"summary_model"` // Deprecated alias for ChatModel
 
@@ -188,20 +193,25 @@ func DefaultConfig() *Config {
 			APIKey:              "",
 			EmbeddingModel:      "nomic-embed-text",
 			EmbeddingDimensions: 256,
+			EmbeddingBatchSize:  50,
+			TimeoutSeconds:      60,
 			ChatModel:           "llama3.2:3b",
 			SummaryModel:        "llama3.2:3b",
 			Embedder: ModelEndpointConfig{
-				Provider:   "ollama",
-				BaseURL:    "http://host.docker.internal:11434",
-				APIKey:     "",
-				Model:      "nomic-embed-text",
-				Dimensions: 256,
+				Provider:       "ollama",
+				BaseURL:        "http://host.docker.internal:11434",
+				APIKey:         "",
+				Model:          "nomic-embed-text",
+				Dimensions:     256,
+				BatchSize:      50,
+				TimeoutSeconds: 60,
 			},
 			Chat: ModelEndpointConfig{
-				Provider: "ollama",
-				BaseURL:  "http://host.docker.internal:11434",
-				APIKey:   "",
-				Model:    "llama3.2:3b",
+				Provider:       "ollama",
+				BaseURL:        "http://host.docker.internal:11434",
+				APIKey:         "",
+				Model:          "llama3.2:3b",
+				TimeoutSeconds: 60,
 			},
 		},
 		MCP: MCPConfig{
@@ -244,20 +254,25 @@ func Parse(data []byte) (*Config, error) {
 			APIKey              *string `yaml:"api_key"`
 			EmbeddingModel      *string `yaml:"embedding_model"`
 			EmbeddingDimensions *int    `yaml:"embedding_dimensions"`
+			EmbeddingBatchSize  *int    `yaml:"embedding_batch_size"`
+			TimeoutSeconds      *int    `yaml:"timeout_seconds"`
 			ChatModel           *string `yaml:"chat_model"`
 			SummaryModel        *string `yaml:"summary_model"`
 			Embedder            struct {
-				Provider   *string `yaml:"provider"`
-				BaseURL    *string `yaml:"base_url"`
-				APIKey     *string `yaml:"api_key"`
-				Model      *string `yaml:"model"`
-				Dimensions *int    `yaml:"dimensions"`
+				Provider       *string `yaml:"provider"`
+				BaseURL        *string `yaml:"base_url"`
+				APIKey         *string `yaml:"api_key"`
+				Model          *string `yaml:"model"`
+				Dimensions     *int    `yaml:"dimensions"`
+				BatchSize      *int    `yaml:"batch_size"`
+				TimeoutSeconds *int    `yaml:"timeout_seconds"`
 			} `yaml:"embedder"`
 			Chat struct {
-				Provider *string `yaml:"provider"`
-				BaseURL  *string `yaml:"base_url"`
-				APIKey   *string `yaml:"api_key"`
-				Model    *string `yaml:"model"`
+				Provider       *string `yaml:"provider"`
+				BaseURL        *string `yaml:"base_url"`
+				APIKey         *string `yaml:"api_key"`
+				Model          *string `yaml:"model"`
+				TimeoutSeconds *int    `yaml:"timeout_seconds"`
 			} `yaml:"chat"`
 		} `yaml:"ai"`
 	}
@@ -291,6 +306,16 @@ func Parse(data []byte) (*Config, error) {
 		cfg.AI.Embedder.Dimensions = *raw.AI.Embedder.Dimensions
 	} else if raw.AI.EmbeddingDimensions != nil {
 		cfg.AI.Embedder.Dimensions = *raw.AI.EmbeddingDimensions
+	}
+	if raw.AI.Embedder.BatchSize != nil {
+		cfg.AI.Embedder.BatchSize = *raw.AI.Embedder.BatchSize
+	} else if raw.AI.EmbeddingBatchSize != nil {
+		cfg.AI.Embedder.BatchSize = *raw.AI.EmbeddingBatchSize
+	}
+	if raw.AI.Embedder.TimeoutSeconds != nil {
+		cfg.AI.Embedder.TimeoutSeconds = *raw.AI.Embedder.TimeoutSeconds
+	} else if raw.AI.TimeoutSeconds != nil {
+		cfg.AI.Embedder.TimeoutSeconds = *raw.AI.TimeoutSeconds
 	}
 	if raw.AI.Embedder.BaseURL != nil {
 		cfg.AI.Embedder.BaseURL = *raw.AI.Embedder.BaseURL
@@ -333,6 +358,11 @@ func Parse(data []byte) (*Config, error) {
 		cfg.AI.Chat.APIKey = *raw.AI.APIKey
 	} else if raw.AI.Chat.Provider != nil && *raw.AI.Chat.Provider != cfg.AI.Provider {
 		cfg.AI.Chat.APIKey = ""
+	}
+	if raw.AI.Chat.TimeoutSeconds != nil {
+		cfg.AI.Chat.TimeoutSeconds = *raw.AI.Chat.TimeoutSeconds
+	} else if raw.AI.TimeoutSeconds != nil {
+		cfg.AI.Chat.TimeoutSeconds = *raw.AI.TimeoutSeconds
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -476,6 +506,27 @@ func (c *Config) Validate() error {
 		c.AI.Embedder.Dimensions = 256
 	}
 
+	// Bidirectional batch size synchronization
+	if c.AI.Embedder.BatchSize > 0 {
+		c.AI.EmbeddingBatchSize = c.AI.Embedder.BatchSize
+	} else if c.AI.EmbeddingBatchSize > 0 {
+		c.AI.Embedder.BatchSize = c.AI.EmbeddingBatchSize
+	} else {
+		c.AI.EmbeddingBatchSize = 50
+		c.AI.Embedder.BatchSize = 50
+	}
+
+	// Timeout synchronization (defaults to 60 seconds)
+	if c.AI.TimeoutSeconds <= 0 {
+		c.AI.TimeoutSeconds = 60
+	}
+	if c.AI.Embedder.TimeoutSeconds <= 0 {
+		c.AI.Embedder.TimeoutSeconds = c.AI.TimeoutSeconds
+	}
+	if c.AI.Chat.TimeoutSeconds <= 0 {
+		c.AI.Chat.TimeoutSeconds = c.AI.TimeoutSeconds
+	}
+
 	// SSRF guards across all configured endpoints
 	if err := ValidateSSRF(c.AI.BaseURL); err != nil {
 		return fmt.Errorf("ai.base_url contains %w", err)
@@ -523,6 +574,24 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+// parseTimeoutSeconds parses an integer number of seconds (e.g. "120") or a duration string (e.g. "2m", "120s").
+func parseTimeoutSeconds(v string) (int, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return secs, true
+	}
+	if d, err := time.ParseDuration(v); err == nil && d > 0 {
+		secs := int(d.Seconds())
+		if secs > 0 {
+			return secs, true
+		}
+	}
+	return 0, false
 }
 
 // ApplyEnvOverrides overrides configuration values from standard SHELFD_* environment variables.
@@ -599,6 +668,30 @@ func ApplyEnvOverrides(cfg *Config) {
 			cfg.AI.Embedder.Dimensions = dims
 		}
 	}
+	if v := os.Getenv("SHELFD_AI_EMBEDDING_BATCH_SIZE"); v != "" {
+		if bs, err := strconv.Atoi(v); err == nil && bs > 0 {
+			cfg.AI.EmbeddingBatchSize = bs
+			cfg.AI.Embedder.BatchSize = bs
+		}
+	} else if v := os.Getenv("SHELFD_AI_BATCH_SIZE"); v != "" {
+		if bs, err := strconv.Atoi(v); err == nil && bs > 0 {
+			cfg.AI.EmbeddingBatchSize = bs
+			cfg.AI.Embedder.BatchSize = bs
+		}
+	}
+	if v := os.Getenv("SHELFD_AI_TIMEOUT_SECONDS"); v != "" {
+		if secs, ok := parseTimeoutSeconds(v); ok {
+			cfg.AI.TimeoutSeconds = secs
+			cfg.AI.Embedder.TimeoutSeconds = secs
+			cfg.AI.Chat.TimeoutSeconds = secs
+		}
+	} else if v := os.Getenv("SHELFD_AI_TIMEOUT"); v != "" {
+		if secs, ok := parseTimeoutSeconds(v); ok {
+			cfg.AI.TimeoutSeconds = secs
+			cfg.AI.Embedder.TimeoutSeconds = secs
+			cfg.AI.Chat.TimeoutSeconds = secs
+		}
+	}
 	if v := os.Getenv("SHELFD_AI_CHAT_MODEL"); v != "" {
 		cfg.AI.ChatModel = v
 		cfg.AI.Chat.Model = v
@@ -633,6 +726,21 @@ func ApplyEnvOverrides(cfg *Config) {
 			cfg.AI.EmbeddingDimensions = dims
 		}
 	}
+	if v := os.Getenv("SHELFD_AI_EMBEDDER_BATCH_SIZE"); v != "" {
+		if bs, err := strconv.Atoi(v); err == nil && bs > 0 {
+			cfg.AI.Embedder.BatchSize = bs
+			cfg.AI.EmbeddingBatchSize = bs
+		}
+	}
+	if v := os.Getenv("SHELFD_AI_EMBEDDER_TIMEOUT_SECONDS"); v != "" {
+		if secs, ok := parseTimeoutSeconds(v); ok {
+			cfg.AI.Embedder.TimeoutSeconds = secs
+		}
+	} else if v := os.Getenv("SHELFD_AI_EMBEDDER_TIMEOUT"); v != "" {
+		if secs, ok := parseTimeoutSeconds(v); ok {
+			cfg.AI.Embedder.TimeoutSeconds = secs
+		}
+	}
 
 	// Specific Chat environment overrides
 	if v := os.Getenv("SHELFD_AI_CHAT_PROVIDER"); v != "" {
@@ -647,12 +755,26 @@ func ApplyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("SHELFD_AI_CHAT_MODEL"); v != "" {
 		cfg.AI.Chat.Model = v
 	}
+	if v := os.Getenv("SHELFD_AI_CHAT_TIMEOUT_SECONDS"); v != "" {
+		if secs, ok := parseTimeoutSeconds(v); ok {
+			cfg.AI.Chat.TimeoutSeconds = secs
+		}
+	} else if v := os.Getenv("SHELFD_AI_CHAT_TIMEOUT"); v != "" {
+		if secs, ok := parseTimeoutSeconds(v); ok {
+			cfg.AI.Chat.TimeoutSeconds = secs
+		}
+	}
 
-	// Resync dimensions
+	// Resync dimensions and batch size
 	if cfg.AI.Embedder.Dimensions > 0 {
 		cfg.AI.EmbeddingDimensions = cfg.AI.Embedder.Dimensions
 	} else if cfg.AI.EmbeddingDimensions > 0 {
 		cfg.AI.Embedder.Dimensions = cfg.AI.EmbeddingDimensions
+	}
+	if cfg.AI.Embedder.BatchSize > 0 {
+		cfg.AI.EmbeddingBatchSize = cfg.AI.Embedder.BatchSize
+	} else if cfg.AI.EmbeddingBatchSize > 0 {
+		cfg.AI.Embedder.BatchSize = cfg.AI.EmbeddingBatchSize
 	}
 
 	if v := os.Getenv("SHELFD_MCP_ENABLED"); v != "" {

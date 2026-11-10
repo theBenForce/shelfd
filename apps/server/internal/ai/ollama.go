@@ -18,6 +18,7 @@ type OllamaClient struct {
 	summaryModel        string
 	embeddingModel      string
 	embeddingDimensions int
+	batchSize           int
 	httpClient          *http.Client
 }
 
@@ -42,13 +43,18 @@ func NewOllamaClient(cfg *config.AIConfig) *OllamaClient {
 	if embeddingDimensions <= 0 {
 		embeddingDimensions = 256
 	}
+	batchSize := cfg.EmbeddingBatchSize
+	if batchSize <= 0 {
+		batchSize = 50
+	}
 
 	return &OllamaClient{
 		baseURL:             baseURL,
 		summaryModel:        chatModel,
 		embeddingModel:      embeddingModel,
 		embeddingDimensions: embeddingDimensions,
-		httpClient:          &http.Client{Timeout: defaultTimeout},
+		batchSize:           batchSize,
+		httpClient:          &http.Client{Timeout: resolveTimeout(cfg.TimeoutSeconds)},
 	}
 }
 
@@ -66,11 +72,16 @@ func NewOllamaEmbedder(cfg *config.ModelEndpointConfig) *OllamaClient {
 	if dims <= 0 {
 		dims = 256
 	}
+	batchSize := cfg.BatchSize
+	if batchSize <= 0 {
+		batchSize = 50
+	}
 	return &OllamaClient{
 		baseURL:             baseURL,
 		embeddingModel:      model,
 		embeddingDimensions: dims,
-		httpClient:          &http.Client{Timeout: defaultTimeout},
+		batchSize:           batchSize,
+		httpClient:          &http.Client{Timeout: resolveTimeout(cfg.TimeoutSeconds)},
 	}
 }
 
@@ -87,7 +98,7 @@ func NewOllamaChatClient(cfg *config.ModelEndpointConfig) *OllamaClient {
 	return &OllamaClient{
 		baseURL:      baseURL,
 		summaryModel: model,
-		httpClient:   &http.Client{Timeout: defaultTimeout},
+		httpClient:   &http.Client{Timeout: resolveTimeout(cfg.TimeoutSeconds)},
 	}
 }
 
@@ -175,7 +186,11 @@ func (c *OllamaClient) GenerateBatchEmbeddings(ctx context.Context, texts []stri
 		return nil, nil
 	}
 
-	chunks := ChunkTexts(texts, 50)
+	chunkSize := c.batchSize
+	if chunkSize <= 0 {
+		chunkSize = 50
+	}
+	chunks := ChunkTexts(texts, chunkSize)
 	var allEmbeddings [][]float32
 
 	for _, chunk := range chunks {

@@ -202,6 +202,12 @@ func NewClient(cfg *config.AIConfig) (Client, error) {
 	if embedderCfg.Dimensions <= 0 {
 		embedderCfg.Dimensions = cfg.EmbeddingDimensions
 	}
+	if embedderCfg.BatchSize <= 0 {
+		embedderCfg.BatchSize = cfg.EmbeddingBatchSize
+	}
+	if embedderCfg.TimeoutSeconds <= 0 {
+		embedderCfg.TimeoutSeconds = cfg.TimeoutSeconds
+	}
 
 	// Resolve Chat config with fallback to top-level legacy fields
 	chatCfg := cfg.Chat
@@ -221,6 +227,9 @@ func NewClient(cfg *config.AIConfig) (Client, error) {
 			chatCfg.Model = cfg.SummaryModel
 		}
 	}
+	if chatCfg.TimeoutSeconds <= 0 {
+		chatCfg.TimeoutSeconds = cfg.TimeoutSeconds
+	}
 
 	embedder, err := NewEmbedder(&embedderCfg)
 	if err != nil {
@@ -239,3 +248,10 @@ func NewClient(cfg *config.AIConfig) (Client, error) {
 }
 
 const defaultTimeout = 60 * time.Second
+
+func resolveTimeout(timeoutSeconds int) time.Duration {
+	if timeoutSeconds > 0 {
+		return time.Duration(timeoutSeconds) * time.Second
+	}
+	return defaultTimeout
+}

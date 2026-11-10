@@ -160,9 +160,12 @@ func main() {
 		"embedder_url", ai.SanitizeURL(cfg.AI.Embedder.BaseURL),
 		"embedder_model", cfg.AI.Embedder.Model,
 		"embedder_dimensions", cfg.AI.Embedder.Dimensions,
+		"embedder_batch_size", cfg.AI.Embedder.BatchSize,
+		"embedder_timeout_s", cfg.AI.Embedder.TimeoutSeconds,
 		"chat_provider", cfg.AI.Chat.Provider,
 		"chat_url", ai.SanitizeURL(cfg.AI.Chat.BaseURL),
 		"chat_model", cfg.AI.Chat.Model,
+		"chat_timeout_s", cfg.AI.Chat.TimeoutSeconds,
 	)
 
 	taxService := taxonomy.NewTaxonomyService(repo, aiClient, logger)
@@ -189,8 +192,12 @@ func main() {
 	ensureSeedToken(ctx, repo, cfg, logger)
 
 	// Start background indexing worker
+	workerBatchSize := cfg.AI.Embedder.BatchSize
+	if workerBatchSize <= 0 {
+		workerBatchSize = 50
+	}
 	chapterWorker := worker.NewWorker(repo, aiClient, worker.Config{
-		BatchSize:    50,
+		BatchSize:    workerBatchSize,
 		PollInterval: 5 * time.Second,
 		Logger:       logger,
 	})
