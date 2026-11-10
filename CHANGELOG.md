@@ -1,3 +1,18 @@
+# [1.16.0](https://github.com/theBenForce/shelfd/compare/v1.15.0...v1.16.0) (2026-11-10)
+
+
+### Bug Fixes
+
+* **app:** resolve remaining E2E and library widget test failures ([#71](https://github.com/theBenForce/shelfd/issues/71)) ([ebefa4f](https://github.com/theBenForce/shelfd/commit/ebefa4f204d4fb8ee84451e3d8c0e9fa7c748ea7))
+* **app:** resolve TactileBookCover build errors and widget test failures ([#70](https://github.com/theBenForce/shelfd/issues/70)) ([3f4c750](https://github.com/theBenForce/shelfd/commit/3f4c750749f11f584adc0f9589401e92595a0f84))
+* **epub:** normalize self-closing tags and span whitespace in RewritePageHTML ([#67](https://github.com/theBenForce/shelfd/issues/67)) ([6f3c178](https://github.com/theBenForce/shelfd/commit/6f3c178401823424cac13f3b71972812abcf0cd3))
+
+
+### Features
+
+* **app:** redesign UI/UX with Tactile Scriptorium theme system ([#69](https://github.com/theBenForce/shelfd/issues/69)) ([02d15fd](https://github.com/theBenForce/shelfd/commit/02d15fdee094b2e9b97fb2fabcd3ba89a9d30e83))
+* **notebooklm:** add Send to NotebookLM dropdown menu and export/push endpoints ([#68](https://github.com/theBenForce/shelfd/issues/68)) ([603eb7e](https://github.com/theBenForce/shelfd/commit/603eb7eb948b43abefa44f3f1aa291e9a62d92d3))
+
 # [1.15.0](https://github.com/theBenForce/shelfd/compare/v1.14.0...v1.15.0) (2026-10-19)
 
 
