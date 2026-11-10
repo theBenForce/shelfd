@@ -604,10 +604,13 @@ func TestSplitModelEndpointsEnvOverrides(t *testing.T) {
 	os.Setenv("SHELFD_AI_EMBEDDER_API_KEY", "google-api-key")
 	os.Setenv("SHELFD_AI_EMBEDDER_MODEL", "text-embedding-004")
 	os.Setenv("SHELFD_AI_EMBEDDER_DIMENSIONS", "768")
+	os.Setenv("SHELFD_AI_EMBEDDER_BATCH_SIZE", "15")
+	os.Setenv("SHELFD_AI_EMBEDDER_TIMEOUT", "3m")
 	os.Setenv("SHELFD_AI_CHAT_PROVIDER", "openai")
 	os.Setenv("SHELFD_AI_CHAT_BASE_URL", "https://api.openai.com/v1")
 	os.Setenv("SHELFD_AI_CHAT_API_KEY", "sk-env-openai")
 	os.Setenv("SHELFD_AI_CHAT_MODEL", "gpt-4o")
+	os.Setenv("SHELFD_AI_CHAT_TIMEOUT_SECONDS", "90")
 
 	defer func() {
 		os.Unsetenv("SHELFD_AI_PROVIDER")
@@ -616,10 +619,13 @@ func TestSplitModelEndpointsEnvOverrides(t *testing.T) {
 		os.Unsetenv("SHELFD_AI_EMBEDDER_API_KEY")
 		os.Unsetenv("SHELFD_AI_EMBEDDER_MODEL")
 		os.Unsetenv("SHELFD_AI_EMBEDDER_DIMENSIONS")
+		os.Unsetenv("SHELFD_AI_EMBEDDER_BATCH_SIZE")
+		os.Unsetenv("SHELFD_AI_EMBEDDER_TIMEOUT")
 		os.Unsetenv("SHELFD_AI_CHAT_PROVIDER")
 		os.Unsetenv("SHELFD_AI_CHAT_BASE_URL")
 		os.Unsetenv("SHELFD_AI_CHAT_API_KEY")
 		os.Unsetenv("SHELFD_AI_CHAT_MODEL")
+		os.Unsetenv("SHELFD_AI_CHAT_TIMEOUT_SECONDS")
 	}()
 
 	cfg := config.DefaultConfig()
@@ -631,11 +637,20 @@ func TestSplitModelEndpointsEnvOverrides(t *testing.T) {
 	if cfg.AI.Embedder.Dimensions != 768 || cfg.AI.EmbeddingDimensions != 768 {
 		t.Errorf("expected dimensions 768, got %d and %d", cfg.AI.Embedder.Dimensions, cfg.AI.EmbeddingDimensions)
 	}
+	if cfg.AI.Embedder.BatchSize != 15 || cfg.AI.EmbeddingBatchSize != 15 {
+		t.Errorf("expected batch size 15, got %d and %d", cfg.AI.Embedder.BatchSize, cfg.AI.EmbeddingBatchSize)
+	}
+	if cfg.AI.Embedder.TimeoutSeconds != 180 {
+		t.Errorf("expected embedder timeout 180s, got %d", cfg.AI.Embedder.TimeoutSeconds)
+	}
 	if cfg.AI.Chat.Provider != "openai" {
 		t.Errorf("expected chat provider openai, got %s", cfg.AI.Chat.Provider)
 	}
 	if cfg.AI.Chat.APIKey != "sk-env-openai" {
 		t.Errorf("expected chat api key sk-env-openai, got %s", cfg.AI.Chat.APIKey)
+	}
+	if cfg.AI.Chat.TimeoutSeconds != 90 {
+		t.Errorf("expected chat timeout 90s, got %d", cfg.AI.Chat.TimeoutSeconds)
 	}
 }
 

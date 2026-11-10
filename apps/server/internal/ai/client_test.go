@@ -543,3 +543,51 @@ func TestSanitizeURL(t *testing.T) {
 	}
 }
 
+func TestEmbedderConfigurableBatchSize(t *testing.T) {
+	ctx := context.Background()
+	var requestSizes []int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requestSizes = append(requestSizes, len(req.Input))
+		data := make([]map[string]any, len(req.Input))
+		for i := range req.Input {
+			data[i] = map[string]any{
+				"index":     i,
+				"embedding": []float32{1, 0, 0, 0},
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer server.Close()
+
+	embedder, err := ai.NewEmbedder(&config.ModelEndpointConfig{
+		Provider:       "openai",
+		BaseURL:        server.URL,
+		Model:          "nomic-embed-text",
+		Dimensions:     4,
+		BatchSize:      2,
+		TimeoutSeconds: 30,
+	})
+	if err != nil {
+		t.Fatalf("NewEmbedder error: %v", err)
+	}
+
+	embs, err := embedder.GenerateBatchEmbeddings(ctx, []string{"one", "two", "three", "four", "five"})
+	if err != nil {
+		t.Fatalf("GenerateBatchEmbeddings error: %v", err)
+	}
+	if len(embs) != 5 {
+		t.Fatalf("expected 5 embeddings, got %d", len(embs))
+	}
+	if len(requestSizes) != 3 || requestSizes[0] != 2 || requestSizes[1] != 2 || requestSizes[2] != 1 {
+		t.Errorf("expected chunk sizes [2, 2, 1], got %v", requestSizes)
+	}
+}
+

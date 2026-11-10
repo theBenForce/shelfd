@@ -19,6 +19,7 @@ type GoogleClient struct {
 	chatModel           string
 	embeddingModel      string
 	embeddingDimensions int
+	batchSize           int
 	httpClient          *http.Client
 }
 
@@ -47,6 +48,10 @@ func NewGoogleClient(cfg *config.AIConfig) *GoogleClient {
 	if embeddingDimensions <= 0 {
 		embeddingDimensions = 256
 	}
+	batchSize := cfg.EmbeddingBatchSize
+	if batchSize <= 0 {
+		batchSize = 100
+	}
 
 	return &GoogleClient{
 		baseURL:             baseURL,
@@ -54,7 +59,8 @@ func NewGoogleClient(cfg *config.AIConfig) *GoogleClient {
 		chatModel:           chatModel,
 		embeddingModel:      embeddingModel,
 		embeddingDimensions: embeddingDimensions,
-		httpClient:          &http.Client{Timeout: defaultTimeout},
+		batchSize:           batchSize,
+		httpClient:          &http.Client{Timeout: resolveTimeout(cfg.TimeoutSeconds)},
 	}
 }
 
@@ -73,12 +79,17 @@ func NewGoogleEmbedder(cfg *config.ModelEndpointConfig) *GoogleClient {
 	if dims <= 0 {
 		dims = 256
 	}
+	batchSize := cfg.BatchSize
+	if batchSize <= 0 {
+		batchSize = 100
+	}
 	return &GoogleClient{
 		baseURL:             baseURL,
 		apiKey:              cfg.APIKey,
 		embeddingModel:      model,
 		embeddingDimensions: dims,
-		httpClient:          &http.Client{Timeout: defaultTimeout},
+		batchSize:           batchSize,
+		httpClient:          &http.Client{Timeout: resolveTimeout(cfg.TimeoutSeconds)},
 	}
 }
 
@@ -97,7 +108,7 @@ func NewGoogleChatClient(cfg *config.ModelEndpointConfig) *GoogleClient {
 		baseURL:    baseURL,
 		apiKey:     cfg.APIKey,
 		chatModel:  model,
-		httpClient: &http.Client{Timeout: defaultTimeout},
+		httpClient: &http.Client{Timeout: resolveTimeout(cfg.TimeoutSeconds)},
 	}
 }
 
@@ -126,7 +137,11 @@ func (c *GoogleClient) GenerateBatchEmbeddings(ctx context.Context, texts []stri
 		return nil, nil
 	}
 
-	chunks := ChunkTexts(texts, 100)
+	chunkSize := c.batchSize
+	if chunkSize <= 0 {
+		chunkSize = 100
+	}
+	chunks := ChunkTexts(texts, chunkSize)
 	var allEmbeddings [][]float32
 
 	modelPath := "models/" + c.embeddingModel
