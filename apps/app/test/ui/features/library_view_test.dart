@@ -466,7 +466,7 @@ void main() {
     // Verify both Rescan Library and Upload EPUB are in desktop view
     final rescanButtons = find.widgetWithText(OutlinedButton, 'Rescan Library');
     expect(rescanButtons, findsNWidgets(2)); // SideNav and Desktop Header
-    expect(find.widgetWithText(OutlinedButton, 'Upload EPUB'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'Upload EPUB'), findsNWidgets(2)); // Desktop Header and Empty State
 
     // Tap Rescan Library in desktop header
     await tester.tap(rescanButtons.last);

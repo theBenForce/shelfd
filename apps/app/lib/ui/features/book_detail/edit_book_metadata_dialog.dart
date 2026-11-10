@@ -745,26 +745,31 @@ class _EditBookMetadataContentState extends ConsumerState<EditBookMetadataConten
             child: const Text('Cancel'),
           ),
           const SizedBox(width: AppTokens.space12),
-          FilledButton.icon(
-            key: const Key('save_book_metadata_button'),
-            style: FilledButton.styleFrom(
-              backgroundColor: colors.accentPrimary,
-              foregroundColor: colors.onAccent,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.radiusMd)),
+          Flexible(
+            child: FilledButton.icon(
+              key: const Key('save_book_metadata_button'),
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.accentPrimary,
+                foregroundColor: colors.onAccent,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.radiusMd)),
+              ),
+              icon: _isSaving
+                  ? SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation(colors.onAccent),
+                      ),
+                    )
+                  : const Icon(Icons.check_rounded, size: 18),
+              label: Text(
+                _isSaving ? 'Saving & Syncing...' : 'Save & Sync EPUB',
+                overflow: TextOverflow.ellipsis,
+              ),
+              onPressed: _isSaving ? null : _saveMetadata,
             ),
-            icon: _isSaving
-                ? SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation(colors.onAccent),
-                    ),
-                  )
-                : const Icon(Icons.check_rounded, size: 18),
-            label: Text(_isSaving ? 'Saving & Syncing...' : 'Save & Sync EPUB'),
-            onPressed: _isSaving ? null : _saveMetadata,
           ),
         ],
       ),
