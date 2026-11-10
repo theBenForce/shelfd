@@ -421,7 +421,13 @@ class _LibraryViewState extends ConsumerState<LibraryView> {
                                       backgroundColor: colors.accentPrimary,
                                       foregroundColor: colors.onAccent,
                                     ),
-                                    onPressed: () => context.go('/connect'),
+                                    onPressed: () async {
+                                      await ref.read(storageServiceProvider).clearAuthToken();
+                                      ref.read(apiServiceProvider).updateConnection(newToken: '');
+                                      if (context.mounted) {
+                                        context.go('/connect');
+                                      }
+                                    },
                                     child: const Text('Reconnect / Sign In'),
                                   ),
                                 ],

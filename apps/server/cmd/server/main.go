@@ -109,10 +109,7 @@ func main() {
 	}
 
 	if cfg.Server.JWTSecret == "" {
-		secretBytes := make([]byte, 32)
-		_, _ = rand.Read(secretBytes)
-		cfg.Server.JWTSecret = hex.EncodeToString(secretBytes)
-		logger.Warn("server.jwt_secret not configured; generated ephemeral JWT secret")
+		cfg.Server.JWTSecret = ensureJWTSecret(cfg.Storage.DataDir, logger)
 	}
 
 	logger.Info("shelfd starting", "version", Version, "host", cfg.Server.Host, "port", cfg.Server.Port)
@@ -449,3 +446,42 @@ func resolveWebDir(configured string) string {
 	}
 	return ""
 }
+
+func ensureJWTSecret(dataDir string, logger *slog.Logger) string {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	trimmedDir := strings.TrimSpace(dataDir)
+	if trimmedDir != "" {
+		secretPath := filepath.Join(trimmedDir, ".jwt_secret")
+		if data, err := os.ReadFile(secretPath); err == nil {
+			if secret := strings.TrimSpace(string(data)); secret != "" {
+				logger.Info("Loaded persisted JWT secret", "path", secretPath)
+				return secret
+			}
+		}
+	}
+
+	secretBytes := make([]byte, 32)
+	_, _ = rand.Read(secretBytes)
+	secret := hex.EncodeToString(secretBytes)
+
+	if trimmedDir != "" {
+		secretPath := filepath.Join(trimmedDir, ".jwt_secret")
+		if err := os.MkdirAll(trimmedDir, 0o755); err == nil {
+			if err := os.WriteFile(secretPath, []byte(secret+"\n"), 0o600); err == nil {
+				logger.Info("Generated and persisted JWT secret", "path", secretPath)
+				return secret
+			} else {
+				logger.Warn("Failed to persist JWT secret to data directory; using ephemeral secret", "path", secretPath, "error", err)
+			}
+		} else {
+			logger.Warn("Failed to create data directory for JWT secret; using ephemeral secret", "dir", trimmedDir, "error", err)
+		}
+	} else {
+		logger.Warn("server.jwt_secret not configured; generated ephemeral JWT secret")
+	}
+
+	return secret
+}
+
