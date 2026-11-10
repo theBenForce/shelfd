@@ -264,9 +264,9 @@ class _SearchHitCard extends StatelessWidget {
                   height: 52,
                   child: TactileBookCover(
                     title: hit.bookTitle,
-                    author: hit.authorName,
+                    subtitle: hit.authorName,
                     showFallbackTitle: false,
-                    borderRadius: AppTokens.radiusSm,
+                    borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                   ),
                 ),
                 const SizedBox(width: AppTokens.space12),

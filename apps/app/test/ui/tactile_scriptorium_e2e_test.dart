@@ -84,6 +84,12 @@ class _FakeLibraryNotifier extends LibraryNotifier {
   void setFilter(String filter) {
     state = state.copyWith(activeFilter: filter);
   }
+
+  @override
+  Future<void> loadLibrary({bool refresh = false}) async {}
+
+  @override
+  Future<void> loadMoreBooks() async {}
 }
 
 class _FakeBookDetailNotifier extends BookDetailNotifier {
@@ -92,6 +98,9 @@ class _FakeBookDetailNotifier extends BookDetailNotifier {
 
   @override
   BookDetailState build() => BookDetailState(book: mockBook, isLoading: false);
+
+  @override
+  Future<void> loadBook() async {}
 }
 
 class _FakeBookChatNotifier extends BookChatNotifier {
@@ -130,7 +139,12 @@ class _FakeAudioPlayerNotifier extends AudioPlayerNotifier {
   AudioPlayerState build() => _initial;
 
   @override
-  Future<void> loadBook(Book book, {String? fileId}) async {
+  Future<void> loadBook(
+    Book book, {
+    String? fileId,
+    double? initialPosition,
+    bool autoPlay = false,
+  }) async {
     state = _initial.copyWith(book: book);
   }
 }

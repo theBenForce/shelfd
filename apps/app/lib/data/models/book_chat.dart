@@ -8,7 +8,7 @@ class BookCitation {
   final String summary;
 
   const BookCitation({
-    required this.chapterId,
+    this.chapterId = '',
     required this.chapterIndex,
     this.chapterTitle,
     this.startParagraph,

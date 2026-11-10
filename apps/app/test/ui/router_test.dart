@@ -94,6 +94,9 @@ class MockReaderRepo implements ReaderRepository {
 class FakeLibraryNotifier extends LibraryNotifier {
   @override
   LibraryState build() => const LibraryState(books: [], isLoading: false);
+
+  @override
+  Future<void> loadLibrary({bool refresh = false}) async {}
 }
 
 void main() {

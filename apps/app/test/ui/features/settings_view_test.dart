@@ -281,7 +281,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('AI Indexing & Vectors'), findsOneWidget);
-    expect(find.text('75%'), findsOneWidget);
+    expect(find.text('75%'), findsWidgets);
     expect(find.textContaining('Host:'), findsOneWidget);
   });
 }

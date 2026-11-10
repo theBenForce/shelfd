@@ -55,6 +55,9 @@ class FakeLibraryNotifier extends LibraryNotifier {
   void setFilter(String filter) {
     state = state.copyWith(activeFilter: filter);
   }
+
+  @override
+  Future<void> loadLibrary({bool refresh = false}) async {}
 }
 
 void main() {
@@ -589,6 +592,9 @@ class FakePagingLibraryNotifier extends LibraryNotifier {
         hasMore: true,
         totalBooks: 50,
       );
+
+  @override
+  Future<void> loadLibrary({bool refresh = false}) async {}
 
   @override
   Future<void> loadMoreBooks() async {

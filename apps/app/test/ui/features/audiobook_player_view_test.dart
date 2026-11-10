@@ -150,28 +150,30 @@ void main() {
       bool bookmarkAdded = false;
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: Builder(
-              builder: (context) => ElevatedButton(
-                key: const Key('open_sheet_btn'),
-                onPressed: () => showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (ctx) => ChapterDrawerSheet(
-                    book: testAudioBook,
-                    chapters: testAudioBook.audioChapters,
-                    currentChapterIndex: 0,
-                    currentPosition: const Duration(seconds: 45),
-                    isPlaying: false,
-                    onChapterSelected: (idx) => selectedChapter = idx,
-                    onSeekToPosition: (_) {},
-                    onSetSleepTimer: (_) {},
-                    onAddBookmark: () => bookmarkAdded = true,
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  key: const Key('open_sheet_btn'),
+                  onPressed: () => showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (ctx) => ChapterDrawerSheet(
+                      book: testAudioBook,
+                      chapters: testAudioBook.audioChapters,
+                      currentChapterIndex: 0,
+                      currentPosition: const Duration(seconds: 45),
+                      isPlaying: false,
+                      onChapterSelected: (idx) => selectedChapter = idx,
+                      onSeekToPosition: (_) {},
+                      onSetSleepTimer: (_) {},
+                      onAddBookmark: () => bookmarkAdded = true,
+                    ),
                   ),
+                  child: const Text('Open Sheet'),
                 ),
-                child: const Text('Open Sheet'),
               ),
             ),
           ),

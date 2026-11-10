@@ -406,6 +406,7 @@ class HtmlText extends StatelessWidget {
       case HtmlBlockType.paragraph:
         return Text.rich(
           TextSpan(
+            style: baseStyle,
             children: parseHtmlInlineSpans(
               block.htmlContent,
               baseStyle,
@@ -422,6 +423,7 @@ class HtmlText extends StatelessWidget {
         );
         return Text.rich(
           TextSpan(
+            style: h1Style,
             children: parseHtmlInlineSpans(block.htmlContent, h1Style, linkColor: linkColor),
           ),
         );
@@ -434,6 +436,7 @@ class HtmlText extends StatelessWidget {
         );
         return Text.rich(
           TextSpan(
+            style: h2Style,
             children: parseHtmlInlineSpans(block.htmlContent, h2Style, linkColor: linkColor),
           ),
         );
@@ -446,6 +449,7 @@ class HtmlText extends StatelessWidget {
         );
         return Text.rich(
           TextSpan(
+            style: h3Style,
             children: parseHtmlInlineSpans(block.htmlContent, h3Style, linkColor: linkColor),
           ),
         );
@@ -467,6 +471,7 @@ class HtmlText extends StatelessWidget {
           ),
           child: Text.rich(
             TextSpan(
+              style: quoteStyle,
               children: parseHtmlInlineSpans(
                 block.htmlContent,
                 quoteStyle,
@@ -490,6 +495,7 @@ class HtmlText extends StatelessWidget {
               Expanded(
                 child: Text.rich(
                   TextSpan(
+                    style: baseStyle,
                     children: parseHtmlInlineSpans(
                       block.htmlContent,
                       baseStyle,
