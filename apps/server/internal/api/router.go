@@ -102,6 +102,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("POST /api/v1/books/{id}/notebooklm", auth(http.HandlerFunc(bookHandler.SendBookToNotebookLM)))
 	mux.Handle("POST /api/v1/books/{id}/yoto", auth(http.HandlerFunc(yotoHandler.SendBookToYoto)))
 	mux.Handle("GET /api/v1/books/{id}/cover", auth(http.HandlerFunc(bookHandler.GetBookCover)))
+	mux.Handle("GET /api/v1/books/{id}/readalong", auth(http.HandlerFunc(bookHandler.GetBookReadalong)))
 	mux.Handle("GET /api/v1/books/{id}/assets/{path...}", auth(http.HandlerFunc(bookHandler.GetBookAsset)))
 	mux.Handle("GET /api/v1/books/{id}/chapters/{index}/html", auth(http.HandlerFunc(bookHandler.GetChapterHTML)))
 	mux.Handle("POST /api/v1/books/{id}/reparse", auth(http.HandlerFunc(bookHandler.ReparseBook)))
@@ -112,6 +113,8 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	// Audiobook streaming & management
 	mux.Handle("GET /api/v1/audiobooks/{id}/stream", auth(http.HandlerFunc(audioHandler.StreamAudio)))
 	mux.Handle("HEAD /api/v1/audiobooks/{id}/stream", auth(http.HandlerFunc(audioHandler.StreamAudio)))
+	mux.Handle("GET /api/v1/books/{id}/audio", auth(http.HandlerFunc(audioHandler.StreamAudio)))
+	mux.Handle("HEAD /api/v1/books/{id}/audio", auth(http.HandlerFunc(audioHandler.StreamAudio)))
 	mux.Handle("GET /api/v1/audiobooks/{id}/chapters", auth(http.HandlerFunc(audioHandler.GetChapters)))
 	mux.Handle("GET /api/v1/audiobooks/{id}/progress", auth(http.HandlerFunc(audioHandler.GetProgress)))
 	mux.Handle("POST /api/v1/audiobooks/{id}/progress", auth(http.HandlerFunc(audioHandler.UpdateProgress)))
@@ -148,4 +151,3 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	return CORSMiddleware(mux)
 }
-

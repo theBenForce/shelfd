@@ -14,18 +14,18 @@ import (
 )
 
 var (
-	whitespaceRegex     = regexp.MustCompile(`[ \t\r\n]+`)
-	multiNLRegex        = regexp.MustCompile(`\n{3,}`)
-	viewportRegex       = regexp.MustCompile(`(?i)<meta[^>]+content=["']([^"']+)["'][^>]+name=["']viewport["']|<meta[^>]+name=["']viewport["'][^>]+content=["']([^"']+)["']`)
-	widthValRegex       = regexp.MustCompile(`(?i)width\s*=\s*(\d+)`)
-	heightValRegex      = regexp.MustCompile(`(?i)height\s*=\s*(\d+)`)
-	svgViewBoxRegex     = regexp.MustCompile(`(?i)<svg[^>]+viewBox=["']\s*([0-9.]+)[,\s]+([0-9.]+)[,\s]+([0-9.]+)[,\s]+([0-9.]+)["']`)
-	svgWidthHeightRegex = regexp.MustCompile(`(?i)<svg[^>]+width=["'](\d+)(?:px)?["'][^>]+height=["'](\d+)(?:px)?["']|<svg[^>]+height=["'](\d+)(?:px)?["'][^>]+width=["'](\d+)(?:px)?["']`)
-	imgWidthHeightRegex = regexp.MustCompile(`(?i)<img[^>]+width=["'](\d+)(?:px)?["'][^>]+height=["'](\d+)(?:px)?["']|<img[^>]+height=["'](\d+)(?:px)?["'][^>]+width=["'](\d+)(?:px)?["']`)
-	srcAttrRegex        = regexp.MustCompile(`(?i)(<img[^>]+src=["'])([^"']+)(["'])`)
-	imgXlinkRegex       = regexp.MustCompile(`(?i)(<image[^>]+(?:xlink:href|href)=["'])([^"']+)(["'])`)
-	linkHrefRegex       = regexp.MustCompile(`(?i)(<link[^>]+href=["'])([^"']+)(["'])`)
-	sourceSrcRegex      = regexp.MustCompile(`(?i)(<source[^>]+src=["'])([^"']+)(["'])`)
+	whitespaceRegex       = regexp.MustCompile(`[ \t\r\n]+`)
+	multiNLRegex          = regexp.MustCompile(`\n{3,}`)
+	viewportRegex         = regexp.MustCompile(`(?i)<meta[^>]+content=["']([^"']+)["'][^>]+name=["']viewport["']|<meta[^>]+name=["']viewport["'][^>]+content=["']([^"']+)["']`)
+	widthValRegex         = regexp.MustCompile(`(?i)width\s*=\s*(\d+)`)
+	heightValRegex        = regexp.MustCompile(`(?i)height\s*=\s*(\d+)`)
+	svgViewBoxRegex       = regexp.MustCompile(`(?i)<svg[^>]+viewBox=["']\s*([0-9.]+)[,\s]+([0-9.]+)[,\s]+([0-9.]+)[,\s]+([0-9.]+)["']`)
+	svgWidthHeightRegex   = regexp.MustCompile(`(?i)<svg[^>]+width=["'](\d+)(?:px)?["'][^>]+height=["'](\d+)(?:px)?["']|<svg[^>]+height=["'](\d+)(?:px)?["'][^>]+width=["'](\d+)(?:px)?["']`)
+	imgWidthHeightRegex   = regexp.MustCompile(`(?i)<img[^>]+width=["'](\d+)(?:px)?["'][^>]+height=["'](\d+)(?:px)?["']|<img[^>]+height=["'](\d+)(?:px)?["'][^>]+width=["'](\d+)(?:px)?["']`)
+	srcAttrRegex          = regexp.MustCompile(`(?i)(<img[^>]+src=["'])([^"']+)(["'])`)
+	imgXlinkRegex         = regexp.MustCompile(`(?i)(<image[^>]+(?:xlink:href|href)=["'])([^"']+)(["'])`)
+	linkHrefRegex         = regexp.MustCompile(`(?i)(<link[^>]+href=["'])([^"']+)(["'])`)
+	sourceSrcRegex        = regexp.MustCompile(`(?i)(<source[^>]+src=["'])([^"']+)(["'])`)
 	cssUrlRegex           = regexp.MustCompile(`(?i)url\(\s*["']?([^"')]+)["']?\s*\)`)
 	negativeZIndex        = regexp.MustCompile(`(?i)z-index\s*:\s*-\d+`)
 	headTagRegex          = regexp.MustCompile(`(?i)<head[^>]*>`)
@@ -228,13 +228,14 @@ func (r *Reader) ExtractChapters() ([]*ParsedChapter, error) {
 		chapterIndex++
 
 		chapters = append(chapters, &ParsedChapter{
-			Index:        chapterIndex,
-			Title:        title,
-			ContentPlain: plaintext,
-			Href:         fullPath,
-			PageWidth:    pageWidth,
-			PageHeight:   pageHeight,
-			PageSpread:   pageSpread,
+			Index:          chapterIndex,
+			Title:          title,
+			ContentPlain:   plaintext,
+			Href:           fullPath,
+			PageWidth:      pageWidth,
+			PageHeight:     pageHeight,
+			PageSpread:     pageSpread,
+			MediaOverlayID: strings.TrimSpace(item.MediaOverlay),
 		})
 	}
 
@@ -297,6 +298,18 @@ func DetectMimeType(filePath string) string {
 		return "application/javascript"
 	case ".html", ".xhtml":
 		return "text/html; charset=utf-8"
+	case ".smil":
+		return "application/smil+xml"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".m4a", ".m4b", ".mp4":
+		return "audio/mp4"
+	case ".ogg", ".oga", ".opus":
+		return "audio/ogg"
+	case ".flac":
+		return "audio/flac"
+	case ".aac":
+		return "audio/aac"
 	case ".woff":
 		return "font/woff"
 	case ".woff2":
@@ -373,6 +386,84 @@ func RewritePageHTML(rawHTML, bookID, chapterHref string, pageWidth, pageHeight 
 	// Fix negative z-indices
 	htmlStr = negativeZIndex.ReplaceAllString(htmlStr, "z-index: 1")
 
+	readalongBridge := fmt.Sprintf(`<style>
+.-epub-media-overlay-active,
+[data-shelfd-readalong-active="true"] {
+  background-color: rgba(255, 212, 0, 0.42);
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px rgba(255, 212, 0, 0.32);
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+}
+</style>
+<script>
+(function() {
+  var currentBookId = %q;
+  var currentChapterHref = %q;
+  var activeElements = [];
+
+  function clearActive(activeClass) {
+    for (var i = 0; i < activeElements.length; i++) {
+      var el = activeElements[i];
+      if (!el) continue;
+      el.removeAttribute('data-shelfd-readalong-active');
+      el.classList.remove('-epub-media-overlay-active');
+      if (activeClass) el.classList.remove(activeClass);
+    }
+    activeElements = [];
+  }
+
+  function applyHighlight(fragmentId, activeClass, playbackActiveClass, playing) {
+    var cls = activeClass || '-epub-media-overlay-active';
+    var playCls = playbackActiveClass || '-epub-media-overlay-playing';
+    clearActive(cls);
+    if (document.documentElement) {
+      if (playing) {
+        document.documentElement.classList.add(playCls);
+        document.documentElement.classList.add('-epub-media-overlay-playing');
+      } else {
+        document.documentElement.classList.remove(playCls);
+        document.documentElement.classList.remove('-epub-media-overlay-playing');
+      }
+    }
+    if (!fragmentId) return;
+    var target = document.getElementById(fragmentId);
+    if (!target) return;
+    target.classList.add(cls);
+    target.classList.add('-epub-media-overlay-active');
+    target.setAttribute('data-shelfd-readalong-active', 'true');
+    activeElements.push(target);
+  }
+
+  window.__shelfdHighlightReadalong = applyHighlight;
+
+  window.addEventListener('message', function(ev) {
+    var d = ev && ev.data;
+    if (!d || typeof d !== 'object') return;
+    if (d.type === 'shelfd:readalong-highlight') {
+      applyHighlight(d.fragmentId || '', d.activeClass || '', d.playbackActiveClass || '', !!d.playing);
+    }
+  });
+
+  document.addEventListener('click', function(ev) {
+    var node = ev.target;
+    while (node && node !== document.body && node !== document.documentElement) {
+      if (node.id) {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+            type: 'shelfd:readalong-click',
+            bookId: currentBookId,
+            chapterHref: currentChapterHref,
+            fragmentId: node.id
+          }, '*');
+        }
+        break;
+      }
+      node = node.parentElement;
+    }
+  });
+})();
+</script>`, bookID, chapterHref)
+
 	// Inject defensive containment CSS, viewport meta, and auto-fit scaling for fixed-layout pages
 	var injected string
 	if pageWidth != nil && pageHeight != nil && *pageWidth > 0 && *pageHeight > 0 {
@@ -396,6 +487,7 @@ body {
   transform-origin: 0 0 !important;
 }
 </style>
+%s
 <script>
 (function() {
   var dw = %d;
@@ -426,7 +518,7 @@ body {
     fit();
   }
 })();
-</script>`, dw, dh, dw, dh)
+</script>`, dw, dh, readalongBridge, dw, dh)
 	} else {
 		injected = `<style>
 html, body {
@@ -443,7 +535,8 @@ img, svg {
   max-height: 100%;
   display: block;
 }
-</style>`
+</style>
+` + readalongBridge
 	}
 
 	headLoc := headTagRegex.FindStringIndex(htmlStr)

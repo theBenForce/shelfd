@@ -32,6 +32,7 @@ class Book {
   final String? pageProgressionDirection;
   final String bookType;
   final double? durationSeconds;
+  final bool hasReadalong;
   final int? bitrateKbps;
   final List<BookFile> files;
   final List<AudioChapter> audioChapters;
@@ -60,6 +61,7 @@ class Book {
     this.pageProgressionDirection,
     this.bookType = 'ebook',
     this.durationSeconds,
+    this.hasReadalong = false,
     this.bitrateKbps,
     this.files = const [],
     this.audioChapters = const [],
@@ -67,6 +69,7 @@ class Book {
 
   bool get isFixedLayout => layout == 'pre-paginated';
   bool get isAudiobook => bookType == 'audiobook';
+  bool get canReadAlong => hasReadalong || (!isAudiobook && (durationSeconds ?? 0) > 0);
 
   List<SpineItem> get namedSpine => spine.where((s) => s.hasNamedChapter).toList();
 
@@ -105,6 +108,18 @@ class Book {
           : '';
       cover = cleanBase.isNotEmpty ? '$cleanBase/api/v1/books/$id/cover' : '/api/v1/books/$id/cover';
     }
+
+    final durationSec = (json['duration_seconds'] as num?)?.toDouble();
+    final parsedFiles = rawFiles
+        .whereType<Map<String, dynamic>>()
+        .map((f) => BookFile.fromJson(f))
+        .toList();
+    final parsedBookType = json['book_type'] as String? ?? 'ebook';
+    final explicitReadalong = json['has_readalong'] as bool?;
+    final inferredReadalong = explicitReadalong ??
+        (parsedBookType != 'audiobook' &&
+            ((durationSec != null && durationSec > 0) ||
+                parsedFiles.any((f) => f.fileType == 'audiobook' || f.fileType == 'audio')));
 
     return Book(
       id: id,
@@ -146,13 +161,11 @@ class Book {
       renditionSpread: json['rendition_spread'] as String?,
       renditionOrientation: json['rendition_orientation'] as String?,
       pageProgressionDirection: json['page_progression_direction'] as String?,
-      bookType: json['book_type'] as String? ?? 'ebook',
-      durationSeconds: (json['duration_seconds'] as num?)?.toDouble(),
+      bookType: parsedBookType,
+      durationSeconds: durationSec,
+      hasReadalong: inferredReadalong,
       bitrateKbps: (json['bitrate_kbps'] as num?)?.toInt(),
-      files: rawFiles
-          .whereType<Map<String, dynamic>>()
-          .map((f) => BookFile.fromJson(f))
-          .toList(),
+      files: parsedFiles,
       audioChapters: rawAudioChapters
           .whereType<Map<String, dynamic>>()
           .map((c) => AudioChapter.fromJson(c))
@@ -185,6 +198,7 @@ class Book {
       if (pageProgressionDirection != null) 'page_progression_direction': pageProgressionDirection,
       'book_type': bookType,
       if (durationSeconds != null) 'duration_seconds': durationSeconds,
+      'has_readalong': hasReadalong,
       if (bitrateKbps != null) 'bitrate_kbps': bitrateKbps,
       if (files.isNotEmpty) 'files': files.map((f) => f.toJson()).toList(),
       if (audioChapters.isNotEmpty) 'audio_chapters': audioChapters.map((c) => c.toJson()).toList(),
@@ -215,6 +229,7 @@ class Book {
     String? pageProgressionDirection,
     String? bookType,
     double? durationSeconds,
+    bool? hasReadalong,
     int? bitrateKbps,
     List<BookFile>? files,
     List<AudioChapter>? audioChapters,
@@ -243,6 +258,7 @@ class Book {
       pageProgressionDirection: pageProgressionDirection ?? this.pageProgressionDirection,
       bookType: bookType ?? this.bookType,
       durationSeconds: durationSeconds ?? this.durationSeconds,
+      hasReadalong: hasReadalong ?? this.hasReadalong,
       bitrateKbps: bitrateKbps ?? this.bitrateKbps,
       files: files ?? this.files,
       audioChapters: audioChapters ?? this.audioChapters,
@@ -316,4 +332,138 @@ class SpineItem {
     };
   }
 }
+
+class ReadalongSegment {
+  final int chapterIndex;
+  final String chapterHref;
+  final String overlayId;
+  final String parId;
+  final String fragmentId;
+  final String text;
+  final String audioSrc;
+  final double clipBegin;
+  final double clipEnd;
+  final double globalBegin;
+  final double globalEnd;
+
+  const ReadalongSegment({
+    required this.chapterIndex,
+    this.chapterHref = '',
+    this.overlayId = '',
+    this.parId = '',
+    this.fragmentId = '',
+    this.text = '',
+    this.audioSrc = '',
+    required this.clipBegin,
+    required this.clipEnd,
+    required this.globalBegin,
+    required this.globalEnd,
+  });
+
+  factory ReadalongSegment.fromJson(Map<String, dynamic> json) {
+    final clipBegin = (json['clip_begin'] as num?)?.toDouble() ?? 0.0;
+    final clipEnd = (json['clip_end'] as num?)?.toDouble() ?? 0.0;
+    return ReadalongSegment(
+      chapterIndex: (json['chapter_index'] as num?)?.toInt() ?? 1,
+      chapterHref: json['chapter_href'] as String? ?? '',
+      overlayId: json['overlay_id'] as String? ?? '',
+      parId: json['par_id'] as String? ?? '',
+      fragmentId: json['fragment_id'] as String? ?? '',
+      text: json['text'] as String? ?? '',
+      audioSrc: json['audio_src'] as String? ?? '',
+      clipBegin: clipBegin,
+      clipEnd: clipEnd,
+      globalBegin: (json['global_begin'] as num?)?.toDouble() ?? clipBegin,
+      globalEnd: (json['global_end'] as num?)?.toDouble() ?? clipEnd,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'chapter_index': chapterIndex,
+      if (chapterHref.isNotEmpty) 'chapter_href': chapterHref,
+      if (overlayId.isNotEmpty) 'overlay_id': overlayId,
+      if (parId.isNotEmpty) 'par_id': parId,
+      if (fragmentId.isNotEmpty) 'fragment_id': fragmentId,
+      if (text.isNotEmpty) 'text': text,
+      if (audioSrc.isNotEmpty) 'audio_src': audioSrc,
+      'clip_begin': clipBegin,
+      'clip_end': clipEnd,
+      'global_begin': globalBegin,
+      'global_end': globalEnd,
+    };
+  }
+}
+
+class ReadalongManifest {
+  final String bookId;
+  final bool hasReadalong;
+  final bool hasMediaOverlays;
+  final String activeClass;
+  final String playbackActiveClass;
+  final String? narrator;
+  final double? durationSeconds;
+  final String audioStreamUrl;
+  final List<ReadalongSegment> segments;
+
+  const ReadalongManifest({
+    required this.bookId,
+    this.hasReadalong = false,
+    this.hasMediaOverlays = false,
+    this.activeClass = '-epub-media-overlay-active',
+    this.playbackActiveClass = '-epub-media-overlay-playing',
+    this.narrator,
+    this.durationSeconds,
+    this.audioStreamUrl = '',
+    this.segments = const [],
+  });
+
+  ReadalongSegment? segmentAt(double positionSeconds) {
+    if (segments.isEmpty) return null;
+    for (final seg in segments) {
+      if (positionSeconds >= seg.globalBegin && positionSeconds < seg.globalEnd) {
+        return seg;
+      }
+    }
+    if (positionSeconds >= segments.last.globalEnd &&
+        (positionSeconds - segments.last.globalEnd) < 0.5) {
+      return segments.last;
+    }
+    return null;
+  }
+
+  ReadalongSegment? firstSegmentForChapter(int chapterIndex) {
+    for (final seg in segments) {
+      if (seg.chapterIndex == chapterIndex) {
+        return seg;
+      }
+    }
+    return null;
+  }
+
+  factory ReadalongManifest.fromJson(Map<String, dynamic> json) {
+    final rawSegments = json['segments'] as List<dynamic>? ?? const [];
+    final activeCls = (json['active_class'] as String?)?.trim();
+    final playbackCls = (json['playback_active_class'] as String?)?.trim();
+    return ReadalongManifest(
+      bookId: json['book_id'] as String? ?? '',
+      hasReadalong: json['has_readalong'] as bool? ?? false,
+      hasMediaOverlays: json['has_media_overlays'] as bool? ?? false,
+      activeClass: (activeCls != null && activeCls.isNotEmpty)
+          ? activeCls
+          : '-epub-media-overlay-active',
+      playbackActiveClass: (playbackCls != null && playbackCls.isNotEmpty)
+          ? playbackCls
+          : '-epub-media-overlay-playing',
+      narrator: json['narrator'] as String?,
+      durationSeconds: (json['duration_seconds'] as num?)?.toDouble(),
+      audioStreamUrl: json['audio_stream_url'] as String? ?? '',
+      segments: rawSegments
+          .whereType<Map<String, dynamic>>()
+          .map(ReadalongSegment.fromJson)
+          .toList(),
+    );
+  }
+}
+
 

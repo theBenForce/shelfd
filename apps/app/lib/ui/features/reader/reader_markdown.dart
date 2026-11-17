@@ -542,6 +542,7 @@ Widget buildReaderBlockWidget({
   required ThemeData theme,
   List<Highlight> highlights = const [],
   void Function(Highlight hl)? onHighlightTap,
+  String? activeReadalongText,
 }) {
   final colors = theme.extension<ShelfdColors>();
   final headingColor = colors?.ink ?? theme.colorScheme.primary;
@@ -549,6 +550,20 @@ Widget buildReaderBlockWidget({
   final onSurfaceColor = colors?.ink ?? theme.colorScheme.onSurface;
   final secondaryColor = colors?.secondaryInk ?? onSurfaceColor.withValues(alpha: 0.85);
   final dividerColor = colors?.subtleBorder ?? theme.dividerColor;
+
+  final effectiveHighlights = <Highlight>[...highlights];
+  final cleanReadalong = activeReadalongText?.trim() ?? '';
+  if (cleanReadalong.isNotEmpty) {
+    effectiveHighlights.add(
+      Highlight(
+        id: '__readalong_active__',
+        bookId: '',
+        selectedText: cleanReadalong,
+        color: 'yellow',
+        createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+      ),
+    );
+  }
 
   switch (block.type) {
     case ReaderBlockType.h1:
@@ -566,7 +581,7 @@ Widget buildReaderBlockWidget({
               baseStyle: style,
               accentColor: accentColor,
               settings: settings,
-              highlights: highlights,
+              highlights: effectiveHighlights,
               onHighlightTap: onHighlightTap,
             ),
           ),
@@ -588,7 +603,7 @@ Widget buildReaderBlockWidget({
               baseStyle: style,
               accentColor: accentColor,
               settings: settings,
-              highlights: highlights,
+              highlights: effectiveHighlights,
               onHighlightTap: onHighlightTap,
             ),
           ),
@@ -610,7 +625,7 @@ Widget buildReaderBlockWidget({
               baseStyle: style,
               accentColor: accentColor,
               settings: settings,
-              highlights: highlights,
+              highlights: effectiveHighlights,
               onHighlightTap: onHighlightTap,
             ),
           ),
@@ -632,7 +647,7 @@ Widget buildReaderBlockWidget({
               baseStyle: style,
               accentColor: accentColor,
               settings: settings,
-              highlights: highlights,
+              highlights: effectiveHighlights,
               onHighlightTap: onHighlightTap,
             ),
           ),
@@ -679,7 +694,7 @@ Widget buildReaderBlockWidget({
               baseStyle: quoteStyle,
               accentColor: accentColor,
               settings: settings,
-              highlights: highlights,
+              highlights: effectiveHighlights,
               onHighlightTap: onHighlightTap,
             ),
           ),
@@ -702,7 +717,7 @@ Widget buildReaderBlockWidget({
               baseStyle: bodyStyle,
               accentColor: accentColor,
               settings: settings,
-              highlights: highlights,
+              highlights: effectiveHighlights,
               onHighlightTap: onHighlightTap,
             ),
           ),

@@ -39,6 +39,9 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
   String? _error;
   dynamic _activeIdentifier;
   String? _selectedText;
+  ReadalongManifest? _readalongManifest;
+  ReadalongSegment? _activeSegment;
+  bool _autoTurnPages = true;
 
   int _getSpineIndex(List<SpineItem> spine) {
     if (spine.isEmpty) return -1;
@@ -74,11 +77,77 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
       }
     } catch (_) {}
 
+    try {
+      final manifest = await bookRepo.getBookReadalong(widget.bookId);
+      if (mounted && (manifest.hasReadalong || manifest.segments.isNotEmpty)) {
+        setState(() {
+          _readalongManifest = manifest;
+        });
+      }
+    } catch (_) {}
+
     if (_currentChapter == null) {
       final bookDetail = ref.read(bookDetailProvider(widget.bookId)).book;
       final availableSpine = _spine.isNotEmpty ? _spine : (bookDetail?.spine ?? const []);
       final target = _activeIdentifier ?? (availableSpine.isNotEmpty ? availableSpine.first.id : 1);
       _loadChapter(target);
+    }
+  }
+
+  void _onAudioStateChanged(AudioPlayerState audioState, List<SpineItem> effectiveSpine) {
+    if (audioState.book?.id != widget.bookId) return;
+    final manifest = _readalongManifest;
+    if (manifest == null || manifest.segments.isEmpty) return;
+
+    final posSec = audioState.position.inMilliseconds / 1000.0;
+    final seg = manifest.segmentAt(posSec);
+
+    if (seg?.parId != _activeSegment?.parId ||
+        seg?.fragmentId != _activeSegment?.fragmentId ||
+        seg?.text != _activeSegment?.text ||
+        seg?.chapterIndex != _activeSegment?.chapterIndex) {
+      if (mounted) {
+        setState(() {
+          _activeSegment = seg;
+        });
+      }
+    }
+
+    if (_autoTurnPages &&
+        audioState.isPlaying &&
+        seg != null &&
+        seg.chapterIndex > 0 &&
+        !_isLoading &&
+        _currentChapter != null &&
+        _currentChapter!.chapterIndex != seg.chapterIndex) {
+      dynamic target = seg.chapterIndex;
+      final spineMatch = effectiveSpine.where((s) => s.chapterIndex == seg.chapterIndex);
+      if (spineMatch.isNotEmpty && spineMatch.first.id.isNotEmpty) {
+        target = spineMatch.first.id;
+      } else if (seg.chapterIndex - 1 >= 0 &&
+          seg.chapterIndex - 1 < effectiveSpine.length &&
+          effectiveSpine[seg.chapterIndex - 1].id.isNotEmpty) {
+        target = effectiveSpine[seg.chapterIndex - 1].id;
+      }
+      _loadChapter(target);
+    }
+  }
+
+  Future<void> _toggleReadalongPlayback(Book? book) async {
+    final audioState = ref.read(audioPlayerProvider);
+    final notifier = ref.read(audioPlayerProvider.notifier);
+    final targetBook = book ?? Book(id: widget.bookId, title: _currentChapter?.title ?? 'Book', hasReadalong: true);
+    if (audioState.book?.id != widget.bookId) {
+      double? startPos;
+      if (_currentChapter != null && _currentChapter!.chapterIndex > 0) {
+        final firstSeg = _readalongManifest?.firstSegmentForChapter(_currentChapter!.chapterIndex);
+        if (firstSeg != null && firstSeg.globalBegin > 0) {
+          startPos = firstSeg.globalBegin;
+        }
+      }
+      await notifier.loadBook(targetBook, initialPosition: startPos, autoPlay: true);
+    } else {
+      await notifier.togglePlayPause();
     }
   }
 
@@ -234,13 +303,24 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
       return FixedLayoutReader(
         book: book,
         initialChapterIdentifier: widget.chapterIdentifier ?? widget.chapterIndex,
+        initialReadalongManifest: _readalongManifest,
       );
     }
+
+    final effectiveSpine = _spine.isNotEmpty ? _spine : (book?.spine ?? const []);
+    ref.listen<AudioPlayerState>(audioPlayerProvider, (prev, next) {
+      _onAudioStateChanged(next, effectiveSpine);
+    });
+    final audioState = ref.watch(audioPlayerProvider);
+    final isThisBookPlaying =
+        audioState.book?.id == widget.bookId && audioState.isPlaying;
+    final hasReadalong = (book?.canReadAlong ?? false) ||
+        (_readalongManifest?.hasReadalong ?? false) ||
+        (_readalongManifest?.segments.isNotEmpty ?? false);
 
     final settings = ref.watch(readerSettingsProvider);
     final theme = AppTheme.buildTheme(settings.themeMode);
     final colors = theme.extension<ShelfdColors>() ?? ShelfdColors.of(context);
-    final effectiveSpine = _spine.isNotEmpty ? _spine : (book?.spine ?? const []);
     final spineIdx = _getSpineIndex(effectiveSpine);
 
     final chapterHighlights = (bookDetailState.book?.highlights ?? const []).where((h) {
@@ -325,6 +405,32 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
             ),
           ),
           actions: [
+            if (hasReadalong) ...[
+              IconButton(
+                key: const Key('readalong-play-pause-button'),
+                icon: Icon(
+                  isThisBookPlaying
+                      ? Icons.pause_circle_filled_rounded
+                      : Icons.play_circle_fill_rounded,
+                  color: colors.accentPrimary,
+                ),
+                tooltip: isThisBookPlaying ? 'Pause Read-Along' : 'Play Read-Along',
+                onPressed: () => _toggleReadalongPlayback(book),
+              ),
+              IconButton(
+                key: const Key('readalong-autoturn-toggle'),
+                icon: Icon(
+                  _autoTurnPages ? Icons.sync_rounded : Icons.sync_disabled_rounded,
+                  color: _autoTurnPages ? colors.accentPrimary : colors.mutedInk,
+                ),
+                tooltip: _autoTurnPages ? 'Auto-Turn Pages: On' : 'Auto-Turn Pages: Off',
+                onPressed: () {
+                  setState(() {
+                    _autoTurnPages = !_autoTurnPages;
+                  });
+                },
+              ),
+            ],
             IconButton(
               icon: const Icon(Icons.bookmark_add_outlined),
               tooltip: 'Bookmark Location',
@@ -602,6 +708,7 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                               theme: theme,
                               highlights: chapterHighlights,
                               onHighlightTap: _showExistingHighlightSheet,
+                              activeReadalongText: _activeSegment?.text,
                             );
                           },
                         ),

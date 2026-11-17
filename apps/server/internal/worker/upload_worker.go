@@ -37,6 +37,7 @@ type UploadWorker struct {
 	stopCh        chan struct{}
 	stopOnce      sync.Once
 	wg            sync.WaitGroup
+	procMu        sync.Mutex
 }
 
 // NewUploadWorker initializes a new background upload worker.
@@ -75,9 +76,25 @@ func (w *UploadWorker) Trigger() {
 	}
 }
 
+// DrainPending synchronously drains all currently pending upload jobs.
+func (w *UploadWorker) DrainPending(ctx context.Context) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		processed, err := w.ProcessNext(ctx)
+		if err != nil || !processed {
+			break
+		}
+	}
+}
+
 // ProcessNext fetches and processes a single pending upload job.
 // Returns true if a job was found and processed, or false if queue is empty.
 func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
+	w.procMu.Lock()
+	defer w.procMu.Unlock()
+
 	jobs, err := w.repo.GetPendingUploadJobs(ctx, 1)
 	if err != nil {
 		return false, fmt.Errorf("getting pending upload jobs: %w", err)

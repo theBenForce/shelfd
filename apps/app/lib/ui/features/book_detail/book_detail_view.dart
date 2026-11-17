@@ -433,6 +433,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
 
   bool _hasAudiobook(Book book) {
     return book.isAudiobook ||
+        book.hasReadalong ||
         (book.durationSeconds != null && book.durationSeconds! > 0) ||
         book.files.any((f) => f.fileType == 'audiobook' || f.durationSeconds != null);
   }

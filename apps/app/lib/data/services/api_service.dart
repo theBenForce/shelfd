@@ -284,6 +284,15 @@ class ApiService {
     return Book.fromJson(data, baseUrl: baseUrl);
   }
 
+  Future<ReadalongManifest> getBookReadalong(String id) async {
+    final response = await client.get(_uri('/api/v1/books/$id/readalong'), headers: _headers());
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return ReadalongManifest.fromJson(data);
+  }
+
   String getAudioStreamUrl(String bookId) {
     if (token != null && token!.isNotEmpty) {
       return _uri('/api/v1/audiobooks/$bookId/stream', {'token': token!}).toString();

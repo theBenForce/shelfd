@@ -1713,6 +1713,21 @@ class ShelfdGridCard extends StatelessWidget {
               ),
               showSpineCrease: true,
               showShadow: false,
+              topRightBadge: (book.canReadAlong || book.isAudiobook)
+                  ? Container(
+                      key: Key('book_audio_badge_${book.id}'),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTokens.espressoInk.withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(AppTokens.radiusPill),
+                      ),
+                      child: const Icon(
+                        Icons.headphones_rounded,
+                        size: 13,
+                        color: AppTokens.amberAccent,
+                      ),
+                    )
+                  : null,
               bottomOverlay: progressPercent > 0
                   ? LinearProgressIndicator(
                       value: book.readingProgress.clamp(0.0, 1.0),

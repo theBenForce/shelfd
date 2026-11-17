@@ -48,18 +48,33 @@ class FixedSpread {
     if (leftPage != null && (leftPage!.id == idStr || leftPage!.chapterIndex.toString() == idStr)) return true;
     return false;
   }
+
+  bool containsChapterIndex(int chapterIndex, List<SpineItem> spine) {
+    if (chapterIndex <= 0) return false;
+    if (rightPage.chapterIndex == chapterIndex) return true;
+    if (leftPage != null && leftPage!.chapterIndex == chapterIndex) return true;
+    final rightPos = spine.indexOf(rightPage);
+    if (rightPos >= 0 && (rightPos + 1) == chapterIndex) return true;
+    if (leftPage != null) {
+      final leftPos = spine.indexOf(leftPage!);
+      if (leftPos >= 0 && (leftPos + 1) == chapterIndex) return true;
+    }
+    return false;
+  }
 }
 
 class FixedLayoutReader extends ConsumerStatefulWidget {
   final Book book;
   final dynamic initialChapterIdentifier;
   final VoidCallback? onClose;
+  final ReadalongManifest? initialReadalongManifest;
 
   const FixedLayoutReader({
     super.key,
     required this.book,
     this.initialChapterIdentifier,
     this.onClose,
+    this.initialReadalongManifest,
   });
 
   @override
@@ -71,11 +86,99 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   int _currentSpreadIndex = 0;
   final FocusNode _focusNode = FocusNode();
   bool _controlsVisible = true;
+  ReadalongManifest? _readalongManifest;
+  ReadalongSegment? _activeSegment;
+  bool _autoTurnPages = true;
+
+  bool get _hasReadalong =>
+      widget.book.canReadAlong ||
+      (_readalongManifest?.hasReadalong ?? false) ||
+      (_readalongManifest?.segments.isNotEmpty ?? false);
 
   @override
   void initState() {
     super.initState();
+    _readalongManifest = widget.initialReadalongManifest;
     _resolveInitialSpread();
+    Future.microtask(_loadReadalongManifest);
+  }
+
+  Future<void> _loadReadalongManifest() async {
+    if (_readalongManifest != null) return;
+    try {
+      final manifest = await ref.read(bookRepositoryProvider).getBookReadalong(widget.book.id);
+      if (mounted && (manifest.hasReadalong || manifest.segments.isNotEmpty)) {
+        setState(() {
+          _readalongManifest = manifest;
+        });
+        final audioState = ref.read(audioPlayerProvider);
+        if (audioState.book?.id == widget.book.id) {
+          _onAudioStateChanged(audioState);
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _onAudioStateChanged(AudioPlayerState audioState) {
+    if (audioState.book?.id != widget.book.id) return;
+    final manifest = _readalongManifest;
+    if (manifest == null || manifest.segments.isEmpty) return;
+
+    final posSec = audioState.position.inMilliseconds / 1000.0;
+    final seg = manifest.segmentAt(posSec);
+
+    final changed = seg?.fragmentId != _activeSegment?.fragmentId ||
+        seg?.parId != _activeSegment?.parId ||
+        seg?.chapterIndex != _activeSegment?.chapterIndex ||
+        seg?.text != _activeSegment?.text;
+
+    if (changed && mounted) {
+      setState(() {
+        _activeSegment = seg;
+      });
+    }
+
+    highlightHtmlFrame(
+      fragmentId: seg?.fragmentId ?? '',
+      activeClass: manifest.activeClass,
+      playbackActiveClass: manifest.playbackActiveClass,
+      playing: audioState.isPlaying,
+    );
+
+    if (_autoTurnPages && audioState.isPlaying && seg != null && seg.chapterIndex > 0) {
+      final spreads = _currentSpreads;
+      if (spreads.isNotEmpty && _currentSpreadIndex < spreads.length) {
+        final curSpread = spreads[_currentSpreadIndex];
+        if (!curSpread.containsChapterIndex(seg.chapterIndex, widget.book.spine)) {
+          final targetIdx = spreads.indexWhere(
+            (s) => s.containsChapterIndex(seg.chapterIndex, widget.book.spine),
+          );
+          if (targetIdx >= 0 && targetIdx != _currentSpreadIndex) {
+            _goToSpread(targetIdx, spreads.length);
+          }
+        }
+      }
+    }
+  }
+
+  Future<void> _toggleReadalongPlayback() async {
+    final audioState = ref.read(audioPlayerProvider);
+    final notifier = ref.read(audioPlayerProvider.notifier);
+    if (audioState.book?.id != widget.book.id) {
+      double? initialPos;
+      if (_currentSpreads.isNotEmpty && _currentSpreadIndex < _currentSpreads.length) {
+        final curSpread = _currentSpreads[_currentSpreadIndex];
+        final page = curSpread.leftPage ?? curSpread.rightPage;
+        final chIdx = page.chapterIndex > 0 ? page.chapterIndex : (_currentSpreadIndex + 1);
+        final firstSeg = _readalongManifest?.firstSegmentForChapter(chIdx);
+        if (firstSeg != null && firstSeg.globalBegin > 0) {
+          initialPos = firstSeg.globalBegin;
+        }
+      }
+      await notifier.loadBook(widget.book, initialPosition: initialPos, autoPlay: true);
+    } else {
+      await notifier.togglePlayPause();
+    }
   }
 
   void _toggleControls() {
@@ -226,6 +329,13 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AudioPlayerState>(audioPlayerProvider, (prev, next) {
+      _onAudioStateChanged(next);
+    });
+    final audioState = ref.watch(audioPlayerProvider);
+    final isThisBookPlaying =
+        audioState.book?.id == widget.book.id && audioState.isPlaying;
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final screenWidth = constraints.maxWidth;
@@ -330,13 +440,75 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                       ),
                     ),
 
+                  // Read-Along Active Phrase / Highlight Overlay Banner
+                  if (_hasReadalong && (_activeSegment != null || isThisBookPlaying))
+                    Positioned(
+                      bottom: _controlsVisible ? 72 : 16,
+                      left: 24,
+                      right: 24,
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 640),
+                          child: Container(
+                            key: const Key('readalong-overlay-pill'),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: colors.surface.withValues(alpha: 0.96),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(color: colors.accentPrimary.withValues(alpha: 0.5)),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black45,
+                                  blurRadius: 12,
+                                  offset: Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.graphic_eq_rounded,
+                                  size: 18,
+                                  color: colors.accentPrimary,
+                                ),
+                                const SizedBox(width: 8),
+                                Flexible(
+                                  child: Container(
+                                    key: const Key('readalong-active-text'),
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFFD60A).withValues(alpha: 0.35),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      (_activeSegment?.text.isNotEmpty ?? false)
+                                          ? _activeSegment!.text
+                                          : 'Playing read-along audio…',
+                                      style: AppTypography.bodySans(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: colors.ink,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 2,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+
                   // Top Header Bar
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 200),
                     top: _controlsVisible ? 0 : -70,
                     left: 0,
                     right: 0,
-                    child: _buildTopBar(context, currentSpread, spreads.length),
+                    child: _buildTopBar(context, currentSpread, spreads.length, isThisBookPlaying),
                   ),
 
                   // Bottom Navigation Bar
@@ -357,7 +529,12 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
     );
   }
 
-  Widget _buildTopBar(BuildContext context, FixedSpread? spread, int totalSpreads) {
+  Widget _buildTopBar(
+    BuildContext context,
+    FixedSpread? spread,
+    int totalSpreads,
+    bool isThisBookPlaying,
+  ) {
     final colors = ShelfdColors.of(context);
 
     return Container(
@@ -401,6 +578,33 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
               ],
             ),
           ),
+
+          if (_hasReadalong) ...[
+            IconButton(
+              key: const Key('readalong-play-pause-button'),
+              icon: Icon(
+                isThisBookPlaying
+                    ? Icons.pause_circle_filled_rounded
+                    : Icons.play_circle_fill_rounded,
+                color: colors.accentPrimary,
+              ),
+              tooltip: isThisBookPlaying ? 'Pause Read-Along' : 'Play Read-Along',
+              onPressed: _toggleReadalongPlayback,
+            ),
+            IconButton(
+              key: const Key('readalong-autoturn-toggle'),
+              icon: Icon(
+                _autoTurnPages ? Icons.sync_rounded : Icons.sync_disabled_rounded,
+                color: _autoTurnPages ? colors.accentPrimary : colors.mutedInk,
+              ),
+              tooltip: _autoTurnPages ? 'Auto-Turn Pages: On' : 'Auto-Turn Pages: Off',
+              onPressed: () {
+                setState(() {
+                  _autoTurnPages = !_autoTurnPages;
+                });
+              },
+            ),
+          ],
 
           // Spread Mode Toggle
           IconButton(

@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -239,6 +240,8 @@ func (in *Ingester) importNewBook(ctx context.Context, fullPath, relativePath st
 		RenditionSpread:          parsed.RenditionSpread,
 		RenditionOrientation:     parsed.RenditionOrientation,
 		PageProgressionDirection: parsed.PageProgressionDirection,
+		BookType:                 "ebook",
+		DurationSeconds:          parsed.MediaDurationSeconds,
 	}
 	if parsed.Description != "" {
 		book.Description = &parsed.Description
@@ -267,6 +270,11 @@ func (in *Ingester) importNewBook(ctx context.Context, fullPath, relativePath st
 			continue
 		}
 		_ = in.repo.LinkBookAuthor(ctx, book.ID, author.ID, a.Role)
+	}
+	if parsed.MediaNarrator != "" {
+		if narrator, err := in.repo.UpsertAuthor(ctx, parsed.MediaNarrator); err == nil {
+			_ = in.repo.LinkBookAuthor(ctx, book.ID, narrator.ID, "Narrator")
+		}
 	}
 
 	// Link Genres
@@ -378,10 +386,160 @@ func (in *Ingester) updateModifiedBook(ctx context.Context, book *repository.Boo
 	return book, nil
 }
 
+// HasReadalongAudio returns true if an ebook already has an attached read-along audio file in book_files.
+func (in *Ingester) HasReadalongAudio(ctx context.Context, bookID string) bool {
+	files, err := in.repo.GetBookFilesByBookID(ctx, bookID)
+	if err != nil {
+		return false
+	}
+	for _, bf := range files {
+		if bf != nil && bf.FileType == "audiobook" {
+			return true
+		}
+	}
+	return false
+}
+
+// AttachReadalongAudio attaches an uploaded audio stream (and optional cover) as the read-along rendition
+// of an existing primary ebook on the shelf, replacing any previously linked read-along audio in place.
+// Returns the updated book and whether a previous read-along audio was already attached (isDuplicate).
+func (in *Ingester) AttachReadalongAudio(
+	ctx context.Context,
+	book *repository.Book,
+	originalFilename string,
+	r io.Reader,
+	authors []string,
+	narrator *string,
+	coverBytes []byte,
+) (*repository.Book, bool, error) {
+	if book == nil {
+		return nil, false, fmt.Errorf("target book is nil")
+	}
+
+	wasDuplicate := in.HasReadalongAudio(ctx, book.ID)
+
+	bookDirRel := filepath.Dir(book.FilePath)
+	bookDirFull := filepath.Join(in.libraryDir, bookDirRel)
+	if err := os.MkdirAll(bookDirFull, 0755); err != nil {
+		return nil, wasDuplicate, fmt.Errorf("creating book directory: %w", err)
+	}
+
+	ext := strings.ToLower(filepath.Ext(originalFilename))
+	if ext == "" {
+		ext = ".m4b"
+	}
+
+	epubBase := strings.TrimSuffix(filepath.Base(book.FilePath), filepath.Ext(book.FilePath))
+	if epubBase == "" {
+		epubBase = SanitizePathSegment(book.Title)
+	}
+	audioFilename := epubBase + ext
+	audioFullPath := filepath.Join(bookDirFull, audioFilename)
+	tmpFilePath := audioFullPath + ".tmp"
+
+	// Remove any older audio files in book_files that had a different filename so replacement doesn't duplicate
+	if existingFiles, err := in.repo.GetBookFilesByBookID(ctx, book.ID); err == nil {
+		for _, ef := range existingFiles {
+			if ef != nil && ef.FileType == "audiobook" {
+				oldFull := filepath.Join(in.libraryDir, ef.FilePath)
+				if filepath.Clean(oldFull) != filepath.Clean(audioFullPath) {
+					_ = os.Remove(oldFull)
+				}
+			}
+		}
+	}
+
+	f, err := os.Create(tmpFilePath)
+	if err != nil {
+		return nil, wasDuplicate, fmt.Errorf("creating temporary read-along file: %w", err)
+	}
+	if _, err := io.Copy(f, r); err != nil {
+		f.Close()
+		_ = os.Remove(tmpFilePath)
+		return nil, wasDuplicate, fmt.Errorf("writing read-along audio: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpFilePath)
+		return nil, wasDuplicate, fmt.Errorf("closing read-along audio: %w", err)
+	}
+	if err := os.Rename(tmpFilePath, audioFullPath); err != nil {
+		_ = os.Remove(tmpFilePath)
+		return nil, wasDuplicate, fmt.Errorf("renaming read-along audio: %w", err)
+	}
+
+	// Save provided cover or embedded audio cover if present
+	if len(coverBytes) > 0 {
+		coverExt := ".jpg"
+		if bytes.HasPrefix(coverBytes, []byte("\x89PNG\r\n\x1a\n")) {
+			coverExt = ".png"
+		} else if len(coverBytes) >= 12 && string(coverBytes[0:4]) == "RIFF" && string(coverBytes[8:12]) == "WEBP" {
+			coverExt = ".webp"
+		}
+		coverFile := "cover" + coverExt
+		coverFull := filepath.Join(bookDirFull, coverFile)
+		if err := os.WriteFile(coverFull, coverBytes, 0644); err == nil {
+			rel := filepath.Join(bookDirRel, coverFile)
+			book.CoverPath = &rel
+		}
+	} else if book.CoverPath == nil || *book.CoverPath == "" {
+		if meta, err := audio.ExtractMetadata(audioFullPath); err == nil && meta != nil {
+			if cov := in.resolveAudioCover(meta, bookDirFull, bookDirRel, book.ID); cov != nil {
+				book.CoverPath = cov
+			}
+		}
+	}
+
+	// Ensure ebook stays primary
+	book.BookType = "ebook"
+	_ = in.repo.UpdateBook(ctx, book)
+
+	// Update authors if non-Unknown @ART authors were provided
+	var validAuthors []string
+	for _, a := range authors {
+		clean := strings.TrimSpace(a)
+		if clean != "" && !strings.EqualFold(clean, "Unknown") {
+			validAuthors = append(validAuthors, clean)
+		}
+	}
+	if len(validAuthors) > 0 {
+		_ = in.repo.ClearBookAuthors(ctx, book.ID)
+		for _, aName := range validAuthors {
+			if author, err := in.repo.UpsertAuthor(ctx, aName); err == nil {
+				_ = in.repo.LinkBookAuthor(ctx, book.ID, author.ID, "Author")
+			}
+		}
+	}
+	if narrator != nil && strings.TrimSpace(*narrator) != "" {
+		if narr, err := in.repo.UpsertAuthor(ctx, strings.TrimSpace(*narrator)); err == nil {
+			_ = in.repo.LinkBookAuthor(ctx, book.ID, narr.ID, "Narrator")
+		}
+	}
+
+	// Sync book_files and audio_chapters and update book.DurationSeconds
+	epubFullPath := filepath.Join(in.libraryDir, book.FilePath)
+	_ = in.syncBookFiles(ctx, book.ID, epubFullPath)
+
+	updated, err := in.repo.GetBookByID(ctx, book.ID)
+	if err != nil || updated == nil {
+		return book, wasDuplicate, nil
+	}
+	return updated, wasDuplicate, nil
+}
+
 // SaveUpload securely saves an uploaded media stream directly into Audiobookshelf structure:
 // /library/<Author>/<Title>/<Title><ext>
 // It performs atomic staging (.tmp file) before final rename to ensure no partial reads by ABS scanners.
 func (in *Ingester) SaveUpload(ctx context.Context, authorName, title, originalFilename string, r io.Reader) (*repository.Book, error) {
+	fileType, _ := DetectFileType(originalFilename)
+	if fileType == "audiobook" {
+		if matched, err := repository.MatchBookForReadalong(ctx, in.repo, title, []string{authorName}); err == nil && matched != nil {
+			updated, _, attachErr := in.AttachReadalongAudio(ctx, matched, originalFilename, r, []string{authorName}, nil, nil)
+			if attachErr == nil {
+				return updated, nil
+			}
+		}
+	}
+
 	sanitizedAuthor := SanitizeAuthorSegment(authorName)
 	sanitizedTitle := SanitizePathSegment(title)
 
@@ -1063,4 +1221,3 @@ func (in *Ingester) syncBookFiles(ctx context.Context, bookID, bookFullPath stri
 	}
 	return nil
 }
-

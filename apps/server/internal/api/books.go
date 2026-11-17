@@ -98,6 +98,7 @@ type BookListItem struct {
 	PageProgressionDirection string                         `json:"page_progression_direction"`
 	BookType                 string                         `json:"book_type,omitempty"`
 	DurationSeconds          *float64                       `json:"duration_seconds,omitempty"`
+	HasReadalong             bool                           `json:"has_readalong"`
 	Authors                  []*repository.Author           `json:"authors"`
 	Genres                   []*repository.Genre            `json:"genres"`
 	Topics                   []*repository.Topic            `json:"topics"`
@@ -106,12 +107,41 @@ type BookListItem struct {
 
 type BookDetailResponse struct {
 	BookListItem
-	Spine         []*repository.SpineItem   `json:"spine"`
-	Chapters      []*repository.Chapter     `json:"chapters"`
-	Bookmarks     []*repository.Bookmark    `json:"bookmarks"`
-	Highlights    []*repository.Highlight   `json:"highlights"`
-	Files         []*repository.BookFile    `json:"files"`
+	Spine         []*repository.SpineItem    `json:"spine"`
+	Chapters      []*repository.Chapter      `json:"chapters"`
+	Bookmarks     []*repository.Bookmark     `json:"bookmarks"`
+	Highlights    []*repository.Highlight    `json:"highlights"`
+	Files         []*repository.BookFile     `json:"files"`
 	AudioChapters []*repository.AudioChapter `json:"audio_chapters,omitempty"`
+}
+
+// resolveReadalongStatus determines whether a book has read-along audio and resolves its duration.
+func resolveReadalongStatus(ctx context.Context, repo repository.StorageEngine, b *repository.Book, files []*repository.BookFile) (bool, *float64) {
+	if b == nil {
+		return false, nil
+	}
+	dur := b.DurationSeconds
+	if b.BookType == "audiobook" {
+		return false, dur
+	}
+	if files == nil && repo != nil {
+		files, _ = repo.GetBookFilesByBookID(ctx, b.ID)
+	}
+	hasAudioFile := false
+	var filesDuration float64
+	for _, f := range files {
+		if f != nil && (f.FileType == "audiobook" || f.FileType == "audio") {
+			hasAudioFile = true
+			if f.DurationSeconds != nil && *f.DurationSeconds > 0 {
+				filesDuration += *f.DurationSeconds
+			}
+		}
+	}
+	if (dur == nil || *dur <= 0) && filesDuration > 0 {
+		dur = &filesDuration
+	}
+	hasReadalong := hasAudioFile || (dur != nil && *dur > 0)
+	return hasReadalong, dur
 }
 
 // BuildBookListItem loads relational metadata for a book and constructs a BookListItem DTO.
@@ -120,6 +150,7 @@ func BuildBookListItem(ctx context.Context, repo repository.StorageEngine, b *re
 	genres, _ := repo.GetBookGenres(ctx, b.ID)
 	topics, _ := repo.GetBookTopics(ctx, b.ID)
 	seriesList, _ := repo.GetBookSeries(ctx, b.ID)
+	hasReadalong, durationSeconds := resolveReadalongStatus(ctx, repo, b, nil)
 
 	return BookListItem{
 		ID:                       b.ID,
@@ -138,7 +169,8 @@ func BuildBookListItem(ctx context.Context, repo repository.StorageEngine, b *re
 		RenditionOrientation:     b.RenditionOrientation,
 		PageProgressionDirection: b.PageProgressionDirection,
 		BookType:                 b.BookType,
-		DurationSeconds:          b.DurationSeconds,
+		DurationSeconds:          durationSeconds,
+		HasReadalong:             hasReadalong,
 		Authors:                  authors,
 		Genres:                   genres,
 		Topics:                   topics,
@@ -308,6 +340,42 @@ func (h *BookHandler) ListBooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(books) == 0 && filter.Offset == 0 && filter.Title != nil && strings.TrimSpace(*filter.Title) != "" {
+		normTitle := repository.NormalizeReadalongMatchText(*filter.Title)
+		var normAuthor string
+		if filter.AuthorName != nil {
+			normAuthor = repository.NormalizeReadalongMatchText(*filter.AuthorName)
+		}
+		if normTitle != "" {
+			if allBooks, err := h.repo.ListBooks(r.Context(), repository.BookFilter{Limit: 1000}); err == nil {
+				for _, cand := range allBooks {
+					if cand == nil || repository.NormalizeReadalongMatchText(cand.Title) != normTitle {
+						continue
+					}
+					if normAuthor != "" && normAuthor != "unknown" {
+						candAuthors, _ := h.repo.GetBookAuthors(r.Context(), cand.ID)
+						authorMatched := false
+						for _, ca := range candAuthors {
+							if ca == nil {
+								continue
+							}
+							na := repository.NormalizeReadalongMatchText(ca.Name)
+							if na == normAuthor || strings.Contains(na, normAuthor) || strings.Contains(normAuthor, na) {
+								authorMatched = true
+								break
+							}
+						}
+						if !authorMatched {
+							continue
+						}
+					}
+					books = append(books, cand)
+				}
+				total = len(books)
+			}
+		}
+	}
+
 	var items []BookListItem
 	for _, b := range books {
 		items = append(items, BuildBookListItem(r.Context(), h.repo, b))
@@ -362,6 +430,7 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 	highlights, _ := h.repo.ListHighlightsByBookID(r.Context(), book.ID)
 	files, _ := h.repo.GetBookFilesByBookID(r.Context(), book.ID)
 	audioChapters, _ := h.repo.GetAudioChaptersByBookID(r.Context(), book.ID)
+	hasReadalong, durationSeconds := resolveReadalongStatus(r.Context(), h.repo, book, files)
 
 	writeJSON(w, http.StatusOK, BookDetailResponse{
 		BookListItem: BookListItem{
@@ -381,7 +450,8 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 			RenditionOrientation:     book.RenditionOrientation,
 			PageProgressionDirection: book.PageProgressionDirection,
 			BookType:                 book.BookType,
-			DurationSeconds:          book.DurationSeconds,
+			DurationSeconds:          durationSeconds,
+			HasReadalong:             hasReadalong,
 			Authors:                  authors,
 			Genres:                   genres,
 			Topics:                   topics,
@@ -1527,6 +1597,96 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 		warnings = append(warnings, "No title found in metadata")
 	}
 
+	// If staging an audio file, drain any pending queued EPUB uploads first so a just-uploaded
+	// EPUB from Step 1 is in the catalog, then try to match an existing ebook on the shelf.
+	if fileType == "audiobook" {
+		h.drainPendingUploads(r.Context())
+
+		matchedBook, matchErr := repository.MatchBookForReadalong(r.Context(), h.repo, title, authors)
+		if matchErr == nil && matchedBook != nil && h.ingester != nil {
+			var coverBytes []byte
+			if hasCover {
+				coverBytes, _ = os.ReadFile(filepath.Join(uploadsDir, jobID+".cover"))
+			}
+
+			audioFile, openErr := os.Open(stagedPath)
+			if openErr == nil {
+				updatedBook, wasDuplicate, attachErr := h.ingester.AttachReadalongAudio(
+					r.Context(),
+					matchedBook,
+					header.Filename,
+					audioFile,
+					authors,
+					narrator,
+					coverBytes,
+				)
+				audioFile.Close()
+				if attachErr == nil && updatedBook != nil {
+					if wasDuplicate {
+						warnings = append(warnings, "Book already exists in library")
+					}
+					dto := StagedMetadataDTO{
+						Title:           updatedBook.Title,
+						Authors:         authors,
+						Description:     desc,
+						Publisher:       pub,
+						Language:        lang,
+						Genres:          genres,
+						IsDuplicate:     wasDuplicate,
+						Warnings:        warnings,
+						BookType:        "ebook",
+						Narrator:        narrator,
+						DurationSeconds: updatedBook.DurationSeconds,
+					}
+					metaBytes, _ := json.Marshal(dto)
+					metaStr := string(metaBytes)
+
+					job := &repository.UploadJob{
+						ID:         jobID,
+						Filename:   header.Filename,
+						StagedPath: stagedPath,
+						Status:     "completed",
+						BookID:     &updatedBook.ID,
+						Metadata:   &metaStr,
+						HasCover:   hasCover,
+					}
+					_ = h.repo.CreateUploadJob(r.Context(), job)
+					_ = h.repo.UpdateUploadJobStatus(r.Context(), job.ID, "completed", &updatedBook.ID, nil)
+					_ = os.Remove(stagedPath)
+
+					if h.hub != nil {
+						h.hub.Broadcast(events.Event{
+							Type: events.EventBookAdded,
+							Data: BuildBookListItem(r.Context(), h.repo, updatedBook),
+						})
+					}
+					h.broadcastQueueStatus(r.Context())
+
+					h.logger.Info("Linked staged audio as read-along to existing ebook",
+						"job_id", job.ID,
+						"book_id", updatedBook.ID,
+						"title", updatedBook.Title,
+						"is_duplicate", wasDuplicate,
+					)
+
+					writeJSON(w, http.StatusOK, map[string]any{
+						"id":           updatedBook.ID,
+						"book_id":      updatedBook.ID,
+						"job_id":       job.ID,
+						"status":       job.Status,
+						"filename":     job.Filename,
+						"metadata":     dto,
+						"has_cover":    hasCover,
+						"warnings":     warnings,
+						"is_duplicate": wasDuplicate,
+						"created_at":   job.CreatedAt,
+					})
+					return
+				}
+			}
+		}
+	}
+
 	primaryAuthor := authors[0]
 	isDuplicate := false
 	targetRelPath := filepath.Join(scanner.SanitizeAuthorSegment(primaryAuthor), scanner.SanitizePathSegment(title), scanner.SanitizePathSegment(title)+ext)
@@ -1539,6 +1699,9 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 		})
 		if err == nil {
 			for _, b := range books {
+				if fileType == "audiobook" && b.BookType != "audiobook" {
+					continue
+				}
 				if strings.EqualFold(strings.TrimSpace(b.Title), title) {
 					bAuthors, err := h.repo.GetBookAuthors(r.Context(), b.ID)
 					if err == nil {
@@ -1609,6 +1772,213 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 		"is_duplicate": isDuplicate,
 		"created_at":   job.CreatedAt,
 	})
+}
+
+func (h *BookHandler) drainPendingUploads(ctx context.Context) {
+	if h.uploadWorker != nil {
+		h.uploadWorker.DrainPending(ctx)
+		return
+	}
+	if h.ingester != nil && h.repo != nil {
+		tmpWorker := worker.NewUploadWorker(h.repo, h.ingester, h.worker, worker.UploadWorkerConfig{
+			Hub:    h.hub,
+			Logger: h.logger,
+		})
+		tmpWorker.DrainPending(ctx)
+	}
+}
+
+// ReadalongResponse represents the synchronized Media Overlays / read-along payload for a book.
+type ReadalongResponse struct {
+	BookID              string                     `json:"book_id"`
+	HasReadalong        bool                       `json:"has_readalong"`
+	HasMediaOverlays    bool                       `json:"has_media_overlays"`
+	ActiveClass         string                     `json:"active_class"`
+	PlaybackActiveClass string                     `json:"playback_active_class"`
+	Narrator            string                     `json:"narrator,omitempty"`
+	DurationSeconds     *float64                   `json:"duration_seconds,omitempty"`
+	AudioStreamURL      string                     `json:"audio_stream_url,omitempty"`
+	Segments            []epub.MediaOverlaySegment `json:"segments"`
+}
+
+// GetBookReadalong returns the EPUB 3 Media Overlays (SMIL) timeline or synthesized chapter/paragraph
+// read-along segments for synchronized audio playback, word highlighting, and page turning.
+func (h *BookHandler) GetBookReadalong(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book: %v", err))
+		return
+	}
+
+	files, _ := h.repo.GetBookFilesByBookID(r.Context(), book.ID)
+	hasReadalong, durationSeconds := resolveReadalongStatus(r.Context(), h.repo, book, files)
+
+	resp := ReadalongResponse{
+		BookID:              book.ID,
+		HasReadalong:        hasReadalong,
+		HasMediaOverlays:    false,
+		ActiveClass:         "-epub-media-overlay-active",
+		PlaybackActiveClass: "-epub-media-overlay-playing",
+		DurationSeconds:     durationSeconds,
+		Segments:            []epub.MediaOverlaySegment{},
+	}
+	if hasReadalong || book.BookType == "audiobook" {
+		resp.AudioStreamURL = fmt.Sprintf("/api/v1/audiobooks/%s/stream", book.ID)
+	}
+
+	// 1. Attempt to extract SMIL Media Overlays from the EPUB archive if available
+	if epubPath := h.resolveBookFilePath(book); epubPath != "" && strings.HasSuffix(strings.ToLower(epubPath), ".epub") {
+		if reader, err := epub.Open(epubPath); err == nil {
+			if manifest, mErr := reader.ExtractMediaOverlays(); mErr == nil && manifest != nil {
+				if manifest.ActiveClass != "" {
+					resp.ActiveClass = manifest.ActiveClass
+				}
+				if manifest.PlaybackActiveClass != "" {
+					resp.PlaybackActiveClass = manifest.PlaybackActiveClass
+				}
+				if manifest.Narrator != "" {
+					resp.Narrator = manifest.Narrator
+				}
+				if resp.DurationSeconds == nil && manifest.DurationSeconds != nil {
+					resp.DurationSeconds = manifest.DurationSeconds
+				}
+				if len(manifest.Segments) > 0 {
+					resp.HasMediaOverlays = true
+					resp.HasReadalong = true
+					resp.Segments = manifest.Segments
+					if resp.AudioStreamURL == "" {
+						resp.AudioStreamURL = fmt.Sprintf("/api/v1/audiobooks/%s/stream", book.ID)
+					}
+				}
+			}
+			reader.Close()
+		}
+	}
+
+	// 2. Fallback: if the book has read-along audio linked but no SMIL segments inside the EPUB,
+	// synthesize timeline segments from the book's chapters and paragraphs so the reader can still
+	// highlight phrases and auto-turn pages across the audio timeline.
+	if len(resp.Segments) == 0 && resp.HasReadalong {
+		chapters, _ := h.repo.GetChaptersByBookID(r.Context(), book.ID)
+		audioChapters, _ := h.repo.GetAudioChaptersByBookID(r.Context(), book.ID)
+
+		totalDur := 0.0
+		if resp.DurationSeconds != nil && *resp.DurationSeconds > 0 {
+			totalDur = *resp.DurationSeconds
+		} else {
+			for _, ac := range audioChapters {
+				end := ac.StartOffsetSec + ac.DurationSec
+				if end > totalDur {
+					totalDur = end
+				}
+			}
+		}
+
+		if len(chapters) > 0 && totalDur > 0 {
+			totalChars := 0
+			for _, ch := range chapters {
+				cLen := len(strings.TrimSpace(ch.ContentPlain))
+				if cLen < 20 {
+					cLen = 20
+				}
+				totalChars += cLen
+			}
+
+			cursor := 0.0
+			for i, ch := range chapters {
+				var chapStart, chapEnd float64
+				if len(audioChapters) == len(chapters) && audioChapters[i].DurationSec > 0 {
+					chapStart = audioChapters[i].StartOffsetSec
+					chapEnd = chapStart + audioChapters[i].DurationSec
+				} else {
+					cLen := len(strings.TrimSpace(ch.ContentPlain))
+					if cLen < 20 {
+						cLen = 20
+					}
+					dur := totalDur * (float64(cLen) / float64(totalChars))
+					chapStart = cursor
+					chapEnd = cursor + dur
+					cursor = chapEnd
+				}
+
+				href := ""
+				if ch.Href != nil {
+					href = *ch.Href
+				}
+
+				var blocks []string
+				for _, line := range strings.Split(ch.ContentPlain, "\n") {
+					trimmed := strings.TrimSpace(line)
+					if trimmed != "" {
+						blocks = append(blocks, trimmed)
+					}
+				}
+				if len(blocks) == 0 && ch.Title != nil && strings.TrimSpace(*ch.Title) != "" {
+					blocks = []string{strings.TrimSpace(*ch.Title)}
+				}
+				if len(blocks) == 0 {
+					resp.Segments = append(resp.Segments, epub.MediaOverlaySegment{
+						ChapterIndex: ch.ChapterIndex,
+						ChapterHref:  href,
+						FragmentID:   fmt.Sprintf("ch-%d", ch.ChapterIndex),
+						ClipBegin:    0,
+						ClipEnd:      chapEnd - chapStart,
+						GlobalBegin:  chapStart,
+						GlobalEnd:    chapEnd,
+					})
+					continue
+				}
+
+				blockChars := 0
+				for _, b := range blocks {
+					blockChars += len(b)
+				}
+				if blockChars == 0 {
+					blockChars = 1
+				}
+
+				bCursor := chapStart
+				chapDur := chapEnd - chapStart
+				for bIdx, bText := range blocks {
+					bDur := chapDur * (float64(len(bText)) / float64(blockChars))
+					bStart := bCursor
+					bEnd := bCursor + bDur
+					bCursor = bEnd
+					resp.Segments = append(resp.Segments, epub.MediaOverlaySegment{
+						ChapterIndex: ch.ChapterIndex,
+						ChapterHref:  href,
+						ParID:        fmt.Sprintf("ch%d_p%d", ch.ChapterIndex, bIdx+1),
+						FragmentID:   fmt.Sprintf("p%d", bIdx+1),
+						Text:         bText,
+						ClipBegin:    bStart - chapStart,
+						ClipEnd:      bEnd - chapStart,
+						GlobalBegin:  bStart,
+						GlobalEnd:    bEnd,
+					})
+				}
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // GetUploadJobCover returns the extracted cover image for a staged upload job.
@@ -1785,6 +2155,13 @@ func (h *BookHandler) CommitUploadJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if job.Status == "completed" && job.BookID != nil {
+		if existingBook, bErr := h.repo.GetBookByID(r.Context(), *job.BookID); bErr == nil && existingBook != nil {
+			writeJSON(w, http.StatusCreated, existingBook)
+			return
+		}
+	}
+
 	if job.Status != "staged" {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Upload job is not in 'staged' status (current status: %s)", job.Status))
 		return
@@ -1839,10 +2216,42 @@ func (h *BookHandler) CommitUploadJob(w http.ResponseWriter, r *http.Request) {
 	}
 	defer stagedFile.Close()
 
+	stagedCoverPath := filepath.Join(h.dataDir, "uploads", job.ID+".cover")
+	coverBytes, _ := os.ReadFile(stagedCoverPath)
+
+	// If committing an audiobook that matches an existing ebook on the shelf, attach as read-along
+	if fileType == "audiobook" {
+		if matchedBook, mErr := repository.MatchBookForReadalong(r.Context(), h.repo, title, authors); mErr == nil && matchedBook != nil {
+			updatedBook, _, attachErr := h.ingester.AttachReadalongAudio(
+				r.Context(),
+				matchedBook,
+				job.Filename,
+				stagedFile,
+				authors,
+				req.Narrator,
+				coverBytes,
+			)
+			stagedFile.Close()
+			if attachErr == nil && updatedBook != nil {
+				_ = os.Remove(job.StagedPath)
+				_ = os.Remove(stagedCoverPath)
+				_ = h.repo.UpdateUploadJobStatus(r.Context(), job.ID, "completed", &updatedBook.ID, nil)
+				if h.hub != nil {
+					h.hub.Broadcast(events.Event{
+						Type: events.EventBookAdded,
+						Data: BuildBookListItem(r.Context(), h.repo, updatedBook),
+					})
+				}
+				h.broadcastQueueStatus(r.Context())
+				writeJSON(w, http.StatusCreated, updatedBook)
+				return
+			}
+		}
+	}
+
 	// If a staged cover file exists, write it into /library/<Author>/<Title>/cover.<ext>
 	// so Audiobookshelf immediately detects it as the book cover.
-	stagedCoverPath := filepath.Join(h.dataDir, "uploads", job.ID+".cover")
-	if coverBytes, err := os.ReadFile(stagedCoverPath); err == nil && len(coverBytes) > 0 {
+	if len(coverBytes) > 0 {
 		ext := ".jpg"
 		ct := http.DetectContentType(coverBytes)
 		if strings.Contains(ct, "png") {
@@ -1863,8 +2272,8 @@ func (h *BookHandler) CommitUploadJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For audiobooks, update book metadata with user-confirmed details
-	if fileType == "audiobook" {
+	// For standalone audiobooks, update book metadata with user-confirmed details
+	if fileType == "audiobook" && book.BookType == "audiobook" {
 		book.Title = title
 		book.Description = req.Description
 		book.Publisher = req.Publisher
@@ -2711,5 +3120,3 @@ func (h *BookHandler) UploadBookCover(w http.ResponseWriter, r *http.Request) {
 		"cover_path": relCoverPath,
 	})
 }
-
-
