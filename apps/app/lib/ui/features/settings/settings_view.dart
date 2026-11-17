@@ -716,6 +716,144 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
             const SizedBox(height: AppTokens.space20),
 
+            // Server & Live Indexing Status Card
+            Consumer(
+              builder: (context, ref, _) {
+                final queueState = ref.watch(queueProvider);
+                final status = queueState.status;
+                final libraryState = ref.watch(libraryProvider);
+                final resolvedBook =
+                    status != null ? resolveBookTitle(status.currentBook, libraryState.books) : null;
+                final progress = status != null ? (status.progressPercent / 100.0).clamp(0.0, 1.0) : 0.0;
+                final c = context.shelfdColors;
+
+                return BentoCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.dns_outlined, size: 20, color: c.accentPrimary),
+                          const SizedBox(width: AppTokens.space8),
+                          Text(
+                            'Server Connection',
+                            style: AppTypography.titleSerif(fontSize: 18, color: c.ink),
+                          ),
+                          const Spacer(),
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: c.accentSecondary,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: AppTokens.space8),
+                          Text(
+                            'Connected',
+                            style: AppTypography.captionSans(color: c.accentSecondary),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppTokens.space8),
+                      Text(
+                        'Host: ${authState.serverUrl ?? 'Self-hosted API'}',
+                        style: AppTypography.mono(fontSize: 12, color: c.secondaryInk),
+                      ),
+
+                      if (status != null) ...[
+                        const SizedBox(height: AppTokens.space16),
+                        Divider(color: c.subtleBorder, height: 1),
+                        const SizedBox(height: AppTokens.space16),
+                        Row(
+                          children: [
+                            Icon(Icons.auto_awesome_rounded, size: 16, color: c.accentPrimary),
+                            const SizedBox(width: AppTokens.space8),
+                            Text(
+                              'AI Indexing & Vectors',
+                              style: AppTypography.bodySans(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: c.ink,
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '${status.progressPercent.toStringAsFixed(0)}%',
+                              style: AppTypography.mono(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: c.accentPrimary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppTokens.space8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: LinearProgressIndicator(
+                            value: progress,
+                            minHeight: 4,
+                            backgroundColor: c.containerLow,
+                            valueColor: AlwaysStoppedAnimation<Color>(c.accentPrimary),
+                          ),
+                        ),
+                        const SizedBox(height: AppTokens.space8),
+                        Text(
+                          '${status.indexedChapters} of ${status.totalChapters} chapters processed (${status.pendingChapters} pending)',
+                          style: AppTypography.captionSans(color: c.mutedInk),
+                        ),
+                        if (resolvedBook != null && resolvedBook.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Now processing: $resolvedBook',
+                            style: AppTypography.captionSans(color: c.ink),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ],
+                      const SizedBox(height: AppTokens.space16),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: c.ink,
+                          side: BorderSide(color: c.border),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppTokens.space16,
+                            vertical: AppTokens.space12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                          ),
+                        ),
+                        icon: queueState.isLoading
+                            ? SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: c.accentPrimary,
+                                ),
+                              )
+                            : const Icon(Icons.sync_rounded, size: 18),
+                        label: Text(queueState.isLoading ? 'Scanning...' : 'Rescan Library for New Books'),
+                        onPressed: queueState.isLoading
+                            ? null
+                            : () async {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Scanning library for new books...')),
+                                );
+                                await ref.read(bookRepositoryProvider).triggerScan();
+                              },
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+
+            const SizedBox(height: AppTokens.space20),
+
             // Yoto Player Integration Card
             Consumer(
               builder: (context, ref, _) {
@@ -737,11 +875,15 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         children: [
                           Icon(Icons.speaker_rounded, size: 20, color: c.accentPrimary),
                           const SizedBox(width: AppTokens.space8),
-                          Text(
-                            'Yoto Player Integration',
-                            style: AppTypography.titleSerif(fontSize: 18, color: c.ink),
+                          Expanded(
+                            child: Text(
+                              'Yoto Player Integration',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTypography.titleSerif(fontSize: 18, color: c.ink),
+                            ),
                           ),
-                          const Spacer(),
+                          const SizedBox(width: AppTokens.space8),
                           StatusBadge(
                             label: yotoState.isLinked ? 'Linked' : 'Not Connected',
                             backgroundColor: yotoState.isLinked
@@ -965,144 +1107,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                           ),
                         ],
                       ],
-                    ],
-                  ),
-                );
-              },
-            ),
-
-            const SizedBox(height: AppTokens.space20),
-
-            // Server & Live Indexing Status Card
-            Consumer(
-              builder: (context, ref, _) {
-                final queueState = ref.watch(queueProvider);
-                final status = queueState.status;
-                final libraryState = ref.watch(libraryProvider);
-                final resolvedBook =
-                    status != null ? resolveBookTitle(status.currentBook, libraryState.books) : null;
-                final progress = status != null ? (status.progressPercent / 100.0).clamp(0.0, 1.0) : 0.0;
-                final c = context.shelfdColors;
-
-                return BentoCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.dns_outlined, size: 20, color: c.accentPrimary),
-                          const SizedBox(width: AppTokens.space8),
-                          Text(
-                            'Server Connection',
-                            style: AppTypography.titleSerif(fontSize: 18, color: c.ink),
-                          ),
-                          const Spacer(),
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: c.accentSecondary,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: AppTokens.space8),
-                          Text(
-                            'Connected',
-                            style: AppTypography.captionSans(color: c.accentSecondary),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: AppTokens.space8),
-                      Text(
-                        'Host: ${authState.serverUrl ?? 'Self-hosted API'}',
-                        style: AppTypography.mono(fontSize: 12, color: c.secondaryInk),
-                      ),
-
-                      if (status != null) ...[
-                        const SizedBox(height: AppTokens.space16),
-                        Divider(color: c.subtleBorder, height: 1),
-                        const SizedBox(height: AppTokens.space16),
-                        Row(
-                          children: [
-                            Icon(Icons.auto_awesome_rounded, size: 16, color: c.accentPrimary),
-                            const SizedBox(width: AppTokens.space8),
-                            Text(
-                              'AI Indexing & Vectors',
-                              style: AppTypography.bodySans(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: c.ink,
-                              ),
-                            ),
-                            const Spacer(),
-                            Text(
-                              '${status.progressPercent.toStringAsFixed(0)}%',
-                              style: AppTypography.mono(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: c.accentPrimary,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: AppTokens.space8),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(2),
-                          child: LinearProgressIndicator(
-                            value: progress,
-                            minHeight: 4,
-                            backgroundColor: c.containerLow,
-                            valueColor: AlwaysStoppedAnimation<Color>(c.accentPrimary),
-                          ),
-                        ),
-                        const SizedBox(height: AppTokens.space8),
-                        Text(
-                          '${status.indexedChapters} of ${status.totalChapters} chapters processed (${status.pendingChapters} pending)',
-                          style: AppTypography.captionSans(color: c.mutedInk),
-                        ),
-                        if (resolvedBook != null && resolvedBook.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            'Now processing: $resolvedBook',
-                            style: AppTypography.captionSans(color: c.ink),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ],
-                      const SizedBox(height: AppTokens.space16),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: c.ink,
-                          side: BorderSide(color: c.border),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppTokens.space16,
-                            vertical: AppTokens.space12,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                          ),
-                        ),
-                        icon: queueState.isLoading
-                            ? SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: c.accentPrimary,
-                                ),
-                              )
-                            : const Icon(Icons.sync_rounded, size: 18),
-                        label: Text(queueState.isLoading ? 'Scanning...' : 'Rescan Library for New Books'),
-                        onPressed: queueState.isLoading
-                            ? null
-                            : () async {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Scanning library for new books...')),
-                                );
-                                await ref.read(bookRepositoryProvider).triggerScan();
-                              },
-                      ),
                     ],
                   ),
                 );

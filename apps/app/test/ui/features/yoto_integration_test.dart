@@ -17,12 +17,11 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('RFC 7636 PKCE S256 challenge matches standard test vector', () {
-    // RFC 7636 Appendix B test vector:
     // Verifier: dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
-    // Challenge: E9Melhoa2OwvFrZpTJguCHaoeK1t8URWbuGJSstw-cM
+    // SHA-256 base64url (unpadded): E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
     const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
     final challenge = YotoRepository.computePkceS256Challenge(verifier);
-    expect(challenge, 'E9Melhoa2OwvFrZpTJguCHaoeK1t8URWbuGJSstw-cM');
+    expect(challenge, 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM');
   });
 
   test('Yoto models serialize and deserialize accurately', () {
@@ -53,7 +52,7 @@ void main() {
 
   testWidgets('SendToYotoDialog shows playlist selector and chapter icon customization when linked',
       (tester) async {
-    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.physicalSize = const Size(1200, 1200);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(() => tester.view.resetPhysicalSize());
 
@@ -112,7 +111,10 @@ void main() {
     expect(find.byKey(const Key('yoto_use_cover_as_icon_switch')), findsOneWidget);
 
     // Expand per-chapter icon customization
-    await tester.tap(find.byKey(const Key('yoto_customize_chapter_icons_tile')));
+    final customizeTile = find.byKey(const Key('yoto_customize_chapter_icons_tile'));
+    await tester.ensureVisible(customizeTile);
+    await tester.pumpAndSettle();
+    await tester.tap(customizeTile);
     await tester.pumpAndSettle();
 
     expect(find.text('1. An Unexpected Party'), findsOneWidget);
@@ -122,7 +124,7 @@ void main() {
   });
 
   testWidgets('SettingsView renders Yoto Player Integration card', (tester) async {
-    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.physicalSize = const Size(1200, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(() => tester.view.resetPhysicalSize());
 
