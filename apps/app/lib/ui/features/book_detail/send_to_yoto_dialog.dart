@@ -448,7 +448,7 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
                           ),
                           const SizedBox(height: AppTokens.space8),
                           ConstrainedBox(
-                            constraints: const BoxConstraints(maxHeight: 190),
+                            constraints: const BoxConstraints(maxHeight: 150),
                             child: playlistsAsync.when(
                               loading: () => Padding(
                                 padding:
@@ -639,27 +639,30 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
                             ),
                           ),
                           const SizedBox(height: AppTokens.space8),
-                          CheckboxListTile(
-                            key: const Key('yoto_include_cover_checkbox'),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            controlAffinity: ListTileControlAffinity.leading,
-                            title: Text(
-                              'Upload book cover art as Yoto playlist cover',
-                              style: AppTypography.bodySans(
-                                fontSize: 13,
-                                color: colors.ink,
+                          Material(
+                            type: MaterialType.transparency,
+                            child: CheckboxListTile(
+                              key: const Key('yoto_include_cover_checkbox'),
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              title: Text(
+                                'Upload book cover art as Yoto playlist cover',
+                                style: AppTypography.bodySans(
+                                  fontSize: 13,
+                                  color: colors.ink,
+                                ),
                               ),
+                              value: _includeCover,
+                              activeColor: colors.accentPrimary,
+                              onChanged: _isSending
+                                  ? null
+                                  : (val) {
+                                      setState(() {
+                                        _includeCover = val ?? true;
+                                      });
+                                    },
                             ),
-                            value: _includeCover,
-                            activeColor: colors.accentPrimary,
-                            onChanged: _isSending
-                                ? null
-                                : (val) {
-                                    setState(() {
-                                      _includeCover = val ?? true;
-                                    });
-                                  },
                           ),
                         ],
 
@@ -750,26 +753,29 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
                                 ],
                               ),
                               const SizedBox(height: AppTokens.space8),
-                              SwitchListTile.adaptive(
-                                key: const Key('yoto_use_cover_as_icon_switch'),
-                                contentPadding: EdgeInsets.zero,
-                                dense: true,
-                                title: Text(
-                                  'Auto-convert book cover to 16×16 chapter icon',
-                                  style: AppTypography.bodySans(
-                                    fontSize: 13,
-                                    color: colors.ink,
+                              Material(
+                                type: MaterialType.transparency,
+                                child: SwitchListTile.adaptive(
+                                  key: const Key('yoto_use_cover_as_icon_switch'),
+                                  contentPadding: EdgeInsets.zero,
+                                  dense: true,
+                                  title: Text(
+                                    'Auto-convert book cover to 16×16 chapter icon',
+                                    style: AppTypography.bodySans(
+                                      fontSize: 13,
+                                      color: colors.ink,
+                                    ),
                                   ),
+                                  value: _useCoverAsIcon,
+                                  activeTrackColor: colors.accentPrimary,
+                                  onChanged: _isSending
+                                      ? null
+                                      : (val) {
+                                          setState(() {
+                                            _useCoverAsIcon = val;
+                                          });
+                                        },
                                 ),
-                                value: _useCoverAsIcon,
-                                activeTrackColor: colors.accentPrimary,
-                                onChanged: _isSending
-                                    ? null
-                                    : (val) {
-                                        setState(() {
-                                          _useCoverAsIcon = val;
-                                        });
-                                      },
                               ),
                             ],
                           ),
@@ -801,12 +807,16 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
                                   color: colors.accentPrimary,
                                 ),
                                 const SizedBox(width: AppTokens.space8),
-                                Text(
-                                  'Customize Icons per Playlist Entry (${entries.length})',
-                                  style: AppTypography.bodySans(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: colors.accentPrimary,
+                                Flexible(
+                                  child: Text(
+                                    'Customize Icons per Playlist Entry (${entries.length})',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTypography.bodySans(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.accentPrimary,
+                                    ),
                                   ),
                                 ),
                                 if (_chapterCustomIcons.isNotEmpty) ...[

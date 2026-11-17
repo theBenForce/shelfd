@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+STAGED_FILES="$(git diff --cached --name-only)"
+if [ -z "$STAGED_FILES" ]; then
+  exit 0
+fi
+
+# 1. Backend Go verification when apps/server/** is modified
+if echo "$STAGED_FILES" | grep -q '^apps/server/'; then
+  echo "🔍 [pre-commit] Changes detected in apps/server/ — running go vet & go test..."
+  (
+    cd "$ROOT_DIR/apps/server"
+    if command -v mise >/dev/null 2>&1 && ! command -v go >/dev/null 2>&1; then
+      mise exec -- go vet ./...
+      mise exec -- go test -tags fts5 ./...
+    else
+      go vet ./...
+      go test -tags fts5 ./...
+    fi
+  )
+fi
+
+# 2. Frontend Flutter verification when apps/app/** is modified
+if echo "$STAGED_FILES" | grep -q '^apps/app/'; then
+  echo "🔍 [pre-commit] Changes detected in apps/app/..."
+  if command -v flutter >/dev/null 2>&1; then
+    (
+      cd "$ROOT_DIR/apps/app"
+      flutter analyze --no-fatal-infos --no-fatal-warnings
+      flutter test
+    )
+  elif command -v mise >/dev/null 2>&1 && mise exec -- which flutter >/dev/null 2>&1; then
+    (
+      cd "$ROOT_DIR/apps/app"
+      mise exec -- flutter analyze --no-fatal-infos --no-fatal-warnings
+      mise exec -- flutter test
+    )
+  else
+    echo "⚠️  [pre-commit] Flutter SDK not found in local PATH."
+    echo "   Ensure you verify GitHub Actions CI ('gh pr checks --watch') after pushing!"
+  fi
+fi
