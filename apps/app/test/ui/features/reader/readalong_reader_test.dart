@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/services/api_service.dart';
-import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/reader/fixed_layout_reader.dart';
 import 'package:shelf/ui/state/providers.dart';
 
@@ -174,7 +173,6 @@ void main() {
             audioPlayerEngineProvider.overrideWithValue(engine),
           ],
           child: MaterialApp(
-            theme: AppTheme.lightTheme,
             home: FixedLayoutReader(
               book: book,
               initialReadalongManifest: manifest,
