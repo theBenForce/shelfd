@@ -231,6 +231,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: AppTokens.maxReadingWidth),
         child: ListView(
+          cacheExtent: 1200,
           padding: EdgeInsets.symmetric(
             horizontal: horizontalPad,
             vertical: AppTokens.space24,
