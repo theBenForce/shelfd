@@ -41,23 +41,34 @@ class YotoAccountState {
 }
 
 class YotoAccountNotifier extends Notifier<YotoAccountState> {
+  bool _isDisposed = false;
+
   @override
   YotoAccountState build() {
+    _isDisposed = false;
+    ref.onDispose(() {
+      _isDisposed = true;
+    });
     Future.microtask(loadStatus);
     return const YotoAccountState(isLoading: true);
   }
 
   Future<void> loadStatus() async {
+    if (_isDisposed) return;
     state = state.copyWith(isLoading: true, errorMessage: null);
     try {
       final repo = ref.read(yotoRepositoryProvider);
       final status = await repo.getStatus();
-      state = state.copyWith(status: status, isLoading: false);
+      if (!_isDisposed) {
+        state = state.copyWith(status: status, isLoading: false);
+      }
     } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        errorMessage: 'Failed to load Yoto account status: $e',
-      );
+      if (!_isDisposed) {
+        state = state.copyWith(
+          isLoading: false,
+          errorMessage: 'Failed to load Yoto account status: $e',
+        );
+      }
     }
   }
 

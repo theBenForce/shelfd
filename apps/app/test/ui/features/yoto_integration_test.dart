@@ -6,6 +6,8 @@ import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/yoto.dart';
 import 'package:shelf/data/repositories/yoto_repository.dart';
+import 'package:shelf/data/services/api_service.dart';
+import 'package:shelf/data/services/storage_service.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/book_detail/send_to_yoto_dialog.dart';
 import 'package:shelf/ui/features/settings/settings_view.dart';
@@ -57,6 +59,7 @@ void main() {
 
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
+    final mockYotoRepo = _MockYotoRepository(prefs);
 
     const book = Book(
       id: 'audio-book-1',
@@ -88,19 +91,8 @@ void main() {
       ProviderScope(
         overrides: [
           sharedPreferencesProvider.overrideWithValue(prefs),
+          yotoRepositoryProvider.overrideWithValue(mockYotoRepo),
           yotoAccountProvider.overrideWith(_MockLinkedYotoNotifier.new),
-          yotoPlaylistsProvider.overrideWith((ref) async => const [
-                YotoPlaylist(
-                  cardId: 'card-bedtime',
-                  title: 'Bedtime Stories',
-                  chapterCount: 4,
-                ),
-                YotoPlaylist(
-                  cardId: 'card-roadtrip',
-                  title: 'Road Trip Adventures',
-                  chapterCount: 2,
-                ),
-              ]),
         ],
         child: MaterialApp(
           theme: AppTheme.buildTheme(ReadingThemeMode.bone),
@@ -157,6 +149,30 @@ void main() {
     expect(find.byKey(const Key('yoto_client_id_field')), findsOneWidget);
     expect(find.byKey(const Key('link_yoto_oauth_button')), findsOneWidget);
   });
+}
+
+class _MockYotoRepository extends YotoRepository {
+  _MockYotoRepository(SharedPreferences prefs)
+      : super(
+          apiService: ApiService(baseUrl: 'http://localhost:8080'),
+          storageService: StorageService(prefs),
+        );
+
+  @override
+  Future<List<YotoPlaylist>> getPlaylists() async {
+    return const [
+      YotoPlaylist(
+        cardId: 'card-bedtime',
+        title: 'Bedtime Stories',
+        chapterCount: 4,
+      ),
+      YotoPlaylist(
+        cardId: 'card-roadtrip',
+        title: 'Road Trip Adventures',
+        chapterCount: 2,
+      ),
+    ];
+  }
 }
 
 class _MockLinkedYotoNotifier extends YotoAccountNotifier {

@@ -22,6 +22,7 @@ Container Mounts:
 * **Normalized Taxonomy**: Filterable authors, genres, and series with sequence numbers extracted directly from Dublin Core and EPUB 3 / Calibre collections.
 * **Single-Container Homelab Packaging**: Built in Go with embedded SQLite and `sqlite-vec`, packaged into a minimal Alpine container (< 50MB) with PUID/PGID user mapping and graceful signal handling.
 * **Modern Cross-Platform Client**: Flutter-based reading app (`Shelf`) for iOS, Android, and macOS/Desktop featuring Warm Editorial Bone, Sepia, and Dark reading themes.
+* **Yoto Player MYO Integration**: Link a [Yoto](https://yoto.dev/api/) account in Settings and send audiobooks directly to Make Your Own (MYO) playlists with customizable 16×16 pixel display icons per chapter.
 
 ---
 
@@ -231,6 +232,41 @@ pnpm --filter @shelfd/app dev
 
 ---
 
+## Yoto Player Integration ("Send to Yoto")
+
+Shelfd integrates with the [Yoto Developer API](https://yoto.dev/api/) so you can send audiobooks from your library directly to Yoto Make Your Own (MYO) playlists with custom 16×16 pixel chapter icons.
+
+### 1. Create a Yoto Developer Client ID
+1. Sign in to the [Yoto Developer Portal](https://yoto.dev/) and create an OAuth application.
+2. Add your Shelfd Settings URL as an allowed Redirect URI (for example, `http://localhost:8080/settings` or `https://shelfd.example.com/settings`).
+3. Copy your **Client ID** and either set it on the server via environment variables / `config.yaml` or enter it directly in the Shelfd **Settings** page.
+
+### 2. Server Configuration (Optional)
+You can pre-populate the default Yoto Client ID and redirect URI for all users via `config.yaml` or environment variables:
+
+```yaml
+yoto:
+  client_id: "your-yoto-client-id"
+  redirect_uri: "http://localhost:8080/settings"
+  api_base_url: "https://api.yotoplay.com"
+  auth_base_url: "https://login.yotoplay.com"
+```
+
+Or in `docker-compose.yml`:
+```yaml
+environment:
+  - SHELFD_YOTO_CLIENT_ID=your-yoto-client-id
+  - SHELFD_YOTO_REDIRECT_URI=http://localhost:8080/settings
+```
+
+### 3. Linking Your Account & Sending Audiobooks
+1. Open **Settings → Yoto Player Integration** in the Shelfd app.
+2. Click **Authorize with Yoto (PKCE)** to sign in with Yoto (`user:content:manage user:icons:manage offline_access` scopes), or link directly using a Yoto access/refresh token.
+3. Open any book with audio files, click the **Download** menu, and select **Send to Yoto** (automatically disabled for EPUB-only books without audio).
+4. Choose an existing MYO playlist or create a new one, and configure the 16×16 pixel display icons (default icon, auto-converted book cover, or per-chapter custom icons).
+
+---
+
 ## Environment Variables Reference
 
 | Variable | Default | Description |
@@ -253,6 +289,11 @@ pnpm --filter @shelfd/app dev
 | `SHELFD_AI_SUMMARY_MODEL` | `llama3.2:3b` | Summarization model for chapter ingestion |
 | `SHELFD_MCP_ENABLED` | `true` | Enable or disable MCP endpoints |
 | `SHELFD_MCP_PATH` | `/mcp` | Base path for MCP routes |
+| `SHELFD_YOTO_CLIENT_ID` | `""` | Default Yoto OAuth 2.0 Client ID from yoto.dev |
+| `SHELFD_YOTO_CLIENT_SECRET` | `""` | Optional Yoto OAuth Client Secret |
+| `SHELFD_YOTO_REDIRECT_URI` | `""` | Optional default OAuth Redirect URI |
+| `SHELFD_YOTO_API_BASE_URL` | `https://api.yotoplay.com` | Yoto REST API base URL |
+| `SHELFD_YOTO_AUTH_BASE_URL` | `https://login.yotoplay.com` | Yoto OAuth authorization & token base URL |
 
 ---
 
