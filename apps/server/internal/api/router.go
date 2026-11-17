@@ -22,6 +22,7 @@ type RouterConfig struct {
 	AIClient        ai.Client
 	ToolInvoker     ai.ToolInvoker
 	NotebookLM      config.NotebookLMConfig
+	Yoto            config.YotoConfig
 	Hub             *events.Hub
 	DataDir         string
 	LibraryDir      string
@@ -55,6 +56,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	utilHandler := NewUtilityHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
 	audioHandler := NewAudiobookHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, logger)
 	metadataHandler := NewMetadataHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
+	yotoHandler := NewYotoHandler(cfg.Repo, cfg.Yoto, cfg.DataDir, cfg.LibraryDir, logger)
 
 	auth := AuthMiddleware(cfg.Repo, cfg.JWTSecret)
 
@@ -69,6 +71,14 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("POST /api/v1/auth/tokens", auth(http.HandlerFunc(authHandler.CreateToken)))
 	mux.Handle("GET /api/v1/auth/tokens", auth(http.HandlerFunc(authHandler.ListTokens)))
 	mux.Handle("DELETE /api/v1/auth/tokens/{id}", auth(http.HandlerFunc(authHandler.DeleteToken)))
+
+	// Yoto integration routes
+	mux.Handle("GET /api/v1/integrations/yoto/status", auth(http.HandlerFunc(yotoHandler.GetStatus)))
+	mux.Handle("POST /api/v1/integrations/yoto/oauth/exchange", auth(http.HandlerFunc(yotoHandler.ExchangeOAuth)))
+	mux.Handle("POST /api/v1/integrations/yoto/unlink", auth(http.HandlerFunc(yotoHandler.Unlink)))
+	mux.Handle("GET /api/v1/integrations/yoto/playlists", auth(http.HandlerFunc(yotoHandler.ListPlaylists)))
+	mux.Handle("GET /api/v1/integrations/yoto/icons", auth(http.HandlerFunc(yotoHandler.ListIcons)))
+	mux.Handle("POST /api/v1/integrations/yoto/icons", auth(http.HandlerFunc(yotoHandler.UploadIcon)))
 
 	// Metadata search & auto-populate
 	mux.Handle("GET /api/v1/metadata/search", auth(http.HandlerFunc(metadataHandler.Search)))
@@ -90,6 +100,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/books/{id}/download", auth(http.HandlerFunc(bookHandler.DownloadBook)))
 	mux.Handle("GET /api/v1/books/{id}/notebooklm", auth(http.HandlerFunc(bookHandler.ExportBookNotebookLM)))
 	mux.Handle("POST /api/v1/books/{id}/notebooklm", auth(http.HandlerFunc(bookHandler.SendBookToNotebookLM)))
+	mux.Handle("POST /api/v1/books/{id}/yoto", auth(http.HandlerFunc(yotoHandler.SendBookToYoto)))
 	mux.Handle("GET /api/v1/books/{id}/cover", auth(http.HandlerFunc(bookHandler.GetBookCover)))
 	mux.Handle("GET /api/v1/books/{id}/assets/{path...}", auth(http.HandlerFunc(bookHandler.GetBookAsset)))
 	mux.Handle("GET /api/v1/books/{id}/chapters/{index}/html", auth(http.HandlerFunc(bookHandler.GetChapterHTML)))
@@ -137,3 +148,4 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	return CORSMiddleware(mux)
 }
+

@@ -2311,5 +2311,55 @@ func (r *BunStorageEngine) TransferAudiobookProgress(ctx context.Context, fromBo
 	return nil
 }
 
+// --- Yoto Accounts ---
+
+func (r *BunStorageEngine) GetYotoAccountByUserID(ctx context.Context, userID string) (*YotoAccount, error) {
+	acc := new(YotoAccount)
+	err := r.db.NewSelect().Model(acc).
+		Where("user_id = ?", userID).
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting yoto account: %w", err)
+	}
+	return acc, nil
+}
+
+func (r *BunStorageEngine) UpsertYotoAccount(ctx context.Context, account *YotoAccount) error {
+	if account.ID == "" {
+		account.ID = ulid.New()
+	}
+	now := time.Now().UTC()
+	if account.CreatedAt.IsZero() {
+		account.CreatedAt = now
+	}
+	account.UpdatedAt = now
+
+	q := r.db.NewInsert().Model(account)
+	if r.isPG() {
+		q = q.On("CONFLICT (user_id) DO UPDATE SET client_id = EXCLUDED.client_id, access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token, token_expires_at = EXCLUDED.token_expires_at, updated_at = EXCLUDED.updated_at")
+	} else {
+		q = q.On("CONFLICT (user_id) DO UPDATE SET client_id = excluded.client_id, access_token = excluded.access_token, refresh_token = excluded.refresh_token, token_expires_at = excluded.token_expires_at, updated_at = excluded.updated_at")
+	}
+	_, err := q.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("upserting yoto account: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) DeleteYotoAccount(ctx context.Context, userID string) error {
+	_, err := r.db.NewDelete().Model((*YotoAccount)(nil)).
+		Where("user_id = ?", userID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("deleting yoto account: %w", err)
+	}
+	return nil
+}
+
+
 
 

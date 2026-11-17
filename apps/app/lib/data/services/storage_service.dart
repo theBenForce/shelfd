@@ -19,6 +19,8 @@ class StorageService {
   static const _prefixAudioSpeed = 'shelfd_audio_speed_';
   static const _prefixChapter = 'shelfd_chapter_';
   static const _prefixHighlights = 'shelfd_highlights_';
+  static const _keyYotoClientId = 'shelfd_yoto_client_id';
+  static const _keyYotoPkceVerifier = 'shelfd_yoto_pkce_verifier';
 
   // Server credentials
   String? getServerUrl() => _prefs.getString(_keyServerUrl);
@@ -137,4 +139,13 @@ class StorageService {
   Future<void> cacheHighlights(String bookId, List<Map<String, dynamic>> highlights) async {
     await _prefs.setString('$_prefixHighlights$bookId', jsonEncode(highlights));
   }
+
+  // Yoto integration preferences
+  String? getYotoClientId() => _prefs.getString(_keyYotoClientId);
+  Future<void> saveYotoClientId(String clientId) => _prefs.setString(_keyYotoClientId, clientId);
+
+  String? getYotoPkceVerifier() => _prefs.getString(_keyYotoPkceVerifier);
+  Future<void> saveYotoPkceVerifier(String verifier) =>
+      _prefs.setString(_keyYotoPkceVerifier, verifier);
+  Future<void> clearYotoPkceVerifier() => _prefs.remove(_keyYotoPkceVerifier);
 }

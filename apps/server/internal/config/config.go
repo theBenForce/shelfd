@@ -21,9 +21,11 @@ type Config struct {
 	AI         AIConfig         `yaml:"ai"`
 	MCP        MCPConfig        `yaml:"mcp"`
 	NotebookLM NotebookLMConfig `yaml:"notebooklm"`
+	Yoto       YotoConfig       `yaml:"yoto"`
 	Auth       AuthConfig       `yaml:"auth"`
 	Logging    LoggingConfig    `yaml:"logging"`
 }
+
 
 type ServerConfig struct {
 	Host      string `yaml:"host"`
@@ -158,6 +160,34 @@ func (n NotebookLMConfig) String() string {
 		n.Enabled, n.WebhookURL, n.Endpoint, n.ProjectID, n.Location, maskedKey, n.NotebookURL)
 }
 
+// YotoConfig defines optional server-side defaults for Yoto OAuth and API integration.
+type YotoConfig struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	RedirectURI  string `yaml:"redirect_uri"`
+	APIBaseURL   string `yaml:"api_base_url,omitempty"`
+	AuthBaseURL  string `yaml:"auth_base_url,omitempty"`
+}
+
+const (
+	DefaultYotoAPIBaseURL  = "https://api.yotoplay.com"
+	DefaultYotoAuthBaseURL = "https://login.yotoplay.com"
+)
+
+func (y YotoConfig) ResolvedAPIBaseURL() string {
+	if u := strings.TrimSpace(y.APIBaseURL); u != "" {
+		return strings.TrimRight(u, "/")
+	}
+	return DefaultYotoAPIBaseURL
+}
+
+func (y YotoConfig) ResolvedAuthBaseURL() string {
+	if u := strings.TrimSpace(y.AuthBaseURL); u != "" {
+		return strings.TrimRight(u, "/")
+	}
+	return DefaultYotoAuthBaseURL
+}
+
 type AuthConfig struct {
 	AdminUsername string `yaml:"admin_username"`
 	AdminPassword string `yaml:"admin_password"`
@@ -223,6 +253,10 @@ func DefaultConfig() *Config {
 			Location:    "global",
 			NotebookURL: DefaultNotebookLMURL,
 		},
+		Yoto: YotoConfig{
+			APIBaseURL:  DefaultYotoAPIBaseURL,
+			AuthBaseURL: DefaultYotoAuthBaseURL,
+		},
 		Auth: AuthConfig{
 			AdminUsername: "admin",
 			AdminPassword: "",
@@ -233,6 +267,7 @@ func DefaultConfig() *Config {
 		},
 	}
 }
+
 
 // Load reads and parses a YAML configuration file with environment variable substitution.
 func Load(path string) (*Config, error) {
@@ -812,7 +847,24 @@ func ApplyEnvOverrides(cfg *Config) {
 		cfg.NotebookLM.NotebookURL = strings.TrimSpace(v)
 	}
 
+	if v := os.Getenv("SHELFD_YOTO_CLIENT_ID"); v != "" {
+		cfg.Yoto.ClientID = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("SHELFD_YOTO_CLIENT_SECRET"); v != "" {
+		cfg.Yoto.ClientSecret = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("SHELFD_YOTO_REDIRECT_URI"); v != "" {
+		cfg.Yoto.RedirectURI = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("SHELFD_YOTO_API_BASE_URL"); v != "" {
+		cfg.Yoto.APIBaseURL = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("SHELFD_YOTO_AUTH_BASE_URL"); v != "" {
+		cfg.Yoto.AuthBaseURL = strings.TrimSpace(v)
+	}
+
 	if v := os.Getenv("SHELFD_ADMIN_USERNAME"); v != "" {
+
 		cfg.Auth.AdminUsername = v
 	} else if v := os.Getenv("SHELFD_AUTH_ADMIN_USERNAME"); v != "" {
 		cfg.Auth.AdminUsername = v

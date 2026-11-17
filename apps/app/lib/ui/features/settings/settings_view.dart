@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/app_shell.dart';
+import '../../core/file_saver/file_saver.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
 import '../../core/theme.dart';
@@ -22,10 +23,15 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   final _defaultUsernameController = TextEditingController();
+  final _yotoClientIdController = TextEditingController();
+  final _yotoAuthCodeController = TextEditingController();
+  final _yotoAccessTokenController = TextEditingController();
+  final _yotoRefreshTokenController = TextEditingController();
 
   bool _obscureCurrent = true;
   bool _obscureNew = true;
   bool _obscureConfirm = true;
+  bool _showYotoManualTokens = false;
 
   bool _isChangingPassword = false;
   String? _passwordError;
@@ -38,6 +44,15 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     final storage = ref.read(storageServiceProvider);
     final savedUsername = storage.getSavedUsername();
     _defaultUsernameController.text = savedUsername ?? '';
+    _yotoClientIdController.text = storage.getYotoClientId() ?? '';
+
+    final callbackCode = Uri.base.queryParameters['code'];
+    if (callbackCode != null && callbackCode.trim().isNotEmpty) {
+      _yotoAuthCodeController.text = callbackCode.trim();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _handleExchangeYotoCode();
+      });
+    }
   }
 
   @override
@@ -46,6 +61,10 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
     _defaultUsernameController.dispose();
+    _yotoClientIdController.dispose();
+    _yotoAuthCodeController.dispose();
+    _yotoAccessTokenController.dispose();
+    _yotoRefreshTokenController.dispose();
     super.dispose();
   }
 
@@ -117,6 +136,70 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           }
         });
       }
+    }
+  }
+
+  String _resolveYotoRedirectUri() {
+    final base = Uri.base;
+    if (base.scheme == 'http' || base.scheme == 'https') {
+      return '${base.origin}/settings';
+    }
+    return 'http://localhost:8080/settings';
+  }
+
+  Future<void> _handleStartYotoOAuth(String? defaultClientId) async {
+    final clientId = _yotoClientIdController.text.trim().isNotEmpty
+        ? _yotoClientIdController.text.trim()
+        : (defaultClientId ?? '').trim();
+
+    if (clientId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter your Yoto Client ID (from yoto.dev) first.'),
+        ),
+      );
+      return;
+    }
+
+    final url = await ref.read(yotoAccountProvider.notifier).buildAuthUrl(
+          clientId: clientId,
+          redirectUri: _resolveYotoRedirectUri(),
+        );
+    await openExternalUrl(url);
+  }
+
+  Future<void> _handleExchangeYotoCode() async {
+    final code = _yotoAuthCodeController.text.trim();
+    if (code.isEmpty) return;
+
+    final ok = await ref.read(yotoAccountProvider.notifier).exchangeCode(
+          code: code,
+          clientId: _yotoClientIdController.text.trim(),
+          redirectUri: _resolveYotoRedirectUri(),
+        );
+    if (ok && mounted) {
+      _yotoAuthCodeController.clear();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Yoto account linked!')),
+      );
+    }
+  }
+
+  Future<void> _handleLinkYotoToken() async {
+    final access = _yotoAccessTokenController.text.trim();
+    if (access.isEmpty) return;
+
+    final ok = await ref.read(yotoAccountProvider.notifier).linkWithTokens(
+          accessToken: access,
+          refreshToken: _yotoRefreshTokenController.text.trim(),
+          clientId: _yotoClientIdController.text.trim(),
+        );
+    if (ok && mounted) {
+      _yotoAccessTokenController.clear();
+      _yotoRefreshTokenController.clear();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Yoto account linked!')),
+      );
     }
   }
 
@@ -629,6 +712,263 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                   ),
                 ],
               ),
+            ),
+
+            const SizedBox(height: AppTokens.space20),
+
+            // Yoto Player Integration Card
+            Consumer(
+              builder: (context, ref, _) {
+                final yotoState = ref.watch(yotoAccountProvider);
+                final c = context.shelfdColors;
+                final defaultClientId = yotoState.status.defaultClientId;
+                if (_yotoClientIdController.text.isEmpty &&
+                    defaultClientId != null &&
+                    defaultClientId.isNotEmpty) {
+                  _yotoClientIdController.text = defaultClientId;
+                }
+
+                return BentoCard(
+                  key: const Key('yoto_integration_settings_card'),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.speaker_rounded, size: 20, color: c.accentPrimary),
+                          const SizedBox(width: AppTokens.space8),
+                          Text(
+                            'Yoto Player Integration',
+                            style: AppTypography.titleSerif(fontSize: 18, color: c.ink),
+                          ),
+                          const Spacer(),
+                          StatusBadge(
+                            label: yotoState.isLinked ? 'Linked' : 'Not Connected',
+                            backgroundColor: yotoState.isLinked
+                                ? c.accentSecondaryContainer
+                                : c.containerLow,
+                            textColor: yotoState.isLinked ? c.accentSecondary : c.mutedInk,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppTokens.space8),
+                      Text(
+                        'Link your Yoto account to send audiobooks directly to Make Your Own (MYO) playlists with custom 16×16 pixel chapter icons.',
+                        style: AppTypography.captionSans(color: c.mutedInk),
+                      ),
+                      const SizedBox(height: AppTokens.space16),
+
+                      if (yotoState.errorMessage != null) ...[
+                        Container(
+                          padding: const EdgeInsets.all(AppTokens.space12),
+                          decoration: BoxDecoration(
+                            color: c.errorBg,
+                            borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                            border: Border.all(color: c.errorBorder),
+                          ),
+                          child: Text(
+                            yotoState.errorMessage!,
+                            style: AppTypography.bodySans(fontSize: 13, color: c.errorText),
+                          ),
+                        ),
+                        const SizedBox(height: AppTokens.space12),
+                      ],
+
+                      if (yotoState.isLinked) ...[
+                        Container(
+                          padding: const EdgeInsets.all(AppTokens.space12),
+                          decoration: BoxDecoration(
+                            color: c.containerLow,
+                            borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                            border: Border.all(color: c.subtleBorder),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.check_circle_outline, size: 18, color: c.accentSecondary),
+                              const SizedBox(width: AppTokens.space8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Connected to Yoto API',
+                                      style: AppTypography.bodySans(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: c.ink,
+                                      ),
+                                    ),
+                                    if (yotoState.status.clientId != null &&
+                                        yotoState.status.clientId!.isNotEmpty)
+                                      Text(
+                                        'Client ID: ${yotoState.status.clientId}',
+                                        style: AppTypography.mono(
+                                          fontSize: 11,
+                                          color: c.secondaryInk,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              OutlinedButton.icon(
+                                key: const Key('unlink_yoto_account_button'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: c.errorText,
+                                  side: BorderSide(color: c.errorBorder),
+                                ),
+                                onPressed: yotoState.isLoading
+                                    ? null
+                                    : () => ref.read(yotoAccountProvider.notifier).unlink(),
+                                icon: const Icon(Icons.link_off_rounded, size: 16),
+                                label: const Text('Unlink'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else ...[
+                        TextFormField(
+                          key: const Key('yoto_client_id_field'),
+                          controller: _yotoClientIdController,
+                          style: AppTypography.bodySans(fontSize: 14, color: c.ink),
+                          decoration: InputDecoration(
+                            labelText: 'Yoto Client ID',
+                            hintText: 'Your Yoto Developer Client ID from yoto.dev',
+                            isDense: true,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                              borderSide: BorderSide(color: c.border),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                              borderSide: BorderSide(color: c.border),
+                            ),
+                            prefixIcon: Icon(Icons.key_outlined, size: 18, color: c.mutedInk),
+                          ),
+                        ),
+                        const SizedBox(height: AppTokens.space12),
+                        Wrap(
+                          spacing: AppTokens.space8,
+                          runSpacing: AppTokens.space8,
+                          children: [
+                            FilledButton.icon(
+                              key: const Key('link_yoto_oauth_button'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: c.accentPrimary,
+                                foregroundColor: c.onAccent,
+                              ),
+                              onPressed: yotoState.isLoading
+                                  ? null
+                                  : () => _handleStartYotoOAuth(defaultClientId),
+                              icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                              label: const Text('Authorize with Yoto (PKCE)'),
+                            ),
+                            TextButton.icon(
+                              key: const Key('toggle_yoto_manual_token_button'),
+                              onPressed: () {
+                                setState(() {
+                                  _showYotoManualTokens = !_showYotoManualTokens;
+                                });
+                              },
+                              icon: Icon(
+                                _showYotoManualTokens
+                                    ? Icons.expand_less_rounded
+                                    : Icons.expand_more_rounded,
+                                size: 18,
+                              ),
+                              label: Text(
+                                _showYotoManualTokens
+                                    ? 'Hide Token / Code Entry'
+                                    : 'Enter Authorization Code or Token',
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: AppTokens.space12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextFormField(
+                                key: const Key('yoto_auth_code_field'),
+                                controller: _yotoAuthCodeController,
+                                style: AppTypography.bodySans(fontSize: 13, color: c.ink),
+                                decoration: InputDecoration(
+                                  labelText: 'Authorization Code (from callback URL)',
+                                  hintText: 'Paste ?code=... from Yoto login redirect',
+                                  isDense: true,
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                                    borderSide: BorderSide(color: c.border),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: AppTokens.space8),
+                            OutlinedButton(
+                              key: const Key('yoto_exchange_code_button'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: c.ink,
+                                side: BorderSide(color: c.border),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 14,
+                                ),
+                              ),
+                              onPressed:
+                                  yotoState.isLoading ? null : _handleExchangeYotoCode,
+                              child: const Text('Link Code'),
+                            ),
+                          ],
+                        ),
+                        if (_showYotoManualTokens) ...[
+                          const SizedBox(height: AppTokens.space12),
+                          TextFormField(
+                            key: const Key('yoto_access_token_field'),
+                            controller: _yotoAccessTokenController,
+                            style: AppTypography.bodySans(fontSize: 13, color: c.ink),
+                            decoration: InputDecoration(
+                              labelText: 'Yoto Access Token (Direct Link)',
+                              isDense: true,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                                borderSide: BorderSide(color: c.border),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: AppTokens.space8),
+                          TextFormField(
+                            key: const Key('yoto_refresh_token_field'),
+                            controller: _yotoRefreshTokenController,
+                            style: AppTypography.bodySans(fontSize: 13, color: c.ink),
+                            decoration: InputDecoration(
+                              labelText: 'Yoto Refresh Token (Optional)',
+                              isDense: true,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                                borderSide: BorderSide(color: c.border),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: AppTokens.space8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: OutlinedButton.icon(
+                              key: const Key('yoto_link_token_button'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: c.ink,
+                                side: BorderSide(color: c.border),
+                              ),
+                              onPressed:
+                                  yotoState.isLoading ? null : _handleLinkYotoToken,
+                              icon: const Icon(Icons.check_rounded, size: 16),
+                              label: const Text('Save Token'),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ],
+                  ),
+                );
+              },
             ),
 
             const SizedBox(height: AppTokens.space20),

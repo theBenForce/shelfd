@@ -17,6 +17,7 @@ import '../models/topic.dart';
 import '../models/paginated_books.dart';
 import '../models/upload_job.dart';
 import '../models/user.dart';
+import '../models/yoto.dart';
 
 class ApiException implements Exception {
   final int statusCode;
@@ -961,5 +962,125 @@ class ApiService {
     if (response.statusCode >= 400) {
       throw ApiException(response.statusCode, response.body);
     }
+  }
+
+  // Yoto Integration Endpoints
+  Future<YotoStatus> getYotoStatus() async {
+    final response = await client.get(
+      _uri('/api/v1/integrations/yoto/status'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return YotoStatus.fromJson(data);
+  }
+
+  Future<YotoStatus> exchangeYotoOAuth({
+    String? code,
+    String? codeVerifier,
+    String? clientId,
+    String? redirectUri,
+    String? accessToken,
+    String? refreshToken,
+  }) async {
+    final response = await client.post(
+      _uri('/api/v1/integrations/yoto/oauth/exchange'),
+      headers: _headers(),
+      body: jsonEncode({
+        if (code != null && code.isNotEmpty) 'code': code,
+        if (codeVerifier != null && codeVerifier.isNotEmpty) 'code_verifier': codeVerifier,
+        if (clientId != null && clientId.isNotEmpty) 'client_id': clientId,
+        if (redirectUri != null && redirectUri.isNotEmpty) 'redirect_uri': redirectUri,
+        if (accessToken != null && accessToken.isNotEmpty) 'access_token': accessToken,
+        if (refreshToken != null && refreshToken.isNotEmpty) 'refresh_token': refreshToken,
+      }),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return YotoStatus.fromJson(data);
+  }
+
+  Future<void> unlinkYotoAccount() async {
+    final response = await client.post(
+      _uri('/api/v1/integrations/yoto/unlink'),
+      headers: _headers(),
+      body: jsonEncode(<String, dynamic>{}),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+  }
+
+  Future<List<YotoPlaylist>> getYotoPlaylists() async {
+    final response = await client.get(
+      _uri('/api/v1/integrations/yoto/playlists'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final list = data['playlists'] as List<dynamic>? ?? const [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(YotoPlaylist.fromJson)
+        .toList();
+  }
+
+  Future<YotoIconsCatalog> getYotoIcons() async {
+    final response = await client.get(
+      _uri('/api/v1/integrations/yoto/icons'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return YotoIconsCatalog.fromJson(data);
+  }
+
+  Future<YotoDisplayIcon> uploadYotoIcon({
+    required String filename,
+    required List<int> bytes,
+  }) async {
+    final uri = _uri('/api/v1/integrations/yoto/icons');
+    final request = http.MultipartRequest('POST', uri);
+    if (token != null && token!.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        'file',
+        bytes,
+        filename: filename,
+      ),
+    );
+    final streamedResponse = await client.send(request);
+    final response = await http.Response.fromStream(streamedResponse);
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return YotoDisplayIcon.fromJson(data);
+  }
+
+  Future<SendToYotoResult> sendBookToYoto(
+    String bookId,
+    SendToYotoRequest requestPayload,
+  ) async {
+    final response = await client.post(
+      _uri('/api/v1/books/$bookId/yoto'),
+      headers: _headers(),
+      body: jsonEncode(requestPayload.toJson()),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return SendToYotoResult.fromJson(data);
   }
 }
