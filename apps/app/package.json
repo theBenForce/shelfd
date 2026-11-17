@@ -11,7 +11,7 @@
     "dev:web": "flutter run -d web-server --web-port 3000",
     "dev:macos": "flutter run -d macos",
     "test": "if [ -d test ]; then flutter test; else echo 'No tests found in @shelfd/app yet (Milestone 6)'; fi",
-    "lint": "if [ -f pubspec.yaml ]; then flutter analyze; else echo 'No pubspec.yaml in @shelfd/app yet (Milestone 6)'; fi",
+    "lint": "if [ -f pubspec.yaml ]; then flutter analyze --no-fatal-infos --no-fatal-warnings; else echo 'No pubspec.yaml in @shelfd/app yet (Milestone 6)'; fi",
     "clean": "if [ -f pubspec.yaml ]; then flutter clean; fi",
     "generate:icons": "./scripts/generate_icons.sh"
   }

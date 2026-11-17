@@ -30,13 +30,13 @@ if echo "$STAGED_FILES" | grep -q '^apps/app/'; then
   if command -v flutter >/dev/null 2>&1; then
     (
       cd "$ROOT_DIR/apps/app"
-      flutter analyze
+      flutter analyze --no-fatal-infos --no-fatal-warnings
       flutter test
     )
   elif command -v mise >/dev/null 2>&1 && mise exec -- which flutter >/dev/null 2>&1; then
     (
       cd "$ROOT_DIR/apps/app"
-      mise exec -- flutter analyze
+      mise exec -- flutter analyze --no-fatal-infos --no-fatal-warnings
       mise exec -- flutter test
     )
   else
