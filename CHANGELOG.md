@@ -1,3 +1,17 @@
+# [1.18.0](https://github.com/theBenForce/shelfd/compare/v1.17.0...v1.18.0) (2026-11-17)
+
+
+### Bug Fixes
+
+* **app:** resolve Yoto widget layout assertions and add PR CI & pre-commit guardrails ([#76](https://github.com/theBenForce/shelfd/issues/76)) ([0d0f7d0](https://github.com/theBenForce/shelfd/commit/0d0f7d00daf064e9d8b6780df6f118f2f7b66bfc))
+* **app:** use FilePicker.pickFiles v12 static API in YotoIconPickerDialog and document Yoto config ([#75](https://github.com/theBenForce/shelfd/issues/75)) ([7388e68](https://github.com/theBenForce/shelfd/commit/7388e68acfdba9fdc34734419bc0623415244dec))
+* **auth:** persist generated JWT secret in data directory and clear token on 401 ([#73](https://github.com/theBenForce/shelfd/issues/73)) ([66da9a9](https://github.com/theBenForce/shelfd/commit/66da9a9f36d438670336a5c7aef8f641cc4321ed))
+
+
+### Features
+
+* **yoto:** add Send to Yoto playlist integration and 16x16 chapter icons ([#74](https://github.com/theBenForce/shelfd/issues/74)) ([aa6a181](https://github.com/theBenForce/shelfd/commit/aa6a1817de4162d9b11799d48e8f0b05031e1093))
+
 # [1.17.0](https://github.com/theBenForce/shelfd/compare/v1.16.0...v1.17.0) (2026-11-10)
 
 
