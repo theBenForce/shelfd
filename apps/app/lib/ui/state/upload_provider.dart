@@ -139,6 +139,12 @@ class UploadNotifier extends Notifier<UploadState> {
       }
     });
 
+    ref.listen(authProvider, (previous, next) {
+      if (previous?.user != next.user && next.user != null) {
+        loadStagedJobs();
+      }
+    });
+
     Future.microtask(() => loadStagedJobs());
 
     return UploadState(autoCommit: autoCommit);

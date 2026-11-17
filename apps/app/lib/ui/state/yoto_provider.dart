@@ -50,6 +50,11 @@ class YotoAccountNotifier extends Notifier<YotoAccountState> {
     ref.onDispose(() {
       _isDisposed = true;
     });
+    ref.listen(authProvider, (previous, next) {
+      if (previous?.user != next.user && next.user != null) {
+        loadStatus();
+      }
+    });
     Future.microtask(loadStatus);
     return const YotoAccountState(isLoading: true);
   }

@@ -155,8 +155,6 @@ class AuthNotifier extends Notifier<AuthState> {
       final user = await authRepo.login(effectiveUrl, username, password);
       state = state.copyWith(user: user, isLoading: false, serverUrl: effectiveUrl);
       ref.invalidate(queueProvider);
-      ref.invalidate(yotoAccountProvider);
-      ref.invalidate(uploadProvider);
       return true;
     } catch (e) {
       state = state.copyWith(clearUser: true, isLoading: false, error: e.toString());
