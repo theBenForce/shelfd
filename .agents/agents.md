@@ -36,6 +36,7 @@ This file centralizes the specialized AI team personas and implementation workfl
   * **Reading Ergonomics**: Delivers clean, distraction-free typography (custom margins, line height, font sizing, light/sepia/dark reading themes).
   * **Cross-Platform UX**: Builds native-feeling interfaces across iOS, Android, and macOS/Desktop (responsive cover grids, author drawers, series reading lists).
   * **Offline Architecture**: Caches book content and metadata locally so reading continues uninterrupted without active server connectivity.
+  * **Widget Test & Layout Safety**: Strictly follows `.agents/rules/flutter-widget-safety.md` and `.agents/skills/flutter-pre-pr-checklist.md` — grepping existing package call sites before using dependencies, wrapping `Row` text in `Expanded`/`Flexible` for the `Ahem` test font, wrapping `ListTile`/`SwitchListTile`/`CheckboxListTile` in `Material(type: MaterialType.transparency)` inside colored containers, and preserving `ListView` card order for viewport-dependent tests.
 
 ### 5. `@designer` — The UI/UX Architect & Stitch Craftsman
 * **Core Focus**: User interface design, design systems, typographic ergonomics, and Stitch MCP prototyping for Shelfd.
@@ -71,6 +72,7 @@ This file centralizes the specialized AI team personas and implementation workfl
   * **Automated Auth Session Seeding**: Injects local storage authentication tokens (`flutter.shelfd_server_url`, `flutter.shelfd_saved_username`, `flutter.shelfd_auth_token`) so that browser automation bypasses login without manual human intervention.
   * **Visual Proof & Walkthrough Artifacts**: Captures high-fidelity screenshots using `take_screenshot`, offloads them to the conversation brain directory, and embeds them directly into `walkthrough.md`.
   * **Layout & Shell Invariant Checks**: Verifies that desktop sidebar navigation (`AppShell`) persists across catalog and detail views (`/books`, `/series`, `/authors`, `/books/:id`, `/series/:id`, `/authors/:id`), while reader routes (`/books/:id/read`) remain fullscreen.
+  * **GitHub Actions PR CI Gate**: Ensures every Pull Request passes `.github/workflows/ci.yml` (`gh pr checks --watch`) before asking the user to review or merge.
 
 ---
 
@@ -111,7 +113,8 @@ graph TD
 * **Leads**: `@qa`, `@security`, `@homelab`
 * **Actions**:
   * Run workspace checks: `pnpm build`, `pnpm test`, `pnpm lint`.
-  * Run unit and analyzer suites: `mise exec -- flutter analyze`, `mise exec -- flutter test`, `mise exec -- go test ./...`.
+  * Run unit and analyzer suites: `mise exec -- flutter analyze`, `mise exec -- flutter test`, `mise exec -- go test -tags fts5 ./...`.
+  * **PR CI Gate (Mandatory when local `flutter` SDK is absent)**: After opening or pushing to a PR, run `gh pr checks --watch` (or `gh run watch --exit-status`) and verify that the GitHub Actions `CI` workflow passes green before asking the user to merge.
   * **Live End-to-End Verification**:
     1. Start the Go server in watch mode with `air` on `http://localhost:8080`.
     2. Start Flutter Web on `http://localhost:3000` via `flutter run -d web-server --web-port 3000` (maintaining hot reload/restart).
