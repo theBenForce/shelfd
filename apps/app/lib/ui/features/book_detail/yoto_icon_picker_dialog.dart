@@ -55,15 +55,15 @@ class _YotoIconPickerDialogState extends ConsumerState<YotoIconPickerDialog> {
     });
 
     try {
-      final picked = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        withData: true,
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'],
       );
-      if (picked == null || picked.files.isEmpty) return;
+      if (result.isEmpty) return;
 
-      final file = picked.files.first;
-      final bytes = file.bytes;
-      if (bytes == null || bytes.isEmpty) {
+      final file = result.first;
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) {
         setState(() {
           _uploadError = 'Could not read image bytes.';
         });

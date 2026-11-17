@@ -247,7 +247,9 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
   Widget build(BuildContext context) {
     final colors = ShelfdColors.of(context);
     final yotoAccount = ref.watch(yotoAccountProvider);
-    final playlistsAsync = ref.watch(yotoPlaylistsProvider);
+    final AsyncValue<List<YotoPlaylist>> playlistsAsync = yotoAccount.isLinked
+        ? ref.watch(yotoPlaylistsProvider)
+        : const AsyncValue.data([]);
     final entries = _resolveEntries(widget.book);
 
     return Dialog(
