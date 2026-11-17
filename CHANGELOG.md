@@ -1,3 +1,10 @@
+# [1.19.0](https://github.com/theBenForce/shelfd/compare/v1.18.0...v1.19.0) (2026-11-17)
+
+
+### Features
+
+* **readalong:** link staged audio to shelf ebooks and add EPUB 3 Media Overlays reader playback ([#77](https://github.com/theBenForce/shelfd/issues/77)) ([b3b526f](https://github.com/theBenForce/shelfd/commit/b3b526f831857d6db48b0d2ad9e29e9bbd324c80))
+
 # [1.18.0](https://github.com/theBenForce/shelfd/compare/v1.17.0...v1.18.0) (2026-11-17)
 
 
