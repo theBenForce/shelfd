@@ -15,6 +15,7 @@ import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
 import 'edit_book_metadata_dialog.dart';
+import 'send_to_yoto_dialog.dart';
 
 class BookDetailView extends ConsumerStatefulWidget {
   final String bookId;
@@ -152,10 +153,14 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
       case 'markdown':
         _downloadMarkdown(book);
         break;
+      case 'yoto':
+        _sendToYoto(book);
+        break;
     }
   }
 
-  List<PopupMenuEntry<String>> _buildExportMenuItems(ShelfdColors colors) {
+  List<PopupMenuEntry<String>> _buildExportMenuItems(ShelfdColors colors, Book book) {
+    final hasAudio = _hasAudiobook(book);
     return [
       PopupMenuItem<String>(
         key: const Key('menu_item_download_epub'),
@@ -198,6 +203,31 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         ),
       ),
       PopupMenuItem<String>(
+        key: const Key('menu_item_send_yoto'),
+        value: 'yoto',
+        enabled: hasAudio,
+        child: Row(
+          children: [
+            Icon(
+              Icons.speaker_rounded,
+              size: 18,
+              color: hasAudio ? AppTokens.amberAccent : colors.mutedInk,
+            ),
+            const SizedBox(width: AppTokens.space12),
+            Flexible(
+              child: Text(
+                'Send to Yoto',
+                style: AppTypography.bodySans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: hasAudio ? colors.ink : colors.mutedInk,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      PopupMenuItem<String>(
         key: const Key('menu_item_download_markdown'),
         value: 'markdown',
         child: Row(
@@ -218,6 +248,19 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         ),
       ),
     ];
+  }
+
+  Future<void> _sendToYoto(Book book) async {
+    if (!_hasAudiobook(book)) return;
+    final result = await showSendToYotoDialog(context, book);
+    if (result != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _downloadEpub(Book book) async {
@@ -585,7 +628,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                   )
                 : Icon(Icons.download_rounded, color: colors.ink),
             onSelected: (action) => _handleExportMenuSelection(action, book),
-            itemBuilder: (context) => _buildExportMenuItems(colors),
+            itemBuilder: (context) => _buildExportMenuItems(colors, book),
           ),
           IconButton(
             icon: Icon(Icons.bookmark_add_outlined, color: colors.ink),
@@ -906,7 +949,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                 side: BorderSide(color: colors.border),
               ),
               onSelected: (action) => _handleExportMenuSelection(action, book),
-              itemBuilder: (context) => _buildExportMenuItems(colors),
+              itemBuilder: (context) => _buildExportMenuItems(colors, book),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16),
                 decoration: BoxDecoration(

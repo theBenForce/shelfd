@@ -145,6 +145,12 @@ type StorageEngine interface {
 	GetOAuthCode(ctx context.Context, code string) (*OAuthCode, error)
 	DeleteOAuthCode(ctx context.Context, code string) error
 
+	// Yoto Accounts
+	GetYotoAccountByUserID(ctx context.Context, userID string) (*YotoAccount, error)
+	UpsertYotoAccount(ctx context.Context, account *YotoAccount) error
+	DeleteYotoAccount(ctx context.Context, userID string) error
+
 	// Lifecycle
 	Close() error
 }
+

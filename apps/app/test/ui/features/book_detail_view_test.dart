@@ -472,9 +472,17 @@ void main() {
     // Verify all dropdown options are rendered
     expect(find.byKey(const Key('menu_item_download_epub')), findsOneWidget);
     expect(find.byKey(const Key('menu_item_send_notebooklm')), findsOneWidget);
+    expect(find.byKey(const Key('menu_item_send_yoto')), findsOneWidget);
     expect(find.byKey(const Key('menu_item_download_markdown')), findsOneWidget);
     expect(find.text('Send to NotebookLM'), findsOneWidget);
+    expect(find.text('Send to Yoto'), findsOneWidget);
     expect(find.text('Download Markdown (.md)'), findsOneWidget);
+
+    // Since testBook has no audio files, "Send to Yoto" must be disabled
+    final sendYotoItem = tester.widget<PopupMenuItem<String>>(
+      find.byKey(const Key('menu_item_send_yoto')),
+    );
+    expect(sendYotoItem.enabled, isFalse);
 
     // Select "Send to NotebookLM"
     await tester.tap(find.byKey(const Key('menu_item_send_notebooklm')));
@@ -483,6 +491,58 @@ void main() {
     expect(mockRepo.sendToNotebookLMCalledWith, 'book-42');
     expect(mockRepo.downloadNotebookLMCalledWith, 'book-42');
     expect(find.textContaining('NotebookLM'), findsOneWidget);
+  });
+
+  testWidgets('BookDetailView enables Send to Yoto menu item when audio files are available', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+
+    final audiobook = testBook.copyWith(
+      bookType: 'audiobook',
+      durationSeconds: 3600.0,
+      files: const [
+        BookFile(
+          id: 'af-1',
+          bookId: 'book-42',
+          fileType: 'audiobook',
+          filePath: 'chapter1.m4b',
+          durationSeconds: 3600.0,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookDetailProvider('book-42').overrideWith(() => _MockBookDetailNotifier(audiobook)),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const BookDetailView(bookId: 'book-42'),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await tester.tap(find.byKey(const Key('download_hero_menu_button')));
+    await tester.pumpAndSettle();
+
+    final sendYotoItem = tester.widget<PopupMenuItem<String>>(
+      find.byKey(const Key('menu_item_send_yoto')),
+    );
+    expect(sendYotoItem.enabled, isTrue);
+
+    await tester.tap(find.byKey(const Key('menu_item_send_yoto')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('send_to_yoto_dialog')), findsOneWidget);
   });
 
   testWidgets('BookDetailView AppBar Download EPUB dropdown triggers EPUB and Markdown downloads', (tester) async {
