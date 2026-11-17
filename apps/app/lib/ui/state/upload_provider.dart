@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/models/book.dart';
 import '../../data/models/upload_job.dart';
+import '../../data/services/api_service.dart';
 import 'providers.dart';
 
 class PickedEpubFile {
@@ -164,6 +165,10 @@ class UploadNotifier extends Notifier<UploadState> {
         isLoadingJobs: false,
       );
     } catch (e) {
+      if (e is ApiException && e.statusCode == 401) {
+        await ref.read(storageServiceProvider).clearAuthToken();
+        ref.read(apiServiceProvider).updateConnection(newToken: '');
+      }
       if (!ref.mounted) return;
       state = state.copyWith(
         isLoadingJobs: false,

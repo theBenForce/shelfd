@@ -138,7 +138,10 @@ class YotoRepository {
       padded.add(0);
     }
     final byteData = ByteData(8);
-    byteData.setUint64(0, bitLen, Endian.big);
+    final highBits = (bitLen ~/ 0x100000000) & 0xffffffff;
+    final lowBits = bitLen & 0xffffffff;
+    byteData.setUint32(0, highBits, Endian.big);
+    byteData.setUint32(4, lowBits, Endian.big);
     for (int i = 0; i < 8; i++) {
       padded.add(byteData.getUint8(i));
     }

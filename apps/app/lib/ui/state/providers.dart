@@ -154,6 +154,9 @@ class AuthNotifier extends Notifier<AuthState> {
     try {
       final user = await authRepo.login(effectiveUrl, username, password);
       state = state.copyWith(user: user, isLoading: false, serverUrl: effectiveUrl);
+      ref.invalidate(queueProvider);
+      ref.invalidate(yotoAccountProvider);
+      ref.invalidate(uploadProvider);
       return true;
     } catch (e) {
       state = state.copyWith(clearUser: true, isLoading: false, error: e.toString());
@@ -893,6 +896,10 @@ class QueueNotifier extends Notifier<QueueState> {
         },
         onError: (err) {
           debugPrint('Queue SSE stream error: $err');
+          if (err is ApiException && err.statusCode == 401) {
+            _handleUnauthorized(err);
+            return;
+          }
           refresh();
           _scheduleReconnect(const Duration(seconds: 5));
         },
@@ -903,8 +910,22 @@ class QueueNotifier extends Notifier<QueueState> {
       );
     } catch (e) {
       debugPrint('Error initiating Queue SSE stream: $e');
+      if (e is ApiException && e.statusCode == 401) {
+        _handleUnauthorized(e);
+        return;
+      }
       refresh();
       _scheduleReconnect(const Duration(seconds: 5));
+    }
+  }
+
+  Future<void> _handleUnauthorized(Object err) async {
+    _subscription?.cancel();
+    _reconnectTimer?.cancel();
+    await ref.read(storageServiceProvider).clearAuthToken();
+    ref.read(apiServiceProvider).updateConnection(newToken: '');
+    if (!_isDisposed) {
+      state = state.copyWith(isLoading: false, error: err.toString());
     }
   }
 
@@ -926,6 +947,10 @@ class QueueNotifier extends Notifier<QueueState> {
         state = QueueState(status: status, isLoading: false);
       }
     } catch (e) {
+      if (e is ApiException && e.statusCode == 401) {
+        await _handleUnauthorized(e);
+        return;
+      }
       if (!_isDisposed) {
         state = state.copyWith(isLoading: false, error: e.toString());
       }
