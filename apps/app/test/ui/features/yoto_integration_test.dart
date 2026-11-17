@@ -150,6 +150,43 @@ void main() {
     expect(find.text('Yoto Player Integration'), findsOneWidget);
     expect(find.byKey(const Key('yoto_client_id_field')), findsOneWidget);
     expect(find.byKey(const Key('link_yoto_oauth_button')), findsOneWidget);
+
+    // Tapping Authorize with Yoto (PKCE) computes S256 challenge and saves verifier
+    await tester.ensureVisible(find.byKey(const Key('link_yoto_oauth_button')));
+    await tester.tap(find.byKey(const Key('link_yoto_oauth_button')));
+    await tester.pumpAndSettle();
+
+    expect(prefs.getString('shelfd_yoto_client_id'), 'default-client-id');
+    expect(prefs.getString('shelfd_yoto_pkce_verifier'), isNotNull);
+    expect(prefs.getString('shelfd_yoto_pkce_verifier')!.length, 64);
+  });
+
+  testWidgets('SettingsView shows Reconnect / Sign In button when Yoto status fails with 401', (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({
+      'shelfd_auth_token': 'expired-token',
+    });
+    final prefs = await SharedPreferences.getInstance();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          yotoAccountProvider.overrideWith(_MockUnauthorizedYotoNotifier.new),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const SettingsView(),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('yoto_reconnect_signin_button')), findsOneWidget);
   });
 }
 
@@ -199,6 +236,17 @@ class _MockUnlinkedYotoNotifier extends YotoAccountNotifier {
         defaultClientId: 'default-client-id',
       ),
       isLoading: false,
+    );
+  }
+}
+
+class _MockUnauthorizedYotoNotifier extends YotoAccountNotifier {
+  @override
+  YotoAccountState build() {
+    return const YotoAccountState(
+      status: YotoStatus(isLinked: false),
+      isLoading: false,
+      errorMessage: 'Failed to load Yoto account status: ApiException(401): {"error":"Invalid or expired authorization token"}',
     );
   }
 }

@@ -40,11 +40,20 @@ Future<bool> saveDownloadedFile(
 }
 
 Future<bool> openExternalUrl(String url) async {
-  if (url.trim().isEmpty) return false;
+  final trimmed = url.trim();
+  if (trimmed.isEmpty) return false;
   try {
-    web.window.open(url, '_blank');
+    final win = web.window.open(trimmed, '_blank');
+    if (win == null) {
+      web.window.location.assign(trimmed);
+    }
     return true;
   } catch (_) {
-    return false;
+    try {
+      web.window.location.assign(trimmed);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 }
