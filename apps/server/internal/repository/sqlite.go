@@ -739,7 +739,7 @@ func (r *SQLiteStorageEngine) GetBookAuthors(ctx context.Context, bookID string)
 		FROM authors a
 		JOIN book_authors ba ON a.id = ba.author_id
 		WHERE ba.book_id = ?
-		ORDER BY a.name COLLATE NOCASE ASC
+		ORDER BY CASE WHEN LOWER(ba.role) = 'narrator' THEN 1 ELSE 0 END ASC, a.name COLLATE NOCASE ASC
 	`
 	rows, err := r.db.QueryContext(ctx, query, bookID)
 	if err != nil {
@@ -2890,8 +2890,3 @@ func (r *SQLiteStorageEngine) DeleteYotoAccount(ctx context.Context, userID stri
 	}
 	return nil
 }
-
-
-
-
-

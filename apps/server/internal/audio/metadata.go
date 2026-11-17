@@ -59,6 +59,14 @@ func ExtractMetadata(filePath string) (*Metadata, error) {
 func ExtractMetadataFromReader(r io.ReadSeeker, size int64, ext string) (*Metadata, error) {
 	switch ext {
 	case ".m4b", ".m4a", ".mp4":
+		if size >= 3 {
+			var magic [3]byte
+			if _, err := r.Seek(0, io.SeekStart); err == nil {
+				if _, err := io.ReadFull(r, magic[:]); err == nil && string(magic[:]) == "ID3" {
+					return parseMP3(r, size)
+				}
+			}
+		}
 		return parseMP4(r, size)
 	case ".mp3":
 		return parseMP3(r, size)

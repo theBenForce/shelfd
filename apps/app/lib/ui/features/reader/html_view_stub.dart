@@ -18,3 +18,13 @@ Widget buildHtmlFrame({
     ),
   );
 }
+
+void highlightHtmlFrame({
+  required String fragmentId,
+  String activeClass = '-epub-media-overlay-active',
+  String playbackActiveClass = '-epub-media-overlay-playing',
+  bool playing = true,
+}) {
+  // No-op on non-web platforms.
+}
+

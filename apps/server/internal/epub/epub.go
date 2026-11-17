@@ -39,17 +39,23 @@ type ParsedBook struct {
 	RenditionSpread          string // "auto", "landscape", "both", "none"
 	RenditionOrientation     string // "auto", "landscape", "portrait"
 	PageProgressionDirection string // "ltr" or "rtl"
+	HasMediaOverlays         bool
+	MediaActiveClass         string
+	MediaPlaybackActiveClass string
+	MediaDurationSeconds     *float64
+	MediaNarrator            string
 }
 
 // ParsedChapter holds extracted plaintext content and layout metadata for an EPUB spine section.
 type ParsedChapter struct {
-	Index        int
-	Title        *string
-	ContentPlain string
-	Href         string
-	PageWidth    *int
-	PageHeight   *int
-	PageSpread   *string
+	Index          int
+	Title          *string
+	ContentPlain   string
+	Href           string
+	PageWidth      *int
+	PageHeight     *int
+	PageSpread     *string
+	MediaOverlayID string
 }
 
 // Reader provides safe inspection and extraction methods for an EPUB archive.

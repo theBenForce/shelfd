@@ -1,3 +1,4 @@
+import 'dart:js_interop';
 import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
@@ -45,3 +46,25 @@ Widget buildHtmlFrame({
     ),
   );
 }
+
+void highlightHtmlFrame({
+  required String fragmentId,
+  String activeClass = '-epub-media-overlay-active',
+  String playbackActiveClass = '-epub-media-overlay-playing',
+  bool playing = true,
+}) {
+  final payload = <String, Object?>{
+    'type': 'shelfd:readalong-highlight',
+    'fragmentId': fragmentId,
+    'activeClass': activeClass,
+    'playbackActiveClass': playbackActiveClass,
+    'playing': playing,
+  }.jsify();
+
+  for (final iframe in _activeIframes.values) {
+    try {
+      iframe.contentWindow?.postMessage(payload, '*'.toJS);
+    } catch (_) {}
+  }
+}
+

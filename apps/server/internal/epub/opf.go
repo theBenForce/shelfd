@@ -9,11 +9,11 @@ import (
 )
 
 type opfPackage struct {
-	XMLName  xml.Name     `xml:"package"`
-	Version  string       `xml:"version,attr"`
-	Metadata opfMetadata  `xml:"metadata"`
-	Manifest opfManifest  `xml:"manifest"`
-	Spine    opfSpine     `xml:"spine"`
+	XMLName  xml.Name    `xml:"package"`
+	Version  string      `xml:"version,attr"`
+	Metadata opfMetadata `xml:"metadata"`
+	Manifest opfManifest `xml:"manifest"`
+	Spine    opfSpine    `xml:"spine"`
 }
 
 type opfMetadata struct {
@@ -53,10 +53,11 @@ type opfManifest struct {
 }
 
 type opfItem struct {
-	ID         string `xml:"id,attr"`
-	Href       string `xml:"href,attr"`
-	MediaType  string `xml:"media-type,attr"`
-	Properties string `xml:"properties,attr"`
+	ID           string `xml:"id,attr"`
+	Href         string `xml:"href,attr"`
+	MediaType    string `xml:"media-type,attr"`
+	Properties   string `xml:"properties,attr"`
+	MediaOverlay string `xml:"media-overlay,attr"`
 }
 
 type opfSpine struct {
@@ -202,11 +203,28 @@ func (r *Reader) ParseBook() (*ParsedBook, error) {
 		}
 	}
 
+	// Check manifest for SMIL media overlays
+	for _, item := range r.opf.Manifest.Items {
+		if strings.TrimSpace(item.MediaOverlay) != "" || strings.EqualFold(strings.TrimSpace(item.MediaType), "application/smil+xml") {
+			book.HasMediaOverlays = true
+			break
+		}
+	}
+
+	var refinesDurationSum float64
+	var hasGlobalDuration bool
+
 	for _, m := range meta.Metas {
 		prop := strings.ToLower(strings.TrimSpace(m.Property))
 		name := strings.ToLower(strings.TrimSpace(m.Name))
-		val := strings.ToLower(strings.TrimSpace(m.Value))
-		content := strings.ToLower(strings.TrimSpace(m.Content))
+		rawVal := strings.TrimSpace(m.Value)
+		rawContent := strings.TrimSpace(m.Content)
+		val := strings.ToLower(rawVal)
+		content := strings.ToLower(rawContent)
+		metaVal := rawVal
+		if metaVal == "" {
+			metaVal = rawContent
+		}
 
 		if prop == "rendition:spread" && val != "" {
 			book.RenditionSpread = val
@@ -215,6 +233,51 @@ func (r *Reader) ParseBook() (*ParsedBook, error) {
 			book.RenditionOrientation = val
 		} else if name == "orientation-lock" && content != "" {
 			book.RenditionOrientation = content
+		}
+
+		// EPUB 3 Media Overlays / Apple Books read-aloud metadata
+		switch {
+		case prop == "media:active-class" || name == "media:active-class":
+			if metaVal != "" {
+				book.MediaActiveClass = metaVal
+				book.HasMediaOverlays = true
+			}
+		case prop == "media:playback-active-class" || name == "media:playback-active-class":
+			if metaVal != "" {
+				book.MediaPlaybackActiveClass = metaVal
+				book.HasMediaOverlays = true
+			}
+		case prop == "media:narrator" || name == "media:narrator":
+			if metaVal != "" && book.MediaNarrator == "" {
+				book.MediaNarrator = metaVal
+			}
+		case prop == "media:duration" || name == "media:duration":
+			if metaVal != "" {
+				if sec, err := ParseSMILClock(metaVal); err == nil && sec > 0 {
+					if strings.TrimSpace(m.Refines) == "" {
+						dur := sec
+						book.MediaDurationSeconds = &dur
+						hasGlobalDuration = true
+					} else {
+						refinesDurationSum += sec
+					}
+					book.HasMediaOverlays = true
+				}
+			}
+		}
+	}
+
+	if !hasGlobalDuration && refinesDurationSum > 0 {
+		dur := refinesDurationSum
+		book.MediaDurationSeconds = &dur
+	}
+
+	if book.HasMediaOverlays {
+		if book.MediaActiveClass == "" {
+			book.MediaActiveClass = "-epub-media-overlay-active"
+		}
+		if book.MediaPlaybackActiveClass == "" {
+			book.MediaPlaybackActiveClass = "-epub-media-overlay-playing"
 		}
 	}
 

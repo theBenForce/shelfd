@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/shelfd/shelfd/internal/epub"
 	"github.com/shelfd/shelfd/internal/repository"
 )
 
@@ -120,6 +123,26 @@ func (h *AudiobookHandler) StreamAudio(w http.ResponseWriter, r *http.Request) {
 	resolvedPath, err := h.resolveFilePath(audioPath)
 	if err != nil {
 		writeJSONError(w, http.StatusNotFound, "Audio file not found on disk")
+		return
+	}
+
+	if strings.HasSuffix(strings.ToLower(resolvedPath), ".epub") {
+		if reader, oErr := epub.Open(resolvedPath); oErr == nil {
+			defer reader.Close()
+			if manifest, mErr := reader.ExtractMediaOverlays(); mErr == nil && manifest != nil {
+				for _, seg := range manifest.Segments {
+					if seg.AudioSrc != "" {
+						if data, mime, aErr := reader.ExtractAsset(seg.AudioSrc); aErr == nil && len(data) > 0 {
+							w.Header().Set("Content-Type", mime)
+							w.Header().Set("Accept-Ranges", "bytes")
+							http.ServeContent(w, r, filepath.Base(seg.AudioSrc), time.Now(), bytes.NewReader(data))
+							return
+						}
+					}
+				}
+			}
+		}
+		writeJSONError(w, http.StatusNotFound, "No audio stream attached to this book")
 		return
 	}
 

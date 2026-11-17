@@ -97,6 +97,9 @@ class BookRepository {
     return book.copyWith(readingProgress: progress);
   }
 
+  Future<ReadalongManifest> getBookReadalong(String id) =>
+      apiService.getBookReadalong(id);
+
   String getBookDownloadUrl(String bookId) => apiService.getBookDownloadUrl(bookId);
 
   Future<List<int>> downloadBookEpub(String bookId) => apiService.downloadBookEpub(bookId);
