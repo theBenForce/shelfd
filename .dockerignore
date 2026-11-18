@@ -1,0 +1,32 @@
+# Version control & CI/agent tooling
+.git
+.github
+.githooks
+.agents
+
+# Node / Turbo workspace artifacts
+node_modules
+**/node_modules
+.pnpm-store
+.turbo
+**/.turbo
+
+# Documentation & local config/data
+docs
+data
+library
+*.md
+.env
+.env.*
+
+# Backend local build/test artifacts
+apps/server/dist
+apps/server/tmp
+apps/server/*.test
+apps/server/*.out
+
+# Flutter source & intermediates (keep only pre-built apps/app/build/web)
+apps/app/*
+!apps/app/build
+apps/app/build/*
+!apps/app/build/web
