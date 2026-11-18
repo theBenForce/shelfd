@@ -568,7 +568,12 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 				keyStr := fmt.Sprintf("%02d", chIdx+1)
 				labelStr := fmt.Sprintf("%d", chIdx+1)
 				chTitle := strings.TrimSpace(ac.Title)
-				if chTitle == "" {
+				if len(audioChapters) == 1 {
+					lowerTitle := strings.ToLower(chTitle)
+					if chTitle == "" || lowerTitle == "chapter 1" || lowerTitle == "track 1" || lowerTitle == "01" || lowerTitle == "1" {
+						chTitle = book.Title
+					}
+				} else if chTitle == "" {
 					chTitle = fmt.Sprintf("Chapter %d", chIdx+1)
 				}
 				iconURI := resolveChapterIcon(chIdx)
@@ -580,6 +585,8 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 					Key:          keyStr,
 					Title:        chTitle,
 					OverlayLabel: labelStr,
+					Duration:     dur,
+					FileSize:     trackSize,
 					Display:      yoto.DisplayFields{Icon16x16: iconURI},
 					Tracks: []yoto.Track{
 						{
@@ -617,6 +624,8 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 				Key:          keyStr,
 				Title:        chTitle,
 				OverlayLabel: labelStr,
+				Duration:     trackDuration,
+				FileSize:     trackSize,
 				Display:      yoto.DisplayFields{Icon16x16: iconURI},
 				Tracks: []yoto.Track{
 					{
@@ -652,33 +661,91 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 
 	var contentPayload yoto.CardContent
 	mode := strings.ToLower(strings.TrimSpace(req.Mode))
-	if mode == "existing" && strings.TrimSpace(req.CardID) != "" {
-		targetCardID := strings.TrimSpace(req.CardID)
+	targetCardID := strings.TrimSpace(req.CardID)
+	cumulativeDuration := totalDuration
+	cumulativeFileSize := totalFileSize
+
+	switch mode {
+	case "existing", "append":
+		if targetCardID == "" {
+			writeJSONError(w, http.StatusBadRequest, "card_id is required when appending to an existing playlist")
+			return
+		}
+		existingCard, getErr := h.yotoClient.GetCard(r.Context(), accessToken, targetCardID)
+		if getErr != nil || existingCard == nil {
+			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Failed to load existing Yoto playlist: %v", getErr))
+			return
+		}
+		contentPayload.CardID = existingCard.CardID
+		contentPayload.Title = existingCard.Title
+		contentPayload.UserID = existingCard.UserID
+		contentPayload.Slug = existingCard.Slug
+		contentPayload.CreatedAt = existingCard.CreatedAt
+		contentPayload.UpdatedAt = existingCard.UpdatedAt
+		contentPayload.Metadata = existingCard.Metadata
+		contentPayload.Content = existingCard.Content
+
+		existingChapters := existingCard.Content.Chapters
+		if existingCard.Metadata.Media != nil {
+			cumulativeDuration += existingCard.Metadata.Media.Duration
+			cumulativeFileSize += existingCard.Metadata.Media.FileSize
+		} else {
+			for _, ch := range existingChapters {
+				if ch.Duration > 0 {
+					cumulativeDuration += ch.Duration
+				} else {
+					for _, tr := range ch.Tracks {
+						cumulativeDuration += tr.Duration
+					}
+				}
+				if ch.FileSize > 0 {
+					cumulativeFileSize += ch.FileSize
+				} else {
+					for _, tr := range ch.Tracks {
+						cumulativeFileSize += tr.FileSize
+					}
+				}
+			}
+		}
+
+		offset := len(existingChapters)
+		for i := range newChapters {
+			num := offset + i + 1
+			keyStr := fmt.Sprintf("%02d", num)
+			labelStr := fmt.Sprintf("%d", num)
+			newChapters[i].Key = keyStr
+			newChapters[i].OverlayLabel = labelStr
+			for j := range newChapters[i].Tracks {
+				newChapters[i].Tracks[j].Key = keyStr
+				newChapters[i].Tracks[j].OverlayLabel = labelStr
+			}
+		}
+		contentPayload.Content.Chapters = append(existingChapters, newChapters...)
+
+	case "replace":
+		if targetCardID == "" {
+			writeJSONError(w, http.StatusBadRequest, "card_id is required when replacing an existing playlist")
+			return
+		}
 		existingCard, getErr := h.yotoClient.GetCard(r.Context(), accessToken, targetCardID)
 		if getErr == nil && existingCard != nil {
 			contentPayload.CardID = existingCard.CardID
 			contentPayload.Title = existingCard.Title
+			contentPayload.UserID = existingCard.UserID
+			contentPayload.Slug = existingCard.Slug
+			contentPayload.CreatedAt = existingCard.CreatedAt
 			contentPayload.Metadata = existingCard.Metadata
-			existingChapters := existingCard.Content.Chapters
-			offset := len(existingChapters)
-			for i := range newChapters {
-				num := offset + i + 1
-				keyStr := fmt.Sprintf("%02d", num)
-				labelStr := fmt.Sprintf("%d", num)
-				newChapters[i].Key = keyStr
-				newChapters[i].OverlayLabel = labelStr
-				for j := range newChapters[i].Tracks {
-					newChapters[i].Tracks[j].Key = keyStr
-					newChapters[i].Tracks[j].OverlayLabel = labelStr
-				}
-			}
-			contentPayload.Content.Chapters = append(existingChapters, newChapters...)
+			contentPayload.Content = existingCard.Content
 		} else {
 			contentPayload.CardID = targetCardID
 			contentPayload.Title = book.Title
-			contentPayload.Content.Chapters = newChapters
 		}
-	} else {
+		if strings.TrimSpace(req.NewPlaylistTitle) != "" {
+			contentPayload.Title = strings.TrimSpace(req.NewPlaylistTitle)
+		}
+		contentPayload.Content.Chapters = newChapters
+
+	default:
 		playlistTitle := strings.TrimSpace(req.NewPlaylistTitle)
 		if playlistTitle == "" {
 			playlistTitle = book.Title
@@ -694,9 +761,9 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 		contentPayload.Metadata.Cover = &yoto.CardCover{ImageL: uploadedCoverURL}
 	}
 	contentPayload.Metadata.Media = &yoto.CardMediaMetadata{
-		Duration:         totalDuration,
-		FileSize:         totalFileSize,
-		ReadableFileSize: math.Round((float64(totalFileSize)/1024.0/1024.0)*10) / 10,
+		Duration:         cumulativeDuration,
+		FileSize:         cumulativeFileSize,
+		ReadableFileSize: math.Round((float64(cumulativeFileSize)/1024.0/1024.0)*10) / 10,
 	}
 
 	savedCard, err := h.yotoClient.CreateOrUpdateContent(r.Context(), accessToken, &contentPayload)
@@ -705,11 +772,18 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actionVerb := "Sent"
+	if mode == "existing" || mode == "append" {
+		actionVerb = "Appended"
+	} else if mode == "replace" {
+		actionVerb = "Replaced"
+	}
+
 	writeJSON(w, http.StatusOK, SendToYotoResponse{
 		Status:       "sent",
 		CardID:       savedCard.CardID,
 		Title:        savedCard.Title,
 		ChapterCount: len(contentPayload.Content.Chapters),
-		Message:      fmt.Sprintf("Sent %q to Yoto playlist %q", book.Title, savedCard.Title),
+		Message:      fmt.Sprintf("%s %q on Yoto playlist %q", actionVerb, book.Title, savedCard.Title),
 	})
 }

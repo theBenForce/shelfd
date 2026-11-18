@@ -38,17 +38,13 @@ func TestAPI_YotoIntegration(t *testing.T) {
 
 	mockYotoMux.HandleFunc("/content/mine", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		// Realistic Yoto /content/mine summary response omits content.chapters
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"cards": []map[string]any{
 				{
 					"cardId":    "card-existing-1",
 					"title":     "Kids Bedtime Playlist",
 					"updatedAt": "2026-11-16T00:00:00Z",
-					"content": map[string]any{
-						"chapters": []map[string]any{
-							{"key": "01", "title": "Intro"},
-						},
-					},
 				},
 			},
 		})
@@ -58,15 +54,44 @@ func TestAPI_YotoIntegration(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"card": map[string]any{
-				"cardId": "card-existing-1",
-				"title":  "Kids Bedtime Playlist",
+				"cardId":    "card-existing-1",
+				"title":     "Kids Bedtime Playlist",
+				"userId":    "auth0|yoto-user-1",
+				"createdAt": "2026-11-01T00:00:00Z",
+				"metadata": map[string]any{
+					"cover": map[string]any{
+						"imageL": "https://cdn.yoto.io/existing-cover.jpg",
+					},
+					"media": map[string]any{
+						"duration": 180.0,
+						"fileSize": 512000,
+					},
+				},
 				"content": map[string]any{
+					"playbackType": "linear",
+					"config": map[string]any{
+						"resumeTimeout": 2592000,
+					},
 					"chapters": []map[string]any{
 						{
-							"key":   "01",
-							"title": "Existing Chapter 1",
+							"key":      "01",
+							"title":    "Existing Chapter 1",
+							"duration": 180.0,
+							"fileSize": 512000,
 							"display": map[string]any{
 								"icon16x16": yoto.DefaultBookIconID,
+							},
+							"tracks": []map[string]any{
+								{
+									"key":      "01",
+									"title":    "Existing Chapter 1",
+									"trackUrl": "yoto:#existing-sha",
+									"type":     "audio",
+									"format":   "aac",
+									"duration": 180.0,
+									"fileSize": 512000,
+									"channels": 2,
+								},
 							},
 						},
 					},
@@ -189,7 +214,7 @@ func TestAPI_YotoIntegration(t *testing.T) {
 		t.Fatalf("expected IsLinked=true after exchange")
 	}
 
-	// 3. Fetch playlists
+	// 3. Fetch playlists and verify chapter_count is enriched when /content/mine omits chapters
 	req3 := httptest.NewRequest(http.MethodGet, "/api/v1/integrations/yoto/playlists", nil)
 	req3.Header.Set("Authorization", "Bearer "+token)
 	rec3 := httptest.NewRecorder()
@@ -203,6 +228,9 @@ func TestAPI_YotoIntegration(t *testing.T) {
 	_ = json.Unmarshal(rec3.Body.Bytes(), &plResp)
 	if len(plResp.Playlists) != 1 || plResp.Playlists[0].CardID != "card-existing-1" {
 		t.Fatalf("unexpected playlists: %+v", plResp.Playlists)
+	}
+	if plResp.Playlists[0].ChapterCount != 1 {
+		t.Fatalf("expected enriched ChapterCount=1 for card-existing-1, got %d", plResp.Playlists[0].ChapterCount)
 	}
 
 	// 4. Fetch icons
@@ -233,7 +261,7 @@ func TestAPI_YotoIntegration(t *testing.T) {
 		t.Fatalf("expected 400 when sending book without audio, got %d: %s", rec5.Code, rec5.Body.String())
 	}
 
-	// 6. Send Audiobook with 2 chapters and custom per-chapter icons to existing playlist
+	// 6. Append Audiobook with 2 chapters and custom per-chapter icons to existing playlist
 	audioPath := filepath.Join(tmpDir, "TheHobbit.m4b")
 	if err := os.WriteFile(audioPath, []byte("fake-m4b-audio-content"), 0o644); err != nil {
 		t.Fatalf("writing audio file: %v", err)
@@ -258,7 +286,7 @@ func TestAPI_YotoIntegration(t *testing.T) {
 	}
 
 	sendAudioBody, _ := json.Marshal(SendToYotoRequest{
-		Mode:          "existing",
+		Mode:          "append",
 		CardID:        "card-existing-1",
 		DefaultIconID: "yoto:#default-icon-99",
 		ChapterIcons: map[int]string{
@@ -279,9 +307,21 @@ func TestAPI_YotoIntegration(t *testing.T) {
 		t.Fatalf("expected card-existing-1 with 3 total chapters (1 existing + 2 added), got %+v", sendResp)
 	}
 
-	// Verify chapter icons on captured payload
+	// Verify chapter icons, preserved card metadata, and cumulative media stats on captured payload
 	if len(capturedContent.Content.Chapters) != 3 {
 		t.Fatalf("expected 3 chapters in captured content, got %d", len(capturedContent.Content.Chapters))
+	}
+	if capturedContent.UserID != "auth0|yoto-user-1" {
+		t.Errorf("expected UserID auth0|yoto-user-1 preserved on append, got %q", capturedContent.UserID)
+	}
+	if capturedContent.Content.PlaybackType != "linear" {
+		t.Errorf("expected PlaybackType linear preserved on append, got %q", capturedContent.Content.PlaybackType)
+	}
+	if capturedContent.Metadata.Cover == nil || capturedContent.Metadata.Cover.ImageL != "https://cdn.yoto.io/existing-cover.jpg" {
+		t.Errorf("expected existing cover preserved on append, got %+v", capturedContent.Metadata.Cover)
+	}
+	if capturedContent.Metadata.Media == nil || capturedContent.Metadata.Media.Duration != 800.0 || capturedContent.Metadata.Media.FileSize != 2560000 {
+		t.Errorf("expected cumulative media duration=800 and fileSize=2560000, got %+v", capturedContent.Metadata.Media)
 	}
 	if capturedContent.Content.Chapters[1].Display.Icon16x16 != "yoto:#default-icon-99" {
 		t.Errorf("expected chapter 2 to use default icon yoto:#default-icon-99, got %s", capturedContent.Content.Chapters[1].Display.Icon16x16)
@@ -289,6 +329,26 @@ func TestAPI_YotoIntegration(t *testing.T) {
 	if capturedContent.Content.Chapters[2].Display.Icon16x16 != "yoto:#media-dragon-1" {
 		t.Errorf("expected chapter 3 to use custom chapter icon yoto:#media-dragon-1, got %s", capturedContent.Content.Chapters[2].Display.Icon16x16)
 	}
+
+	// 6b. Replace mode overwrites chapters on existing playlist while preserving cardId
+	replaceAudioBody, _ := json.Marshal(SendToYotoRequest{
+		Mode:          "replace",
+		CardID:        "card-existing-1",
+		DefaultIconID: "yoto:#default-icon-99",
+	})
+	req6b := httptest.NewRequest(http.MethodPost, "/api/v1/books/book-audio-1/yoto", bytes.NewReader(replaceAudioBody))
+	req6b.Header.Set("Authorization", "Bearer "+token)
+	rec6b := httptest.NewRecorder()
+	handler.ServeHTTP(rec6b, req6b)
+	if rec6b.Code != http.StatusOK {
+		t.Fatalf("expected 200 replacing audiobook on Yoto playlist, got %d: %s", rec6b.Code, rec6b.Body.String())
+	}
+	var replaceResp SendToYotoResponse
+	_ = json.Unmarshal(rec6b.Body.Bytes(), &replaceResp)
+	if replaceResp.CardID != "card-existing-1" || replaceResp.ChapterCount != 2 {
+		t.Fatalf("expected card-existing-1 with 2 chapters after replace, got %+v", replaceResp)
+	}
+
 
 	// 7. Unlink account
 	req7 := httptest.NewRequest(http.MethodPost, "/api/v1/integrations/yoto/unlink", strings.NewReader(`{}`))

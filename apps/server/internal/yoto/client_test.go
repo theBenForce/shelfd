@@ -265,3 +265,92 @@ func TestClient_Icons(t *testing.T) {
 		t.Fatalf("unexpected uploaded icon: %+v, err=%v", uploaded, err)
 	}
 }
+
+func TestClient_GetMyPlaylistsEnrichesChaptersAndGetCardFormats(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/content/mine", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Real Yoto /content/mine returns card summaries without content.chapters
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"cards": []map[string]any{
+				{
+					"cardId":    "card-sum-1",
+					"title":     "Bedtime Stories",
+					"updatedAt": "2026-11-16T00:00:00Z",
+				},
+				{
+					"cardId":    "card-sum-2",
+					"title":     "Morning Music",
+					"updatedAt": "2026-11-17T00:00:00Z",
+				},
+			},
+		})
+	})
+
+	// Wrapped {"card": ...} response with numeric channels and null display
+	mux.HandleFunc("/content/card-sum-1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"card": {
+				"cardId": "card-sum-1",
+				"title": "Bedtime Stories",
+				"userId": "auth0|user-1",
+				"content": {
+					"chapters": [
+						{
+							"key": "01",
+							"title": "Story One",
+							"display": {"icon16x16": null},
+							"tracks": [
+								{"key": "01", "title": "Story One", "trackUrl": "yoto:#sha1", "type": "audio", "channels": 2, "display": null}
+							]
+						},
+						{
+							"key": "02",
+							"title": "Story Two",
+							"display": {"icon16x16": null},
+							"tracks": [
+								{"key": "01", "title": "Story Two", "trackUrl": "yoto:#sha2", "type": "audio", "channels": "stereo"}
+							]
+						}
+					]
+				}
+			}
+		}`))
+	})
+
+	// Unwrapped top-level card response
+	mux.HandleFunc("/content/card-sum-2", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"cardId": "card-sum-2",
+			"title": "Morning Music",
+			"content": {
+				"chapters": [
+					{"key": "01", "title": "Track 1"},
+					{"key": "02", "title": "Track 2"},
+					{"key": "03", "title": "Track 3"}
+				]
+			}
+		}`))
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := NewClient(WithBaseURLs(srv.URL, srv.URL))
+	cards, err := client.GetMyPlaylists(context.Background(), "tok")
+	if err != nil {
+		t.Fatalf("GetMyPlaylists failed: %v", err)
+	}
+	if len(cards) != 2 {
+		t.Fatalf("expected 2 cards, got %d", len(cards))
+	}
+	if len(cards[0].Content.Chapters) != 2 {
+		t.Errorf("expected card-sum-1 to have 2 chapters after enrichment, got %d", len(cards[0].Content.Chapters))
+	}
+	if len(cards[1].Content.Chapters) != 3 {
+		t.Errorf("expected card-sum-2 to have 3 chapters after enrichment, got %d", len(cards[1].Content.Chapters))
+	}
+}
+
