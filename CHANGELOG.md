@@ -1,3 +1,10 @@
+# [1.20.0](https://github.com/theBenForce/shelfd/compare/v1.19.1...v1.20.0) (2026-11-18)
+
+
+### Features
+
+* **yoto:** enrich playlist chapter counts, add append/replace options, and support sending series ([#79](https://github.com/theBenForce/shelfd/issues/79)) ([c114429](https://github.com/theBenForce/shelfd/commit/c11442929167624d35199287bcf94872747eba04))
+
 ## [1.19.1](https://github.com/theBenForce/shelfd/compare/v1.19.0...v1.19.1) (2026-11-18)
 
 
