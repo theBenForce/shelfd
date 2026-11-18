@@ -346,8 +346,7 @@ void main() {
     mockYotoRepo.bookUploadCompleters['book-1'] = firstUploadCompleter;
     mockYotoRepo.bookUploadCompleters['book-2'] = secondUploadCompleter;
     mockYotoRepo.simulatedProgress = const YotoServerUploadProgress(
-      active: true,
-      currentItem: 'The Hobbit',
+      isActive: true,
       stage: 'uploading',
       currentProgress: 0.5,
       overallProgress: 0.5,
@@ -437,7 +436,7 @@ void main() {
 
     // Fail second upload -> should trigger error toast notification and hide banner once queue finishes
     secondUploadCompleter.completeError(
-      ApiException(502, '{"error":"Yoto API rate limit exceeded"}'),
+      const ApiException(502, '{"error":"Yoto API rate limit exceeded"}'),
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
@@ -457,7 +456,7 @@ class _MockYotoRepository extends YotoRepository {
   SendToYotoRequest? lastRequest;
   final Map<String, Completer<SendToYotoResult>> bookUploadCompleters = {};
   YotoServerUploadProgress simulatedProgress =
-      const YotoServerUploadProgress(active: false);
+      const YotoServerUploadProgress(isActive: false);
 
   _MockYotoRepository(SharedPreferences prefs)
       : super(

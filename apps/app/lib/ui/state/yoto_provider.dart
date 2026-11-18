@@ -481,19 +481,19 @@ class YotoUploadQueueNotifier extends Notifier<YotoUploadQueueState> {
     String detail = error.toString();
     if (error is ApiException) {
       try {
-        final decoded = jsonDecode(error.body);
+        final decoded = jsonDecode(error.message);
         if (decoded is Map<String, dynamic> && decoded['error'] != null) {
           detail = decoded['error'].toString();
-        } else if (error.body.trim().isNotEmpty) {
-          detail = error.body.trim();
+        } else if (error.message.trim().isNotEmpty) {
+          detail = error.message.trim();
         }
       } catch (_) {
-        if (error.body.trim().isNotEmpty) {
-          detail = error.body.trim();
+        if (error.message.trim().isNotEmpty) {
+          detail = error.message.trim();
         }
       }
     }
-    return 'Failed to upload "$title" to Yoto: $detail';
+    return 'Yoto upload failed for "$title": $detail';
   }
 
   Future<void> _processQueue() async {
@@ -577,43 +577,49 @@ class YotoUploadQueueNotifier extends Notifier<YotoUploadQueueState> {
     }
   }
 
+  Future<void> _pollProgressOnce(String taskId) async {
+    if (_isDisposed) return;
+    final repo = ref.read(yotoRepositoryProvider);
+    final serverProg = await repo.getUploadProgress();
+    if (_isDisposed) return;
+
+    _updateTask(taskId, (t) {
+      if (t.status != YotoUploadTaskStatus.uploading) return t;
+      if (serverProg.isActive) {
+        final effCurrent = serverProg.currentProgress > t.currentProgress
+            ? serverProg.currentProgress
+            : t.currentProgress;
+        final effOverall = serverProg.overallProgress > t.overallProgress
+            ? serverProg.overallProgress
+            : t.overallProgress;
+        return t.copyWith(
+          currentProgress: effCurrent.clamp(0.05, 0.98),
+          overallProgress: effOverall.clamp(0.05, 0.98),
+          currentItemLabel: serverProg.currentItem,
+          stage: serverProg.stage,
+          subCompletedItems: serverProg.completedItems,
+          subTotalItems: serverProg.totalItems > 0
+              ? serverProg.totalItems
+              : t.subTotalItems,
+        );
+      }
+      // Smooth fallback step while awaiting server response
+      final nextCurrent = (t.currentProgress + 0.06).clamp(0.08, 0.90);
+      final nextOverall =
+          (t.overallProgress + 0.06 / (t.subTotalItems > 0 ? t.subTotalItems : 1))
+              .clamp(0.08, 0.90);
+      return t.copyWith(
+        currentProgress: nextCurrent,
+        overallProgress: nextOverall,
+      );
+    });
+  }
+
   void _startProgressPolling(String taskId) {
     _stopProgressPolling();
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 400), (_) async {
-      if (_isDisposed) return;
-      final repo = ref.read(yotoRepositoryProvider);
-      final serverProg = await repo.getUploadProgress();
-      if (_isDisposed) return;
-
-      _updateTask(taskId, (t) {
-        if (t.status != YotoUploadTaskStatus.uploading) return t;
-        if (serverProg.isActive) {
-          final effCurrent = serverProg.currentProgress > t.currentProgress
-              ? serverProg.currentProgress
-              : t.currentProgress;
-          final effOverall = serverProg.overallProgress > t.overallProgress
-              ? serverProg.overallProgress
-              : t.overallProgress;
-          return t.copyWith(
-            currentProgress: effCurrent.clamp(0.05, 0.98),
-            overallProgress: effOverall.clamp(0.05, 0.98),
-            currentItemLabel: serverProg.currentItem,
-            stage: serverProg.stage,
-            subCompletedItems: serverProg.completedItems,
-            subTotalItems: serverProg.totalItems > 0
-                ? serverProg.totalItems
-                : t.subTotalItems,
-          );
-        }
-        // Smooth fallback step while awaiting server response
-        final nextCurrent = (t.currentProgress + 0.06).clamp(0.08, 0.90);
-        final nextOverall = (t.overallProgress + 0.06 / (t.subTotalItems > 0 ? t.subTotalItems : 1))
-            .clamp(0.08, 0.90);
-        return t.copyWith(
-          currentProgress: nextCurrent,
-          overallProgress: nextOverall,
-        );
-      });
+    unawaited(_pollProgressOnce(taskId));
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 400), (_) {
+      unawaited(_pollProgressOnce(taskId));
     });
   }
 

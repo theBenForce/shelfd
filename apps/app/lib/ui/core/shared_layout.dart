@@ -1417,7 +1417,7 @@ class YotoUploadQueueBanner extends ConsumerWidget {
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(
-          top: BorderSide(color: colors.borderSubtle),
+          top: BorderSide(color: colors.subtleBorder),
         ),
       ),
       child: Column(
@@ -1426,7 +1426,7 @@ class YotoUploadQueueBanner extends ConsumerWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.speaker_rounded, size: 15, color: colors.accent),
+              Icon(Icons.speaker_rounded, size: 15, color: colors.accentPrimary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -1457,8 +1457,8 @@ class YotoUploadQueueBanner extends ConsumerWidget {
               key: const Key('yoto_current_upload_progress_bar'),
               value: queueState.currentUploadProgress,
               minHeight: 5,
-              backgroundColor: colors.surfaceVariant,
-              valueColor: AlwaysStoppedAnimation<Color>(colors.accent),
+              backgroundColor: colors.containerHigh,
+              valueColor: AlwaysStoppedAnimation<Color>(colors.accentPrimary),
             ),
           ),
           const SizedBox(height: 8),
@@ -1490,9 +1490,9 @@ class YotoUploadQueueBanner extends ConsumerWidget {
               key: const Key('yoto_total_uploads_progress_bar'),
               value: queueState.totalUploadsProgress,
               minHeight: 5,
-              backgroundColor: colors.surfaceVariant,
+              backgroundColor: colors.containerHigh,
               valueColor: AlwaysStoppedAnimation<Color>(
-                colors.accent.withValues(alpha: 0.7),
+                colors.accentPrimary.withValues(alpha: 0.7),
               ),
             ),
           ),
