@@ -6,6 +6,7 @@ import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/services/api_service.dart';
 import 'package:shelf/ui/features/reader/fixed_layout_reader.dart';
+import 'package:shelf/ui/features/reader/html_view.dart';
 import 'package:shelf/ui/state/providers.dart';
 
 class _MockReadalongApiService extends ApiService {
@@ -44,6 +45,10 @@ class _MockReadalongApiService extends ApiService {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    resetHtmlFrameHighlightsForTest();
+  });
 
   group('ReadalongManifest & Book read-along model', () {
     test('parses has_readalong and SMIL segments accurately', () {
@@ -100,7 +105,7 @@ void main() {
   });
 
   group('FixedLayoutReader Read-Along playback, highlighting, and page turning', () {
-    testWidgets('plays audio, highlights spoken phrases, and turns pages automatically',
+    testWidgets('plays audio, highlights spoken phrases without subtitle bubble, and turns pages automatically',
         (tester) async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
@@ -113,6 +118,7 @@ void main() {
         segments: const [
           ReadalongSegment(
             chapterIndex: 1,
+            chapterHref: 'OEBPS/xhtml/page01.xhtml',
             fragmentId: 'w1',
             text: 'Four silly skeletons',
             clipBegin: 0.0,
@@ -122,6 +128,7 @@ void main() {
           ),
           ReadalongSegment(
             chapterIndex: 2,
+            chapterHref: 'OEBPS/xhtml/page02.xhtml',
             fragmentId: 'w2',
             text: 'dancing in the night!',
             clipBegin: 0.0,
@@ -146,6 +153,7 @@ void main() {
             bookId: 'b-skeletons',
             chapterIndex: 1,
             title: 'Page 1',
+            href: 'OEBPS/xhtml/page01.xhtml',
             pageWidth: 600,
             pageHeight: 800,
           ),
@@ -154,6 +162,7 @@ void main() {
             bookId: 'b-skeletons',
             chapterIndex: 2,
             title: 'Page 2',
+            href: 'OEBPS/xhtml/page02.xhtml',
             pageWidth: 600,
             pageHeight: 800,
           ),
@@ -190,17 +199,184 @@ void main() {
       await tester.tap(find.byKey(const Key('readalong-play-pause-button')));
       await tester.pump();
 
-      // Seek to 1.0s -> Chapter 1 phrase "Four silly skeletons" is highlighted
+      // Seek to 1.0s -> Chapter 1 fragment "w1" is highlighted on Page 1 without bottom subtitle bubble
       await engine.seek(const Duration(seconds: 1));
       await tester.pump();
-      expect(find.text('Four silly skeletons'), findsOneWidget);
+      expect(find.byKey(const Key('readalong-overlay-pill')), findsNothing);
+      expect(activeFragmentForViewKey('fixed_b-skeletons_1'), 'w1');
+      expect(activeFragmentForViewKey('fixed_b-skeletons_2'), '');
       expect(find.text('Page 1 of 2'), findsOneWidget);
 
-      // Seek to 5.0s -> Advances to Chapter 2 phrase "dancing in the night!" and auto-turns to Page 2
+      // Seek to 5.0s -> Advances to Chapter 2 fragment "w2" and auto-turns to Page 2
       await engine.seek(const Duration(seconds: 5));
       await tester.pump();
-      expect(find.text('dancing in the night!'), findsOneWidget);
+      expect(find.byKey(const Key('readalong-overlay-pill')), findsNothing);
+      expect(activeFragmentForViewKey('fixed_b-skeletons_1'), '');
+      expect(activeFragmentForViewKey('fixed_b-skeletons_2'), 'w2');
       expect(find.text('Page 2 of 2'), findsOneWidget);
+
+      await engine.stop();
+      await tester.pump();
+    });
+
+    testWidgets('scopes word highlights to only the active page on a two-page facing spread',
+        (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+
+      // Both Page 2 (left) and Page 3 (right) reuse identical fragment IDs ('w1', 'w9')
+      final manifest = ReadalongManifest(
+        bookId: 'b-spidey',
+        hasReadalong: true,
+        hasMediaOverlays: true,
+        durationSeconds: 12.0,
+        segments: const [
+          ReadalongSegment(
+            chapterIndex: 2,
+            chapterHref: 'OEBPS/xhtml/page02.xhtml',
+            fragmentId: 'w9',
+            text: 'Junkyard.',
+            clipBegin: 0.0,
+            clipEnd: 4.0,
+            globalBegin: 0.0,
+            globalEnd: 4.0,
+          ),
+          ReadalongSegment(
+            chapterIndex: 3,
+            chapterHref: 'OEBPS/xhtml/page03.xhtml',
+            fragmentId: 'w9',
+            text: 'Goblin.',
+            clipBegin: 4.0,
+            clipEnd: 8.0,
+            globalBegin: 4.0,
+            globalEnd: 8.0,
+          ),
+          ReadalongSegment(
+            chapterIndex: 4,
+            chapterHref: 'OEBPS/xhtml/page04.xhtml',
+            fragmentId: 'w1',
+            text: 'Spidey!',
+            clipBegin: 8.0,
+            clipEnd: 12.0,
+            globalBegin: 8.0,
+            globalEnd: 12.0,
+          ),
+        ],
+      );
+
+      final book = Book(
+        id: 'b-spidey',
+        title: 'Spidey and His Amazing Friends',
+        layout: 'pre-paginated',
+        bookType: 'ebook',
+        hasReadalong: true,
+        durationSeconds: 12.0,
+        spine: const [
+          SpineItem(
+            id: 'p1',
+            bookId: 'b-spidey',
+            chapterIndex: 1,
+            title: 'Cover',
+            href: 'OEBPS/xhtml/cover.xhtml',
+            pageWidth: 600,
+            pageHeight: 800,
+          ),
+          SpineItem(
+            id: 'p2',
+            bookId: 'b-spidey',
+            chapterIndex: 2,
+            title: 'Page 2',
+            href: 'OEBPS/xhtml/page02.xhtml',
+            pageWidth: 600,
+            pageHeight: 800,
+          ),
+          SpineItem(
+            id: 'p3',
+            bookId: 'b-spidey',
+            chapterIndex: 3,
+            title: 'Page 3',
+            href: 'OEBPS/xhtml/page03.xhtml',
+            pageWidth: 600,
+            pageHeight: 800,
+          ),
+          SpineItem(
+            id: 'p4',
+            bookId: 'b-spidey',
+            chapterIndex: 4,
+            title: 'Page 4',
+            href: 'OEBPS/xhtml/page04.xhtml',
+            pageWidth: 600,
+            pageHeight: 800,
+          ),
+          SpineItem(
+            id: 'p5',
+            bookId: 'b-spidey',
+            chapterIndex: 5,
+            title: 'Page 5',
+            href: 'OEBPS/xhtml/page05.xhtml',
+            pageWidth: 600,
+            pageHeight: 800,
+          ),
+        ],
+      );
+
+      final engine = SimulatedAudioPlayerEngine(
+        initialDuration: const Duration(seconds: 12),
+      );
+      final api = _MockReadalongApiService(manifest);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(prefs),
+            apiServiceProvider.overrideWithValue(api),
+            audioPlayerEngineProvider.overrideWithValue(engine),
+          ],
+          child: MaterialApp(
+            home: FixedLayoutReader(
+              book: book,
+              initialChapterIdentifier: 'p2',
+              initialReadalongManifest: manifest,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Two-page facing spread: Pages 2–3 of 5
+      expect(find.text('Pages 2–3 of 5'), findsOneWidget);
+      expect(find.byKey(const Key('html-frame-fixed_b-spidey_2')), findsOneWidget);
+      expect(find.byKey(const Key('html-frame-fixed_b-spidey_3')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('readalong-play-pause-button')));
+      await tester.pump();
+
+      // At 2.0s (Page 2): ONLY left page (page 2) highlights 'w9'; right page (page 3) is empty
+      await engine.seek(const Duration(seconds: 2));
+      await tester.pump();
+      expect(find.byKey(const Key('readalong-overlay-pill')), findsNothing);
+      expect(activeFragmentForViewKey('fixed_b-spidey_2'), 'w9');
+      expect(activeFragmentForViewKey('fixed_b-spidey_3'), '');
+      expect(lastReadalongHighlight?.chapterHref, 'OEBPS/xhtml/page02.xhtml');
+
+      // At 5.0s (Page 3): stays on Pages 2–3 spread, clears left page (page 2), highlights ONLY right page (page 3)
+      await engine.seek(const Duration(seconds: 5));
+      await tester.pump();
+      expect(find.text('Pages 2–3 of 5'), findsOneWidget);
+      expect(activeFragmentForViewKey('fixed_b-spidey_2'), '');
+      expect(activeFragmentForViewKey('fixed_b-spidey_3'), 'w9');
+      expect(lastReadalongHighlight?.chapterHref, 'OEBPS/xhtml/page03.xhtml');
+
+      // At 9.0s (Page 4): auto-turns to Pages 4–5 spread and highlights ONLY left page (page 4)
+      await engine.seek(const Duration(seconds: 9));
+      await tester.pump();
+      expect(find.text('Pages 4–5 of 5'), findsOneWidget);
+      expect(activeFragmentForViewKey('fixed_b-spidey_4'), 'w1');
+      expect(activeFragmentForViewKey('fixed_b-spidey_5'), '');
 
       await engine.stop();
       await tester.pump();
