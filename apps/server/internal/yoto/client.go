@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -186,19 +185,112 @@ func (c *Client) RefreshToken(ctx context.Context, clientID, refreshToken string
 	return &tok, nil
 }
 
+func isValidYotoMediaID(s string) bool {
+	if len(s) != 43 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		isAlphaNum := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !isAlphaNum && c != '-' && c != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+// NormalizeIcon16x16 converts any Yoto icon identifier (yoto:#id, yoto:id, bare 43-char mediaId)
+// or resolved Yoto icon URL (such as those returned by GET /content/{cardId}) into the canonical
+// "yoto:#<43-char-mediaId>" format required by POST /content.
+// If no valid 43-character mediaId can be extracted, it returns "" so DisplayFields
+// serializes icon16x16 as null rather than failing Yoto schema validation.
+func NormalizeIcon16x16(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.EqualFold(trimmed, "null") {
+		return ""
+	}
+
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		pathPart := trimmed
+		if u, err := url.Parse(trimmed); err == nil && u.Path != "" {
+			pathPart = u.Path
+		} else {
+			if qIdx := strings.IndexByte(pathPart, '?'); qIdx >= 0 {
+				pathPart = pathPart[:qIdx]
+			}
+			if fIdx := strings.IndexByte(pathPart, '#'); fIdx >= 0 {
+				pathPart = pathPart[:fIdx]
+			}
+		}
+		segments := strings.Split(pathPart, "/")
+		for i := len(segments) - 1; i >= 0; i-- {
+			seg := strings.TrimSpace(segments[i])
+			if seg == "" {
+				continue
+			}
+			if dotIdx := strings.LastIndexByte(seg, '.'); dotIdx > 0 {
+				ext := strings.ToLower(seg[dotIdx:])
+				switch ext {
+				case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg":
+					seg = seg[:dotIdx]
+				}
+			}
+			seg = strings.TrimPrefix(seg, "yoto:#")
+			seg = strings.TrimPrefix(seg, "yoto:")
+			seg = strings.TrimPrefix(seg, "#")
+			if isValidYotoMediaID(seg) {
+				return "yoto:#" + seg
+			}
+		}
+		return ""
+	}
+
+	cleaned := strings.TrimPrefix(trimmed, "yoto:#")
+	cleaned = strings.TrimPrefix(cleaned, "yoto:")
+	cleaned = strings.TrimPrefix(cleaned, "#")
+	cleaned = strings.TrimSpace(cleaned)
+	if isValidYotoMediaID(cleaned) {
+		return "yoto:#" + cleaned
+	}
+	return ""
+}
+
 // DisplayFields represents the 16x16 display icon configuration for a chapter or track.
 type DisplayFields struct {
 	Icon16x16 string `json:"icon16x16"`
 }
 
-// MarshalJSON ensures empty Icon16x16 serializes as null rather than an empty string
-// so Yoto's schema validator accepts chapters without custom icons.
+// MarshalJSON ensures empty or non-canonical Icon16x16 values serialize as null
+// or as "yoto:#<43-char-mediaId>" so Yoto's schema validator always accepts chapters and tracks.
 func (d DisplayFields) MarshalJSON() ([]byte, error) {
-	if strings.TrimSpace(d.Icon16x16) == "" {
+	normalized := NormalizeIcon16x16(d.Icon16x16)
+	if normalized == "" {
 		return []byte(`{"icon16x16":null}`), nil
 	}
 	type plainDisplay DisplayFields
-	return json.Marshal(plainDisplay(d))
+	return json.Marshal(plainDisplay{Icon16x16: normalized})
+}
+
+// UnmarshalJSON normalizes icon16x16 values (including resolved CDN URLs returned by GET /content/{cardId})
+// and tolerates null display objects.
+func (d *DisplayFields) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		d.Icon16x16 = ""
+		return nil
+	}
+	var raw struct {
+		Icon16x16 *string `json:"icon16x16"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Icon16x16 != nil {
+		d.Icon16x16 = NormalizeIcon16x16(*raw.Icon16x16)
+	} else {
+		d.Icon16x16 = ""
+	}
+	return nil
 }
 
 // Track represents a single audio track inside a Yoto chapter.
@@ -354,6 +446,15 @@ func decodeYotoCardBytes(body []byte, fallbackCardID string) (*YotoCard, error) 
 	}
 	if card.Metadata.Cover == nil && card.Content.Cover != nil && card.Content.Cover.ImageL != "" {
 		card.Metadata.Cover = &CardCover{ImageL: card.Content.Cover.ImageL}
+	}
+	for i := range card.Content.Chapters {
+		card.Content.Chapters[i].Display.Icon16x16 = NormalizeIcon16x16(card.Content.Chapters[i].Display.Icon16x16)
+		if card.Content.Chapters[i].Tracks == nil {
+			card.Content.Chapters[i].Tracks = []Track{}
+		}
+		for j := range card.Content.Chapters[i].Tracks {
+			card.Content.Chapters[i].Tracks[j].Display.Icon16x16 = NormalizeIcon16x16(card.Content.Chapters[i].Tracks[j].Display.Icon16x16)
+		}
 	}
 	return &card, nil
 }
@@ -553,12 +654,33 @@ type DisplayIcon struct {
 	CreatedAt     string   `json:"createdAt,omitempty"`
 }
 
+func cleanDisplayIconMediaID(rawMediaID, rawURL string) string {
+	if norm := NormalizeIcon16x16(rawMediaID); norm != "" {
+		return strings.TrimPrefix(norm, "yoto:#")
+	}
+	if normURL := NormalizeIcon16x16(rawURL); normURL != "" {
+		return strings.TrimPrefix(normURL, "yoto:#")
+	}
+	trimmed := strings.TrimSpace(rawMediaID)
+	trimmed = strings.TrimPrefix(trimmed, "yoto:#")
+	trimmed = strings.TrimPrefix(trimmed, "yoto:")
+	trimmed = strings.TrimPrefix(trimmed, "#")
+	return trimmed
+}
+
 // YotoURI returns the "yoto:#<mediaId>" reference string used in chapter/track display.icon16x16.
 func (d DisplayIcon) YotoURI() string {
-	if strings.HasPrefix(d.MediaID, "yoto:#") {
-		return d.MediaID
+	if norm := NormalizeIcon16x16(d.MediaID); norm != "" {
+		return norm
 	}
-	return "yoto:#" + d.MediaID
+	if norm := NormalizeIcon16x16(d.URL); norm != "" {
+		return norm
+	}
+	cleaned := cleanDisplayIconMediaID(d.MediaID, d.URL)
+	if cleaned == "" {
+		return ""
+	}
+	return "yoto:#" + cleaned
 }
 
 // GetPublicIcons fetches Yoto's public 16x16 icon catalog from GET /media/displayIcons/user/yoto.
@@ -595,6 +717,9 @@ func (c *Client) GetPublicIcons(ctx context.Context, accessToken string) ([]Disp
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decoding public icons response: %w", err)
+	}
+	for i := range result.DisplayIcons {
+		result.DisplayIcons[i].MediaID = cleanDisplayIconMediaID(result.DisplayIcons[i].MediaID, result.DisplayIcons[i].URL)
 	}
 
 	c.mu.Lock()
@@ -646,7 +771,7 @@ func (c *Client) GetUserIcons(ctx context.Context, accessToken string) ([]Displa
 		_ = json.Unmarshal(raw.URL, &urlStr)
 		icons = append(icons, DisplayIcon{
 			DisplayIconID: raw.DisplayIconID,
-			MediaID:       raw.MediaID,
+			MediaID:       cleanDisplayIconMediaID(raw.MediaID, urlStr),
 			Title:         raw.Title,
 			URL:           urlStr,
 			Public:        raw.Public,
@@ -657,20 +782,32 @@ func (c *Client) GetUserIcons(ctx context.Context, accessToken string) ([]Displa
 	return icons, nil
 }
 
+func detectIconContentType(filename string, data []byte) string {
+	lower := strings.ToLower(strings.TrimSpace(filename))
+	switch {
+	case strings.HasSuffix(lower, ".png"):
+		return "image/png"
+	case strings.HasSuffix(lower, ".jpg"), strings.HasSuffix(lower, ".jpeg"):
+		return "image/jpeg"
+	case strings.HasSuffix(lower, ".gif"):
+		return "image/gif"
+	case strings.HasSuffix(lower, ".webp"):
+		return "image/webp"
+	}
+	if len(data) > 0 {
+		detected := http.DetectContentType(data)
+		if strings.HasPrefix(detected, "image/") {
+			return detected
+		}
+	}
+	return "image/png"
+}
+
 // UploadCustomIcon uploads an image file to POST /media/displayIcons/user/me/upload.
 func (c *Client) UploadCustomIcon(ctx context.Context, accessToken string, imageReader io.Reader, filename string, autoConvert bool) (*DisplayIcon, error) {
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-
-	part, err := writer.CreateFormFile("file", filename)
+	rawBytes, err := io.ReadAll(imageReader)
 	if err != nil {
-		return nil, fmt.Errorf("creating multipart file field: %w", err)
-	}
-	if _, err := io.Copy(part, imageReader); err != nil {
-		return nil, fmt.Errorf("writing icon file to multipart: %w", err)
-	}
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("closing multipart writer: %w", err)
+		return nil, fmt.Errorf("reading icon image bytes: %w", err)
 	}
 
 	u, err := url.Parse(c.apiBaseURL + "/media/displayIcons/user/me/upload")
@@ -684,7 +821,7 @@ func (c *Client) UploadCustomIcon(ctx context.Context, accessToken string, image
 		q.Set("autoConvert", "false")
 	}
 	if filename != "" {
-		base := strings.TrimSuffix(filename, "."+strings.TrimPrefix(strings.ToLower(filename[strings.LastIndex(filename, ".")+1:]), "."))
+		base := filename
 		if idx := strings.LastIndex(filename, "."); idx > 0 {
 			base = filename[:idx]
 		}
@@ -692,12 +829,12 @@ func (c *Client) UploadCustomIcon(ctx context.Context, accessToken string, image
 	}
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(rawBytes))
 	if err != nil {
 		return nil, fmt.Errorf("building custom icon upload request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Content-Type", detectIconContentType(filename, rawBytes))
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -728,7 +865,7 @@ func (c *Client) UploadCustomIcon(ctx context.Context, accessToken string, image
 
 	return &DisplayIcon{
 		DisplayIconID: result.DisplayIcon.DisplayIconID,
-		MediaID:       result.DisplayIcon.MediaID,
+		MediaID:       cleanDisplayIconMediaID(result.DisplayIcon.MediaID, urlStr),
 		Title:         filename,
 		URL:           urlStr,
 		Public:        false,

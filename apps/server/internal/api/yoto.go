@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -12,12 +13,25 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shelfd/shelfd/internal/config"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/yoto"
 )
+
+// YotoUploadProgressResponse reports active Yoto upload and transcode progress for a user.
+type YotoUploadProgressResponse struct {
+	IsActive        bool    `json:"is_active"`
+	Title           string  `json:"title,omitempty"`
+	CurrentItem     string  `json:"current_item,omitempty"`
+	Stage           string  `json:"stage,omitempty"`
+	CurrentProgress float64 `json:"current_progress"`
+	OverallProgress float64 `json:"overall_progress"`
+	CompletedItems  int     `json:"completed_items"`
+	TotalItems      int     `json:"total_items"`
+}
 
 // YotoHandler handles Yoto account linking, playlists, display icons, and sending books to Yoto.
 type YotoHandler struct {
@@ -27,6 +41,9 @@ type YotoHandler struct {
 	dataDir    string
 	libraryDir string
 	logger     *slog.Logger
+
+	progressMu     sync.RWMutex
+	progressByUser map[string]YotoUploadProgressResponse
 }
 
 func NewYotoHandler(
@@ -43,13 +60,48 @@ func NewYotoHandler(
 		yoto.WithBaseURLs(cfg.ResolvedAPIBaseURL(), cfg.ResolvedAuthBaseURL()),
 	)
 	return &YotoHandler{
-		repo:       repo,
-		yotoClient: client,
-		cfg:        cfg,
-		dataDir:    dataDir,
-		libraryDir: libraryDir,
-		logger:     logger,
+		repo:           repo,
+		yotoClient:     client,
+		cfg:            cfg,
+		dataDir:        dataDir,
+		libraryDir:     libraryDir,
+		logger:         logger,
+		progressByUser: make(map[string]YotoUploadProgressResponse),
 	}
+}
+
+func (h *YotoHandler) setUploadProgress(userID string, p YotoUploadProgressResponse) {
+	if userID == "" {
+		return
+	}
+	h.progressMu.Lock()
+	h.progressByUser[userID] = p
+	h.progressMu.Unlock()
+}
+
+func (h *YotoHandler) clearUploadProgress(userID string) {
+	if userID == "" {
+		return
+	}
+	h.progressMu.Lock()
+	delete(h.progressByUser, userID)
+	h.progressMu.Unlock()
+}
+
+// GetUploadProgress handles GET /api/v1/integrations/yoto/progress.
+func (h *YotoHandler) GetUploadProgress(w http.ResponseWriter, r *http.Request) {
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	h.progressMu.RLock()
+	prog, ok := h.progressByUser[user.ID]
+	h.progressMu.RUnlock()
+	if !ok {
+		prog = YotoUploadProgressResponse{IsActive: false}
+	}
+	writeJSON(w, http.StatusOK, prog)
 }
 
 // SetYotoClient allows overriding the Yoto client (e.g. for testing).
@@ -384,14 +436,25 @@ func isAudioExtension(path string) bool {
 }
 
 func normalizeYotoIconURI(iconID string) string {
-	trimmed := strings.TrimSpace(iconID)
-	if trimmed == "" {
-		return ""
+	return yoto.NormalizeIcon16x16(iconID)
+}
+
+type yotoProgressReader struct {
+	r       io.Reader
+	total   int64
+	read    int64
+	onBytes func(readBytes, totalBytes int64)
+}
+
+func (pr *yotoProgressReader) Read(p []byte) (int, error) {
+	n, err := pr.r.Read(p)
+	if n > 0 {
+		pr.read += int64(n)
+		if pr.onBytes != nil {
+			pr.onBytes(pr.read, pr.total)
+		}
 	}
-	if strings.HasPrefix(trimmed, "yoto:#") {
-		return trimmed
-	}
-	return "yoto:#" + trimmed
+	return n, err
 }
 
 type SendToYotoRequest struct {
@@ -451,6 +514,7 @@ func (h *YotoHandler) uploadBookChaptersToYoto(
 	baseDefaultIconURI string,
 	entryOffset int,
 	prefixBookTitle bool,
+	onFileProgress func(fileIdx int, stage string, fileFraction float64),
 ) ([]yoto.Chapter, float64, int64, int, *yotoHTTPError) {
 	bookDefaultIconURI := baseDefaultIconURI
 	if req.UseCoverAsIcon && book.CoverPath != nil && *book.CoverPath != "" {
@@ -459,7 +523,9 @@ func (h *YotoHandler) uploadBookChaptersToYoto(
 				uploadedIcon, upErr := h.yotoClient.UploadCustomIcon(ctx, accessToken, cf, filepath.Base(coverDiskPath), true)
 				cf.Close()
 				if upErr == nil && uploadedIcon != nil && uploadedIcon.MediaID != "" {
-					bookDefaultIconURI = uploadedIcon.YotoURI()
+					if norm := normalizeYotoIconURI(uploadedIcon.YotoURI()); norm != "" {
+						bookDefaultIconURI = norm
+					}
 				}
 			}
 		}
@@ -468,7 +534,9 @@ func (h *YotoHandler) uploadBookChaptersToYoto(
 	resolveChapterIcon := func(globalIdx int) string {
 		if req.ChapterIcons != nil {
 			if custom, ok := req.ChapterIcons[globalIdx]; ok && strings.TrimSpace(custom) != "" {
-				return normalizeYotoIconURI(custom)
+				if norm := normalizeYotoIconURI(custom); norm != "" {
+					return norm
+				}
 			}
 		}
 		return bookDefaultIconURI
@@ -499,6 +567,9 @@ func (h *YotoHandler) uploadBookChaptersToYoto(
 	currentIdx := entryOffset
 
 	for fileIdx, af := range audioFiles {
+		if onFileProgress != nil {
+			onFileProgress(fileIdx, "uploading", 0.05)
+		}
 		resolvedPath, err := h.resolveFilePath(af.FilePath)
 		if err != nil {
 			return nil, 0, 0, currentIdx, &yotoHTTPError{
@@ -529,8 +600,25 @@ func (h *YotoHandler) uploadBookChaptersToYoto(
 			}
 		}
 
+		if onFileProgress != nil {
+			onFileProgress(fileIdx, "uploading", 0.10)
+		}
+
 		mimeType := getAudioMimeType(resolvedPath)
-		err = h.yotoClient.UploadAudioStream(ctx, upURL.UploadURL, f, mimeType, fileSize)
+		reader := &yotoProgressReader{
+			r:     f,
+			total: fileSize,
+			onBytes: func(readBytes, totalBytes int64) {
+				if onFileProgress != nil && totalBytes > 0 {
+					frac := float64(readBytes) / float64(totalBytes)
+					if frac > 1 {
+						frac = 1
+					}
+					onFileProgress(fileIdx, "uploading", 0.10+frac*0.55)
+				}
+			},
+		}
+		err = h.yotoClient.UploadAudioStream(ctx, upURL.UploadURL, reader, mimeType, fileSize)
 		f.Close()
 		if err != nil {
 			return nil, 0, 0, currentIdx, &yotoHTTPError{
@@ -539,12 +627,20 @@ func (h *YotoHandler) uploadBookChaptersToYoto(
 			}
 		}
 
+		if onFileProgress != nil {
+			onFileProgress(fileIdx, "transcoding", 0.70)
+		}
+
 		transcoded, err := h.yotoClient.WaitForTranscoding(ctx, accessToken, upURL.UploadID, 60)
 		if err != nil {
 			return nil, 0, 0, currentIdx, &yotoHTTPError{
 				statusCode: http.StatusBadGateway,
 				message:    fmt.Sprintf("Yoto audio transcoding failed: %v", err),
 			}
+		}
+
+		if onFileProgress != nil {
+			onFileProgress(fileIdx, "transcoding", 0.95)
 		}
 
 		trackDuration := transcoded.TranscodedInfo.Duration
@@ -648,6 +744,9 @@ func (h *YotoHandler) uploadBookChaptersToYoto(
 				},
 			})
 			currentIdx++
+		}
+		if onFileProgress != nil {
+			onFileProgress(fileIdx, "transcoded", 1.0)
 		}
 	}
 
@@ -866,6 +965,9 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 		defaultIconURI = yoto.DefaultBookIconID
 	}
 
+	totalFiles := len(audioFiles)
+	defer h.clearUploadProgress(user.ID)
+
 	newChapters, totalDuration, totalFileSize, _, httpErr := h.uploadBookChaptersToYoto(
 		r.Context(),
 		accessToken,
@@ -875,11 +977,35 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 		defaultIconURI,
 		0,
 		false,
+		func(fileIdx int, stage string, fileFraction float64) {
+			overall := ((float64(fileIdx) + fileFraction) / float64(totalFiles)) * 0.92
+			h.setUploadProgress(user.ID, YotoUploadProgressResponse{
+				IsActive:        true,
+				Title:           book.Title,
+				CurrentItem:     book.Title,
+				Stage:           stage,
+				CurrentProgress: fileFraction,
+				OverallProgress: overall,
+				CompletedItems:  fileIdx,
+				TotalItems:      totalFiles,
+			})
+		},
 	)
 	if httpErr != nil {
 		writeJSONError(w, httpErr.statusCode, httpErr.message)
 		return
 	}
+
+	h.setUploadProgress(user.ID, YotoUploadProgressResponse{
+		IsActive:        true,
+		Title:           book.Title,
+		CurrentItem:     book.Title,
+		Stage:           "saving",
+		CurrentProgress: 0.96,
+		OverallProgress: 0.96,
+		CompletedItems:  totalFiles,
+		TotalItems:      totalFiles,
+	})
 
 	resp, httpErr := h.saveChaptersToYotoCard(
 		r.Context(),
@@ -1022,10 +1148,14 @@ func (h *YotoHandler) SendSeriesToYoto(w http.ResponseWriter, r *http.Request) {
 	var coverPath *string
 	entryOffset := 0
 
-	for _, item := range candidates {
+	totalBooks := len(candidates)
+	defer h.clearUploadProgress(user.ID)
+
+	for bookIdx, item := range candidates {
 		if coverPath == nil && item.book.CoverPath != nil && *item.book.CoverPath != "" {
 			coverPath = item.book.CoverPath
 		}
+		bookFileCount := len(item.files)
 		bookChapters, dur, size, nextOffset, httpErr := h.uploadBookChaptersToYoto(
 			r.Context(),
 			accessToken,
@@ -1035,6 +1165,20 @@ func (h *YotoHandler) SendSeriesToYoto(w http.ResponseWriter, r *http.Request) {
 			defaultIconURI,
 			entryOffset,
 			true,
+			func(fileIdx int, stage string, fileFraction float64) {
+				bookProgress := (float64(fileIdx) + fileFraction) / float64(bookFileCount)
+				overall := ((float64(bookIdx) + bookProgress) / float64(totalBooks)) * 0.92
+				h.setUploadProgress(user.ID, YotoUploadProgressResponse{
+					IsActive:        true,
+					Title:           series.Name,
+					CurrentItem:     item.book.Title,
+					Stage:           stage,
+					CurrentProgress: bookProgress,
+					OverallProgress: overall,
+					CompletedItems:  bookIdx,
+					TotalItems:      totalBooks,
+				})
+			},
 		)
 		if httpErr != nil {
 			writeJSONError(w, httpErr.statusCode, httpErr.message)
@@ -1045,6 +1189,17 @@ func (h *YotoHandler) SendSeriesToYoto(w http.ResponseWriter, r *http.Request) {
 		totalFileSize += size
 		entryOffset = nextOffset
 	}
+
+	h.setUploadProgress(user.ID, YotoUploadProgressResponse{
+		IsActive:        true,
+		Title:           series.Name,
+		CurrentItem:     series.Name,
+		Stage:           "saving",
+		CurrentProgress: 1.0,
+		OverallProgress: 0.96,
+		CompletedItems:  totalBooks,
+		TotalItems:      totalBooks,
+	})
 
 	resp, httpErr := h.saveChaptersToYotoCard(
 		r.Context(),

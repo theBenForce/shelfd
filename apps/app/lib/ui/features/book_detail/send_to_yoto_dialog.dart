@@ -257,7 +257,6 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
     });
 
     try {
-      final repo = ref.read(yotoRepositoryProvider);
       final chapterIconsPayload = <int, String>{
         for (final entry in _chapterCustomIcons.entries)
           entry.key: entry.value.yotoUri,
@@ -278,12 +277,32 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
             : null,
       );
 
-      final result = widget.isSeries
-          ? await repo.sendSeriesToYoto(widget.seriesId!, request)
-          : await repo.sendBookToYoto(widget.book!.id, request);
-      ref.invalidate(yotoPlaylistsProvider);
+      final queueNotifier = ref.read(yotoUploadQueueProvider.notifier);
+      if (widget.isSeries) {
+        queueNotifier.enqueueSeriesUpload(
+          seriesId: widget.seriesId!,
+          title: widget.targetTitle,
+          request: request,
+          bookCount: widget.seriesBooks.length,
+        );
+      } else {
+        queueNotifier.enqueueBookUpload(
+          bookId: widget.book!.id,
+          title: widget.targetTitle,
+          request: request,
+        );
+      }
+
       if (mounted) {
-        Navigator.of(context).pop(result);
+        Navigator.of(context).pop(
+          SendToYotoResult(
+            status: 'queued',
+            cardId: _mode == 'existing' ? (_selectedCardId ?? '') : '',
+            title: _mode == 'new' ? newTitle : widget.targetTitle,
+            chapterCount: _resolveAllEntries().length,
+            message: 'Queued "${widget.targetTitle}" for Yoto upload',
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {

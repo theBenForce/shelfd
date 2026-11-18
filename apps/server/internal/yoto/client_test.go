@@ -121,13 +121,15 @@ func TestClient_UploadTranscodeAndContent(t *testing.T) {
 		})
 	})
 
+	const validCustomIcon = "yoto:#AC6ySygbay79fIMHmMtYN9ekBo1kwMvRoi4DQW_CZW0"
+
 	mux.HandleFunc("/content", func(w http.ResponseWriter, r *http.Request) {
 		var payload CardContent
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if len(payload.Content.Chapters) != 1 || payload.Content.Chapters[0].Display.Icon16x16 != "yoto:#custom-icon-1" {
+		if len(payload.Content.Chapters) != 1 || payload.Content.Chapters[0].Display.Icon16x16 != validCustomIcon {
 			http.Error(w, "missing chapter icon", http.StatusBadRequest)
 			return
 		}
@@ -178,7 +180,7 @@ func TestClient_UploadTranscodeAndContent(t *testing.T) {
 					Key:          "01",
 					Title:        "Chapter 1",
 					OverlayLabel: "1",
-					Display:      DisplayFields{Icon16x16: "yoto:#custom-icon-1"},
+					Display:      DisplayFields{Icon16x16: validCustomIcon},
 					Tracks: []Track{
 						{
 							Key:      "01",
@@ -188,7 +190,7 @@ func TestClient_UploadTranscodeAndContent(t *testing.T) {
 							Format:   transcoded.TranscodedInfo.Format,
 							Duration: transcoded.TranscodedInfo.Duration,
 							FileSize: transcoded.TranscodedInfo.FileSize,
-							Display:  DisplayFields{Icon16x16: "yoto:#custom-icon-1"},
+							Display:  DisplayFields{Icon16x16: validCustomIcon},
 						},
 					},
 				},
@@ -200,6 +202,41 @@ func TestClient_UploadTranscodeAndContent(t *testing.T) {
 	}
 	if card.CardID != "card-abc" {
 		t.Errorf("expected cardId card-abc, got %s", card.CardID)
+	}
+}
+
+func TestNormalizeIcon16x16(t *testing.T) {
+	const id = "AC6ySygbay79fIMHmMtYN9ekBo1kwMvRoi4DQW_CZW0"
+	const expected = "yoto:#" + id
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"canonical yoto:#id", "yoto:#" + id, expected},
+		{"yoto:id without hash", "yoto:" + id, expected},
+		{"bare 43-char mediaId", id, expected},
+		{"resolved Yoto CDN URL", "https://media-secure-sbc.yotoplay.com/icons/" + id, expected},
+		{"resolved Yoto CDN URL with extension and query", "https://card-content.yotoplay.com/yoto/" + id + ".png?token=abc", expected},
+		{"empty string", "", ""},
+		{"short invalid id", "yoto:#short-id", ""},
+		{"URL without 43-char mediaId", "https://example.com/icons/book.png", ""},
+	}
+
+	for _, tc := range cases {
+		if got := NormalizeIcon16x16(tc.in); got != tc.want {
+			t.Errorf("%s: NormalizeIcon16x16(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+
+	// Verify DisplayFields.MarshalJSON serializes invalid icon16x16 as null
+	b, err := json.Marshal(DisplayFields{Icon16x16: "https://example.com/not-43-chars.png"})
+	if err != nil {
+		t.Fatalf("MarshalJSON error: %v", err)
+	}
+	if string(b) != `{"icon16x16":null}` {
+		t.Errorf("expected null icon16x16 JSON, got %s", string(b))
 	}
 }
 

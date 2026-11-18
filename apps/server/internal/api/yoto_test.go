@@ -50,6 +50,13 @@ func TestAPI_YotoIntegration(t *testing.T) {
 		})
 	})
 
+	const (
+		existingIconMediaID = "AC6ySygbay79fIMHmMtYN9ekBo1kwMvRoi4DQW_CZW0"
+		defaultIconMediaID  = "DefaultIconMediaID0000000000000000000000099"
+		dragonIconMediaID   = "DragonIconMediaID00000000000000000000000001"
+		seriesIconMediaID   = "SeriesIconMediaID00000000000000000000000001"
+	)
+
 	mockYotoMux.HandleFunc("/content/card-existing-1", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -79,7 +86,8 @@ func TestAPI_YotoIntegration(t *testing.T) {
 							"duration": 180.0,
 							"fileSize": 512000,
 							"display": map[string]any{
-								"icon16x16": yoto.DefaultBookIconID,
+								// Realistic GET /content/{cardId} returns resolved CDN URL for icon16x16
+								"icon16x16": "https://media-secure-sbc.yotoplay.com/icons/" + existingIconMediaID,
 							},
 							"tracks": []map[string]any{
 								{
@@ -91,6 +99,9 @@ func TestAPI_YotoIntegration(t *testing.T) {
 									"duration": 180.0,
 									"fileSize": 512000,
 									"channels": 2,
+									"display": map[string]any{
+										"icon16x16": "yoto:" + existingIconMediaID,
+									},
 								},
 							},
 						},
@@ -106,7 +117,7 @@ func TestAPI_YotoIntegration(t *testing.T) {
 			"displayIcons": []map[string]any{
 				{
 					"displayIconId": "icon-pub-1",
-					"mediaId":       "media-dragon-1",
+					"mediaId":       dragonIconMediaID,
 					"title":         "Dragon",
 					"public":        true,
 					"publicTags":    []string{"fantasy", "dragon"},
@@ -154,6 +165,21 @@ func TestAPI_YotoIntegration(t *testing.T) {
 
 	mockYotoMux.HandleFunc("/content", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&capturedContent)
+		// Enforce Yoto's strict POST /content validator: icon16x16 must be null/empty or "yoto:#{43-char-mediaId}"
+		for chIdx, ch := range capturedContent.Content.Chapters {
+			if ch.Display.Icon16x16 != "" && (!strings.HasPrefix(ch.Display.Icon16x16, "yoto:#") || len(strings.TrimPrefix(ch.Display.Icon16x16, "yoto:#")) != 43) {
+				http.Error(w, `{"error":{"code":"bad-request","message":"invalid chapter icon16x16"}}`, http.StatusBadRequest)
+				t.Errorf("chapter %d invalid icon16x16: %q", chIdx, ch.Display.Icon16x16)
+				return
+			}
+			for trIdx, tr := range ch.Tracks {
+				if tr.Display.Icon16x16 != "" && (!strings.HasPrefix(tr.Display.Icon16x16, "yoto:#") || len(strings.TrimPrefix(tr.Display.Icon16x16, "yoto:#")) != 43) {
+					http.Error(w, `{"error":{"code":"bad-request","message":"invalid track icon16x16"}}`, http.StatusBadRequest)
+					t.Errorf("chapter %d track %d invalid icon16x16: %q", chIdx, trIdx, tr.Display.Icon16x16)
+					return
+				}
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		cardID := capturedContent.CardID
 		if cardID == "" {
@@ -288,9 +314,9 @@ func TestAPI_YotoIntegration(t *testing.T) {
 	sendAudioBody, _ := json.Marshal(SendToYotoRequest{
 		Mode:          "append",
 		CardID:        "card-existing-1",
-		DefaultIconID: "yoto:#default-icon-99",
+		DefaultIconID: "yoto:#" + defaultIconMediaID,
 		ChapterIcons: map[int]string{
-			1: "yoto:#media-dragon-1",
+			1: "yoto:" + dragonIconMediaID,
 		},
 	})
 	req6 := httptest.NewRequest(http.MethodPost, "/api/v1/books/book-audio-1/yoto", bytes.NewReader(sendAudioBody))
@@ -307,9 +333,15 @@ func TestAPI_YotoIntegration(t *testing.T) {
 		t.Fatalf("expected card-existing-1 with 3 total chapters (1 existing + 2 added), got %+v", sendResp)
 	}
 
-	// Verify chapter icons, preserved card metadata, and cumulative media stats on captured payload
+	// Verify chapter icons (including existing chapter 0 normalized from CDN URL), preserved card metadata, and cumulative media stats
 	if len(capturedContent.Content.Chapters) != 3 {
 		t.Fatalf("expected 3 chapters in captured content, got %d", len(capturedContent.Content.Chapters))
+	}
+	if capturedContent.Content.Chapters[0].Display.Icon16x16 != "yoto:#"+existingIconMediaID {
+		t.Errorf("expected existing chapter 0 icon normalized to yoto:#%s, got %s", existingIconMediaID, capturedContent.Content.Chapters[0].Display.Icon16x16)
+	}
+	if capturedContent.Content.Chapters[0].Tracks[0].Display.Icon16x16 != "yoto:#"+existingIconMediaID {
+		t.Errorf("expected existing chapter 0 track 0 icon normalized to yoto:#%s, got %s", existingIconMediaID, capturedContent.Content.Chapters[0].Tracks[0].Display.Icon16x16)
 	}
 	if capturedContent.UserID != "auth0|yoto-user-1" {
 		t.Errorf("expected UserID auth0|yoto-user-1 preserved on append, got %q", capturedContent.UserID)
@@ -323,18 +355,18 @@ func TestAPI_YotoIntegration(t *testing.T) {
 	if capturedContent.Metadata.Media == nil || capturedContent.Metadata.Media.Duration != 800.0 || capturedContent.Metadata.Media.FileSize != 2560000 {
 		t.Errorf("expected cumulative media duration=800 and fileSize=2560000, got %+v", capturedContent.Metadata.Media)
 	}
-	if capturedContent.Content.Chapters[1].Display.Icon16x16 != "yoto:#default-icon-99" {
-		t.Errorf("expected chapter 2 to use default icon yoto:#default-icon-99, got %s", capturedContent.Content.Chapters[1].Display.Icon16x16)
+	if capturedContent.Content.Chapters[1].Display.Icon16x16 != "yoto:#"+defaultIconMediaID {
+		t.Errorf("expected chapter 2 to use default icon yoto:#%s, got %s", defaultIconMediaID, capturedContent.Content.Chapters[1].Display.Icon16x16)
 	}
-	if capturedContent.Content.Chapters[2].Display.Icon16x16 != "yoto:#media-dragon-1" {
-		t.Errorf("expected chapter 3 to use custom chapter icon yoto:#media-dragon-1, got %s", capturedContent.Content.Chapters[2].Display.Icon16x16)
+	if capturedContent.Content.Chapters[2].Display.Icon16x16 != "yoto:#"+dragonIconMediaID {
+		t.Errorf("expected chapter 3 to use custom chapter icon yoto:#%s, got %s", dragonIconMediaID, capturedContent.Content.Chapters[2].Display.Icon16x16)
 	}
 
 	// 6b. Replace mode overwrites chapters on existing playlist while preserving cardId
 	replaceAudioBody, _ := json.Marshal(SendToYotoRequest{
 		Mode:          "replace",
 		CardID:        "card-existing-1",
-		DefaultIconID: "yoto:#default-icon-99",
+		DefaultIconID: "yoto:#" + defaultIconMediaID,
 	})
 	req6b := httptest.NewRequest(http.MethodPost, "/api/v1/books/book-audio-1/yoto", bytes.NewReader(replaceAudioBody))
 	req6b.Header.Set("Authorization", "Bearer "+token)
@@ -394,7 +426,7 @@ func TestAPI_YotoIntegration(t *testing.T) {
 
 	sendSeriesBody, _ := json.Marshal(SendToYotoRequest{
 		Mode:          "new",
-		DefaultIconID: "yoto:#series-icon-1",
+		DefaultIconID: "yoto:#" + seriesIconMediaID,
 	})
 	req6c := httptest.NewRequest(http.MethodPost, "/api/v1/series/"+series.ID+"/yoto", bytes.NewReader(sendSeriesBody))
 	req6c.Header.Set("Authorization", "Bearer "+token)
@@ -557,6 +589,33 @@ func TestYotoUIContractVerification(t *testing.T) {
 			t.Errorf("series_detail_view.dart missing expected Yoto contract %q", needle)
 		}
 	}
+
+	sharedLayout := readDart("lib/ui/core/shared_layout.dart")
+	for _, needle := range []string{
+		"YotoUploadQueueBanner",
+		"Key('yoto_upload_queue_banner')",
+		"Key('yoto_current_upload_progress_bar')",
+		"Key('yoto_total_uploads_progress_bar')",
+		"Key('yoto_upload_error_toast')",
+	} {
+		if !strings.Contains(sharedLayout, needle) {
+			t.Errorf("shared_layout.dart missing expected Yoto queue banner contract %q", needle)
+		}
+	}
+
+	yotoProvider := readDart("lib/ui/state/yoto_provider.dart")
+	for _, needle := range []string{
+		"yotoUploadQueueProvider",
+		"enqueueBookUpload",
+		"enqueueSeriesUpload",
+		"currentUploadProgress",
+		"totalUploadsProgress",
+	} {
+		if !strings.Contains(yotoProvider, needle) {
+			t.Errorf("yoto_provider.dart missing expected Yoto queue state contract %q", needle)
+		}
+	}
 }
+
 
 

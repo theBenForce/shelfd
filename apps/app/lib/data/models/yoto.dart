@@ -92,10 +92,20 @@ class YotoDisplayIcon {
 
   /// Returns the canonical `yoto:#<mediaId>` URI used in `display.icon16x16`.
   String get yotoUri {
-    if (mediaId.startsWith('yoto:#')) {
-      return mediaId;
+    final trimmed = mediaId.trim();
+    if (trimmed.isEmpty) {
+      return '';
     }
-    return 'yoto:#$mediaId';
+    if (trimmed.startsWith('yoto:#')) {
+      return trimmed;
+    }
+    if (trimmed.startsWith('yoto:')) {
+      return 'yoto:#${trimmed.substring(5)}';
+    }
+    if (trimmed.startsWith('#')) {
+      return 'yoto:$trimmed';
+    }
+    return 'yoto:#$trimmed';
   }
 
   factory YotoDisplayIcon.fromJson(Map<String, dynamic> json) {
@@ -103,10 +113,14 @@ class YotoDisplayIcon {
     final tags = tagsRaw is List
         ? tagsRaw.map((e) => e.toString()).toList()
         : const <String>[];
-    final mediaId = (json['mediaId'] ?? json['media_id'] ?? '') as String;
+    final rawMediaId = (json['mediaId'] ?? json['media_id'] ?? '') as String;
+    final cleanMediaId = rawMediaId
+        .trim()
+        .replaceFirst(RegExp(r'^yoto:#?'), '')
+        .replaceFirst(RegExp(r'^#'), '');
     return YotoDisplayIcon(
-      displayIconId: (json['displayIconId'] ?? json['display_icon_id'] ?? mediaId) as String,
-      mediaId: mediaId,
+      displayIconId: (json['displayIconId'] ?? json['display_icon_id'] ?? cleanMediaId) as String,
+      mediaId: cleanMediaId,
       title: (json['title'] ?? '') as String,
       url: (json['url'] ?? '') as String,
       publicTags: tags,
@@ -141,7 +155,10 @@ class YotoIconsCatalog {
 
   YotoDisplayIcon? findByUriOrMediaId(String? uriOrId) {
     if (uriOrId == null || uriOrId.isEmpty) return null;
-    final clean = uriOrId.startsWith('yoto:#') ? uriOrId.substring(6) : uriOrId;
+    final clean = uriOrId
+        .trim()
+        .replaceFirst(RegExp(r'^yoto:#?'), '')
+        .replaceFirst(RegExp(r'^#'), '');
     for (final icon in allIcons) {
       if (icon.mediaId == clean || icon.yotoUri == uriOrId || icon.displayIconId == clean) {
         return icon;
@@ -228,6 +245,41 @@ class SendToYotoResult {
       title: (json['title'] ?? '') as String,
       chapterCount: (json['chapter_count'] as num?)?.toInt() ?? 0,
       message: (json['message'] ?? 'Sent to Yoto') as String,
+    );
+  }
+}
+
+class YotoServerUploadProgress {
+  final bool isActive;
+  final String? title;
+  final String? currentItem;
+  final String? stage;
+  final double currentProgress;
+  final double overallProgress;
+  final int completedItems;
+  final int totalItems;
+
+  const YotoServerUploadProgress({
+    this.isActive = false,
+    this.title,
+    this.currentItem,
+    this.stage,
+    this.currentProgress = 0.0,
+    this.overallProgress = 0.0,
+    this.completedItems = 0,
+    this.totalItems = 0,
+  });
+
+  factory YotoServerUploadProgress.fromJson(Map<String, dynamic> json) {
+    return YotoServerUploadProgress(
+      isActive: json['is_active'] as bool? ?? false,
+      title: json['title'] as String?,
+      currentItem: json['current_item'] as String?,
+      stage: json['stage'] as String?,
+      currentProgress: ((json['current_progress'] as num?)?.toDouble() ?? 0.0).clamp(0.0, 1.0),
+      overallProgress: ((json['overall_progress'] as num?)?.toDouble() ?? 0.0).clamp(0.0, 1.0),
+      completedItems: (json['completed_items'] as num?)?.toInt() ?? 0,
+      totalItems: (json['total_items'] as num?)?.toInt() ?? 0,
     );
   }
 }
