@@ -44,13 +44,14 @@ class SendToYotoDialog extends ConsumerStatefulWidget {
 
 class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
   String _mode = 'existing'; // 'existing' or 'new'
+  String _existingAction = 'append'; // 'append' or 'replace'
   String? _selectedCardId;
   late final TextEditingController _newTitleController;
   final TextEditingController _playlistSearchController =
       TextEditingController();
   String _playlistFilter = '';
 
-  bool _includeCover = true;
+  bool _includeCover = false;
   bool _useCoverAsIcon = false;
   String _defaultIconUri =
       'yoto:#gTMbacpoeSMYqc9fNLJnxPjylraNG6jIrYEWevyzYbA';
@@ -176,8 +177,9 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
           entry.key: entry.value.yotoUri,
       };
 
+      final effectiveMode = _mode == 'existing' ? _existingAction : 'new';
       final request = SendToYotoRequest(
-        mode: _mode,
+        mode: effectiveMode,
         cardId: _mode == 'existing' ? _selectedCardId : null,
         newPlaylistTitle: _mode == 'new' ? newTitle : null,
         includeCover: _includeCover,
@@ -409,6 +411,7 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
                                   if (selection.isNotEmpty) {
                                     setState(() {
                                       _mode = selection.first;
+                                      _includeCover = _mode == 'new';
                                       _errorMessage = null;
                                     });
                                   }
@@ -417,6 +420,48 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
                         const SizedBox(height: AppTokens.space16),
 
                         if (_mode == 'existing') ...[
+                          SegmentedButton<String>(
+                            key: const Key('yoto_existing_action_selector'),
+                            style: ButtonStyle(
+                              visualDensity: VisualDensity.compact,
+                              backgroundColor: WidgetStateProperty.resolveWith(
+                                (states) => states.contains(WidgetState.selected)
+                                    ? colors.accentContainer
+                                    : colors.containerLow,
+                              ),
+                              foregroundColor: WidgetStateProperty.resolveWith(
+                                (states) => states.contains(WidgetState.selected)
+                                    ? colors.accentPrimary
+                                    : colors.ink,
+                              ),
+                              side: WidgetStatePropertyAll(
+                                BorderSide(color: colors.border),
+                              ),
+                            ),
+                            segments: const [
+                              ButtonSegment<String>(
+                                value: 'append',
+                                label: Text('Append Audio'),
+                                icon: Icon(Icons.playlist_add_rounded, size: 16),
+                              ),
+                              ButtonSegment<String>(
+                                value: 'replace',
+                                label: Text('Replace Audio'),
+                                icon: Icon(Icons.sync_rounded, size: 16),
+                              ),
+                            ],
+                            selected: {_existingAction},
+                            onSelectionChanged: _isSending
+                                ? null
+                                : (selection) {
+                                    if (selection.isNotEmpty) {
+                                      setState(() {
+                                        _existingAction = selection.first;
+                                      });
+                                    }
+                                  },
+                          ),
+                          const SizedBox(height: AppTokens.space12),
                           TextField(
                             key: const Key('yoto_playlist_search_field'),
                             controller: _playlistSearchController,
@@ -509,6 +554,7 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
                                             onPressed: () {
                                               setState(() {
                                                 _mode = 'new';
+                                                _includeCover = true;
                                               });
                                             },
                                             icon: const Icon(
@@ -638,33 +684,35 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
                               ),
                             ),
                           ),
-                          const SizedBox(height: AppTokens.space8),
-                          Material(
-                            type: MaterialType.transparency,
-                            child: CheckboxListTile(
-                              key: const Key('yoto_include_cover_checkbox'),
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                              controlAffinity: ListTileControlAffinity.leading,
-                              title: Text(
-                                'Upload book cover art as Yoto playlist cover',
-                                style: AppTypography.bodySans(
-                                  fontSize: 13,
-                                  color: colors.ink,
-                                ),
-                              ),
-                              value: _includeCover,
-                              activeColor: colors.accentPrimary,
-                              onChanged: _isSending
-                                  ? null
-                                  : (val) {
-                                      setState(() {
-                                        _includeCover = val ?? true;
-                                      });
-                                    },
-                            ),
-                          ),
                         ],
+                        const SizedBox(height: AppTokens.space8),
+                        Material(
+                          type: MaterialType.transparency,
+                          child: CheckboxListTile(
+                            key: const Key('yoto_include_cover_checkbox'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            title: Text(
+                              _mode == 'existing'
+                                  ? 'Update playlist cover with this book\'s cover'
+                                  : 'Upload book cover art as Yoto playlist cover',
+                              style: AppTypography.bodySans(
+                                fontSize: 13,
+                                color: colors.ink,
+                              ),
+                            ),
+                            value: _includeCover,
+                            activeColor: colors.accentPrimary,
+                            onChanged: _isSending
+                                ? null
+                                : (val) {
+                                    setState(() {
+                                      _includeCover = val ?? false;
+                                    });
+                                  },
+                          ),
+                        ),
 
                         const SizedBox(height: AppTokens.space16),
                         Divider(height: 1, color: colors.subtleBorder),
@@ -1018,7 +1066,15 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
                       ),
                       onPressed: _isSending ? null : _handleSend,
                       icon: const Icon(Icons.send_rounded, size: 16),
-                      label: Text(_isSending ? 'Sending...' : 'Send to Yoto'),
+                      label: Text(
+                        _isSending
+                            ? 'Sending...'
+                            : (_mode == 'existing'
+                                ? (_existingAction == 'append'
+                                    ? 'Append to Playlist'
+                                    : 'Replace Playlist')
+                                : 'Send to Yoto'),
+                      ),
                     ),
                   ],
                 ],

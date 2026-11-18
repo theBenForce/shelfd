@@ -106,7 +106,13 @@ void main() {
 
     expect(find.text('Send to Yoto Playlist'), findsOneWidget);
     expect(find.text('Bedtime Stories'), findsOneWidget);
+    expect(find.text('4 chapters'), findsOneWidget);
     expect(find.text('Road Trip Adventures'), findsOneWidget);
+    expect(find.text('2 chapters'), findsOneWidget);
+    expect(find.byKey(const Key('yoto_existing_action_selector')), findsOneWidget);
+    expect(find.text('Append Audio'), findsOneWidget);
+    expect(find.text('Replace Audio'), findsOneWidget);
+    expect(find.text('Append to Playlist'), findsOneWidget);
     expect(find.byKey(const Key('yoto_change_default_icon_button')), findsOneWidget);
     expect(find.byKey(const Key('yoto_use_cover_as_icon_switch')), findsOneWidget);
 
@@ -121,6 +127,27 @@ void main() {
     expect(find.text('2. Roast Mutton'), findsOneWidget);
     expect(find.byKey(const Key('yoto_chapter_icon_button_0')), findsOneWidget);
     expect(find.byKey(const Key('yoto_chapter_icon_button_1')), findsOneWidget);
+
+    // Switching to Replace Audio updates button label to Replace Playlist
+    await tester.ensureVisible(find.text('Replace Audio'));
+    await tester.tap(find.text('Replace Audio'));
+    await tester.pumpAndSettle();
+    expect(find.text('Replace Playlist'), findsOneWidget);
+
+    // Switching back to Append Audio updates button label to Append to Playlist
+    await tester.tap(find.text('Append Audio'));
+    await tester.pumpAndSettle();
+    expect(find.text('Append to Playlist'), findsOneWidget);
+
+    // Submitting in default append mode sends mode='append' and preserves existing cover (includeCover=false)
+    await tester.tap(find.byKey(const Key('confirm_send_to_yoto_button')));
+    await tester.pumpAndSettle();
+
+    expect(mockYotoRepo.lastSentBookId, 'audio-book-1');
+    expect(mockYotoRepo.lastRequest, isNotNull);
+    expect(mockYotoRepo.lastRequest!.mode, 'append');
+    expect(mockYotoRepo.lastRequest!.cardId, 'card-bedtime');
+    expect(mockYotoRepo.lastRequest!.includeCover, isFalse);
   });
 
   testWidgets('SettingsView renders Yoto Player Integration card', (tester) async {
@@ -191,6 +218,9 @@ void main() {
 }
 
 class _MockYotoRepository extends YotoRepository {
+  String? lastSentBookId;
+  SendToYotoRequest? lastRequest;
+
   _MockYotoRepository(SharedPreferences prefs)
       : super(
           apiService: ApiService(baseUrl: 'http://localhost:8080'),
@@ -211,6 +241,22 @@ class _MockYotoRepository extends YotoRepository {
         chapterCount: 2,
       ),
     ];
+  }
+
+  @override
+  Future<SendToYotoResult> sendBookToYoto(
+    String bookId,
+    SendToYotoRequest request,
+  ) async {
+    lastSentBookId = bookId;
+    lastRequest = request;
+    return SendToYotoResult(
+      status: 'sent',
+      cardId: request.cardId ?? 'card-new',
+      title: request.newPlaylistTitle ?? 'Bedtime Stories',
+      chapterCount: 6,
+      message: 'Appended to Yoto playlist',
+    );
   }
 }
 
