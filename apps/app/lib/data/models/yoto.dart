@@ -169,13 +169,14 @@ class YotoIconsCatalog {
 }
 
 class SendToYotoRequest {
-  final String mode; // 'existing' or 'new'
+  final String mode; // 'append', 'replace', 'existing', or 'new'
   final String? cardId;
   final String? newPlaylistTitle;
   final bool includeCover;
   final bool useCoverAsIcon;
   final String? defaultIconId;
   final Map<int, String>? chapterIcons;
+  final List<String>? bookIds;
 
   const SendToYotoRequest({
     required this.mode,
@@ -185,6 +186,7 @@ class SendToYotoRequest {
     this.useCoverAsIcon = false,
     this.defaultIconId,
     this.chapterIcons,
+    this.bookIds,
   });
 
   Map<String, dynamic> toJson() {
@@ -199,6 +201,7 @@ class SendToYotoRequest {
         'default_icon_id': defaultIconId,
       if (chapterIcons != null && chapterIcons!.isNotEmpty)
         'chapter_icons': chapterIcons!.map((k, v) => MapEntry(k.toString(), v)),
+      if (bookIds != null && bookIds!.isNotEmpty) 'book_ids': bookIds,
     };
   }
 }

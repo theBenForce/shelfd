@@ -1092,4 +1092,20 @@ class ApiService {
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return SendToYotoResult.fromJson(data);
   }
+
+  Future<SendToYotoResult> sendSeriesToYoto(
+    String seriesId,
+    SendToYotoRequest requestPayload,
+  ) async {
+    final response = await client.post(
+      _uri('/api/v1/series/$seriesId/yoto'),
+      headers: _headers(),
+      body: jsonEncode(requestPayload.toJson()),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return SendToYotoResult.fromJson(data);
+  }
 }

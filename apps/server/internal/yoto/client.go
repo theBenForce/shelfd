@@ -191,6 +191,16 @@ type DisplayFields struct {
 	Icon16x16 string `json:"icon16x16"`
 }
 
+// MarshalJSON ensures empty Icon16x16 serializes as null rather than an empty string
+// so Yoto's schema validator accepts chapters without custom icons.
+func (d DisplayFields) MarshalJSON() ([]byte, error) {
+	if strings.TrimSpace(d.Icon16x16) == "" {
+		return []byte(`{"icon16x16":null}`), nil
+	}
+	type plainDisplay DisplayFields
+	return json.Marshal(plainDisplay(d))
+}
+
 // Track represents a single audio track inside a Yoto chapter.
 type Track struct {
 	Key          string        `json:"key"`
@@ -201,8 +211,59 @@ type Track struct {
 	Channels     string        `json:"channels,omitempty"`
 	Format       string        `json:"format,omitempty"`
 	Type         string        `json:"type"`
+	UID          string        `json:"uid,omitempty"`
 	OverlayLabel string        `json:"overlayLabel,omitempty"`
 	Display      DisplayFields `json:"display"`
+}
+
+// UnmarshalJSON allows Track.Channels to be decoded from either a JSON string ("stereo"/"mono")
+// or a JSON number (1/2) and handles null display objects on existing Yoto cards.
+func (t *Track) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Key          string          `json:"key"`
+		Title        string          `json:"title"`
+		TrackURL     string          `json:"trackUrl"`
+		Duration     float64         `json:"duration"`
+		FileSize     int64           `json:"fileSize"`
+		Channels     json.RawMessage `json:"channels"`
+		Format       string          `json:"format"`
+		Type         string          `json:"type"`
+		UID          string          `json:"uid"`
+		OverlayLabel string          `json:"overlayLabel"`
+		Display      *DisplayFields  `json:"display"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	t.Key = raw.Key
+	t.Title = raw.Title
+	t.TrackURL = raw.TrackURL
+	t.Duration = raw.Duration
+	t.FileSize = raw.FileSize
+	t.Format = raw.Format
+	t.Type = raw.Type
+	t.UID = raw.UID
+	t.OverlayLabel = raw.OverlayLabel
+	if raw.Display != nil {
+		t.Display = *raw.Display
+	}
+	if len(raw.Channels) > 0 && string(raw.Channels) != "null" {
+		var chStr string
+		if err := json.Unmarshal(raw.Channels, &chStr); err == nil {
+			t.Channels = chStr
+		} else {
+			var chNum int
+			if err := json.Unmarshal(raw.Channels, &chNum); err == nil {
+				switch chNum {
+				case 1:
+					t.Channels = "mono"
+				case 2:
+					t.Channels = "stereo"
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // Chapter represents a chapter in a Yoto card/playlist.
@@ -210,6 +271,8 @@ type Chapter struct {
 	Key          string        `json:"key"`
 	Title        string        `json:"title"`
 	OverlayLabel string        `json:"overlayLabel,omitempty"`
+	Duration     float64       `json:"duration,omitempty"`
+	FileSize     int64         `json:"fileSize,omitempty"`
 	Tracks       []Track       `json:"tracks"`
 	Display      DisplayFields `json:"display"`
 }
@@ -233,17 +296,26 @@ type CardMetadata struct {
 	Description string             `json:"description,omitempty"`
 	Cover       *CardCover         `json:"cover,omitempty"`
 	Media       *CardMediaMetadata `json:"media,omitempty"`
+	Creators    map[string]any     `json:"creators,omitempty"`
 }
 
 // CardContentBody holds the chapters array and playback config.
 type CardContentBody struct {
-	Chapters []Chapter `json:"chapters"`
+	Chapters     []Chapter      `json:"chapters"`
+	Config       map[string]any `json:"config,omitempty"`
+	PlaybackType string         `json:"playbackType,omitempty"`
+	Activity     string         `json:"activity,omitempty"`
+	Version      string         `json:"version,omitempty"`
+	Cover        *CardCover     `json:"cover,omitempty"`
 }
 
 // CardContent is the payload for creating or updating a Yoto playlist via POST /content.
 type CardContent struct {
 	CardID    string          `json:"cardId,omitempty"`
 	Title     string          `json:"title"`
+	UserID    string          `json:"userId,omitempty"`
+	Slug      string          `json:"slug,omitempty"`
+	Deleted   bool            `json:"deleted,omitempty"`
 	Content   CardContentBody `json:"content"`
 	Metadata  CardMetadata    `json:"metadata"`
 	CreatedAt string          `json:"createdAt,omitempty"`
@@ -254,6 +326,8 @@ type CardContent struct {
 type YotoCard struct {
 	CardID    string          `json:"cardId"`
 	Title     string          `json:"title"`
+	UserID    string          `json:"userId,omitempty"`
+	Slug      string          `json:"slug,omitempty"`
 	Deleted   bool            `json:"deleted,omitempty"`
 	CreatedAt string          `json:"createdAt,omitempty"`
 	UpdatedAt string          `json:"updatedAt,omitempty"`
@@ -261,7 +335,31 @@ type YotoCard struct {
 	Metadata  CardMetadata    `json:"metadata,omitempty"`
 }
 
-// GetMyPlaylists retrieves the user's Make Your Own (MYO) playlists from GET /content/mine.
+func decodeYotoCardBytes(body []byte, fallbackCardID string) (*YotoCard, error) {
+	var wrapped struct {
+		Card YotoCard `json:"card"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err != nil {
+		return nil, err
+	}
+	card := wrapped.Card
+	if card.CardID == "" && card.Title == "" && len(card.Content.Chapters) == 0 {
+		var direct YotoCard
+		if err := json.Unmarshal(body, &direct); err == nil {
+			card = direct
+		}
+	}
+	if card.CardID == "" {
+		card.CardID = fallbackCardID
+	}
+	if card.Metadata.Cover == nil && card.Content.Cover != nil && card.Content.Cover.ImageL != "" {
+		card.Metadata.Cover = &CardCover{ImageL: card.Content.Cover.ImageL}
+	}
+	return &card, nil
+}
+
+// GetMyPlaylists retrieves the user's Make Your Own (MYO) playlists from GET /content/mine
+// and enriches any summary cards that omit content.chapters via GetCard.
 func (c *Client) GetMyPlaylists(ctx context.Context, accessToken string) ([]YotoCard, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiBaseURL+"/content/mine", nil)
 	if err != nil {
@@ -291,39 +389,113 @@ func (c *Client) GetMyPlaylists(ctx context.Context, accessToken string) ([]Yoto
 	var active []YotoCard
 	for _, card := range result.Cards {
 		if !card.Deleted {
+			if card.Metadata.Cover == nil && card.Content.Cover != nil && card.Content.Cover.ImageL != "" {
+				card.Metadata.Cover = &CardCover{ImageL: card.Content.Cover.ImageL}
+			}
 			active = append(active, card)
 		}
 	}
+
+	// GET /content/mine returns card summaries without content.chapters.
+	// Fetch card details concurrently for any card whose chapters were omitted.
+	type enrichResult struct {
+		idx  int
+		card *YotoCard
+	}
+	sem := make(chan struct{}, 5)
+	resCh := make(chan enrichResult, len(active))
+	pending := 0
+	for i := range active {
+		if len(active[i].Content.Chapters) == 0 && strings.TrimSpace(active[i].CardID) != "" {
+			pending++
+			idx := i
+			cardID := active[i].CardID
+			go func() {
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				detail, getErr := c.GetCard(ctx, accessToken, cardID)
+				if getErr == nil && detail != nil {
+					resCh <- enrichResult{idx: idx, card: detail}
+				} else {
+					resCh <- enrichResult{idx: idx, card: nil}
+				}
+			}()
+		}
+	}
+	for range pending {
+		r := <-resCh
+		if r.card != nil {
+			if len(r.card.Content.Chapters) > 0 {
+				active[r.idx].Content = r.card.Content
+			}
+			if active[r.idx].Metadata.Cover == nil && r.card.Metadata.Cover != nil {
+				active[r.idx].Metadata.Cover = r.card.Metadata.Cover
+			}
+			if active[r.idx].Metadata.Media == nil && r.card.Metadata.Media != nil {
+				active[r.idx].Metadata.Media = r.card.Metadata.Media
+			}
+			if active[r.idx].UserID == "" && r.card.UserID != "" {
+				active[r.idx].UserID = r.card.UserID
+			}
+		}
+	}
+
 	return active, nil
 }
 
-// GetCard retrieves full card details including chapters from GET /content/{cardId}.
+// GetCard retrieves full card details including chapters from GET /content/{cardId}
+// (falling back to GET /card/{cardId} if needed).
 func (c *Client) GetCard(ctx context.Context, accessToken, cardID string) (*YotoCard, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiBaseURL+"/content/"+url.PathEscape(cardID), nil)
-	if err != nil {
-		return nil, fmt.Errorf("building get card request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetching card %s: %w", cardID, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("fetching card %s failed with status %d: %s", cardID, resp.StatusCode, strings.TrimSpace(string(body)))
+	escapedID := url.PathEscape(cardID)
+	endpoints := []string{
+		c.apiBaseURL + "/content/" + escapedID,
+		c.apiBaseURL + "/card/" + escapedID,
 	}
 
-	var result struct {
-		Card YotoCard `json:"card"`
+	var lastErr error
+	var bestCard *YotoCard
+	for _, endpoint := range endpoints {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			lastErr = fmt.Errorf("building get card request: %w", err)
+			continue
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("fetching card %s: %w", cardID, err)
+			continue
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = fmt.Errorf("reading card %s response: %w", cardID, readErr)
+			continue
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			lastErr = fmt.Errorf("fetching card %s failed with status %d: %s", cardID, resp.StatusCode, strings.TrimSpace(string(body)))
+			continue
+		}
+
+		card, decErr := decodeYotoCardBytes(body, cardID)
+		if decErr != nil {
+			lastErr = fmt.Errorf("decoding card response: %w", decErr)
+			continue
+		}
+		if len(card.Content.Chapters) > 0 {
+			return card, nil
+		}
+		if bestCard == nil {
+			bestCard = card
+		}
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding card response: %w", err)
+	if bestCard != nil {
+		return bestCard, nil
 	}
-	return &result.Card, nil
+	return nil, lastErr
 }
 
 // CreateOrUpdateContent creates or updates a Yoto MYO playlist via POST /content.
@@ -347,24 +519,26 @@ func (c *Client) CreateOrUpdateContent(ctx context.Context, accessToken string, 
 	}
 	defer resp.Body.Close()
 
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return nil, fmt.Errorf("reading create/update content response: %w", readErr)
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("create/update content failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	var result struct {
-		Card YotoCard `json:"card"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	card, err := decodeYotoCardBytes(body, content.CardID)
+	if err != nil {
 		return nil, fmt.Errorf("decoding create/update content response: %w", err)
 	}
-	if result.Card.CardID == "" && content.CardID != "" {
-		result.Card.CardID = content.CardID
+	if card.CardID == "" && content.CardID != "" {
+		card.CardID = content.CardID
 	}
-	if result.Card.Title == "" {
-		result.Card.Title = content.Title
+	if card.Title == "" {
+		card.Title = content.Title
 	}
-	return &result.Card, nil
+	return card, nil
 }
 
 // DisplayIcon represents a 16x16 pixel icon from Yoto's public library or user custom icons.

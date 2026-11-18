@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
+import '../book_detail/send_to_yoto_dialog.dart';
 
 int compareSeriesBooks(Book a, Book b) {
   final seqA = a.seriesSequence;
@@ -92,6 +93,24 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
     }
   }
 
+  Future<void> _sendSeriesToYoto(String title, List<Book> audioBooks) async {
+    if (audioBooks.isEmpty) return;
+    final result = await showSendSeriesToYotoDialog(
+      context,
+      seriesId: widget.seriesId,
+      seriesName: title,
+      books: audioBooks,
+    );
+    if (result != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = ShelfdColors.of(context);
@@ -102,6 +121,7 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
             : (_books.isNotEmpty && _books.first.series != null
                 ? _books.first.series!.name
                 : 'Series'));
+    final audioBooks = _books.where((b) => b.hasAudio).toList();
 
     return Scaffold(
       backgroundColor: colors.background,
@@ -158,6 +178,23 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
                             ),
                           ),
                         ),
+                        if (audioBooks.isNotEmpty) ...[
+                          OutlinedButton.icon(
+                            key: const Key('send_series_to_yoto_button'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: colors.ink,
+                              side: BorderSide(color: colors.border),
+                            ),
+                            onPressed: () => _sendSeriesToYoto(title, audioBooks),
+                            icon: const Icon(
+                              Icons.speaker_rounded,
+                              size: 16,
+                              color: AppTokens.amberAccent,
+                            ),
+                            label: const Text('Send to Yoto'),
+                          ),
+                          const SizedBox(width: AppTokens.space12),
+                        ],
                         if (_books.isNotEmpty)
                           StatusBadge(
                             label: '${_books.length} Books',
