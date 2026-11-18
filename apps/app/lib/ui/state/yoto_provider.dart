@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/models/yoto.dart';
 import '../../data/repositories/yoto_repository.dart';
+import '../../data/services/api_service.dart';
 import 'providers.dart';
 
 final yotoRepositoryProvider = Provider<YotoRepository>((ref) {
@@ -49,8 +50,20 @@ class YotoAccountNotifier extends Notifier<YotoAccountState> {
     ref.onDispose(() {
       _isDisposed = true;
     });
+    ref.listen(authProvider, (previous, next) {
+      if (previous?.user != next.user && next.user != null) {
+        loadStatus();
+      }
+    });
     Future.microtask(loadStatus);
     return const YotoAccountState(isLoading: true);
+  }
+
+  Future<void> _clearAuthOn401(Object e) async {
+    if (e is ApiException && e.statusCode == 401) {
+      await ref.read(storageServiceProvider).clearAuthToken();
+      ref.read(apiServiceProvider).updateConnection(newToken: '');
+    }
   }
 
   Future<void> loadStatus() async {
@@ -63,6 +76,7 @@ class YotoAccountNotifier extends Notifier<YotoAccountState> {
         state = state.copyWith(status: status, isLoading: false);
       }
     } catch (e) {
+      await _clearAuthOn401(e);
       if (!_isDisposed) {
         state = state.copyWith(
           isLoading: false,
@@ -108,6 +122,7 @@ class YotoAccountNotifier extends Notifier<YotoAccountState> {
       );
       return true;
     } catch (e) {
+      await _clearAuthOn401(e);
       state = state.copyWith(
         isLoading: false,
         errorMessage: 'Failed to link Yoto account: $e',
@@ -140,6 +155,7 @@ class YotoAccountNotifier extends Notifier<YotoAccountState> {
       );
       return true;
     } catch (e) {
+      await _clearAuthOn401(e);
       state = state.copyWith(
         isLoading: false,
         errorMessage: 'Failed to link Yoto account: $e',
@@ -167,6 +183,7 @@ class YotoAccountNotifier extends Notifier<YotoAccountState> {
         successMessage: 'Yoto account unlinked.',
       );
     } catch (e) {
+      await _clearAuthOn401(e);
       state = state.copyWith(
         isLoading: false,
         errorMessage: 'Failed to unlink Yoto account: $e',

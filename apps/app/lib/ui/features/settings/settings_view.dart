@@ -161,11 +161,21 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       return;
     }
 
-    final url = await ref.read(yotoAccountProvider.notifier).buildAuthUrl(
-          clientId: clientId,
-          redirectUri: _resolveYotoRedirectUri(),
+    try {
+      final url = await ref.read(yotoAccountProvider.notifier).buildAuthUrl(
+            clientId: clientId,
+            redirectUri: _resolveYotoRedirectUri(),
+          );
+      await openExternalUrl(url);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to start Yoto authorization: $e'),
+          ),
         );
-    await openExternalUrl(url);
+      }
+    }
   }
 
   Future<void> _handleExchangeYotoCode() async {
@@ -909,9 +919,33 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                             borderRadius: BorderRadius.circular(AppTokens.radiusSm),
                             border: Border.all(color: c.errorBorder),
                           ),
-                          child: Text(
-                            yotoState.errorMessage!,
-                            style: AppTypography.bodySans(fontSize: 13, color: c.errorText),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                yotoState.errorMessage!,
+                                style: AppTypography.bodySans(fontSize: 13, color: c.errorText),
+                              ),
+                              if (yotoState.errorMessage!.contains('401')) ...[
+                                const SizedBox(height: AppTokens.space8),
+                                OutlinedButton.icon(
+                                  key: const Key('yoto_reconnect_signin_button'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: c.errorText,
+                                    side: BorderSide(color: c.errorBorder),
+                                  ),
+                                  onPressed: () async {
+                                    await ref.read(storageServiceProvider).clearAuthToken();
+                                    ref.read(apiServiceProvider).updateConnection(newToken: '');
+                                    if (context.mounted) {
+                                      context.go('/connect');
+                                    }
+                                  },
+                                  icon: const Icon(Icons.login_rounded, size: 16),
+                                  label: const Text('Reconnect / Sign In'),
+                                ),
+                              ],
+                            ],
                           ),
                         ),
                         const SizedBox(height: AppTokens.space12),
