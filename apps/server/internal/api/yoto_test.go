@@ -547,6 +547,16 @@ func TestYotoUIContractVerification(t *testing.T) {
 			t.Errorf("settings_view.dart missing expected Yoto contract %q", needle)
 		}
 	}
+
+	seriesDetail := readDart("lib/ui/features/series/series_detail_view.dart")
+	for _, needle := range []string{
+		"Key('send_series_to_yoto_button')",
+		"showSendSeriesToYotoDialog",
+	} {
+		if !strings.Contains(seriesDetail, needle) {
+			t.Errorf("series_detail_view.dart missing expected Yoto contract %q", needle)
+		}
+	}
 }
 
 

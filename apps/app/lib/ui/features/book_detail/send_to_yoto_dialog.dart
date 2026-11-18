@@ -20,6 +20,23 @@ Future<SendToYotoResult?> showSendToYotoDialog(
   );
 }
 
+Future<SendToYotoResult?> showSendSeriesToYotoDialog(
+  BuildContext context, {
+  required String seriesId,
+  required String seriesName,
+  required List<Book> books,
+}) {
+  return showDialog<SendToYotoResult>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => SendToYotoDialog.series(
+      seriesId: seriesId,
+      seriesName: seriesName,
+      seriesBooks: books,
+    ),
+  );
+}
+
 class _PlaylistEntryItem {
   final int index;
   final String title;
@@ -31,12 +48,29 @@ class _PlaylistEntryItem {
 }
 
 class SendToYotoDialog extends ConsumerStatefulWidget {
-  final Book book;
+  final Book? book;
+  final String? seriesId;
+  final String? seriesName;
+  final List<Book> seriesBooks;
 
   const SendToYotoDialog({
     super.key,
-    required this.book,
-  });
+    required Book this.book,
+  })  : seriesId = null,
+        seriesName = null,
+        seriesBooks = const [];
+
+  const SendToYotoDialog.series({
+    super.key,
+    required String this.seriesId,
+    required String this.seriesName,
+    required this.seriesBooks,
+  }) : book = null;
+
+  bool get isSeries => seriesId != null && seriesId!.isNotEmpty;
+
+  String get targetTitle =>
+      isSeries ? (seriesName ?? 'Series') : (book?.title ?? 'Book');
 
   @override
   ConsumerState<SendToYotoDialog> createState() => _SendToYotoDialogState();
@@ -65,7 +99,7 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
   @override
   void initState() {
     super.initState();
-    _newTitleController = TextEditingController(text: widget.book.title);
+    _newTitleController = TextEditingController(text: widget.targetTitle);
   }
 
   @override
@@ -75,10 +109,36 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
     super.dispose();
   }
 
-  List<_PlaylistEntryItem> _resolveEntries(Book book) {
+  List<_PlaylistEntryItem> _resolveBookEntries(
+    Book book, {
+    required int startIndex,
+    required bool prefixBookTitle,
+  }) {
+    String formatTitle(String raw, bool singleEntry) {
+      final trimmed = raw.trim();
+      if (!prefixBookTitle) {
+        return trimmed;
+      }
+      final lower = trimmed.toLowerCase();
+      if (singleEntry &&
+          (trimmed.isEmpty ||
+              lower == 'chapter 1' ||
+              lower == 'track 1' ||
+              lower == '01' ||
+              lower == '1' ||
+              lower == book.title.toLowerCase())) {
+        return book.title;
+      }
+      if (lower.startsWith(book.title.toLowerCase())) {
+        return trimmed;
+      }
+      return '${book.title} - $trimmed';
+    }
+
     final audioFiles = book.files
         .where((f) =>
             f.fileType == 'audiobook' ||
+            f.fileType == 'audio' ||
             f.filePath.toLowerCase().endsWith('.m4b') ||
             f.filePath.toLowerCase().endsWith('.m4a') ||
             f.filePath.toLowerCase().endsWith('.mp3'))
@@ -95,33 +155,59 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
           final parts = f.filePath.split('/');
           label = parts.last;
         }
-        return _PlaylistEntryItem(index: i, title: label);
+        return _PlaylistEntryItem(
+          index: startIndex + i,
+          title: formatTitle(label, false),
+        );
       });
     }
 
     if (book.audioChapters.isNotEmpty) {
+      final single = book.audioChapters.length == 1;
       return List.generate(book.audioChapters.length, (i) {
         final ch = book.audioChapters[i];
+        final raw =
+            ch.title.trim().isNotEmpty ? ch.title.trim() : 'Chapter ${i + 1}';
         return _PlaylistEntryItem(
-          index: i,
-          title: ch.title.trim().isNotEmpty ? ch.title.trim() : 'Chapter ${i + 1}',
+          index: startIndex + i,
+          title: formatTitle(raw, single),
         );
       });
     }
 
     return [
       _PlaylistEntryItem(
-        index: 0,
+        index: startIndex,
         title: book.title.isNotEmpty ? book.title : 'Chapter 1',
       ),
     ];
+  }
+
+  List<_PlaylistEntryItem> _resolveAllEntries() {
+    if (widget.isSeries) {
+      final entries = <_PlaylistEntryItem>[];
+      for (final b in widget.seriesBooks) {
+        final bookEntries = _resolveBookEntries(
+          b,
+          startIndex: entries.length,
+          prefixBookTitle: true,
+        );
+        entries.addAll(bookEntries);
+      }
+      return entries;
+    }
+    return _resolveBookEntries(
+      widget.book!,
+      startIndex: 0,
+      prefixBookTitle: false,
+    );
   }
 
   Future<void> _pickDefaultIcon() async {
     final picked = await showYotoIconPickerDialog(
       context,
       currentIconUri: _defaultIconUri,
-      targetLabel: 'Default icon for all chapters in "${widget.book.title}"',
+      targetLabel: 'Default icon for all chapters in "${widget.targetTitle}"',
     );
     if (picked != null && mounted) {
       setState(() {
@@ -153,7 +239,7 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
 
     if (_mode == 'existing' && (_selectedCardId == null || _selectedCardId!.isEmpty)) {
       setState(() {
-        _errorMessage = 'Please select a Yoto playlist to add this book to.';
+        _errorMessage = 'Please select a Yoto playlist to add this audio to.';
       });
       return;
     }
@@ -187,9 +273,14 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
         defaultIconId: _defaultIconUri,
         chapterIcons:
             chapterIconsPayload.isNotEmpty ? chapterIconsPayload : null,
+        bookIds: widget.isSeries
+            ? widget.seriesBooks.map((b) => b.id).toList()
+            : null,
       );
 
-      final result = await repo.sendBookToYoto(widget.book.id, request);
+      final result = widget.isSeries
+          ? await repo.sendSeriesToYoto(widget.seriesId!, request)
+          : await repo.sendBookToYoto(widget.book!.id, request);
       ref.invalidate(yotoPlaylistsProvider);
       if (mounted) {
         Navigator.of(context).pop(result);
@@ -252,7 +343,10 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
     final AsyncValue<List<YotoPlaylist>> playlistsAsync = yotoAccount.isLinked
         ? ref.watch(yotoPlaylistsProvider)
         : const AsyncValue.data([]);
-    final entries = _resolveEntries(widget.book);
+    final entries = _resolveAllEntries();
+    final headerSubtitle = widget.isSeries
+        ? '${widget.targetTitle} • ${widget.seriesBooks.length} ${widget.seriesBooks.length == 1 ? 'book' : 'books'} • ${entries.length} ${entries.length == 1 ? 'chapter' : 'chapters'}'
+        : '${widget.targetTitle} • ${entries.length} ${entries.length == 1 ? 'chapter' : 'chapters'}';
 
     return Dialog(
       key: const Key('send_to_yoto_dialog'),
@@ -294,7 +388,9 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Send to Yoto Playlist',
+                          widget.isSeries
+                              ? 'Send Series to Yoto Playlist'
+                              : 'Send to Yoto Playlist',
                           style: AppTypography.titleSerif(
                             fontSize: 20,
                             fontWeight: FontWeight.w600,
@@ -302,7 +398,7 @@ class _SendToYotoDialogState extends ConsumerState<SendToYotoDialog> {
                           ),
                         ),
                         Text(
-                          '${widget.book.title} • ${entries.length} ${entries.length == 1 ? 'chapter' : 'chapters'}',
+                          headerSubtitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: AppTypography.captionSans(

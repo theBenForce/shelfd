@@ -150,6 +150,110 @@ void main() {
     expect(mockYotoRepo.lastRequest!.includeCover, isFalse);
   });
 
+  testWidgets('SendToYotoDialog.series sends entire series audio in sequence order',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 1200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final mockYotoRepo = _MockYotoRepository(prefs);
+
+    const seriesBooks = [
+      Book(
+        id: 'series-book-1',
+        title: 'The Hobbit',
+        bookType: 'audiobook',
+        durationSeconds: 3600.0,
+        audioChapters: [
+          AudioChapter(
+            id: 'ch1',
+            bookId: 'series-book-1',
+            chapterIndex: 1,
+            title: 'An Unexpected Party',
+            startOffsetSec: 0,
+            durationSec: 1800,
+          ),
+          AudioChapter(
+            id: 'ch2',
+            bookId: 'series-book-1',
+            chapterIndex: 2,
+            title: 'Roast Mutton',
+            startOffsetSec: 1800,
+            durationSec: 1800,
+          ),
+        ],
+      ),
+      Book(
+        id: 'series-book-2',
+        title: 'The Fellowship of the Ring',
+        bookType: 'audiobook',
+        durationSeconds: 3000.0,
+        audioChapters: [
+          AudioChapter(
+            id: 'ch3',
+            bookId: 'series-book-2',
+            chapterIndex: 1,
+            title: 'Chapter 1',
+            startOffsetSec: 0,
+            durationSec: 3000,
+          ),
+        ],
+      ),
+    ];
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          yotoRepositoryProvider.overrideWithValue(mockYotoRepo),
+          yotoAccountProvider.overrideWith(_MockLinkedYotoNotifier.new),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const Scaffold(
+            body: SendToYotoDialog.series(
+              seriesId: 'series-middle-earth',
+              seriesName: 'Middle-earth',
+              seriesBooks: seriesBooks,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(find.text('Send Series to Yoto Playlist'), findsOneWidget);
+    expect(find.text('Middle-earth • 2 books • 3 chapters'), findsOneWidget);
+
+    // Expand per-chapter icon customization to verify series chapter labels
+    final customizeTile = find.byKey(const Key('yoto_customize_chapter_icons_tile'));
+    await tester.ensureVisible(customizeTile);
+    await tester.pumpAndSettle();
+    await tester.tap(customizeTile);
+    await tester.pumpAndSettle();
+
+    expect(find.text('1. The Hobbit - An Unexpected Party'), findsOneWidget);
+    expect(find.text('2. The Hobbit - Roast Mutton'), findsOneWidget);
+    expect(find.text('3. The Fellowship of the Ring'), findsOneWidget);
+
+    // Switch to Create New Playlist and submit
+    await tester.ensureVisible(find.text('Create New Playlist'));
+    await tester.tap(find.text('Create New Playlist'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('confirm_send_to_yoto_button')));
+    await tester.pumpAndSettle();
+
+    expect(mockYotoRepo.lastSentSeriesId, 'series-middle-earth');
+    expect(mockYotoRepo.lastRequest, isNotNull);
+    expect(mockYotoRepo.lastRequest!.mode, 'new');
+    expect(mockYotoRepo.lastRequest!.newPlaylistTitle, 'Middle-earth');
+    expect(mockYotoRepo.lastRequest!.bookIds, ['series-book-1', 'series-book-2']);
+  });
+
   testWidgets('SettingsView renders Yoto Player Integration card', (tester) async {
     tester.view.physicalSize = const Size(1200, 2400);
     tester.view.devicePixelRatio = 1.0;
@@ -219,6 +323,7 @@ void main() {
 
 class _MockYotoRepository extends YotoRepository {
   String? lastSentBookId;
+  String? lastSentSeriesId;
   SendToYotoRequest? lastRequest;
 
   _MockYotoRepository(SharedPreferences prefs)
@@ -256,6 +361,22 @@ class _MockYotoRepository extends YotoRepository {
       title: request.newPlaylistTitle ?? 'Bedtime Stories',
       chapterCount: 6,
       message: 'Appended to Yoto playlist',
+    );
+  }
+
+  @override
+  Future<SendToYotoResult> sendSeriesToYoto(
+    String seriesId,
+    SendToYotoRequest request,
+  ) async {
+    lastSentSeriesId = seriesId;
+    lastRequest = request;
+    return SendToYotoResult(
+      status: 'sent',
+      cardId: request.cardId ?? 'card-series-new',
+      title: request.newPlaylistTitle ?? 'Middle-earth',
+      chapterCount: 3,
+      message: 'Sent series to Yoto playlist',
     );
   }
 }

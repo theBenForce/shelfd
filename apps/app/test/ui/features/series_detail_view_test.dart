@@ -79,6 +79,8 @@ void main() {
         authors: [Author(id: 'a1', name: 'Rick Riordan')],
         series: s,
         seriesSequence: 2.0,
+        bookType: 'audiobook',
+        durationSeconds: 1800.0,
       ),
       const Book(
         id: 'b3',
@@ -107,10 +109,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    // Verify Series title and book count
+    // Verify Series title, book count, and Send to Yoto button
     expect(find.text('Percy Jackson'), findsWidgets);
     expect(find.text('3 Books in Series'), findsOneWidget);
     expect(find.text('3 Books'), findsOneWidget);
+    expect(find.byKey(const Key('send_series_to_yoto_button')), findsOneWidget);
 
     // Verify books are displayed with TactileBookCover
     expect(find.byType(TactileBookCover), findsNWidgets(3));

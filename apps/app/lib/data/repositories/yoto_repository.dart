@@ -107,6 +107,12 @@ class YotoRepository {
   ) =>
       apiService.sendBookToYoto(bookId, request);
 
+  Future<SendToYotoResult> sendSeriesToYoto(
+    String seriesId,
+    SendToYotoRequest request,
+  ) =>
+      apiService.sendSeriesToYoto(seriesId, request);
+
   static String generatePkceVerifier([int length = 64]) {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
     final rand = Random.secure();

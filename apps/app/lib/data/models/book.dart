@@ -70,6 +70,17 @@ class Book {
   bool get isFixedLayout => layout == 'pre-paginated';
   bool get isAudiobook => bookType == 'audiobook';
   bool get canReadAlong => hasReadalong || (!isAudiobook && (durationSeconds ?? 0) > 0);
+  bool get hasAudio =>
+      isAudiobook ||
+      hasReadalong ||
+      (durationSeconds != null && durationSeconds! > 0) ||
+      files.any((f) =>
+          f.fileType == 'audiobook' ||
+          f.fileType == 'audio' ||
+          f.durationSeconds != null ||
+          f.filePath.toLowerCase().endsWith('.m4b') ||
+          f.filePath.toLowerCase().endsWith('.m4a') ||
+          f.filePath.toLowerCase().endsWith('.mp3'));
 
   List<SpineItem> get namedSpine => spine.where((s) => s.hasNamedChapter).toList();
 
