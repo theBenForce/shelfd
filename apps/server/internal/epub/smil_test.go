@@ -214,11 +214,14 @@ func TestExtractMediaOverlays_EPUB3ReadAlong(t *testing.T) {
 		t.Errorf("expected seg[3] global [5.0, 7.0], got [%v, %v]", seg3.GlobalBegin, seg3.GlobalEnd)
 	}
 
-	// Verify RewritePageHTML injects readalong highlight bridge
+	// Verify RewritePageHTML injects readalong highlight bridge with chapterHref scoping
 	w := 600
 	h := 800
 	rewritten := epub.RewritePageHTML(string(files["OEBPS/xhtml/page01.xhtml"]), "book-123", "OEBPS/xhtml/page01.xhtml", &w, &h)
 	if !strings.Contains(rewritten, "shelfd:readalong-highlight") || !strings.Contains(rewritten, "__shelfdHighlightReadalong") {
 		t.Errorf("expected RewritePageHTML to inject readalong highlight bridge")
+	}
+	if !strings.Contains(rewritten, "d.chapterHref") || !strings.Contains(rewritten, "incomingHref !== normCurrentHref") {
+		t.Errorf("expected RewritePageHTML bridge to scope highlights by chapterHref")
 	}
 }

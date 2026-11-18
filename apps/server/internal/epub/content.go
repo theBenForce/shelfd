@@ -401,13 +401,41 @@ func RewritePageHTML(rawHTML, bookID, chapterHref string, pageWidth, pageHeight 
   var currentChapterHref = %q;
   var activeElements = [];
 
+  function normalizeHref(h) {
+    if (!h || typeof h !== 'string') return '';
+    var s = h.trim().replace(/\\/g, '/');
+    var hashIdx = s.indexOf('#');
+    if (hashIdx >= 0) s = s.substring(0, hashIdx);
+    while (s.indexOf('./') === 0) s = s.substring(2);
+    while (s.indexOf('/') === 0) s = s.substring(1);
+    return s.toLowerCase();
+  }
+
+  function addClasses(el, raw) {
+    if (!el || !raw) return;
+    var parts = String(raw).trim().split(/\s+/);
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i]) el.classList.add(parts[i]);
+    }
+  }
+
+  function removeClasses(el, raw) {
+    if (!el || !raw) return;
+    var parts = String(raw).trim().split(/\s+/);
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i]) el.classList.remove(parts[i]);
+    }
+  }
+
+  var normCurrentHref = normalizeHref(currentChapterHref);
+
   function clearActive(activeClass) {
     for (var i = 0; i < activeElements.length; i++) {
       var el = activeElements[i];
       if (!el) continue;
       el.removeAttribute('data-shelfd-readalong-active');
       el.classList.remove('-epub-media-overlay-active');
-      if (activeClass) el.classList.remove(activeClass);
+      removeClasses(el, activeClass);
     }
     activeElements = [];
   }
@@ -418,17 +446,17 @@ func RewritePageHTML(rawHTML, bookID, chapterHref string, pageWidth, pageHeight 
     clearActive(cls);
     if (document.documentElement) {
       if (playing) {
-        document.documentElement.classList.add(playCls);
+        addClasses(document.documentElement, playCls);
         document.documentElement.classList.add('-epub-media-overlay-playing');
       } else {
-        document.documentElement.classList.remove(playCls);
+        removeClasses(document.documentElement, playCls);
         document.documentElement.classList.remove('-epub-media-overlay-playing');
       }
     }
     if (!fragmentId) return;
     var target = document.getElementById(fragmentId);
     if (!target) return;
-    target.classList.add(cls);
+    addClasses(target, cls);
     target.classList.add('-epub-media-overlay-active');
     target.setAttribute('data-shelfd-readalong-active', 'true');
     activeElements.push(target);
@@ -440,7 +468,18 @@ func RewritePageHTML(rawHTML, bookID, chapterHref string, pageWidth, pageHeight 
     var d = ev && ev.data;
     if (!d || typeof d !== 'object') return;
     if (d.type === 'shelfd:readalong-highlight') {
-      applyHighlight(d.fragmentId || '', d.activeClass || '', d.playbackActiveClass || '', !!d.playing);
+      var cls = d.activeClass || '';
+      var playCls = d.playbackActiveClass || '';
+      if (d.bookId && currentBookId && d.bookId !== currentBookId) {
+        applyHighlight('', cls, playCls, false);
+        return;
+      }
+      var incomingHref = normalizeHref(d.chapterHref || '');
+      if (incomingHref && normCurrentHref && incomingHref !== normCurrentHref) {
+        applyHighlight('', cls, playCls, false);
+        return;
+      }
+      applyHighlight(d.fragmentId || '', cls, playCls, !!d.playing);
     }
   });
 

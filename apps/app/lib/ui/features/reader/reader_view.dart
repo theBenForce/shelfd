@@ -708,7 +708,13 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                               theme: theme,
                               highlights: chapterHighlights,
                               onHighlightTap: _showExistingHighlightSheet,
-                              activeReadalongText: _activeSegment?.text,
+                              activeReadalongText: (_activeSegment != null &&
+                                      (_currentChapter == null ||
+                                          _currentChapter!.chapterIndex <= 0 ||
+                                          _activeSegment!.chapterIndex <= 0 ||
+                                          _activeSegment!.chapterIndex == _currentChapter!.chapterIndex))
+                                  ? _activeSegment!.text
+                                  : null,
                             );
                           },
                         ),

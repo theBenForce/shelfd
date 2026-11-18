@@ -103,8 +103,73 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
     Future.microtask(_loadReadalongManifest);
   }
 
+  static String _normalizeHref(String raw) {
+    var s = raw.trim().replaceAll('\\', '/');
+    final hashIdx = s.indexOf('#');
+    if (hashIdx >= 0) {
+      s = s.substring(0, hashIdx);
+    }
+    while (s.startsWith('./')) {
+      s = s.substring(2);
+    }
+    while (s.startsWith('/')) {
+      s = s.substring(1);
+    }
+    return s.toLowerCase();
+  }
+
+  String _pageViewKey(SpineItem page) {
+    return 'fixed_${widget.book.id}_${page.chapterIndex}';
+  }
+
+  SpineItem? _findPageForSegment(ReadalongSegment? seg) {
+    if (seg == null) return null;
+    final spine = widget.book.spine;
+    if (spine.isEmpty) return null;
+
+    final segHref = _normalizeHref(seg.chapterHref);
+    if (segHref.isNotEmpty) {
+      for (final item in spine) {
+        final itemHref = _normalizeHref(item.href ?? '');
+        if (itemHref.isNotEmpty && itemHref == segHref) {
+          return item;
+        }
+      }
+      final segBase = segHref.split('/').last;
+      if (segBase.isNotEmpty) {
+        final baseMatches = spine.where((item) {
+          final itemHref = _normalizeHref(item.href ?? '');
+          return itemHref.isNotEmpty && itemHref.split('/').last == segBase;
+        }).toList();
+        if (baseMatches.length == 1) {
+          return baseMatches.first;
+        }
+      }
+    }
+
+    if (seg.chapterIndex > 0) {
+      for (final item in spine) {
+        if (item.chapterIndex == seg.chapterIndex) {
+          return item;
+        }
+      }
+      if (seg.chapterIndex - 1 < spine.length) {
+        return spine[seg.chapterIndex - 1];
+      }
+    }
+    return null;
+  }
+
   Future<void> _loadReadalongManifest() async {
-    if (_readalongManifest != null) return;
+    if (_readalongManifest != null) {
+      if (mounted) {
+        final audioState = ref.read(audioPlayerProvider);
+        if (audioState.book?.id == widget.book.id) {
+          _onAudioStateChanged(audioState);
+        }
+      }
+      return;
+    }
     try {
       final manifest = await ref.read(bookRepositoryProvider).getBookReadalong(widget.book.id);
       if (mounted && (manifest.hasReadalong || manifest.segments.isNotEmpty)) {
@@ -120,38 +185,44 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   }
 
   void _onAudioStateChanged(AudioPlayerState audioState) {
-    if (audioState.book?.id != widget.book.id) return;
+    if (audioState.book?.id != widget.book.id) {
+      if (_activeSegment != null) {
+        _activeSegment = null;
+        highlightHtmlFrame(
+          bookId: widget.book.id,
+          fragmentId: '',
+          activeClass: _readalongManifest?.activeClass ?? '-epub-media-overlay-active',
+          playbackActiveClass: _readalongManifest?.playbackActiveClass ?? '-epub-media-overlay-playing',
+          playing: false,
+        );
+      }
+      return;
+    }
     final manifest = _readalongManifest;
     if (manifest == null || manifest.segments.isEmpty) return;
 
     final posSec = audioState.position.inMilliseconds / 1000.0;
     final seg = manifest.segmentAt(posSec);
+    _activeSegment = seg;
 
-    final changed = seg?.fragmentId != _activeSegment?.fragmentId ||
-        seg?.parId != _activeSegment?.parId ||
-        seg?.chapterIndex != _activeSegment?.chapterIndex ||
-        seg?.text != _activeSegment?.text;
-
-    if (changed && mounted) {
-      setState(() {
-        _activeSegment = seg;
-      });
-    }
-
-    highlightHtmlFrame(
-      fragmentId: seg?.fragmentId ?? '',
-      activeClass: manifest.activeClass,
-      playbackActiveClass: manifest.playbackActiveClass,
-      playing: audioState.isPlaying,
-    );
+    final targetPage = _findPageForSegment(seg);
+    final targetViewKey = targetPage != null ? _pageViewKey(targetPage) : null;
+    final effectiveChapterHref = (targetPage?.href?.isNotEmpty ?? false)
+        ? targetPage!.href!
+        : (seg?.chapterHref ?? '');
 
     if (_autoTurnPages && audioState.isPlaying && seg != null && seg.chapterIndex > 0) {
       final spreads = _currentSpreads;
       if (spreads.isNotEmpty && _currentSpreadIndex < spreads.length) {
         final curSpread = spreads[_currentSpreadIndex];
-        if (!curSpread.containsChapterIndex(seg.chapterIndex, widget.book.spine)) {
+        final onCurrentSpread = targetPage != null && targetPage.id.isNotEmpty
+            ? curSpread.containsChapter(targetPage.id)
+            : curSpread.containsChapterIndex(seg.chapterIndex, widget.book.spine);
+        if (!onCurrentSpread) {
           final targetIdx = spreads.indexWhere(
-            (s) => s.containsChapterIndex(seg.chapterIndex, widget.book.spine),
+            (s) => targetPage != null && targetPage.id.isNotEmpty
+                ? s.containsChapter(targetPage.id)
+                : s.containsChapterIndex(seg.chapterIndex, widget.book.spine),
           );
           if (targetIdx >= 0 && targetIdx != _currentSpreadIndex) {
             _goToSpread(targetIdx, spreads.length);
@@ -159,6 +230,18 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
         }
       }
     }
+
+    highlightHtmlFrame(
+      targetViewKey: targetViewKey,
+      bookId: widget.book.id,
+      chapterHref: effectiveChapterHref,
+      fragmentId: seg != null && (targetPage != null || widget.book.spine.isEmpty)
+          ? seg.fragmentId
+          : '',
+      activeClass: manifest.activeClass,
+      playbackActiveClass: manifest.playbackActiveClass,
+      playing: audioState.isPlaying,
+    );
   }
 
   Future<void> _toggleReadalongPlayback() async {
@@ -168,9 +251,15 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
       double? initialPos;
       if (_currentSpreads.isNotEmpty && _currentSpreadIndex < _currentSpreads.length) {
         final curSpread = _currentSpreads[_currentSpreadIndex];
-        final page = curSpread.leftPage ?? curSpread.rightPage;
-        final chIdx = page.chapterIndex > 0 ? page.chapterIndex : (_currentSpreadIndex + 1);
-        final firstSeg = _readalongManifest?.firstSegmentForChapter(chIdx);
+        final firstPage = curSpread.leftPage ?? curSpread.rightPage;
+        final firstChIdx = firstPage.chapterIndex > 0 ? firstPage.chapterIndex : (_currentSpreadIndex + 1);
+        var firstSeg = _readalongManifest?.firstSegmentForChapter(firstChIdx);
+        if (firstSeg == null && curSpread.leftPage != null) {
+          final rightChIdx = curSpread.rightPage.chapterIndex;
+          if (rightChIdx > 0) {
+            firstSeg = _readalongManifest?.firstSegmentForChapter(rightChIdx);
+          }
+        }
         if (firstSeg != null && firstSeg.globalBegin > 0) {
           initialPos = firstSeg.globalBegin;
         }
@@ -440,68 +529,6 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                       ),
                     ),
 
-                  // Read-Along Active Phrase / Highlight Overlay Banner
-                  if (_hasReadalong && (_activeSegment != null || isThisBookPlaying))
-                    Positioned(
-                      bottom: _controlsVisible ? 72 : 16,
-                      left: 24,
-                      right: 24,
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 640),
-                          child: Container(
-                            key: const Key('readalong-overlay-pill'),
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: colors.surface.withValues(alpha: 0.96),
-                              borderRadius: BorderRadius.circular(24),
-                              border: Border.all(color: colors.accentPrimary.withValues(alpha: 0.5)),
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Colors.black45,
-                                  blurRadius: 12,
-                                  offset: Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.graphic_eq_rounded,
-                                  size: 18,
-                                  color: colors.accentPrimary,
-                                ),
-                                const SizedBox(width: 8),
-                                Flexible(
-                                  child: Container(
-                                    key: const Key('readalong-active-text'),
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFFFD60A).withValues(alpha: 0.35),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      (_activeSegment?.text.isNotEmpty ?? false)
-                                          ? _activeSegment!.text
-                                          : 'Playing read-along audio…',
-                                      style: AppTypography.bodySans(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                        color: colors.ink,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                      maxLines: 2,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-
                   // Top Header Bar
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 200),
@@ -740,7 +767,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
 
       final displayW = pw * scale;
       final displayH = ph * scale;
-      final viewKey = 'fixed_${widget.book.id}_${page.chapterIndex}';
+      final viewKey = _pageViewKey(page);
       final url = _buildPageUrl(page);
 
       return Center(
@@ -789,8 +816,8 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
       final rightDisplayW = rightW * scale;
       final displayH = combinedH * scale;
 
-      final leftViewKey = 'fixed_${widget.book.id}_${leftPage.chapterIndex}';
-      final rightViewKey = 'fixed_${widget.book.id}_${rightPage.chapterIndex}';
+      final leftViewKey = _pageViewKey(leftPage);
+      final rightViewKey = _pageViewKey(rightPage);
       final leftUrl = _buildPageUrl(leftPage);
       final rightUrl = _buildPageUrl(rightPage);
 
