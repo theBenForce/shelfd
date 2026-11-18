@@ -1,3 +1,10 @@
+## [1.20.2](https://github.com/theBenForce/shelfd/compare/v1.20.1...v1.20.2) (2026-11-18)
+
+
+### Bug Fixes
+
+* **readalong:** scope word highlights to active page on two-page spreads and remove subtitle pill ([#82](https://github.com/theBenForce/shelfd/issues/82)) ([f6cc990](https://github.com/theBenForce/shelfd/commit/f6cc990c29afbf928df4e16792fbc50db868dea5))
+
 ## [1.20.1](https://github.com/theBenForce/shelfd/compare/v1.20.0...v1.20.1) (2026-11-18)
 
 
