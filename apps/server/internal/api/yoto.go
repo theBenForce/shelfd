@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -401,6 +402,7 @@ type SendToYotoRequest struct {
 	UseCoverAsIcon   bool           `json:"use_cover_as_icon"`
 	DefaultIconID    string         `json:"default_icon_id,omitempty"`
 	ChapterIcons     map[int]string `json:"chapter_icons,omitempty"`
+	BookIDs          []string       `json:"book_ids,omitempty"`
 }
 
 type SendToYotoResponse struct {
@@ -411,41 +413,8 @@ type SendToYotoResponse struct {
 	Message      string `json:"message"`
 }
 
-// SendBookToYoto handles POST /api/v1/books/{id}/yoto.
-func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
-	user := CurrentUser(r.Context())
-	if user == nil {
-		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
-		return
-	}
-
-	bookID := r.PathValue("id")
-	if bookID == "" {
-		bookID = extractIDFromPath(r.URL.Path, "books")
-	}
-	if bookID == "" {
-		writeJSONError(w, http.StatusBadRequest, "Book ID is required")
-		return
-	}
-
-	var req SendToYotoRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	book, err := h.repo.GetBookByID(r.Context(), bookID)
-	if errors.Is(err, repository.ErrNotFound) || book == nil {
-		writeJSONError(w, http.StatusNotFound, "Book not found")
-		return
-	}
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to load book: %v", err))
-		return
-	}
-
-	// Collect audio files for this book
-	files, _ := h.repo.GetBookFilesByBookID(r.Context(), book.ID)
+func (h *YotoHandler) collectBookAudioFiles(ctx context.Context, book *repository.Book) []*repository.BookFile {
+	files, _ := h.repo.GetBookFilesByBookID(ctx, book.ID)
 	var audioFiles []*repository.BookFile
 	for _, f := range files {
 		if f.FileType == "audiobook" || f.FileType == "audio" || isAudioExtension(f.FilePath) {
@@ -461,63 +430,89 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 			DurationSeconds: book.DurationSeconds,
 		})
 	}
+	return audioFiles
+}
 
-	if len(audioFiles) == 0 {
-		writeJSONError(w, http.StatusBadRequest, "Audio files are not available for this book")
-		return
-	}
+type yotoHTTPError struct {
+	statusCode int
+	message    string
+}
 
-	accessToken, err := h.getValidAccessToken(r.Context(), user.ID)
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
+func (e *yotoHTTPError) Error() string {
+	return e.message
+}
 
-	// Determine default 16x16 icon URI
-	defaultIconURI := normalizeYotoIconURI(req.DefaultIconID)
-	if defaultIconURI == "" {
-		defaultIconURI = yoto.DefaultBookIconID
-	}
-
+func (h *YotoHandler) uploadBookChaptersToYoto(
+	ctx context.Context,
+	accessToken string,
+	book *repository.Book,
+	audioFiles []*repository.BookFile,
+	req SendToYotoRequest,
+	baseDefaultIconURI string,
+	entryOffset int,
+	prefixBookTitle bool,
+) ([]yoto.Chapter, float64, int64, int, *yotoHTTPError) {
+	bookDefaultIconURI := baseDefaultIconURI
 	if req.UseCoverAsIcon && book.CoverPath != nil && *book.CoverPath != "" {
 		if coverDiskPath, err := h.resolveFilePath(*book.CoverPath); err == nil {
 			if cf, err := os.Open(coverDiskPath); err == nil {
-				uploadedIcon, upErr := h.yotoClient.UploadCustomIcon(r.Context(), accessToken, cf, filepath.Base(coverDiskPath), true)
+				uploadedIcon, upErr := h.yotoClient.UploadCustomIcon(ctx, accessToken, cf, filepath.Base(coverDiskPath), true)
 				cf.Close()
 				if upErr == nil && uploadedIcon != nil && uploadedIcon.MediaID != "" {
-					defaultIconURI = uploadedIcon.YotoURI()
+					bookDefaultIconURI = uploadedIcon.YotoURI()
 				}
 			}
 		}
 	}
 
-	resolveChapterIcon := func(idx int) string {
+	resolveChapterIcon := func(globalIdx int) string {
 		if req.ChapterIcons != nil {
-			if custom, ok := req.ChapterIcons[idx]; ok && strings.TrimSpace(custom) != "" {
+			if custom, ok := req.ChapterIcons[globalIdx]; ok && strings.TrimSpace(custom) != "" {
 				return normalizeYotoIconURI(custom)
 			}
 		}
-		return defaultIconURI
+		return bookDefaultIconURI
 	}
 
-	audioChapters, _ := h.repo.GetAudioChaptersByBookID(r.Context(), book.ID)
+	formatSeriesChapterTitle := func(rawTitle string, singleEntryForBook bool) string {
+		trimmed := strings.TrimSpace(rawTitle)
+		if !prefixBookTitle {
+			return trimmed
+		}
+		if singleEntryForBook {
+			lower := strings.ToLower(trimmed)
+			if trimmed == "" || lower == "chapter 1" || lower == "track 1" || lower == "01" || lower == "1" || strings.EqualFold(trimmed, book.Title) {
+				return book.Title
+			}
+		}
+		if strings.HasPrefix(strings.ToLower(trimmed), strings.ToLower(book.Title)) {
+			return trimmed
+		}
+		return fmt.Sprintf("%s - %s", book.Title, trimmed)
+	}
 
-	var newChapters []yoto.Chapter
+	audioChapters, _ := h.repo.GetAudioChaptersByBookID(ctx, book.ID)
+
+	var chapters []yoto.Chapter
 	var totalDuration float64
 	var totalFileSize int64
+	currentIdx := entryOffset
 
-	// Upload each audio file and map chapters
 	for fileIdx, af := range audioFiles {
 		resolvedPath, err := h.resolveFilePath(af.FilePath)
 		if err != nil {
-			writeJSONError(w, http.StatusNotFound, fmt.Sprintf("Audio file not found on disk: %s", af.FilePath))
-			return
+			return nil, 0, 0, currentIdx, &yotoHTTPError{
+				statusCode: http.StatusNotFound,
+				message:    fmt.Sprintf("Audio file not found on disk: %s", af.FilePath),
+			}
 		}
 
 		f, err := os.Open(resolvedPath)
 		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to open audio file: %v", err))
-			return
+			return nil, 0, 0, currentIdx, &yotoHTTPError{
+				statusCode: http.StatusInternalServerError,
+				message:    fmt.Sprintf("Failed to open audio file: %v", err),
+			}
 		}
 		stat, statErr := f.Stat()
 		var fileSize int64
@@ -525,25 +520,31 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 			fileSize = stat.Size()
 		}
 
-		upURL, err := h.yotoClient.RequestAudioUploadURL(r.Context(), accessToken)
+		upURL, err := h.yotoClient.RequestAudioUploadURL(ctx, accessToken)
 		if err != nil {
 			f.Close()
-			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Failed to request Yoto upload URL: %v", err))
-			return
+			return nil, 0, 0, currentIdx, &yotoHTTPError{
+				statusCode: http.StatusBadGateway,
+				message:    fmt.Sprintf("Failed to request Yoto upload URL: %v", err),
+			}
 		}
 
 		mimeType := getAudioMimeType(resolvedPath)
-		err = h.yotoClient.UploadAudioStream(r.Context(), upURL.UploadURL, f, mimeType, fileSize)
+		err = h.yotoClient.UploadAudioStream(ctx, upURL.UploadURL, f, mimeType, fileSize)
 		f.Close()
 		if err != nil {
-			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Failed to upload audio to Yoto: %v", err))
-			return
+			return nil, 0, 0, currentIdx, &yotoHTTPError{
+				statusCode: http.StatusBadGateway,
+				message:    fmt.Sprintf("Failed to upload audio to Yoto: %v", err),
+			}
 		}
 
-		transcoded, err := h.yotoClient.WaitForTranscoding(r.Context(), accessToken, upURL.UploadID, 60)
+		transcoded, err := h.yotoClient.WaitForTranscoding(ctx, accessToken, upURL.UploadID, 60)
 		if err != nil {
-			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Yoto audio transcoding failed: %v", err))
-			return
+			return nil, 0, 0, currentIdx, &yotoHTTPError{
+				statusCode: http.StatusBadGateway,
+				message:    fmt.Sprintf("Yoto audio transcoding failed: %v", err),
+			}
 		}
 
 		trackDuration := transcoded.TranscodedInfo.Duration
@@ -562,11 +563,11 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 		totalDuration += trackDuration
 		totalFileSize += trackSize
 
-		// If single audio file with multiple parsed audio chapters, create chapter entries for each chapter
 		if len(audioFiles) == 1 && len(audioChapters) > 0 {
 			for chIdx, ac := range audioChapters {
-				keyStr := fmt.Sprintf("%02d", chIdx+1)
-				labelStr := fmt.Sprintf("%d", chIdx+1)
+				num := currentIdx + 1
+				keyStr := fmt.Sprintf("%02d", num)
+				labelStr := fmt.Sprintf("%d", num)
 				chTitle := strings.TrimSpace(ac.Title)
 				if len(audioChapters) == 1 {
 					lowerTitle := strings.ToLower(chTitle)
@@ -576,12 +577,13 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 				} else if chTitle == "" {
 					chTitle = fmt.Sprintf("Chapter %d", chIdx+1)
 				}
-				iconURI := resolveChapterIcon(chIdx)
+				chTitle = formatSeriesChapterTitle(chTitle, len(audioChapters) == 1)
+				iconURI := resolveChapterIcon(currentIdx)
 				dur := ac.DurationSec
 				if dur <= 0 {
 					dur = trackDuration
 				}
-				newChapters = append(newChapters, yoto.Chapter{
+				chapters = append(chapters, yoto.Chapter{
 					Key:          keyStr,
 					Title:        chTitle,
 					OverlayLabel: labelStr,
@@ -603,10 +605,12 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 						},
 					},
 				})
+				currentIdx++
 			}
 		} else {
-			keyStr := fmt.Sprintf("%02d", fileIdx+1)
-			labelStr := fmt.Sprintf("%d", fileIdx+1)
+			num := currentIdx + 1
+			keyStr := fmt.Sprintf("%02d", num)
+			labelStr := fmt.Sprintf("%d", num)
 			chTitle := transcoded.TranscodedInfo.Metadata.Title
 			if chTitle == "" && fileIdx < len(audioChapters) && audioChapters[fileIdx].Title != "" {
 				chTitle = audioChapters[fileIdx].Title
@@ -619,8 +623,9 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 					chTitle = strings.TrimSuffix(base, filepath.Ext(base))
 				}
 			}
-			iconURI := resolveChapterIcon(fileIdx)
-			newChapters = append(newChapters, yoto.Chapter{
+			chTitle = formatSeriesChapterTitle(chTitle, len(audioFiles) == 1)
+			iconURI := resolveChapterIcon(currentIdx)
+			chapters = append(chapters, yoto.Chapter{
 				Key:          keyStr,
 				Title:        chTitle,
 				OverlayLabel: labelStr,
@@ -642,16 +647,31 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 					},
 				},
 			})
+			currentIdx++
 		}
 	}
 
-	// Optional cover image upload
+	return chapters, totalDuration, totalFileSize, currentIdx, nil
+}
+
+func (h *YotoHandler) saveChaptersToYotoCard(
+	ctx context.Context,
+	accessToken string,
+	req SendToYotoRequest,
+	itemLabel string,
+	defaultPlaylistTitle string,
+	defaultDescription *string,
+	coverPath *string,
+	newChapters []yoto.Chapter,
+	totalDuration float64,
+	totalFileSize int64,
+) (*SendToYotoResponse, *yotoHTTPError) {
 	var uploadedCoverURL string
-	if req.IncludeCover && book.CoverPath != nil && *book.CoverPath != "" {
-		if coverDiskPath, err := h.resolveFilePath(*book.CoverPath); err == nil {
+	if req.IncludeCover && coverPath != nil && *coverPath != "" {
+		if coverDiskPath, err := h.resolveFilePath(*coverPath); err == nil {
 			if cf, err := os.Open(coverDiskPath); err == nil {
 				mime := getAudioMimeType(coverDiskPath)
-				if mediaURL, upErr := h.yotoClient.UploadCoverImage(r.Context(), accessToken, cf, mime); upErr == nil {
+				if mediaURL, upErr := h.yotoClient.UploadCoverImage(ctx, accessToken, cf, mime); upErr == nil {
 					uploadedCoverURL = mediaURL
 				}
 				cf.Close()
@@ -668,13 +688,17 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 	switch mode {
 	case "existing", "append":
 		if targetCardID == "" {
-			writeJSONError(w, http.StatusBadRequest, "card_id is required when appending to an existing playlist")
-			return
+			return nil, &yotoHTTPError{
+				statusCode: http.StatusBadRequest,
+				message:    "card_id is required when appending to an existing playlist",
+			}
 		}
-		existingCard, getErr := h.yotoClient.GetCard(r.Context(), accessToken, targetCardID)
+		existingCard, getErr := h.yotoClient.GetCard(ctx, accessToken, targetCardID)
 		if getErr != nil || existingCard == nil {
-			writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Failed to load existing Yoto playlist: %v", getErr))
-			return
+			return nil, &yotoHTTPError{
+				statusCode: http.StatusBadGateway,
+				message:    fmt.Sprintf("Failed to load existing Yoto playlist: %v", getErr),
+			}
 		}
 		contentPayload.CardID = existingCard.CardID
 		contentPayload.Title = existingCard.Title
@@ -724,10 +748,12 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 
 	case "replace":
 		if targetCardID == "" {
-			writeJSONError(w, http.StatusBadRequest, "card_id is required when replacing an existing playlist")
-			return
+			return nil, &yotoHTTPError{
+				statusCode: http.StatusBadRequest,
+				message:    "card_id is required when replacing an existing playlist",
+			}
 		}
-		existingCard, getErr := h.yotoClient.GetCard(r.Context(), accessToken, targetCardID)
+		existingCard, getErr := h.yotoClient.GetCard(ctx, accessToken, targetCardID)
 		if getErr == nil && existingCard != nil {
 			contentPayload.CardID = existingCard.CardID
 			contentPayload.Title = existingCard.Title
@@ -738,7 +764,7 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 			contentPayload.Content = existingCard.Content
 		} else {
 			contentPayload.CardID = targetCardID
-			contentPayload.Title = book.Title
+			contentPayload.Title = defaultPlaylistTitle
 		}
 		if strings.TrimSpace(req.NewPlaylistTitle) != "" {
 			contentPayload.Title = strings.TrimSpace(req.NewPlaylistTitle)
@@ -748,12 +774,12 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 	default:
 		playlistTitle := strings.TrimSpace(req.NewPlaylistTitle)
 		if playlistTitle == "" {
-			playlistTitle = book.Title
+			playlistTitle = defaultPlaylistTitle
 		}
 		contentPayload.Title = playlistTitle
 		contentPayload.Content.Chapters = newChapters
-		if book.Description != nil {
-			contentPayload.Metadata.Description = *book.Description
+		if defaultDescription != nil {
+			contentPayload.Metadata.Description = *defaultDescription
 		}
 	}
 
@@ -766,10 +792,12 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 		ReadableFileSize: math.Round((float64(cumulativeFileSize)/1024.0/1024.0)*10) / 10,
 	}
 
-	savedCard, err := h.yotoClient.CreateOrUpdateContent(r.Context(), accessToken, &contentPayload)
+	savedCard, err := h.yotoClient.CreateOrUpdateContent(ctx, accessToken, &contentPayload)
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("Failed to save Yoto playlist: %v", err))
-		return
+		return nil, &yotoHTTPError{
+			statusCode: http.StatusBadGateway,
+			message:    fmt.Sprintf("Failed to save Yoto playlist: %v", err),
+		}
 	}
 
 	actionVerb := "Sent"
@@ -779,11 +807,261 @@ func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
 		actionVerb = "Replaced"
 	}
 
-	writeJSON(w, http.StatusOK, SendToYotoResponse{
+	return &SendToYotoResponse{
 		Status:       "sent",
 		CardID:       savedCard.CardID,
 		Title:        savedCard.Title,
 		ChapterCount: len(contentPayload.Content.Chapters),
-		Message:      fmt.Sprintf("%s %q on Yoto playlist %q", actionVerb, book.Title, savedCard.Title),
+		Message:      fmt.Sprintf("%s %q on Yoto playlist %q", actionVerb, itemLabel, savedCard.Title),
+	}, nil
+}
+
+// SendBookToYoto handles POST /api/v1/books/{id}/yoto.
+func (h *YotoHandler) SendBookToYoto(w http.ResponseWriter, r *http.Request) {
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID is required")
+		return
+	}
+
+	var req SendToYotoRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to load book: %v", err))
+		return
+	}
+
+	audioFiles := h.collectBookAudioFiles(r.Context(), book)
+	if len(audioFiles) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "Audio files are not available for this book")
+		return
+	}
+
+	accessToken, err := h.getValidAccessToken(r.Context(), user.ID)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	defaultIconURI := normalizeYotoIconURI(req.DefaultIconID)
+	if defaultIconURI == "" {
+		defaultIconURI = yoto.DefaultBookIconID
+	}
+
+	newChapters, totalDuration, totalFileSize, _, httpErr := h.uploadBookChaptersToYoto(
+		r.Context(),
+		accessToken,
+		book,
+		audioFiles,
+		req,
+		defaultIconURI,
+		0,
+		false,
+	)
+	if httpErr != nil {
+		writeJSONError(w, httpErr.statusCode, httpErr.message)
+		return
+	}
+
+	resp, httpErr := h.saveChaptersToYotoCard(
+		r.Context(),
+		accessToken,
+		req,
+		book.Title,
+		book.Title,
+		book.Description,
+		book.CoverPath,
+		newChapters,
+		totalDuration,
+		totalFileSize,
+	)
+	if httpErr != nil {
+		writeJSONError(w, httpErr.statusCode, httpErr.message)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// SendSeriesToYoto handles POST /api/v1/series/{id}/yoto.
+func (h *YotoHandler) SendSeriesToYoto(w http.ResponseWriter, r *http.Request) {
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	seriesID := r.PathValue("id")
+	if seriesID == "" {
+		seriesID = extractIDFromPath(r.URL.Path, "series")
+	}
+	if seriesID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Series ID is required")
+		return
+	}
+
+	var req SendToYotoRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	series, err := h.repo.GetSeriesByID(r.Context(), seriesID)
+	if errors.Is(err, repository.ErrNotFound) || series == nil {
+		writeJSONError(w, http.StatusNotFound, "Series not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to load series: %v", err))
+		return
+	}
+
+	books, err := h.repo.ListBooks(r.Context(), repository.BookFilter{
+		SeriesID: &seriesID,
+		Limit:    500,
 	})
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to list books in series: %v", err))
+		return
+	}
+
+	type seriesBookItem struct {
+		book     *repository.Book
+		files    []*repository.BookFile
+		sequence *float64
+	}
+
+	var candidates []seriesBookItem
+	for _, b := range books {
+		files := h.collectBookAudioFiles(r.Context(), b)
+		if len(files) == 0 {
+			continue
+		}
+		var seq *float64
+		if details, sErr := h.repo.GetBookSeries(r.Context(), b.ID); sErr == nil {
+			for _, d := range details {
+				if d.ID == seriesID {
+					seq = d.SequenceNumber
+					break
+				}
+			}
+		}
+		candidates = append(candidates, seriesBookItem{
+			book:     b,
+			files:    files,
+			sequence: seq,
+		})
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		seqA := candidates[i].sequence
+		seqB := candidates[j].sequence
+		if seqA != nil && seqB != nil && *seqA != *seqB {
+			return *seqA < *seqB
+		}
+		if seqA != nil && seqB == nil {
+			return true
+		}
+		if seqA == nil && seqB != nil {
+			return false
+		}
+		return strings.ToLower(candidates[i].book.Title) < strings.ToLower(candidates[j].book.Title)
+	})
+
+	if len(req.BookIDs) > 0 {
+		byID := make(map[string]seriesBookItem, len(candidates))
+		for _, c := range candidates {
+			byID[c.book.ID] = c
+		}
+		var filtered []seriesBookItem
+		for _, id := range req.BookIDs {
+			if item, ok := byID[strings.TrimSpace(id)]; ok {
+				filtered = append(filtered, item)
+			}
+		}
+		candidates = filtered
+	}
+
+	if len(candidates) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "Audio files are not available for any books in this series")
+		return
+	}
+
+	accessToken, err := h.getValidAccessToken(r.Context(), user.ID)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	defaultIconURI := normalizeYotoIconURI(req.DefaultIconID)
+	if defaultIconURI == "" {
+		defaultIconURI = yoto.DefaultBookIconID
+	}
+
+	var allChapters []yoto.Chapter
+	var totalDuration float64
+	var totalFileSize int64
+	var coverPath *string
+	entryOffset := 0
+
+	for _, item := range candidates {
+		if coverPath == nil && item.book.CoverPath != nil && *item.book.CoverPath != "" {
+			coverPath = item.book.CoverPath
+		}
+		bookChapters, dur, size, nextOffset, httpErr := h.uploadBookChaptersToYoto(
+			r.Context(),
+			accessToken,
+			item.book,
+			item.files,
+			req,
+			defaultIconURI,
+			entryOffset,
+			true,
+		)
+		if httpErr != nil {
+			writeJSONError(w, httpErr.statusCode, httpErr.message)
+			return
+		}
+		allChapters = append(allChapters, bookChapters...)
+		totalDuration += dur
+		totalFileSize += size
+		entryOffset = nextOffset
+	}
+
+	resp, httpErr := h.saveChaptersToYotoCard(
+		r.Context(),
+		accessToken,
+		req,
+		series.Name,
+		series.Name,
+		series.Description,
+		coverPath,
+		allChapters,
+		totalDuration,
+		totalFileSize,
+	)
+	if httpErr != nil {
+		writeJSONError(w, httpErr.statusCode, httpErr.message)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }

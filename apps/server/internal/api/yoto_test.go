@@ -349,6 +349,82 @@ func TestAPI_YotoIntegration(t *testing.T) {
 		t.Fatalf("expected card-existing-1 with 2 chapters after replace, got %+v", replaceResp)
 	}
 
+	// 6c. Send an entire series to a Yoto playlist (ordered by sequence number, skipping non-audio books)
+	series, err := repo.UpsertSeries(context.Background(), "Middle-earth", nil)
+	if err != nil {
+		t.Fatalf("upserting series: %v", err)
+	}
+	seq1 := 1.0
+	seq2 := 2.0
+	seq3 := 3.0
+	if err := repo.LinkBookSeries(context.Background(), audioBook.ID, series.ID, &seq1); err != nil {
+		t.Fatalf("linking book 1 to series: %v", err)
+	}
+	dur2 := 300.0
+	audioBook2 := &repository.Book{
+		ID:              "book-audio-2",
+		Title:           "The Fellowship of the Ring",
+		FilePath:        "TheHobbit.m4b",
+		BookType:        "audiobook",
+		DurationSeconds: &dur2,
+	}
+	if err := repo.CreateBook(ctx, audioBook2); err != nil {
+		t.Fatalf("creating book 2: %v", err)
+	}
+	if err := repo.CreateAudioChapters(ctx, []*repository.AudioChapter{
+		{ID: "ach-2-1", BookID: audioBook2.ID, ChapterIndex: 1, Title: "Chapter 1", StartOffsetSec: 0, DurationSec: 300},
+	}); err != nil {
+		t.Fatalf("creating audio chapters for book 2: %v", err)
+	}
+	if err := repo.LinkBookSeries(ctx, audioBook2.ID, series.ID, &seq2); err != nil {
+		t.Fatalf("linking book 2 to series: %v", err)
+	}
+	ebookOnly := &repository.Book{
+		ID:       "book-ebook-3",
+		Title:    "The Silmarillion Companion",
+		FilePath: "companion.epub",
+		BookType: "ebook",
+	}
+	if err := repo.CreateBook(ctx, ebookOnly); err != nil {
+		t.Fatalf("creating ebook-only book 3: %v", err)
+	}
+	if err := repo.LinkBookSeries(ctx, ebookOnly.ID, series.ID, &seq3); err != nil {
+		t.Fatalf("linking book 3 to series: %v", err)
+	}
+
+	sendSeriesBody, _ := json.Marshal(SendToYotoRequest{
+		Mode:          "new",
+		DefaultIconID: "yoto:#series-icon-1",
+	})
+	req6c := httptest.NewRequest(http.MethodPost, "/api/v1/series/"+series.ID+"/yoto", bytes.NewReader(sendSeriesBody))
+	req6c.Header.Set("Authorization", "Bearer "+token)
+	rec6c := httptest.NewRecorder()
+	handler.ServeHTTP(rec6c, req6c)
+	if rec6c.Code != http.StatusOK {
+		t.Fatalf("expected 200 sending series to Yoto, got %d: %s", rec6c.Code, rec6c.Body.String())
+	}
+	var seriesResp SendToYotoResponse
+	if err := json.Unmarshal(rec6c.Body.Bytes(), &seriesResp); err != nil {
+		t.Fatalf("decoding send series response: %v", err)
+	}
+	if seriesResp.Title != "Middle-earth" || seriesResp.ChapterCount != 3 {
+		t.Fatalf("expected playlist 'Middle-earth' with 3 chapters, got %+v", seriesResp)
+	}
+	if len(capturedContent.Content.Chapters) != 3 {
+		t.Fatalf("expected 3 chapters in captured content for series, got %d", len(capturedContent.Content.Chapters))
+	}
+	if capturedContent.Content.Chapters[0].Title != "The Hobbit - An Unexpected Party" {
+		t.Errorf("expected chapter 0 title 'The Hobbit - An Unexpected Party', got %q", capturedContent.Content.Chapters[0].Title)
+	}
+	if capturedContent.Content.Chapters[1].Title != "The Hobbit - Roast Mutton" {
+		t.Errorf("expected chapter 1 title 'The Hobbit - Roast Mutton', got %q", capturedContent.Content.Chapters[1].Title)
+	}
+	if capturedContent.Content.Chapters[2].Title != "The Fellowship of the Ring" {
+		t.Errorf("expected chapter 2 title 'The Fellowship of the Ring', got %q", capturedContent.Content.Chapters[2].Title)
+	}
+	if capturedContent.Content.Chapters[2].Key != "03" || capturedContent.Content.Chapters[2].OverlayLabel != "3" {
+		t.Errorf("expected chapter 2 key=03 and label=3, got key=%s label=%s", capturedContent.Content.Chapters[2].Key, capturedContent.Content.Chapters[2].OverlayLabel)
+	}
 
 	// 7. Unlink account
 	req7 := httptest.NewRequest(http.MethodPost, "/api/v1/integrations/yoto/unlink", strings.NewReader(`{}`))
