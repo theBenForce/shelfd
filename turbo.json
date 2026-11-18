@@ -7,6 +7,8 @@
         "$TURBO_DEFAULT$",
         "lib/**",
         "web/**",
+        "assets/**",
+        "fonts/**",
         "pubspec.yaml",
         "pubspec.lock"
       ],
@@ -15,7 +17,7 @@
       ]
     },
     "@shelfd/server#build": {
-      "dependsOn": ["^build:web"],
+      "dependsOn": ["^build"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "**/*.go",
@@ -28,13 +30,20 @@
       ]
     },
     "@shelfd/app#build": {
-      "dependsOn": ["build:web"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "lib/**",
+        "web/**",
+        "assets/**",
+        "fonts/**",
+        "pubspec.yaml",
+        "pubspec.lock"
+      ],
       "outputs": [
         "build/web/**"
       ]
     },
     "test": {
-      "dependsOn": ["^build"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "**/*.go",

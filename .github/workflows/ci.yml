@@ -24,15 +24,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -51,6 +52,10 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Resolve Flutter dependencies
+        working-directory: apps/app
+        run: flutter pub get
+
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
@@ -61,4 +66,4 @@ jobs:
         run: pnpm test
 
       - name: Build Flutter web application
-        run: pnpm --filter @shelfd/app build:web
+        run: pnpm turbo run build:web

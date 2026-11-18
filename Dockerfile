@@ -9,13 +9,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /src
 
-# Leverage Docker layer caching for Go modules
+# Leverage Docker layer caching for Go modules and heavy Cgo amalgamations
 COPY apps/server/go.mod apps/server/go.sum ./
 RUN go mod download
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -tags sqlite_fts5 \
+    github.com/mattn/go-sqlite3 \
+    github.com/asg017/sqlite-vec-go-bindings/cgo \
+    github.com/uptrace/bun \
+    github.com/uptrace/bun/dialect/pgdialect \
+    github.com/uptrace/bun/dialect/sqlitedialect \
+    github.com/uptrace/bun/driver/pgdriver \
+    github.com/golang-jwt/jwt/v5 \
+    github.com/google/uuid \
+    golang.org/x/crypto/bcrypt \
+    golang.org/x/net/html \
+    gopkg.in/yaml.v3
 
 # Copy server source code and compile with Cgo
-ARG VERSION=0.1.0
 COPY apps/server ./
+ARG VERSION=0.1.0
 RUN CGO_ENABLED=1 GOOS=linux go build \
     -tags sqlite_fts5 \
     -ldflags="-s -w -X main.Version=${VERSION}" \
