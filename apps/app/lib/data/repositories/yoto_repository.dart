@@ -113,6 +113,14 @@ class YotoRepository {
   ) =>
       apiService.sendSeriesToYoto(seriesId, request);
 
+  Future<YotoServerUploadProgress> getUploadProgress() async {
+    try {
+      return await apiService.getYotoUploadProgress();
+    } catch (_) {
+      return const YotoServerUploadProgress(isActive: false);
+    }
+  }
+
   static String generatePkceVerifier([int length = 64]) {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
     final rand = Random.secure();

@@ -1351,6 +1351,7 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
               child: Column(
                 children: [
                   Expanded(child: body),
+                  const YotoUploadQueueBanner(),
                   const MiniPlayerBar(),
                 ],
               ),
@@ -1366,6 +1367,7 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
       body: Column(
         children: [
           Expanded(child: body),
+          const YotoUploadQueueBanner(),
           const MiniPlayerBar(),
         ],
       ),
@@ -1374,6 +1376,127 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
         onTap: onNavTap,
         currentPath: currentPath,
         onNavigate: onNavigate,
+      ),
+    );
+  }
+}
+
+class YotoUploadQueueBanner extends ConsumerWidget {
+  const YotoUploadQueueBanner({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.listen<YotoUploadQueueState>(yotoUploadQueueProvider, (previous, next) {
+      final err = next.latestError;
+      if (err != null && err.id != previous?.latestError?.id) {
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger?.showSnackBar(
+          SnackBar(
+            key: const Key('yoto_upload_error_toast'),
+            content: Text(err.message),
+            backgroundColor: Colors.red.shade800,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        ref.read(yotoUploadQueueProvider.notifier).acknowledgeError(err.id);
+      }
+    });
+
+    final queueState = ref.watch(yotoUploadQueueProvider);
+    if (!queueState.hasActiveOrPending) {
+      return const SizedBox.shrink();
+    }
+
+    final colors = ShelfdColors.of(context);
+    final currentPct = (queueState.currentUploadProgress * 100).round();
+    final totalPct = (queueState.totalUploadsProgress * 100).round();
+
+    return Container(
+      key: const Key('yoto_upload_queue_banner'),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(
+          top: BorderSide(color: colors.subtleBorder),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.speaker_rounded, size: 15, color: colors.accentPrimary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Current Upload: ${queueState.currentUploadTitle}',
+                  style: AppTypography.bodySans(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${queueState.currentStageDescription} ($currentPct%)',
+                style: AppTypography.mono(
+                  fontSize: 11,
+                  color: colors.mutedInk,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              key: const Key('yoto_current_upload_progress_bar'),
+              value: queueState.currentUploadProgress,
+              minHeight: 5,
+              backgroundColor: colors.containerHigh,
+              valueColor: AlwaysStoppedAnimation<Color>(colors.accentPrimary),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Total Uploads (${queueState.completedUploadsCount} of ${queueState.totalUploadsCount})',
+                  style: AppTypography.bodySans(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: colors.mutedInk,
+                  ),
+                ),
+              ),
+              Text(
+                '$totalPct%',
+                style: AppTypography.mono(
+                  fontSize: 11,
+                  color: colors.mutedInk,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              key: const Key('yoto_total_uploads_progress_bar'),
+              value: queueState.totalUploadsProgress,
+              minHeight: 5,
+              backgroundColor: colors.containerHigh,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                colors.accentPrimary.withValues(alpha: 0.7),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

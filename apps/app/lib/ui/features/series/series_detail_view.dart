@@ -101,7 +101,7 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
       seriesName: title,
       books: audioBooks,
     );
-    if (result != null && mounted) {
+    if (result != null && result.status != 'queued' && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(result.message),

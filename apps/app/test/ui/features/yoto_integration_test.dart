@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +9,7 @@ import 'package:shelf/data/models/yoto.dart';
 import 'package:shelf/data/repositories/yoto_repository.dart';
 import 'package:shelf/data/services/api_service.dart';
 import 'package:shelf/data/services/storage_service.dart';
+import 'package:shelf/ui/core/shared_layout.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/book_detail/send_to_yoto_dialog.dart';
 import 'package:shelf/ui/features/settings/settings_view.dart';
@@ -35,6 +37,18 @@ void main() {
     });
     expect(icon.yotoUri, 'yoto:#media-abc');
     expect(icon.publicTags, contains('dragon'));
+
+    final iconWithoutHash = YotoDisplayIcon.fromJson({
+      'displayIconId': 'icon-2',
+      'mediaId': 'AC6ySygbay79fIMHmMtYN9ekBo1kwMvRoi4DQW_CZW0',
+      'yotoUri': 'yoto:AC6ySygbay79fIMHmMtYN9ekBo1kwMvRoi4DQW_CZW0',
+      'title': 'Book',
+      'url': 'https://yoto.io/book.png',
+    });
+    expect(
+      iconWithoutHash.yotoUri,
+      'yoto:#AC6ySygbay79fIMHmMtYN9ekBo1kwMvRoi4DQW_CZW0',
+    );
 
     final req = SendToYotoRequest(
       mode: 'existing',
@@ -319,18 +333,141 @@ void main() {
 
     expect(find.byKey(const Key('yoto_reconnect_signin_button')), findsOneWidget);
   });
+
+  testWidgets(
+      'YotoUploadQueueBanner shows current & total progress bars and toast notification on error',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final mockYotoRepo = _MockYotoRepository(prefs);
+
+    final firstUploadCompleter = Completer<SendToYotoResult>();
+    final secondUploadCompleter = Completer<SendToYotoResult>();
+    mockYotoRepo.bookUploadCompleters['book-1'] = firstUploadCompleter;
+    mockYotoRepo.bookUploadCompleters['book-2'] = secondUploadCompleter;
+    mockYotoRepo.simulatedProgress = const YotoServerUploadProgress(
+      isActive: true,
+      stage: 'uploading',
+      currentProgress: 0.5,
+      overallProgress: 0.5,
+      completedItems: 0,
+      totalItems: 1,
+    );
+
+    late WidgetRef capturedRef;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          yotoRepositoryProvider.overrideWithValue(mockYotoRepo),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: Scaffold(
+            body: Consumer(
+              builder: (context, ref, _) {
+                capturedRef = ref;
+                return const Column(
+                  children: [
+                    Expanded(child: SizedBox()),
+                    YotoUploadQueueBanner(),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // Initially hidden when queue is empty
+    expect(find.byKey(const Key('yoto_upload_queue_banner')), findsNothing);
+
+    // Enqueue 2 books into background upload queue
+    final notifier = capturedRef.read(yotoUploadQueueProvider.notifier);
+    notifier.enqueueBookUpload(
+      bookId: 'book-1',
+      title: 'The Hobbit',
+      request: const SendToYotoRequest(mode: 'append', cardId: 'card-bedtime'),
+    );
+    notifier.enqueueBookUpload(
+      bookId: 'book-2',
+      title: 'The Fellowship of the Ring',
+      request: const SendToYotoRequest(mode: 'append', cardId: 'card-bedtime'),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // Banner and both progress bars are visible
+    expect(find.byKey(const Key('yoto_upload_queue_banner')), findsOneWidget);
+    expect(find.byKey(const Key('yoto_current_upload_progress_bar')), findsOneWidget);
+    expect(find.byKey(const Key('yoto_total_uploads_progress_bar')), findsOneWidget);
+    expect(find.textContaining('Current Upload: The Hobbit'), findsOneWidget);
+    expect(find.text('Total Uploads (0 of 2)'), findsOneWidget);
+
+    final currentBar1 = tester.widget<LinearProgressIndicator>(
+      find.byKey(const Key('yoto_current_upload_progress_bar')),
+    );
+    final totalBar1 = tester.widget<LinearProgressIndicator>(
+      find.byKey(const Key('yoto_total_uploads_progress_bar')),
+    );
+    expect(currentBar1.value, closeTo(0.5, 0.01));
+    expect(totalBar1.value, closeTo(0.25, 0.01));
+
+    // Complete first upload; second upload starts
+    firstUploadCompleter.complete(
+      const SendToYotoResult(
+        status: 'sent',
+        cardId: 'card-bedtime',
+        title: 'Bedtime Stories',
+        chapterCount: 6,
+        message: 'Appended',
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(
+      find.textContaining('Current Upload: The Fellowship of the Ring'),
+      findsOneWidget,
+    );
+    expect(find.text('Total Uploads (1 of 2)'), findsOneWidget);
+
+    // Fail second upload -> should trigger error toast notification and hide banner once queue finishes
+    secondUploadCompleter.completeError(
+      const ApiException(502, '{"error":"Yoto API rate limit exceeded"}'),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.byKey(const Key('yoto_upload_error_toast')), findsOneWidget);
+    expect(
+      find.textContaining('Yoto upload failed for "The Fellowship of the Ring"'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('yoto_upload_queue_banner')), findsNothing);
+  });
 }
 
 class _MockYotoRepository extends YotoRepository {
   String? lastSentBookId;
   String? lastSentSeriesId;
   SendToYotoRequest? lastRequest;
+  final Map<String, Completer<SendToYotoResult>> bookUploadCompleters = {};
+  YotoServerUploadProgress simulatedProgress =
+      const YotoServerUploadProgress(isActive: false);
 
   _MockYotoRepository(SharedPreferences prefs)
       : super(
           apiService: ApiService(baseUrl: 'http://localhost:8080'),
           storageService: StorageService(prefs),
         );
+
+  @override
+  Future<YotoServerUploadProgress> getUploadProgress() async {
+    return simulatedProgress;
+  }
 
   @override
   Future<List<YotoPlaylist>> getPlaylists() async {
@@ -355,6 +492,10 @@ class _MockYotoRepository extends YotoRepository {
   ) async {
     lastSentBookId = bookId;
     lastRequest = request;
+    final completer = bookUploadCompleters[bookId];
+    if (completer != null) {
+      return completer.future;
+    }
     return SendToYotoResult(
       status: 'sent',
       cardId: request.cardId ?? 'card-new',

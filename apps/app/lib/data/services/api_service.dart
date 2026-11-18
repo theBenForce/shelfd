@@ -1108,4 +1108,16 @@ class ApiService {
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return SendToYotoResult.fromJson(data);
   }
+
+  Future<YotoServerUploadProgress> getYotoUploadProgress() async {
+    final response = await client.get(
+      _uri('/api/v1/integrations/yoto/progress'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return YotoServerUploadProgress.fromJson(data);
+  }
 }

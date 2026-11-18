@@ -79,6 +79,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/integrations/yoto/playlists", auth(http.HandlerFunc(yotoHandler.ListPlaylists)))
 	mux.Handle("GET /api/v1/integrations/yoto/icons", auth(http.HandlerFunc(yotoHandler.ListIcons)))
 	mux.Handle("POST /api/v1/integrations/yoto/icons", auth(http.HandlerFunc(yotoHandler.UploadIcon)))
+	mux.Handle("GET /api/v1/integrations/yoto/progress", auth(http.HandlerFunc(yotoHandler.GetUploadProgress)))
 
 	// Metadata search & auto-populate
 	mux.Handle("GET /api/v1/metadata/search", auth(http.HandlerFunc(metadataHandler.Search)))

@@ -253,7 +253,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
   Future<void> _sendToYoto(Book book) async {
     if (!_hasAudiobook(book)) return;
     final result = await showSendToYotoDialog(context, book);
-    if (result != null && mounted) {
+    if (result != null && result.status != 'queued' && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(result.message),
