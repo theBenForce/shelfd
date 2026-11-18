@@ -1,3 +1,10 @@
+## [1.19.1](https://github.com/theBenForce/shelfd/compare/v1.19.0...v1.19.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **app:** replace setUint64 in Yoto PKCE SHA-256 for web and stop 401 queue polling ([#78](https://github.com/theBenForce/shelfd/issues/78)) ([12686e0](https://github.com/theBenForce/shelfd/commit/12686e0db84d8ed2b4e879233588b5976efba016))
+
 # [1.19.0](https://github.com/theBenForce/shelfd/compare/v1.18.0...v1.19.0) (2026-11-17)
 
 
