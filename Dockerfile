@@ -36,8 +36,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
     ./cmd/server
 
 # ==============================================================================
-# Opt-in Stage: Build reference TypeScript plugins & Node-enabled runtime image
-# Build via: docker build --target runtime-plugins -t shelfd:plugins .
+# Stage 2: Build reference TypeScript plugins
 # ==============================================================================
 FROM node:22-bookworm-slim AS plugin-builder
 
@@ -51,47 +50,11 @@ RUN node ./packages/plugin-sdk/scripts/build-sdk.mjs \
     && cp ./plugins/project-gutenberg/plugin.json /out/builtin-plugins/project-gutenberg/plugin.json \
     && cp ./plugins/project-gutenberg/dist/index.mjs /out/builtin-plugins/project-gutenberg/dist/index.mjs
 
-FROM debian:bookworm-slim AS runtime-plugins
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    tzdata \
-    gosu \
-    tini \
-    curl \
-    libsqlite3-0 \
-    libstdc++6 \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN mkdir -p /data /data/plugins /library /config /usr/share/shelfd/web /usr/share/shelfd/builtin-plugins
-
-COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
-COPY --from=builder /out/shelfd /usr/local/bin/shelfd
-COPY --from=plugin-builder /out/builtin-plugins /usr/share/shelfd/builtin-plugins
-COPY apps/app/build/web /usr/share/shelfd/web
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-ENV PUID=1000 \
-    PGID=1000 \
-    UMASK=002 \
-    SHELFD_STORAGE_DATA_DIR=/data \
-    SHELFD_STORAGE_LIBRARY_DIR=/library \
-    SHELFD_SERVER_WEB_DIR=/usr/share/shelfd/web
-
-EXPOSE 8080
-VOLUME ["/data", "/library"]
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8080/health || exit 1
-
-ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
-CMD ["shelfd"]
-
 # ==============================================================================
-# Default Final Stage: Minimal pure-Go runtime image (shelfd:latest)
+# Opt-in Minimal Stage: Pure-Go runtime image without Node/built-in plugins
+# Build via: docker build --target runtime-minimal -t shelfd:minimal .
 # ==============================================================================
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim AS runtime-minimal
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -132,3 +95,45 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
 CMD ["shelfd"]
+
+# ==============================================================================
+# Default Final Stage: Node-enabled runtime image with built-in plugins (shelfd:latest)
+# ==============================================================================
+FROM debian:bookworm-slim AS runtime-plugins
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    tzdata \
+    gosu \
+    tini \
+    curl \
+    libsqlite3-0 \
+    libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /data /data/plugins /library /config /usr/share/shelfd/web /usr/share/shelfd/builtin-plugins
+
+COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=builder /out/shelfd /usr/local/bin/shelfd
+COPY --from=plugin-builder /out/builtin-plugins /usr/share/shelfd/builtin-plugins
+COPY apps/app/build/web /usr/share/shelfd/web
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENV PUID=1000 \
+    PGID=1000 \
+    UMASK=002 \
+    SHELFD_STORAGE_DATA_DIR=/data \
+    SHELFD_STORAGE_LIBRARY_DIR=/library \
+    SHELFD_SERVER_WEB_DIR=/usr/share/shelfd/web
+
+EXPOSE 8080
+VOLUME ["/data", "/library"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8080/health || exit 1
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
+CMD ["shelfd"]
+
+FROM runtime-plugins AS runtime
