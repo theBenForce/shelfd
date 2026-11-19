@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,9 @@ import (
 
 	"github.com/shelfd/shelfd/internal/plugins"
 )
+
+const maxPluginActionAssetBytes = 5 << 20
+
 
 // PluginHandler handles REST endpoints for plugin management, configuration, commands, and catalog imports.
 type PluginHandler struct {
@@ -311,6 +315,333 @@ func (h *PluginHandler) StageCatalogItems(w http.ResponseWriter, r *http.Request
 		statusCode = http.StatusAccepted
 	}
 	writeJSON(w, statusCode, res)
+}
+
+func (h *PluginHandler) GetAuthStatus(w http.ResponseWriter, r *http.Request) {
+	if h.host == nil {
+		writeJSONError(w, http.StatusNotFound, "Plugin not found")
+		return
+	}
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+	res, err := h.host.GetAuthStatus(r.Context(), name, user.ID, user.Username)
+	if err != nil {
+		h.writePluginError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (h *PluginHandler) BeginAuth(w http.ResponseWriter, r *http.Request) {
+	if h.host == nil {
+		writeJSONError(w, http.StatusNotFound, "Plugin not found")
+		return
+	}
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+
+	var req plugins.AuthBeginParams
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON request: %v", err))
+			return
+		}
+	}
+
+	res, err := h.host.BeginAuth(r.Context(), name, req, user.ID, user.Username)
+	if err != nil {
+		h.writePluginError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (h *PluginHandler) CompleteAuth(w http.ResponseWriter, r *http.Request) {
+	if h.host == nil {
+		writeJSONError(w, http.StatusNotFound, "Plugin not found")
+		return
+	}
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+
+	var req plugins.AuthCompleteParams
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON request: %v", err))
+			return
+		}
+	}
+
+	res, err := h.host.CompleteAuth(r.Context(), name, req, user.ID, user.Username)
+	if err != nil {
+		h.writePluginError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (h *PluginHandler) DisconnectAuth(w http.ResponseWriter, r *http.Request) {
+	if h.host == nil {
+		writeJSONError(w, http.StatusNotFound, "Plugin not found")
+		return
+	}
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+	res, err := h.host.DisconnectAuth(r.Context(), name, user.ID, user.Username)
+	if err != nil {
+		h.writePluginError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (h *PluginHandler) PrepareAction(w http.ResponseWriter, r *http.Request) {
+	if h.host == nil {
+		writeJSONError(w, http.StatusNotFound, "Plugin not found")
+		return
+	}
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+	action := strings.TrimSpace(r.PathValue("action"))
+	if action == "" {
+		writeJSONError(w, http.StatusBadRequest, "Action name required")
+		return
+	}
+
+	var req struct {
+		Target  plugins.ActionTarget `json:"target"`
+		Context map[string]any       `json:"context,omitempty"`
+		Type    string               `json:"type,omitempty"`
+		ID      string               `json:"id,omitempty"`
+		Title   string               `json:"title,omitempty"`
+		BookIDs []string             `json:"book_ids,omitempty"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON request: %v", err))
+			return
+		}
+	}
+	target := req.Target
+	if target.ID == "" && req.ID != "" {
+		target = plugins.ActionTarget{
+			Type:    req.Type,
+			ID:      req.ID,
+			Title:   req.Title,
+			BookIDs: req.BookIDs,
+		}
+	}
+
+	res, err := h.host.PrepareAction(r.Context(), name, action, target, req.Context, user.ID, user.Username)
+	if err != nil {
+		h.writePluginError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (h *PluginHandler) GetActionOptions(w http.ResponseWriter, r *http.Request) {
+	if h.host == nil {
+		writeJSONError(w, http.StatusNotFound, "Plugin not found")
+		return
+	}
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+	action := strings.TrimSpace(r.PathValue("action"))
+	if action == "" {
+		writeJSONError(w, http.StatusBadRequest, "Action name required")
+		return
+	}
+
+	q := r.URL.Query()
+	source := strings.TrimSpace(q.Get("source"))
+	tab := strings.TrimSpace(q.Get("tab"))
+	query := strings.TrimSpace(q.Get("q"))
+	cursor := strings.TrimSpace(q.Get("cursor"))
+	var target *plugins.ActionTarget
+	targetType := strings.TrimSpace(q.Get("target_type"))
+	targetID := strings.TrimSpace(q.Get("target_id"))
+	if targetType != "" || targetID != "" {
+		target = &plugins.ActionTarget{
+			Type: targetType,
+			ID:   targetID,
+		}
+	}
+
+	res, err := h.host.FetchActionOptions(r.Context(), name, action, source, tab, query, cursor, target, user.ID, user.Username)
+	if err != nil {
+		h.writePluginError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (h *PluginHandler) UploadActionAsset(w http.ResponseWriter, r *http.Request) {
+	if h.host == nil {
+		writeJSONError(w, http.StatusNotFound, "Plugin not found")
+		return
+	}
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+	action := strings.TrimSpace(r.PathValue("action"))
+	if action == "" {
+		writeJSONError(w, http.StatusBadRequest, "Action name required")
+		return
+	}
+
+	if err := r.ParseMultipartForm(maxPluginActionAssetBytes + (1 << 20)); err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse multipart form: %v", err))
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Missing 'file' field in multipart upload")
+		return
+	}
+	defer file.Close()
+
+	if header != nil && header.Size > maxPluginActionAssetBytes {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "Asset exceeds maximum size of 5 MB")
+		return
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, maxPluginActionAssetBytes+1))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to read uploaded asset: %v", err))
+		return
+	}
+	if len(data) > maxPluginActionAssetBytes {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "Asset exceeds maximum size of 5 MB")
+		return
+	}
+	if len(data) == 0 {
+		writeJSONError(w, http.StatusBadRequest, "Uploaded asset file is empty")
+		return
+	}
+
+	filename := "asset"
+	mimeType := ""
+	if header != nil {
+		if strings.TrimSpace(header.Filename) != "" {
+			filename = strings.TrimSpace(header.Filename)
+		}
+		mimeType = strings.TrimSpace(header.Header.Get("Content-Type"))
+	}
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		mimeType = http.DetectContentType(data)
+	}
+
+	field := strings.TrimSpace(r.FormValue("field"))
+	dataBase64 := base64.StdEncoding.EncodeToString(data)
+
+	res, err := h.host.UploadActionAsset(r.Context(), name, action, field, filename, mimeType, dataBase64, user.ID, user.Username)
+	if err != nil {
+		h.writePluginError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (h *PluginHandler) InvokeAction(w http.ResponseWriter, r *http.Request) {
+	if h.host == nil {
+		writeJSONError(w, http.StatusNotFound, "Plugin not found")
+		return
+	}
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+	action := strings.TrimSpace(r.PathValue("action"))
+	if action == "" {
+		writeJSONError(w, http.StatusBadRequest, "Action name required")
+		return
+	}
+
+	var req struct {
+		Target    plugins.ActionTarget `json:"target"`
+		Values    map[string]any       `json:"values,omitempty"`
+		Overrides map[string]string    `json:"overrides,omitempty"`
+		Async     bool                 `json:"async,omitempty"`
+	}
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON request: %v", err))
+			return
+		}
+	}
+
+	res, err := h.host.InvokeAction(r.Context(), name, action, req.Target, req.Values, req.Overrides, req.Async, user.ID, user.Username)
+	if err != nil {
+		h.writePluginError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (h *PluginHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
+	if h.host == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"jobs": []*plugins.PluginJob{}})
+		return
+	}
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	jobs := h.host.ListUserJobs(user.ID)
+	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+}
+
+func (h *PluginHandler) DismissJob(w http.ResponseWriter, r *http.Request) {
+	if h.host == nil {
+		writeJSONError(w, http.StatusNotFound, "Job not found")
+		return
+	}
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	jobID := strings.TrimSpace(r.PathValue("id"))
+	if jobID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Job ID required")
+		return
+	}
+	if !h.host.DismissJob(user.ID, jobID) {
+		writeJSONError(w, http.StatusNotFound, "Job not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *PluginHandler) writePluginResultOrError(w http.ResponseWriter, raw json.RawMessage, err error) {

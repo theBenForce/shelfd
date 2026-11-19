@@ -702,6 +702,10 @@ func notebookLMFilename(book *repository.Book) string {
 }
 
 func (h *BookHandler) compileBookNotebookLMMarkdown(ctx context.Context, book *repository.Book) string {
+	return h.compileBookMarkdown(ctx, book)
+}
+
+func (h *BookHandler) compileBookMarkdown(ctx context.Context, book *repository.Book) string {
 	var sb strings.Builder
 
 	title := strings.TrimSpace(book.Title)
@@ -855,9 +859,9 @@ func (h *BookHandler) compileBookNotebookLMMarkdown(ctx context.Context, book *r
 	return sb.String()
 }
 
-// ExportBookNotebookLM handles GET /api/v1/books/{id}/notebooklm and serves a compiled
-// NotebookLM-optimized Markdown document containing metadata, highlights, and chapter content.
-func (h *BookHandler) ExportBookNotebookLM(w http.ResponseWriter, r *http.Request) {
+// ExportBookMarkdown handles GET /api/v1/books/{id}/markdown and serves a compiled
+// Markdown document containing metadata, highlights, and chapter content.
+func (h *BookHandler) ExportBookMarkdown(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
@@ -882,7 +886,7 @@ func (h *BookHandler) ExportBookNotebookLM(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	markdown := h.compileBookNotebookLMMarkdown(r.Context(), book)
+	markdown := h.compileBookMarkdown(r.Context(), book)
 	filename := notebookLMFilename(book)
 
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
@@ -890,6 +894,11 @@ func (h *BookHandler) ExportBookNotebookLM(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Cache-Control", "private, no-transform")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(markdown))
+}
+
+// ExportBookNotebookLM handles GET /api/v1/books/{id}/notebooklm and delegates to ExportBookMarkdown.
+func (h *BookHandler) ExportBookNotebookLM(w http.ResponseWriter, r *http.Request) {
+	h.ExportBookMarkdown(w, r)
 }
 
 // SendBookToNotebookLM handles POST /api/v1/books/{id}/notebooklm.

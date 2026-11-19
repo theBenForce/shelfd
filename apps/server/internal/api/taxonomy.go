@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -300,6 +302,80 @@ func (h *TaxonomyHandler) ListSeries(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type SeriesBookItem struct {
+	BookListItem
+	SequenceNumber *float64               `json:"sequence_number,omitempty"`
+	Files          []*repository.BookFile `json:"files,omitempty"`
+}
+
+func (h *TaxonomyHandler) GetSeries(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	seriesID := strings.TrimSpace(r.PathValue("id"))
+	if seriesID == "" {
+		seriesID = extractIDFromPath(r.URL.Path, "series")
+	}
+	if seriesID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Series ID required")
+		return
+	}
+
+	series, err := h.repo.GetSeriesByID(r.Context(), seriesID)
+	if errors.Is(err, repository.ErrNotFound) || series == nil {
+		writeJSONError(w, http.StatusNotFound, "Series not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to load series: %v", err))
+		return
+	}
+
+	books, err := h.repo.ListBooks(r.Context(), repository.BookFilter{SeriesID: &seriesID, Limit: 500})
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to list books in series: %v", err))
+		return
+	}
+
+	items := make([]SeriesBookItem, 0, len(books))
+	for _, b := range books {
+		listItem := BuildBookListItem(r.Context(), h.repo, b)
+		files, _ := h.repo.GetBookFilesByBookID(r.Context(), b.ID)
+		var seq *float64
+		for _, sd := range listItem.Series {
+			if sd != nil && sd.ID == seriesID {
+				seq = sd.SequenceNumber
+				break
+			}
+		}
+		items = append(items, SeriesBookItem{
+			BookListItem:   listItem,
+			SequenceNumber: seq,
+			Files:          files,
+		})
+	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].SequenceNumber != nil && items[j].SequenceNumber != nil {
+			if *items[i].SequenceNumber != *items[j].SequenceNumber {
+				return *items[i].SequenceNumber < *items[j].SequenceNumber
+			}
+		} else if items[i].SequenceNumber != nil {
+			return true
+		} else if items[j].SequenceNumber != nil {
+			return false
+		}
+		return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title)
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"series": series,
+		"books":  items,
+	})
+}
+
 func (h *TaxonomyHandler) ListTopics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -316,4 +392,5 @@ func (h *TaxonomyHandler) ListTopics(w http.ResponseWriter, r *http.Request) {
 		"topics": topics,
 	})
 }
+
 

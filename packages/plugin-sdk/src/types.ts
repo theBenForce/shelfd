@@ -1,6 +1,6 @@
 export const PROTOCOL_VERSION = "2026-11-01";
 
-export type PluginCapability = "tools" | "commands" | "events" | "catalog";
+export type PluginCapability = "tools" | "commands" | "events" | "catalog" | "actions";
 export type CatalogMode = "browse" | "search";
 export type PluginAPIScope = "uploads:stage" | "uploads:write" | "books:read";
 
@@ -35,6 +35,195 @@ export interface CatalogDescriptor {
   requires_auth?: boolean;
 }
 
+export interface AuthFieldSpec {
+  key: string;
+  title: string;
+  description?: string;
+  secret?: boolean;
+  required?: boolean;
+  placeholder?: string;
+}
+
+export interface AuthSpec {
+  methods: string[];
+  title?: string;
+  description?: string;
+  callback_param?: string;
+  fields?: AuthFieldSpec[];
+}
+
+export interface AuthStatusResult {
+  connected: boolean;
+  configured: boolean;
+  method?: string;
+  account_label?: string;
+  auth_url?: string;
+  callback_param?: string;
+  message?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface AuthBeginRequest {
+  method?: string;
+  redirect_uri?: string;
+  state?: string;
+  code_challenge?: string;
+  code_challenge_method?: string;
+}
+
+export interface AuthBeginResult {
+  method: string;
+  authorize_url?: string;
+  callback_param?: string;
+  instructions?: string;
+  fields?: AuthFieldSpec[];
+}
+
+export interface AuthCompleteRequest {
+  method?: string;
+  code?: string;
+  redirect_uri?: string;
+  code_verifier?: string;
+  state?: string;
+  values?: Record<string, string>;
+}
+
+export interface ActionDef {
+  name: string;
+  title: string;
+  description?: string;
+  icon?: string;
+  targets: Array<"book" | "series">;
+  media_types?: Array<"ebook" | "audiobook">;
+  mode?: "immediate" | "form";
+  execution?: "sync" | "job";
+}
+
+export interface ActionTarget {
+  type: "book" | "series";
+  id: string;
+  title?: string;
+  book_ids?: string[];
+}
+
+export interface ActionEntry {
+  id: string;
+  index: number;
+  title: string;
+  subtitle?: string;
+  icon_uri?: string;
+  image_url?: string;
+}
+
+export interface FieldVisibilityRule {
+  field: string;
+  equals?: string;
+  in?: string[];
+}
+
+export interface OptionItem {
+  value: string;
+  label: string;
+  subtitle?: string;
+  description?: string;
+  image_url?: string;
+  icon_uri?: string;
+  badge?: string;
+  count?: number;
+  meta?: Record<string, unknown>;
+}
+
+export interface AssetPickerTab {
+  id: string;
+  label: string;
+  searchable?: boolean;
+}
+
+export type InputFieldKind = "text" | "boolean" | "select" | "segmented" | "remote_select" | "asset_picker";
+
+export interface InputFieldSpec {
+  key: string;
+  kind: InputFieldKind;
+  title: string;
+  description?: string;
+  placeholder?: string;
+  required?: boolean;
+  default_value?: unknown;
+  visible_when?: FieldVisibilityRule;
+  options?: OptionItem[];
+  options_source?: string;
+  searchable?: boolean;
+  empty_message?: string;
+  asset_shape?: "square_pixel" | "cover";
+  tabs?: AssetPickerTab[];
+  allow_upload?: boolean;
+  per_entry_override?: boolean;
+  override_key?: string;
+  override_label?: string;
+}
+
+export interface ActionFormSpec {
+  title: string;
+  description?: string;
+  submit_label?: string;
+  auth_required?: boolean;
+  auth_message?: string;
+  entries?: ActionEntry[];
+  fields: InputFieldSpec[];
+}
+
+export interface ActionPrepareRequest {
+  action: string;
+  target: ActionTarget;
+  context?: Record<string, unknown>;
+}
+
+export interface ActionOptionsRequest {
+  action: string;
+  source: string;
+  tab?: string;
+  query?: string;
+  cursor?: string;
+  target?: ActionTarget;
+}
+
+export interface ActionOptionsResult {
+  items: OptionItem[];
+  next_cursor?: string;
+}
+
+export interface AssetUploadRequest {
+  action: string;
+  field?: string;
+  filename: string;
+  mime_type: string;
+  data_base64: string;
+}
+
+export interface AssetUploadResult {
+  item: OptionItem;
+}
+
+export interface ActionInvokeRequest {
+  action: string;
+  job_id?: string;
+  target: ActionTarget;
+  values?: Record<string, unknown>;
+  overrides?: Record<string, string>;
+}
+
+export interface ActionResult {
+  status: "completed" | "client_handoff" | "job_started";
+  message?: string;
+  external_url?: string;
+  open_url?: string;
+  download_api_path?: string;
+  file_name?: string;
+  mime_type?: string;
+  job_id?: string;
+  data?: Record<string, unknown>;
+}
+
 export interface PluginManifest {
   name: string;
   version: string;
@@ -52,6 +241,8 @@ export interface PluginManifest {
   tools?: ToolDef[];
   commands?: CommandDef[];
   catalog?: CatalogDescriptor;
+  auth?: AuthSpec;
+  actions?: ActionDef[];
 }
 
 export interface CatalogFormat {
@@ -171,9 +362,11 @@ export interface StageBookResponse {
 }
 
 export interface ProgressNotification {
+  jobId?: string;
   batchId?: string;
   current: number;
   total: number;
+  percent?: number;
   externalId?: string;
   title?: string;
   status?: string;
@@ -188,6 +381,10 @@ export interface PluginContext<TConfig extends Record<string, unknown> = Record<
   readonly config: TConfig;
   stageBook(input: StageBookInput): Promise<StageBookResponse>;
   patchConfig(values: Partial<TConfig>): Promise<void>;
+  refreshInvocationToken(): Promise<string>;
+  fetchLoopback(path: string, init?: RequestInit): Promise<Response>;
+  openLoopbackStream(path: string): Promise<{ stream: ReadableStream<Uint8Array>; contentLength?: number; contentType?: string }>;
+  getBookMarkdown(bookId: string): Promise<{ markdown: string; fileName: string }>;
   emitEvent(event: string, data?: Record<string, unknown>): void;
   reportProgress(progress: ProgressNotification): void;
   log(level: "debug" | "info" | "warn" | "error", message: string): void;
@@ -213,12 +410,36 @@ export interface CatalogHandlers<TConfig extends Record<string, unknown> = Recor
   stage: (req: CatalogStageRequest, ctx: PluginContext<TConfig>) => Promise<CatalogStageResult>;
 }
 
+export interface PluginAuthHandlers<TConfig extends Record<string, unknown> = Record<string, unknown>> {
+  spec?: AuthSpec;
+  status: (ctx: PluginContext<TConfig>) => Promise<AuthStatusResult> | AuthStatusResult;
+  begin?: (req: AuthBeginRequest, ctx: PluginContext<TConfig>) => Promise<AuthBeginResult> | AuthBeginResult;
+  complete?: (req: AuthCompleteRequest, ctx: PluginContext<TConfig>) => Promise<AuthStatusResult> | AuthStatusResult;
+  disconnect?: (ctx: PluginContext<TConfig>) => Promise<AuthStatusResult> | AuthStatusResult;
+}
+
+export interface ActionHandlerSpec<TConfig extends Record<string, unknown> = Record<string, unknown>> {
+  title?: string;
+  description?: string;
+  icon?: string;
+  targets?: Array<"book" | "series">;
+  mediaTypes?: Array<"ebook" | "audiobook">;
+  mode?: "immediate" | "form";
+  execution?: "sync" | "job";
+  prepare?: (req: ActionPrepareRequest, ctx: PluginContext<TConfig>) => Promise<ActionFormSpec> | ActionFormSpec;
+  options?: (req: ActionOptionsRequest, ctx: PluginContext<TConfig>) => Promise<ActionOptionsResult> | ActionOptionsResult;
+  uploadAsset?: (req: AssetUploadRequest, ctx: PluginContext<TConfig>) => Promise<AssetUploadResult> | AssetUploadResult;
+  invoke: (req: ActionInvokeRequest, ctx: PluginContext<TConfig>) => Promise<ActionResult> | ActionResult;
+}
+
 export interface PluginDefinition<TConfig extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
   version: string;
   tools?: Record<string, ToolHandlerSpec<TConfig>>;
   commands?: Record<string, CommandHandlerSpec<TConfig>>;
   catalog?: CatalogHandlers<TConfig>;
+  auth?: PluginAuthHandlers<TConfig>;
+  actions?: Record<string, ActionHandlerSpec<TConfig>>;
   onInitialize?: (params: { protocolVersion: string; shelfdVersion: string; apiBase: string; dataDir: string }) => Promise<void> | void;
   onConfigUpdate?: (userId: string, config: TConfig) => Promise<void> | void;
   onShutdown?: () => Promise<void> | void;
@@ -230,3 +451,4 @@ export interface PoliteFetcherOptions {
   userAgent?: string;
   fetchImpl?: typeof fetch;
 }
+

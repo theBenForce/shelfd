@@ -144,9 +144,11 @@ func PluginScopeAllowsRequest(scopes []string, method, path string) bool {
 
 	if method == http.MethodGet || method == http.MethodHead {
 		if cleanPath == "/api/v1/books" || strings.HasPrefix(cleanPath, "/api/v1/books/") ||
+			strings.HasPrefix(cleanPath, "/api/v1/audiobooks/") ||
 			cleanPath == "/api/v1/search" ||
 			cleanPath == "/api/v1/authors" || strings.HasPrefix(cleanPath, "/api/v1/authors/") ||
-			cleanPath == "/api/v1/genres" || cleanPath == "/api/v1/topics" || cleanPath == "/api/v1/series" {
+			cleanPath == "/api/v1/genres" || cleanPath == "/api/v1/topics" ||
+			cleanPath == "/api/v1/series" || strings.HasPrefix(cleanPath, "/api/v1/series/") {
 			return hasScope("books:read")
 		}
 	}

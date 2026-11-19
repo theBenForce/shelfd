@@ -11,8 +11,9 @@ import type { PluginManifest } from "./types.ts";
 
 const PLUGIN_NAME_RE = /^[a-z][a-z0-9_-]{1,32}$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-const VALID_CAPABILITIES = new Set(["tools", "commands", "events", "catalog"]);
+const VALID_CAPABILITIES = new Set(["tools", "commands", "events", "catalog", "actions"]);
 const VALID_SCOPES = new Set(["uploads:stage", "uploads:write", "books:read"]);
+const VALID_ACTION_TARGETS = new Set(["book", "series"]);
 
 export function validateManifest(manifest: PluginManifest): string[] {
   const errors: string[] = [];
@@ -32,12 +33,38 @@ export function validateManifest(manifest: PluginManifest): string[] {
   }
   for (const cap of manifest.capabilities ?? []) {
     if (!VALID_CAPABILITIES.has(cap)) {
-      errors.push(`Unsupported capability "${cap}" (allowed: tools, commands, events, catalog)`);
+      errors.push(`Unsupported capability "${cap}" (allowed: tools, commands, events, catalog, actions)`);
     }
   }
   for (const scope of manifest.api_scopes ?? []) {
     if (!VALID_SCOPES.has(scope)) {
       errors.push(`Unsupported api_scope "${scope}" (allowed: uploads:stage, uploads:write, books:read)`);
+    }
+  }
+  if (manifest.auth !== undefined) {
+    if (!manifest.auth || typeof manifest.auth !== "object" || !Array.isArray(manifest.auth.methods) || manifest.auth.methods.length === 0) {
+      errors.push(`"auth.methods" must be a non-empty array of supported authentication method strings`);
+    }
+  }
+  if (manifest.actions !== undefined) {
+    if (!Array.isArray(manifest.actions)) {
+      errors.push(`"actions" must be an array of action descriptors`);
+    } else {
+      for (const act of manifest.actions) {
+        if (!act || typeof act !== "object") {
+          errors.push(`Each entry in "actions" must be an object`);
+          continue;
+        }
+        if (typeof act.name !== "string" || !act.name.trim()) {
+          errors.push(`Action descriptor is missing a valid "name"`);
+        }
+        if (typeof act.title !== "string" || !act.title.trim()) {
+          errors.push(`Action "${String(act.name ?? "")}" is missing a valid "title"`);
+        }
+        if (!Array.isArray(act.targets) || act.targets.length === 0 || act.targets.some((t) => !VALID_ACTION_TARGETS.has(t))) {
+          errors.push(`Action "${String(act.name ?? "")}" must specify a non-empty "targets" array containing "book" and/or "series"`);
+        }
+      }
     }
   }
   return errors;
@@ -433,6 +460,41 @@ export async function verifyPlugin(pluginDir: string): Promise<VerifyReport> {
       return;
     }
 
+    if (req.method === "GET" && url === "/api/v1/books/verify-book-1/markdown") {
+      const auth = req.headers.authorization ?? "";
+      if (!auth.startsWith("Bearer verify-scoped-token")) {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "Missing or invalid scoped invocation token" }));
+        return;
+      }
+      res.writeHead(200, {
+        "content-type": "text/markdown; charset=utf-8",
+        "content-disposition": 'attachment; filename="Verified_Book.md"',
+      });
+      res.end("# Verified Book\n\n## Chapters\n\n### Chapter 1\n\nSample chapter content.\n");
+      return;
+    }
+
+    if (req.method === "GET" && url === "/api/v1/books/verify-book-1") {
+      const auth = req.headers.authorization ?? "";
+      if (!auth.startsWith("Bearer verify-scoped-token")) {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "Missing or invalid scoped invocation token" }));
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          id: "verify-book-1",
+          title: "Verified Book",
+          book_type: "audiobook",
+          authors: [{ id: "author-1", name: "Test Author" }],
+          files: [],
+        })
+      );
+      return;
+    }
+
     if (url.startsWith("/mock-gutendex/books")) {
       const addr = mockServer.address();
       const port = typeof addr === "object" && addr ? addr.port : 0;
@@ -543,6 +605,8 @@ export async function verifyPlugin(pluginDir: string): Promise<VerifyReport> {
           }
         } else if (parsed.method === "config/patch" && parsed.id !== undefined) {
           child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: parsed.id, result: { ok: true } })}\n`);
+        } else if (parsed.method === "host/refresh_token" && parsed.id !== undefined) {
+          child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: parsed.id, result: { invocation_token: "verify-scoped-token-refreshed" } })}\n`);
         }
       } catch {
         malformedStdoutFrames += 1;
@@ -635,6 +699,49 @@ export async function verifyPlugin(pluginDir: string): Promise<VerifyReport> {
           name: "catalog_stage_loopback",
           passed: Boolean(stageOk),
           detail: stageOk ? `Staged upload_job_id=${String(firstStaged?.upload_job_id)}` : JSON.stringify(stageResp.error ?? stageRes),
+        });
+      }
+    }
+
+    // 2b. If actions plugin declares actions or auth, verify auth/status and actions contract
+    if (manifest.auth) {
+      const authStatusResp = await callRpc("auth/status", { auth: authEnvelope });
+      const authRes = (authStatusResp.result ?? {}) as { connected?: boolean; configured?: boolean };
+      const authOk = !authStatusResp.error && typeof authRes.connected === "boolean";
+      checks.push({
+        name: "auth_status_contract",
+        passed: authOk,
+        detail: authOk ? `connected=${String(authRes.connected)} configured=${String(authRes.configured ?? false)}` : JSON.stringify(authStatusResp.error ?? authRes),
+      });
+    }
+
+    if ((manifest.capabilities ?? []).includes("actions") && (manifest.actions ?? []).length > 0) {
+      const firstAction = manifest.actions![0];
+      if (firstAction.mode === "form") {
+        const prepResp = await callRpc("actions/prepare", {
+          action: firstAction.name,
+          target: { type: firstAction.targets[0] ?? "book", id: "verify-book-1", title: "Verified Book" },
+          auth: authEnvelope,
+        });
+        const prepRes = (prepResp.result ?? {}) as { title?: string; fields?: unknown[] };
+        const prepOk = !prepResp.error && typeof prepRes.title === "string" && Array.isArray(prepRes.fields);
+        checks.push({
+          name: "actions_prepare_contract",
+          passed: prepOk,
+          detail: prepOk ? `Action "${firstAction.name}" form prepared (${prepRes.fields!.length} field(s))` : JSON.stringify(prepResp.error ?? prepRes),
+        });
+      } else {
+        const invResp = await callRpc("actions/invoke", {
+          action: firstAction.name,
+          target: { type: firstAction.targets[0] ?? "book", id: "verify-book-1", title: "Verified Book" },
+          auth: authEnvelope,
+        });
+        const invRes = (invResp.result ?? {}) as { status?: string };
+        const invOk = !invResp.error && typeof invRes.status === "string";
+        checks.push({
+          name: "actions_invoke_contract",
+          passed: invOk,
+          detail: invOk ? `Action "${firstAction.name}" returned status=${String(invRes.status)}` : JSON.stringify(invResp.error ?? invRes),
         });
       }
     }

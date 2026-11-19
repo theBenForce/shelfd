@@ -571,3 +571,317 @@ func TestAPI_RealProjectGutenbergPlugin_EndToEnd(t *testing.T) {
 		t.Fatalf("expected item 84 status 'in_library' after commit, got %+v", page2.Items)
 	}
 }
+
+func TestAPI_PluginBooksReadScope_ActionsAuthAssetsAndJobsSSE(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	ctx := context.Background()
+	book := seedNotebookLMTestBook(t, f)
+
+	seriesList, err := f.repo.ListSeries(ctx)
+	if err != nil || len(seriesList) == 0 {
+		t.Fatalf("ListSeries: %v", err)
+	}
+	seriesID := seriesList[0].ID
+
+	booksReadToken, _, err := api.GeneratePluginInvocationJWT(
+		f.user.ID,
+		f.user.Username,
+		"action-plugin",
+		[]string{"books:read"},
+		f.jwtSecret,
+		5*time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("GeneratePluginInvocationJWT failed: %v", err)
+	}
+
+	for _, allowedPath := range []string{
+		"/api/v1/books/" + book.ID + "/markdown",
+		"/api/v1/audiobooks/" + book.ID + "/chapters",
+		"/api/v1/series/" + seriesID,
+	} {
+		req := httptest.NewRequest(http.MethodGet, allowedPath, nil)
+		req.Header.Set("Authorization", "Bearer "+booksReadToken)
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK for books:read token on GET %s, got %d: %s", allowedPath, rec.Code, rec.Body.String())
+		}
+	}
+
+	if api.PluginScopeAllowsRequest([]string{"books:read"}, http.MethodDelete, "/api/v1/books/"+book.ID) {
+		t.Fatalf("expected PluginScopeAllowsRequest to reject DELETE /api/v1/books/{id} under books:read")
+	}
+	for _, blocked := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodDelete, "/api/v1/books/" + book.ID + "/highlights/hl-nlm-1"},
+		{http.MethodDelete, "/api/v1/audiobooks/" + book.ID + "/progress"},
+		{http.MethodPut, "/api/v1/books/" + book.ID + "/metadata"},
+		{http.MethodPost, "/api/v1/books/upload/stage"},
+	} {
+		req := httptest.NewRequest(blocked.method, blocked.path, nil)
+		req.Header.Set("Authorization", "Bearer "+booksReadToken)
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 Forbidden for books:read token on %s %s, got %d", blocked.method, blocked.path, rec.Code)
+		}
+	}
+
+	pluginsDir := t.TempDir()
+	pDir := filepath.Join(pluginsDir, "demo-actions")
+	if err := os.MkdirAll(pDir, 0755); err != nil {
+		t.Fatalf("mkdir plugin: %v", err)
+	}
+
+	pluginScript := `
+import readline from 'node:readline';
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+function send(msg) { process.stdout.write(JSON.stringify(msg) + '\n'); }
+
+rl.on('line', async (line) => {
+  if (!line.trim()) return;
+  const msg = JSON.parse(line);
+  if (!msg.method) return;
+
+  if (msg.method === 'initialize') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        name: 'demo-actions',
+        version: '1.0.0',
+        auth: { methods: ['oauth_pkce', 'token'], title: 'Link Demo' },
+        actions: [
+          {
+            name: 'send_card',
+            title: 'Send Card',
+            targets: ['book', 'series'],
+            media_types: ['audiobook', 'ebook'],
+            mode: 'form',
+            execution: 'job'
+          }
+        ]
+      }
+    });
+  } else if (msg.method === 'shutdown') {
+    send({ jsonrpc: '2.0', id: msg.id, result: { ok: true } });
+    process.exit(0);
+  } else if (msg.method === 'auth/status') {
+    send({ jsonrpc: '2.0', id: msg.id, result: { linked: true, account_label: 'demo-user' } });
+  } else if (msg.method === 'auth/begin') {
+    send({ jsonrpc: '2.0', id: msg.id, result: { authorize_url: 'https://example.com/auth?state=' + (msg.params?.state || '') } });
+  } else if (msg.method === 'auth/complete') {
+    send({ jsonrpc: '2.0', id: msg.id, result: { linked: true, account_label: 'demo-user' } });
+  } else if (msg.method === 'auth/disconnect') {
+    send({ jsonrpc: '2.0', id: msg.id, result: { linked: false } });
+  } else if (msg.method === 'actions/prepare') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        title: 'Send ' + (msg.params?.target?.title || msg.params?.target?.id || ''),
+        fields: [{ key: 'card_title', kind: 'text', title: 'Card Title' }],
+        entries: [{ id: 'e1', index: 1, title: 'Entry 1' }]
+      }
+    });
+  } else if (msg.method === 'actions/options') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        items: [{ value: 'opt-1', label: 'Option ' + (msg.params?.source || '') + ':' + (msg.params?.query || '') }]
+      }
+    });
+  } else if (msg.method === 'actions/upload_asset') {
+    const raw = Buffer.from(msg.params?.data_base64 || '', 'base64');
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        item: { value: 'asset://' + msg.params?.filename, label: msg.params?.filename + ' (' + raw.length + 'B)' }
+      }
+    });
+  } else if (msg.method === 'actions/invoke') {
+    send({
+      jsonrpc: '2.0',
+      method: 'progress',
+      params: {
+        job_id: msg.params?.job_id,
+        current: 1,
+        total: 1,
+        percent: 100,
+        title: 'Chapter 1',
+        message: 'Transferring...'
+      }
+    });
+    await new Promise((r) => setTimeout(r, 80));
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        status: 'completed',
+        message: 'Card transferred'
+      }
+    });
+  }
+});
+`
+	manifestJSON := `{
+  "name": "demo-actions",
+  "version": "1.0.0",
+  "display_name": "Demo Actions",
+  "entrypoint": { "command": "node", "args": ["index.mjs"] },
+  "capabilities": ["actions", "events"],
+  "api_scopes": ["books:read"]
+}`
+	_ = os.WriteFile(filepath.Join(pDir, "plugin.json"), []byte(manifestJSON), 0644)
+	_ = os.WriteFile(filepath.Join(pDir, "index.mjs"), []byte(pluginScript), 0644)
+
+	eventCh, unsub := f.hub.Subscribe()
+	defer unsub()
+
+	pluginHost := plugins.NewHost(f.repo, plugins.HostConfig{
+		PluginsDir:    pluginsDir,
+		APIBase:       "http://127.0.0.1:8080",
+		ShelfdVersion: "0.1.0-test",
+		MasterSecret:  f.jwtSecret,
+		IdleTimeout:   30 * time.Second,
+		TokenIssuer: func(userID, username, pluginName string, scopes []string) (string, error) {
+			tok, _, err := api.GeneratePluginInvocationJWT(userID, username, pluginName, scopes, f.jwtSecret, 5*time.Minute)
+			return tok, err
+		},
+		Hub:    f.hub,
+		Logger: slog.Default(),
+	})
+	pluginHost.Start(ctx)
+	defer pluginHost.Stop()
+
+	router := api.NewRouter(api.RouterConfig{
+		Repo:         f.repo,
+		Ingester:     f.ingester,
+		Scanner:      f.scanner,
+		UploadWorker: f.uploadWorker,
+		AIClient:     f.aiClient,
+		PluginHost:   pluginHost,
+		Hub:          f.hub,
+		DataDir:      f.dataDir,
+		LibraryDir:   f.libDir,
+		JWTSecret:    f.jwtSecret,
+	})
+
+	userToken := f.loginAndGetToken(t)
+
+	for _, step := range []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/api/v1/plugins/demo-actions/auth/begin", `{"method":"oauth_pkce","state":"s1"}`},
+		{http.MethodPost, "/api/v1/plugins/demo-actions/auth/complete", `{"method":"oauth_pkce","code":"c1"}`},
+		{http.MethodGet, "/api/v1/plugins/demo-actions/auth/status", ""},
+		{http.MethodDelete, "/api/v1/plugins/demo-actions/auth/disconnect", ""},
+	} {
+		req := httptest.NewRequest(step.method, step.path, strings.NewReader(step.body))
+		req.Header.Set("Authorization", "Bearer "+userToken)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK on %s %s, got %d: %s", step.method, step.path, rec.Code, rec.Body.String())
+		}
+	}
+
+	prepReq := httptest.NewRequest(http.MethodPost, "/api/v1/plugins/demo-actions/actions/send_card/prepare", strings.NewReader(`{"target":{"type":"book","id":"`+book.ID+`","title":"Solaris"}}`))
+	prepReq.Header.Set("Authorization", "Bearer "+userToken)
+	prepRec := httptest.NewRecorder()
+	router.ServeHTTP(prepRec, prepReq)
+	if prepRec.Code != http.StatusOK || !strings.Contains(prepRec.Body.String(), `"Send Solaris"`) {
+		t.Fatalf("unexpected actions/prepare response (%d): %s", prepRec.Code, prepRec.Body.String())
+	}
+
+	optReq := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/demo-actions/actions/send_card/options?source=targets&q=test", nil)
+	optReq.Header.Set("Authorization", "Bearer "+userToken)
+	optRec := httptest.NewRecorder()
+	router.ServeHTTP(optRec, optReq)
+	if optRec.Code != http.StatusOK || !strings.Contains(optRec.Body.String(), `"Option targets:test"`) {
+		t.Fatalf("unexpected actions/options response (%d): %s", optRec.Code, optRec.Body.String())
+	}
+
+	buildAssetReq := func(payload []byte) *http.Request {
+		var b bytes.Buffer
+		mw := multipart.NewWriter(&b)
+		fw, _ := mw.CreateFormFile("file", "icon.png")
+		_, _ = fw.Write(payload)
+		_ = mw.WriteField("field", "icon")
+		_ = mw.Close()
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/plugins/demo-actions/actions/send_card/assets", &b)
+		r.Header.Set("Authorization", "Bearer "+userToken)
+		r.Header.Set("Content-Type", mw.FormDataContentType())
+		return r
+	}
+
+	smallAssetRec := httptest.NewRecorder()
+	router.ServeHTTP(smallAssetRec, buildAssetReq([]byte{0x89, 'P', 'N', 'G', 1, 2, 3, 4}))
+	if smallAssetRec.Code != http.StatusOK || !strings.Contains(smallAssetRec.Body.String(), `"asset://icon.png"`) {
+		t.Fatalf("expected 200 OK for small asset upload, got %d: %s", smallAssetRec.Code, smallAssetRec.Body.String())
+	}
+
+	oversizedAsset := bytes.Repeat([]byte("A"), (5<<20)+1024)
+	largeAssetRec := httptest.NewRecorder()
+	router.ServeHTTP(largeAssetRec, buildAssetReq(oversizedAsset))
+	if largeAssetRec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 RequestEntityTooLarge for >5MB asset upload, got %d: %s", largeAssetRec.Code, largeAssetRec.Body.String())
+	}
+
+	invReq := httptest.NewRequest(http.MethodPost, "/api/v1/plugins/demo-actions/actions/send_card/invoke", strings.NewReader(`{"target":{"type":"book","id":"`+book.ID+`","title":"Solaris"}}`))
+	invReq.Header.Set("Authorization", "Bearer "+userToken)
+	invRec := httptest.NewRecorder()
+	router.ServeHTTP(invRec, invReq)
+	if invRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on actions/invoke, got %d: %s", invRec.Code, invRec.Body.String())
+	}
+	var invRes plugins.ActionResult
+	_ = json.Unmarshal(invRec.Body.Bytes(), &invRes)
+	if invRes.Status != "job_started" || invRes.JobID == "" {
+		t.Fatalf("expected job_started with JobID, got %+v", invRes)
+	}
+
+	sawJobProgress := false
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && !sawJobProgress {
+		select {
+		case ev := <-eventCh:
+			if m, ok := ev.Data.(map[string]any); ok && m["kind"] == "job_progress" && m["job_id"] == invRes.JobID {
+				if jb, ok := m["job"].(*plugins.PluginJob); ok && jb.Status == "completed" {
+					sawJobProgress = true
+				}
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	if !sawJobProgress {
+		t.Fatalf("expected SSE job_progress event reaching completed status for job %s", invRes.JobID)
+	}
+
+	jobsReq := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/jobs", nil)
+	jobsReq.Header.Set("Authorization", "Bearer "+userToken)
+	jobsRec := httptest.NewRecorder()
+	router.ServeHTTP(jobsRec, jobsReq)
+	if jobsRec.Code != http.StatusOK || !strings.Contains(jobsRec.Body.String(), invRes.JobID) {
+		t.Fatalf("expected GET /api/v1/plugins/jobs to list job %s, got %d: %s", invRes.JobID, jobsRec.Code, jobsRec.Body.String())
+	}
+
+	delJobReq := httptest.NewRequest(http.MethodDelete, "/api/v1/plugins/jobs/"+invRes.JobID, nil)
+	delJobReq.Header.Set("Authorization", "Bearer "+userToken)
+	delJobRec := httptest.NewRecorder()
+	router.ServeHTTP(delJobRec, delJobReq)
+	if delJobRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on DELETE /api/v1/plugins/jobs/{id}, got %d", delJobRec.Code)
+	}
+}
+
