@@ -18,23 +18,70 @@ class AudiobookPlayerView extends ConsumerStatefulWidget {
 }
 
 class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
+  bool _hasReadalongManifest = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final playerNotifier = ref.read(audioPlayerProvider.notifier);
+      playerNotifier.setPlaybackMode(AudioPlaybackMode.audiobook);
+
+      final playerState = ref.read(audioPlayerProvider);
+      final isAlreadyActive = playerState.book?.id == widget.bookId &&
+          playerState.status != AudioPlaybackStatus.idle &&
+          playerState.status != AudioPlaybackStatus.error;
+
       final detailState = ref.read(bookDetailProvider(widget.bookId));
       if (detailState.book != null) {
-        playerNotifier.loadBook(detailState.book!);
+        if (isAlreadyActive) {
+          playerNotifier.syncBookMetadata(detailState.book!);
+        } else {
+          playerNotifier.loadBook(detailState.book!);
+        }
+        _checkReadalongIfNeeded(detailState.book!);
       } else {
         ref.read(bookDetailProvider(widget.bookId).notifier).loadBook().then((_) {
+          if (!mounted) return;
           final loadedBook = ref.read(bookDetailProvider(widget.bookId)).book;
           if (loadedBook != null) {
-            playerNotifier.loadBook(loadedBook);
+            final latestState = ref.read(audioPlayerProvider);
+            final stillActive = latestState.book?.id == widget.bookId &&
+                latestState.status != AudioPlaybackStatus.idle &&
+                latestState.status != AudioPlaybackStatus.error;
+            if (stillActive) {
+              playerNotifier.syncBookMetadata(loadedBook);
+            } else {
+              playerNotifier.loadBook(loadedBook);
+            }
+            _checkReadalongIfNeeded(loadedBook);
           }
         });
       }
     });
+  }
+
+  Future<void> _checkReadalongIfNeeded(Book book) async {
+    if (book.canReadAlong || book.isAudiobook) return;
+    try {
+      final manifest = await ref.read(bookRepositoryProvider).getBookReadalong(widget.bookId);
+      if (mounted && (manifest.hasReadalong || manifest.segments.isNotEmpty)) {
+        setState(() {
+          _hasReadalongManifest = true;
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _switchToReadalong(BuildContext context, Book book) {
+    ref.read(audioPlayerProvider.notifier).setPlaybackMode(AudioPlaybackMode.readalong);
+    final target = '/books/${book.id}/read';
+    if (context.canPop()) {
+      context.pushReplacement(target);
+    } else {
+      context.go(target);
+    }
   }
 
   void _showSpeedPicker(BuildContext context, double currentSpeed) {
@@ -136,7 +183,8 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
     final playerState = ref.watch(audioPlayerProvider);
     final playerNotifier = ref.read(audioPlayerProvider.notifier);
 
-    final book = playerState.book ?? detailState.book;
+    final activeBook = playerState.book?.id == widget.bookId ? playerState.book : null;
+    final book = detailState.book ?? activeBook;
 
     if (book == null) {
       return const Scaffold(
@@ -147,6 +195,9 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
       );
     }
 
+    final canReadAlong = book.canReadAlong ||
+        (activeBook?.canReadAlong ?? false) ||
+        _hasReadalongManifest;
     final currentChapter = playerState.activeChapter;
     final chapterTitle = currentChapter?.title ?? 'Full Audiobook';
 
@@ -211,6 +262,84 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
+                    if (canReadAlong) ...[
+                      const SizedBox(height: AppTokens.space4),
+                      Center(
+                        child: Container(
+                          key: const Key('audio_player_mode_toggle'),
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                            color: AppTokens.obsidianElevated,
+                            borderRadius: BorderRadius.circular(AppTokens.radiusPill),
+                            border: Border.all(color: AppTokens.obsidianBorder),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: AppTokens.space12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTokens.amberAccent,
+                                  borderRadius: BorderRadius.circular(AppTokens.radiusPill),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.headphones_rounded,
+                                      size: 15,
+                                      color: AppTokens.charcoalInk,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Audiobook',
+                                      style: AppTypography.bodySans(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppTokens.charcoalInk,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              InkWell(
+                                key: const Key('switch_to_readalong_button'),
+                                borderRadius: BorderRadius.circular(AppTokens.radiusPill),
+                                onTap: () => _switchToReadalong(context, book),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: AppTokens.space12,
+                                    vertical: 6,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.menu_book_rounded,
+                                        size: 15,
+                                        color: AppTokens.antiqueCream.withValues(alpha: 0.85),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Read-Along',
+                                        style: AppTypography.bodySans(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppTokens.antiqueCream.withValues(alpha: 0.85),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: AppTokens.space8),
 
                     // Hero Cover Artwork with ambient glow & physical sleeve crease

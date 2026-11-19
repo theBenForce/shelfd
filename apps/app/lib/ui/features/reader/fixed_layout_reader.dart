@@ -160,12 +160,39 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
     return null;
   }
 
+  @override
+  void didUpdateWidget(covariant FixedLayoutReader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialReadalongManifest != null && _readalongManifest == null) {
+      _readalongManifest = widget.initialReadalongManifest;
+      final audioState = ref.read(audioPlayerProvider);
+      if (audioState.book?.id == widget.book.id && audioState.status != AudioPlaybackStatus.idle) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _onAudioStateChanged(
+              ref.read(audioPlayerProvider),
+              forceSyncSpread: widget.initialChapterIdentifier == null,
+            );
+          }
+        });
+      }
+    }
+  }
+
   Future<void> _loadReadalongManifest() async {
+    final initialAudio = ref.read(audioPlayerProvider);
+    if (initialAudio.book?.id == widget.book.id && initialAudio.status != AudioPlaybackStatus.idle) {
+      ref.read(audioPlayerProvider.notifier).setPlaybackMode(AudioPlaybackMode.readalong);
+    }
+
     if (_readalongManifest != null) {
       if (mounted) {
         final audioState = ref.read(audioPlayerProvider);
-        if (audioState.book?.id == widget.book.id) {
-          _onAudioStateChanged(audioState);
+        if (audioState.book?.id == widget.book.id && audioState.status != AudioPlaybackStatus.idle) {
+          _onAudioStateChanged(
+            audioState,
+            forceSyncSpread: widget.initialChapterIdentifier == null,
+          );
         }
       }
       return;
@@ -177,14 +204,17 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
           _readalongManifest = manifest;
         });
         final audioState = ref.read(audioPlayerProvider);
-        if (audioState.book?.id == widget.book.id) {
-          _onAudioStateChanged(audioState);
+        if (audioState.book?.id == widget.book.id && audioState.status != AudioPlaybackStatus.idle) {
+          _onAudioStateChanged(
+            audioState,
+            forceSyncSpread: widget.initialChapterIdentifier == null,
+          );
         }
       }
     } catch (_) {}
   }
 
-  void _onAudioStateChanged(AudioPlayerState audioState) {
+  void _onAudioStateChanged(AudioPlayerState audioState, {bool forceSyncSpread = false}) {
     if (audioState.book?.id != widget.book.id) {
       if (_activeSegment != null) {
         _activeSegment = null;
@@ -211,7 +241,9 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
         ? targetPage!.href!
         : (seg?.chapterHref ?? '');
 
-    if (_autoTurnPages && audioState.isPlaying && seg != null && seg.chapterIndex > 0) {
+    if (((_autoTurnPages && audioState.isPlaying) || forceSyncSpread) &&
+        seg != null &&
+        seg.chapterIndex > 0) {
       final spreads = _currentSpreads;
       if (spreads.isNotEmpty && _currentSpreadIndex < spreads.length) {
         final curSpread = spreads[_currentSpreadIndex];
@@ -244,10 +276,23 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
     );
   }
 
+  void _switchToAudiobook(BuildContext context) {
+    ref.read(audioPlayerProvider.notifier).setPlaybackMode(AudioPlaybackMode.audiobook);
+    final target = '/books/${widget.book.id}/listen';
+    if (context.canPop()) {
+      context.pushReplacement(target);
+    } else {
+      context.go(target);
+    }
+  }
+
   Future<void> _toggleReadalongPlayback() async {
     final audioState = ref.read(audioPlayerProvider);
     final notifier = ref.read(audioPlayerProvider.notifier);
-    if (audioState.book?.id != widget.book.id) {
+    notifier.setPlaybackMode(AudioPlaybackMode.readalong);
+    if (audioState.book?.id != widget.book.id ||
+        audioState.status == AudioPlaybackStatus.idle ||
+        audioState.status == AudioPlaybackStatus.error) {
       double? initialPos;
       if (_currentSpreads.isNotEmpty && _currentSpreadIndex < _currentSpreads.length) {
         final curSpread = _currentSpreads[_currentSpreadIndex];
@@ -630,6 +675,12 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   _autoTurnPages = !_autoTurnPages;
                 });
               },
+            ),
+            IconButton(
+              key: const Key('switch_to_audiobook_button'),
+              icon: Icon(Icons.headphones_rounded, color: colors.ink),
+              tooltip: 'Switch to Audiobook Player',
+              onPressed: () => _switchToAudiobook(context),
             ),
           ],
 

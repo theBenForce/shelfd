@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
@@ -552,7 +553,97 @@ void main() {
       expect(find.byIcon(Icons.play_circle_filled), findsOneWidget);
       expect(find.byKey(const Key('mini_player_close')), findsOneWidget);
       expect(find.byIcon(Icons.close), findsOneWidget);
+      // Pure audiobook should not render read-along mode toggle
+      expect(find.byKey(const Key('mini_player_mode_toggle')), findsNothing);
     });
+
+    testWidgets(
+      'tapping MiniPlayerBar opens AudiobookPlayerView without resetting playback position or pausing',
+      (tester) async {
+        tester.view.physicalSize = const Size(800, 1000);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        // Simulate server progress still at 0.0 (e.g. before periodic 10s sync)
+        apiService.mockProgress = AudiobookProgress(
+          bookId: 'audio-1',
+          positionSeconds: 0.0,
+          speed: 1.0,
+        );
+
+        final container = ProviderContainer(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(prefs),
+            storageServiceProvider.overrideWithValue(storageService),
+            apiServiceProvider.overrideWithValue(apiService),
+            audioRepositoryProvider.overrideWithValue(repository),
+            audioPlayerEngineProvider.overrideWithValue(engine),
+            bookDetailProvider('audio-1').overrideWith(
+              () => _MockAudioBookDetailNotifier(audiobook),
+            ),
+          ],
+        );
+        addTearDown(() => container.dispose());
+
+        // Start playback and advance to 45 seconds (without syncing to server)
+        final notifier = container.read(audioPlayerProvider.notifier);
+        await notifier.loadBook(audiobook, autoPlay: true);
+        await engine.seek(const Duration(seconds: 45));
+        await tester.pump();
+
+        expect(container.read(audioPlayerProvider).position, const Duration(seconds: 45));
+        expect(container.read(audioPlayerProvider).isPlaying, isTrue);
+
+        final router = GoRouter(
+          initialLocation: '/books',
+          routes: [
+            GoRoute(
+              path: '/books',
+              builder: (context, state) => const Scaffold(
+                body: Center(child: Text('Library')),
+                bottomNavigationBar: MiniPlayerBar(),
+              ),
+            ),
+            GoRoute(
+              path: '/books/:bookId/listen',
+              builder: (context, state) => AudiobookPlayerView(
+                bookId: state.pathParameters['bookId']!,
+              ),
+            ),
+          ],
+        );
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp.router(
+              theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+              routerConfig: router,
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Tap the mini player at the bottom of the app
+        expect(find.byKey(const Key('mini_player_tap_area')), findsOneWidget);
+        await tester.tap(find.byKey(const Key('mini_player_tap_area')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        // Full AudiobookPlayerView is shown, still playing, and NOT reset to 0
+        expect(find.byType(AudiobookPlayerView), findsOneWidget);
+        final afterState = container.read(audioPlayerProvider);
+        expect(afterState.isPlaying, isTrue);
+        expect(afterState.position.inSeconds, greaterThanOrEqualTo(45));
+        expect(find.byKey(const Key('audio_player_mode_toggle')), findsNothing);
+
+        await notifier.pause();
+        await tester.pump();
+      },
+    );
   });
 }
 

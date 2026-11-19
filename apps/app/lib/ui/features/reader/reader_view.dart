@@ -64,6 +64,11 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
   }
 
   Future<void> _initBookAndChapter() async {
+    final initialAudio = ref.read(audioPlayerProvider);
+    if (initialAudio.book?.id == widget.bookId && initialAudio.status != AudioPlaybackStatus.idle) {
+      ref.read(audioPlayerProvider.notifier).setPlaybackMode(AudioPlaybackMode.readalong);
+    }
+
     // Refresh book detail for latest highlights and annotations (cross-device sync)
     ref.read(bookDetailProvider(widget.bookId).notifier).loadBook();
 
@@ -86,12 +91,47 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
       }
     } catch (_) {}
 
+    if (!mounted) return;
     if (_currentChapter == null) {
       final bookDetail = ref.read(bookDetailProvider(widget.bookId)).book;
       final availableSpine = _spine.isNotEmpty ? _spine : (bookDetail?.spine ?? const []);
-      final target = _activeIdentifier ?? (availableSpine.isNotEmpty ? availableSpine.first.id : 1);
+      dynamic target = _activeIdentifier ?? (availableSpine.isNotEmpty ? availableSpine.first.id : 1);
+
+      final audioState = ref.read(audioPlayerProvider);
+      final hasExplicitChapter = widget.initialChapter != null ||
+          widget.chapterIdentifier != null ||
+          widget.chapterIndex != null;
+      if (!hasExplicitChapter &&
+          audioState.book?.id == widget.bookId &&
+          audioState.status != AudioPlaybackStatus.idle) {
+        final posSec = audioState.position.inMilliseconds / 1000.0;
+        final seg = _readalongManifest?.segmentAt(posSec);
+        if (seg != null) {
+          _activeSegment = seg;
+          if (seg.chapterIndex > 0) {
+            target = _resolveSpineTarget(seg.chapterIndex, availableSpine);
+          }
+        } else if (audioState.activeChapter != null) {
+          final chIdx = audioState.activeChapter!.chapterIndex + 1;
+          target = _resolveSpineTarget(chIdx, availableSpine);
+        }
+      }
+
       _loadChapter(target);
     }
+  }
+
+  dynamic _resolveSpineTarget(int chapterIndex, List<SpineItem> availableSpine) {
+    final spineMatch = availableSpine.where((s) => s.chapterIndex == chapterIndex);
+    if (spineMatch.isNotEmpty && spineMatch.first.id.isNotEmpty) {
+      return spineMatch.first.id;
+    }
+    if (chapterIndex - 1 >= 0 &&
+        chapterIndex - 1 < availableSpine.length &&
+        availableSpine[chapterIndex - 1].id.isNotEmpty) {
+      return availableSpine[chapterIndex - 1].id;
+    }
+    return chapterIndex;
   }
 
   void _onAudioStateChanged(AudioPlayerState audioState, List<SpineItem> effectiveSpine) {
@@ -120,24 +160,29 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
         !_isLoading &&
         _currentChapter != null &&
         _currentChapter!.chapterIndex != seg.chapterIndex) {
-      dynamic target = seg.chapterIndex;
-      final spineMatch = effectiveSpine.where((s) => s.chapterIndex == seg.chapterIndex);
-      if (spineMatch.isNotEmpty && spineMatch.first.id.isNotEmpty) {
-        target = spineMatch.first.id;
-      } else if (seg.chapterIndex - 1 >= 0 &&
-          seg.chapterIndex - 1 < effectiveSpine.length &&
-          effectiveSpine[seg.chapterIndex - 1].id.isNotEmpty) {
-        target = effectiveSpine[seg.chapterIndex - 1].id;
-      }
+      final target = _resolveSpineTarget(seg.chapterIndex, effectiveSpine);
       _loadChapter(target);
+    }
+  }
+
+  void _switchToAudiobook(BuildContext context) {
+    ref.read(audioPlayerProvider.notifier).setPlaybackMode(AudioPlaybackMode.audiobook);
+    final target = '/books/${widget.bookId}/listen';
+    if (context.canPop()) {
+      context.pushReplacement(target);
+    } else {
+      context.go(target);
     }
   }
 
   Future<void> _toggleReadalongPlayback(Book? book) async {
     final audioState = ref.read(audioPlayerProvider);
     final notifier = ref.read(audioPlayerProvider.notifier);
+    notifier.setPlaybackMode(AudioPlaybackMode.readalong);
     final targetBook = book ?? Book(id: widget.bookId, title: _currentChapter?.title ?? 'Book', hasReadalong: true);
-    if (audioState.book?.id != widget.bookId) {
+    if (audioState.book?.id != widget.bookId ||
+        audioState.status == AudioPlaybackStatus.idle ||
+        audioState.status == AudioPlaybackStatus.error) {
       double? startPos;
       if (_currentChapter != null && _currentChapter!.chapterIndex > 0) {
         final firstSeg = _readalongManifest?.firstSegmentForChapter(_currentChapter!.chapterIndex);
@@ -429,6 +474,12 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                     _autoTurnPages = !_autoTurnPages;
                   });
                 },
+              ),
+              IconButton(
+                key: const Key('switch_to_audiobook_button'),
+                icon: const Icon(Icons.headphones_rounded),
+                tooltip: 'Switch to Audiobook Player',
+                onPressed: () => _switchToAudiobook(context),
               ),
             ],
             IconButton(
