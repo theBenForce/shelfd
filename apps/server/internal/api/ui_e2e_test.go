@@ -488,7 +488,7 @@ func TestTactileScriptorium_Tier1_FeatureCoverage(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		seedNotebookLMTestBook(t, f)
+		seedMarkdownTestBook(t, f)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/books?limit=10&offset=0", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -515,7 +515,7 @@ func TestTactileScriptorium_Tier1_FeatureCoverage(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		seedNotebookLMTestBook(t, f)
+		seedMarkdownTestBook(t, f)
 
 		q := url.QueryEscape(`author:"Stanislaw Lem" genre:"Science Fiction" topic:"First Contact" Solaris`)
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/books?search="+q, nil)
@@ -570,7 +570,7 @@ func TestTactileScriptorium_Tier1_FeatureCoverage(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		seedNotebookLMTestBook(t, f)
+		seedMarkdownTestBook(t, f)
 
 		for _, ep := range []string{"/api/v1/authors", "/api/v1/series"} {
 			req := httptest.NewRequest(http.MethodGet, ep, nil)
@@ -588,7 +588,7 @@ func TestTactileScriptorium_Tier1_FeatureCoverage(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		seedNotebookLMTestBook(t, f)
+		seedMarkdownTestBook(t, f)
 
 		for _, ep := range []string{"/api/v1/genres", "/api/v1/topics"} {
 			req := httptest.NewRequest(http.MethodGet, ep, nil)
@@ -661,7 +661,7 @@ func TestTactileScriptorium_Tier1_FeatureCoverage(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+book.ID, nil)
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -684,7 +684,7 @@ func TestTactileScriptorium_Tier1_FeatureCoverage(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		// Create Bookmark
 		bmReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+book.ID+"/bookmarks", strings.NewReader(`{"title":"Station Arrival","progress":0.25}`))
@@ -715,7 +715,7 @@ func TestTactileScriptorium_Tier1_FeatureCoverage(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 		chTitle := "Chapter 3: The Visitors"
 		_ = f.repo.CreateChapter(context.Background(), &repository.Chapter{
 			ID:           "ch-nlm-3",
@@ -746,27 +746,27 @@ func TestTactileScriptorium_Tier1_FeatureCoverage(t *testing.T) {
 		}
 	})
 
-	t.Run("F06_T1_04_LiveAPI_NotebookLMMarkdownExportAndHandoff", func(t *testing.T) {
+	t.Run("F06_T1_04_LiveAPI_MarkdownExportAndPluginActions", func(t *testing.T) {
 		f := setupAPITest(t)
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
-		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+book.ID+"/notebooklm", nil)
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+book.ID+"/markdown", nil)
 		getReq.Header.Set("Authorization", "Bearer "+token)
 		getRec := httptest.NewRecorder()
 		f.handler.ServeHTTP(getRec, getReq)
 		if getRec.Code != http.StatusOK || !strings.Contains(getRec.Body.String(), "We don't need other worlds") {
-			t.Fatalf("expected 200 and highlight in NotebookLM markdown export, got %d", getRec.Code)
+			t.Fatalf("expected 200 and highlight in markdown export, got %d", getRec.Code)
 		}
 
-		postReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+book.ID+"/notebooklm", nil)
-		postReq.Header.Set("Authorization", "Bearer "+token)
-		postRec := httptest.NewRecorder()
-		f.handler.ServeHTTP(postRec, postReq)
-		if postRec.Code != http.StatusOK || !strings.Contains(postRec.Body.String(), "client_handoff") {
-			t.Fatalf("expected 200 and client_handoff on POST notebooklm, got %d", postRec.Code)
+		jobsReq := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/jobs", nil)
+		jobsReq.Header.Set("Authorization", "Bearer "+token)
+		jobsRec := httptest.NewRecorder()
+		f.handler.ServeHTTP(jobsRec, jobsReq)
+		if jobsRec.Code != http.StatusOK || !strings.Contains(jobsRec.Body.String(), `"jobs"`) {
+			t.Fatalf("expected 200 and jobs list on GET /api/v1/plugins/jobs, got %d", jobsRec.Code)
 		}
 	})
 
@@ -796,7 +796,7 @@ func TestTactileScriptorium_Tier1_FeatureCoverage(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		payload := `{"title":"Solaris: Definitive Edition","authors":["Stanislaw Lem","Bill Johnston"],"series":"Lem Masterworks","sequence_number":1,"publisher":"MIT Press","language":"en","genres":["Sci-Fi"],"topics":["Philosophy"]}`
 		req := httptest.NewRequest(http.MethodPut, "/api/v1/books/"+book.ID+"/metadata", strings.NewReader(payload))
@@ -819,7 +819,7 @@ func TestTactileScriptorium_Tier1_FeatureCoverage(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		pngHeader := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0x00, 0x00, 0x00, 0x0D}
 		var body bytes.Buffer
@@ -888,7 +888,7 @@ func TestTactileScriptorium_Tier1_FeatureCoverage(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		for _, path := range []string{
 			"/api/v1/books/" + book.ID + "/chapters/1",
@@ -1269,7 +1269,7 @@ func TestTactileScriptorium_Tier1_FeatureCoverage(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		seedNotebookLMTestBook(t, f)
+		seedMarkdownTestBook(t, f)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/search?q=sentient+ocean&limit=5", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -1680,7 +1680,7 @@ func TestTactileScriptorium_Tier2_BoundaryAndCornerCases(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		seedNotebookLMTestBook(t, f)
+		seedMarkdownTestBook(t, f)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/books?search=nonexistent_xyz_999", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -1725,7 +1725,7 @@ func TestTactileScriptorium_Tier2_BoundaryAndCornerCases(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		seedNotebookLMTestBook(t, f)
+		seedMarkdownTestBook(t, f)
 
 		q := url.QueryEscape(`isbn:9780156027601 title:"Solaris"`)
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/books?search="+q, nil)
@@ -1824,7 +1824,7 @@ func TestTactileScriptorium_Tier2_BoundaryAndCornerCases(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		// Empty selected_text -> 400
 		emptyReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+book.ID+"/highlights", strings.NewReader(`{"selected_text":"   ","color":"yellow"}`))
@@ -1852,7 +1852,7 @@ func TestTactileScriptorium_Tier2_BoundaryAndCornerCases(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		emptyReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+book.ID+"/chat", strings.NewReader(`{"query":"   "}`))
 		emptyReq.Header.Set("Authorization", "Bearer "+token)
@@ -1914,7 +1914,7 @@ func TestTactileScriptorium_Tier2_BoundaryAndCornerCases(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		req := httptest.NewRequest(http.MethodPut, "/api/v1/books/"+book.ID+"/metadata", strings.NewReader(`{"title":"   "}`))
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -1931,7 +1931,7 @@ func TestTactileScriptorium_Tier2_BoundaryAndCornerCases(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		req := httptest.NewRequest(http.MethodPut, "/api/v1/books/"+book.ID+"/metadata", strings.NewReader(`{"title":"Anonymous Codex","authors":[]}`))
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -1948,7 +1948,7 @@ func TestTactileScriptorium_Tier2_BoundaryAndCornerCases(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		var body bytes.Buffer
 		mpw := multipart.NewWriter(&body)
@@ -1996,7 +1996,7 @@ func TestTactileScriptorium_Tier2_BoundaryAndCornerCases(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		// Non-integer non-existing chapter identifier -> 400
 		badReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+book.ID+"/chapters/not-an-index", nil)
@@ -2156,7 +2156,7 @@ func TestTactileScriptorium_Tier2_BoundaryAndCornerCases(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		seedNotebookLMTestBook(t, f)
+		seedMarkdownTestBook(t, f)
 
 		// Stage EPUB with no author -> warning "No author found in metadata"
 		noAuthorBytes := buildInMemoryEPUB(t, "Authorless Scroll", "", "Mystery text")
@@ -2531,7 +2531,7 @@ func TestTactileScriptorium_Tier3_CrossFeatureCombinations(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		seedNotebookLMTestBook(t, f)
+		seedMarkdownTestBook(t, f)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/books?search="+url.QueryEscape(`author:"Stanislaw Lem"`), nil)
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -2554,7 +2554,7 @@ func TestTactileScriptorium_Tier3_CrossFeatureCombinations(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		putReq := httptest.NewRequest(http.MethodPut, "/api/v1/books/"+book.ID+"/metadata", strings.NewReader(`{"title":"Solaris Restored","authors":["Stanislaw Lem"],"series":"Cyberiad Series","sequence_number":2}`))
 		putReq.Header.Set("Authorization", "Bearer "+token)
@@ -2579,7 +2579,7 @@ func TestTactileScriptorium_Tier3_CrossFeatureCombinations(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		hlReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+book.ID+"/highlights", strings.NewReader(`{"selected_text":"Kelvin entered the arrival capsule.","color":"pink","chapter_id":"ch-nlm-1"}`))
 		hlReq.Header.Set("Authorization", "Bearer "+token)
@@ -2618,7 +2618,7 @@ func TestTactileScriptorium_Tier3_CrossFeatureCombinations(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		seedNotebookLMTestBook(t, f)
+		seedMarkdownTestBook(t, f)
 
 		dupBytes := buildInMemoryEPUB(t, "Solaris: The Novel?", "Stanislaw Lem", "Second copy")
 		var body bytes.Buffer
@@ -2677,7 +2677,7 @@ func TestTactileScriptorium_Tier3_CrossFeatureCombinations(t *testing.T) {
 		f := setupAPITest(t)
 		defer f.db.Close()
 		defer f.repo.Close()
-		seedNotebookLMTestBook(t, f)
+		seedMarkdownTestBook(t, f)
 
 		rootMux := http.NewServeMux()
 		oauthHandler := api.NewOAuthHandler(f.repo)
@@ -2744,7 +2744,7 @@ func TestTactileScriptorium_Tier4_RealWorldUserJourneys(t *testing.T) {
 		f := setupAPITest(t)
 		defer f.db.Close()
 		defer f.repo.Close()
-		seedNotebookLMTestBook(t, f)
+		seedMarkdownTestBook(t, f)
 
 		// Step 1: Discover server connect-info
 		ciReq := httptest.NewRequest(http.MethodGet, "/api/v1/server/connect-info", nil)
@@ -2846,7 +2846,7 @@ func TestTactileScriptorium_Tier4_RealWorldUserJourneys(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		// Step 1: Filter catalog by author & genre
 		fReq := httptest.NewRequest(http.MethodGet, "/api/v1/books?search="+url.QueryEscape(`author:"Stanislaw Lem" genre:"Science Fiction"`), nil)
@@ -2869,12 +2869,12 @@ func TestTactileScriptorium_Tier4_RealWorldUserJourneys(t *testing.T) {
 		}
 	})
 
-	t.Run("T4_Journey04_ReflowableReadingHighlightingNoteTakingAndNotebookLMExport", func(t *testing.T) {
+	t.Run("T4_Journey04_ReflowableReadingHighlightingNoteTakingAndMarkdownExport", func(t *testing.T) {
 		f := setupAPITest(t)
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		// Step 1: Fetch chapter 1 for reading
 		chReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+book.ID+"/chapters/1", nil)
@@ -2904,12 +2904,11 @@ func TestTactileScriptorium_Tier4_RealWorldUserJourneys(t *testing.T) {
 			t.Fatalf("bookmark creation failed: %d", bmRec.Code)
 		}
 
-		// Step 3: Export to NotebookLM Markdown and verify highlight + note appear
-		nlmReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+book.ID+"/notebooklm", nil)
-		nlmReq.Header.Set("Authorization", "Bearer "+token)
-		nlmRec := httptest.NewRecorder()
-		f.handler.ServeHTTP(nlmRec, nlmReq)
-		assertContainsAll(t, "NotebookLM export", nlmRec.Body.String(),
+		mdReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+book.ID+"/markdown", nil)
+		mdReq.Header.Set("Authorization", "Bearer "+token)
+		mdRec := httptest.NewRecorder()
+		f.handler.ServeHTTP(mdRec, mdReq)
+		assertContainsAll(t, "Markdown export", mdRec.Body.String(),
 			"The shifting mimoids rose above the horizon",
 			"Vivid imagery of the ocean",
 		)
@@ -3072,7 +3071,7 @@ func TestTactileScriptorium_Tier4_RealWorldUserJourneys(t *testing.T) {
 		f := setupAPITest(t)
 		defer f.db.Close()
 		defer f.repo.Close()
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		rootMux := http.NewServeMux()
 		oauthHandler := api.NewOAuthHandler(f.repo)
@@ -3238,7 +3237,7 @@ func TestTactileScriptorium_Tier5_AdversarialHardening(t *testing.T) {
 		defer f.db.Close()
 		defer f.repo.Close()
 		token := f.loginAndGetToken(t)
-		book := seedNotebookLMTestBook(t, f)
+		book := seedMarkdownTestBook(t, f)
 
 		payload := `{
 			"title": "Solaris: 太陽系 <script>alert('xss')</script> & \"Archival Edition\"",

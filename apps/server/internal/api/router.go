@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/shelfd/shelfd/internal/ai"
-	"github.com/shelfd/shelfd/internal/config"
 	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/plugins"
 	"github.com/shelfd/shelfd/internal/repository"
@@ -23,8 +22,6 @@ type RouterConfig struct {
 	AIClient        ai.Client
 	ToolInvoker     ai.ToolInvoker
 	PluginHost      *plugins.Host
-	NotebookLM      config.NotebookLMConfig
-	Yoto            config.YotoConfig
 	Hub             *events.Hub
 	DataDir         string
 	LibraryDir      string
@@ -50,7 +47,6 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	if cfg.ToolInvoker != nil {
 		bookHandler.SetToolInvoker(cfg.ToolInvoker)
 	}
-	bookHandler.SetNotebookLMConfig(cfg.NotebookLM)
 	taxHandler := NewTaxonomyHandler(cfg.Repo, cfg.LibraryDir, cfg.DataDir, logger)
 	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, cfg.Hub, logger)
 	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version, cfg.DefaultUsername)
@@ -58,7 +54,6 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	utilHandler := NewUtilityHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
 	audioHandler := NewAudiobookHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, logger)
 	metadataHandler := NewMetadataHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
-	yotoHandler := NewYotoHandler(cfg.Repo, cfg.Yoto, cfg.DataDir, cfg.LibraryDir, logger)
 	pluginHandler := NewPluginHandler(cfg.PluginHost, logger)
 
 	auth := AuthMiddleware(cfg.Repo, cfg.JWTSecret)
@@ -99,15 +94,6 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/plugins/{name}/catalog", auth(http.HandlerFunc(pluginHandler.GetCatalog)))
 	mux.Handle("POST /api/v1/plugins/{name}/catalog/stage", auth(http.HandlerFunc(pluginHandler.StageCatalogItems)))
 
-	// Yoto integration routes
-	mux.Handle("GET /api/v1/integrations/yoto/status", auth(http.HandlerFunc(yotoHandler.GetStatus)))
-	mux.Handle("POST /api/v1/integrations/yoto/oauth/exchange", auth(http.HandlerFunc(yotoHandler.ExchangeOAuth)))
-	mux.Handle("POST /api/v1/integrations/yoto/unlink", auth(http.HandlerFunc(yotoHandler.Unlink)))
-	mux.Handle("GET /api/v1/integrations/yoto/playlists", auth(http.HandlerFunc(yotoHandler.ListPlaylists)))
-	mux.Handle("GET /api/v1/integrations/yoto/icons", auth(http.HandlerFunc(yotoHandler.ListIcons)))
-	mux.Handle("POST /api/v1/integrations/yoto/icons", auth(http.HandlerFunc(yotoHandler.UploadIcon)))
-	mux.Handle("GET /api/v1/integrations/yoto/progress", auth(http.HandlerFunc(yotoHandler.GetUploadProgress)))
-
 	// Metadata search & auto-populate
 	mux.Handle("GET /api/v1/metadata/search", auth(http.HandlerFunc(metadataHandler.Search)))
 
@@ -127,9 +113,6 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("POST /api/v1/books/{id}/cover/fetch", auth(http.HandlerFunc(metadataHandler.FetchBookCover)))
 	mux.Handle("GET /api/v1/books/{id}/download", auth(http.HandlerFunc(bookHandler.DownloadBook)))
 	mux.Handle("GET /api/v1/books/{id}/markdown", auth(http.HandlerFunc(bookHandler.ExportBookMarkdown)))
-	mux.Handle("GET /api/v1/books/{id}/notebooklm", auth(http.HandlerFunc(bookHandler.ExportBookNotebookLM)))
-	mux.Handle("POST /api/v1/books/{id}/notebooklm", auth(http.HandlerFunc(bookHandler.SendBookToNotebookLM)))
-	mux.Handle("POST /api/v1/books/{id}/yoto", auth(http.HandlerFunc(yotoHandler.SendBookToYoto)))
 	mux.Handle("GET /api/v1/books/{id}/cover", auth(http.HandlerFunc(bookHandler.GetBookCover)))
 	mux.Handle("GET /api/v1/books/{id}/readalong", auth(http.HandlerFunc(bookHandler.GetBookReadalong)))
 	mux.Handle("GET /api/v1/books/{id}/assets/{path...}", auth(http.HandlerFunc(bookHandler.GetBookAsset)))
@@ -170,7 +153,6 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/topics", auth(http.HandlerFunc(taxHandler.ListTopics)))
 	mux.Handle("GET /api/v1/series", auth(http.HandlerFunc(taxHandler.ListSeries)))
 	mux.Handle("GET /api/v1/series/{id}", auth(http.HandlerFunc(taxHandler.GetSeries)))
-	mux.Handle("POST /api/v1/series/{id}/yoto", auth(http.HandlerFunc(yotoHandler.SendSeriesToYoto)))
 
 	mux.Handle("GET /api/v1/queue/status", auth(http.HandlerFunc(queueHandler.GetStatus)))
 	mux.Handle("GET /api/v1/queue/events", auth(http.HandlerFunc(queueHandler.StreamEvents)))

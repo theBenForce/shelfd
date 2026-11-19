@@ -5,8 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,13 +12,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shelfd/shelfd/internal/api"
-	"github.com/shelfd/shelfd/internal/config"
-	"github.com/shelfd/shelfd/internal/mcp"
 	"github.com/shelfd/shelfd/internal/repository"
 )
 
-func seedNotebookLMTestBook(t *testing.T, f *testFixture) *repository.Book {
+func seedMarkdownTestBook(t *testing.T, f *testFixture) *repository.Book {
 	t.Helper()
 	ctx := context.Background()
 
@@ -109,16 +104,21 @@ func seedNotebookLMTestBook(t *testing.T, f *testFixture) *repository.Book {
 	return book
 }
 
-func TestAPI_ExportBookNotebookLM(t *testing.T) {
+func seedNotebookLMTestBook(t *testing.T, f *testFixture) *repository.Book {
+	t.Helper()
+	return seedMarkdownTestBook(t, f)
+}
+
+func TestAPI_ExportBookMarkdown(t *testing.T) {
 	f := setupAPITest(t)
 	defer f.db.Close()
 	defer f.repo.Close()
 
 	token := f.loginAndGetToken(t)
-	seedNotebookLMTestBook(t, f)
+	seedMarkdownTestBook(t, f)
 
 	// 1. Unauthenticated request returns 401
-	unauthReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-nlm-1/notebooklm", nil)
+	unauthReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-nlm-1/markdown", nil)
 	unauthRec := httptest.NewRecorder()
 	f.handler.ServeHTTP(unauthRec, unauthReq)
 	if unauthRec.Code != http.StatusUnauthorized {
@@ -126,7 +126,7 @@ func TestAPI_ExportBookNotebookLM(t *testing.T) {
 	}
 
 	// 2. Authenticated GET request returns compiled Markdown with expected headers
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-nlm-1/notebooklm", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-nlm-1/markdown", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
@@ -171,7 +171,7 @@ func TestAPI_ExportBookNotebookLM(t *testing.T) {
 	}
 
 	// 3. Authenticated via ?token= query parameter
-	reqQuery := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-nlm-1/notebooklm?token="+token, nil)
+	reqQuery := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-nlm-1/markdown?token="+token, nil)
 	recQuery := httptest.NewRecorder()
 	f.handler.ServeHTTP(recQuery, reqQuery)
 	if recQuery.Code != http.StatusOK {
@@ -179,7 +179,7 @@ func TestAPI_ExportBookNotebookLM(t *testing.T) {
 	}
 
 	// 4. Nonexistent book returns 404
-	req404 := httptest.NewRequest(http.MethodGet, "/api/v1/books/nonexistent-book/notebooklm", nil)
+	req404 := httptest.NewRequest(http.MethodGet, "/api/v1/books/nonexistent-book/markdown", nil)
 	req404.Header.Set("Authorization", "Bearer "+token)
 	rec404 := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec404, req404)
@@ -188,7 +188,7 @@ func TestAPI_ExportBookNotebookLM(t *testing.T) {
 	}
 }
 
-func TestAPI_ExportBookNotebookLM_EPUBFallback(t *testing.T) {
+func TestAPI_ExportBookMarkdown_EPUBFallback(t *testing.T) {
 	f := setupAPITest(t)
 	defer f.db.Close()
 	defer f.repo.Close()
@@ -238,7 +238,7 @@ func TestAPI_ExportBookNotebookLM_EPUBFallback(t *testing.T) {
 		t.Fatalf("CreateBook failed: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-nlm-fallback/notebooklm", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/books/book-nlm-fallback/markdown", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
@@ -251,230 +251,6 @@ func TestAPI_ExportBookNotebookLM_EPUBFallback(t *testing.T) {
 	}
 }
 
-func TestAPI_SendBookToNotebookLM_ClientHandoff(t *testing.T) {
-	f := setupAPITest(t)
-	defer f.db.Close()
-	defer f.repo.Close()
-
-	token := f.loginAndGetToken(t)
-	seedNotebookLMTestBook(t, f)
-
-	// 1. Unauthenticated POST returns 401
-	unauthReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/book-nlm-1/notebooklm", strings.NewReader("{}"))
-	unauthRec := httptest.NewRecorder()
-	f.handler.ServeHTTP(unauthRec, unauthReq)
-	if unauthRec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for unauthenticated POST, got %d", unauthRec.Code)
-	}
-
-	// 2. Authenticated POST with default zero-config returns client_handoff
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/books/book-nlm-1/notebooklm", strings.NewReader("{}"))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	f.handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp api.NotebookLMSendResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response JSON: %v", err)
-	}
-	if resp.Status != "client_handoff" {
-		t.Errorf("expected status client_handoff, got %q", resp.Status)
-	}
-	if resp.NotebookURL != "https://notebooklm.google.com/" {
-		t.Errorf("expected notebook_url https://notebooklm.google.com/, got %q", resp.NotebookURL)
-	}
-	if resp.FileName != "Solaris_ The Novel.md" {
-		t.Errorf("expected file_name Solaris_ The Novel.md, got %q", resp.FileName)
-	}
-	if resp.DownloadPath != "/api/v1/books/book-nlm-1/notebooklm" {
-		t.Errorf("expected download_path /api/v1/books/book-nlm-1/notebooklm, got %q", resp.DownloadPath)
-	}
-
-	// 3. Nonexistent book returns 404
-	req404 := httptest.NewRequest(http.MethodPost, "/api/v1/books/nonexistent/notebooklm", nil)
-	req404.Header.Set("Authorization", "Bearer "+token)
-	rec404 := httptest.NewRecorder()
-	f.handler.ServeHTTP(rec404, req404)
-	if rec404.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for nonexistent book, got %d", rec404.Code)
-	}
-}
-
-func TestAPI_SendBookToNotebookLM_WebhookAndEnterprise(t *testing.T) {
-	f := setupAPITest(t)
-	defer f.db.Close()
-	defer f.repo.Close()
-
-	token := f.loginAndGetToken(t)
-	seedNotebookLMTestBook(t, f)
-
-	// Subtest 1: Webhook push success & upstream error (502)
-	t.Run("webhook_push", func(t *testing.T) {
-		var receivedAuth string
-		var receivedPayload map[string]any
-		shouldFail := false
-
-		webhookServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if shouldFail {
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte("upstream failure"))
-				return
-			}
-			receivedAuth = r.Header.Get("Authorization")
-			body, _ := io.ReadAll(r.Body)
-			_ = json.Unmarshal(body, &receivedPayload)
-
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"notebook_url":"https://notebooklm.google.com/notebook/nb-webhook-99","message":"Created notebook nb-webhook-99"}`))
-		}))
-		defer webhookServer.Close()
-
-		router := api.NewRouter(api.RouterConfig{
-			Repo:         f.repo,
-			Ingester:     f.ingester,
-			Scanner:      f.scanner,
-			UploadWorker: f.uploadWorker,
-			AIClient:     f.aiClient,
-			ToolInvoker:  mcp.NewToolExecutor(f.repo, f.aiClient, slog.Default()),
-			NotebookLM: config.NotebookLMConfig{
-				Enabled:    true,
-				WebhookURL: webhookServer.URL,
-				APIKey:     "test-webhook-secret",
-			},
-			Hub:        f.hub,
-			DataDir:    f.dataDir,
-			LibraryDir: f.libDir,
-			JWTSecret:  f.jwtSecret,
-		})
-
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/books/book-nlm-1/notebooklm", nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected 200 OK from webhook push, got %d: %s", rec.Code, rec.Body.String())
-		}
-		if receivedAuth != "Bearer test-webhook-secret" {
-			t.Errorf("expected Authorization Bearer test-webhook-secret, got %q", receivedAuth)
-		}
-		if receivedPayload["book_id"] != "book-nlm-1" {
-			t.Errorf("expected book_id book-nlm-1, got %v", receivedPayload["book_id"])
-		}
-		contentStr, _ := receivedPayload["content"].(string)
-		if !strings.Contains(contentStr, "Kris Kelvin entered the arrival capsule") {
-			t.Errorf("expected webhook content to include chapter markdown, got %s", contentStr)
-		}
-
-		var resp api.NotebookLMSendResponse
-		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
-		if resp.Status != "sent" {
-			t.Errorf("expected status sent, got %q", resp.Status)
-		}
-		if resp.NotebookURL != "https://notebooklm.google.com/notebook/nb-webhook-99" {
-			t.Errorf("expected notebook_url https://notebooklm.google.com/notebook/nb-webhook-99, got %q", resp.NotebookURL)
-		}
-		if resp.Message != "Created notebook nb-webhook-99" {
-			t.Errorf("expected message Created notebook nb-webhook-99, got %q", resp.Message)
-		}
-
-		// Verify 502 Bad Gateway when upstream fails
-		shouldFail = true
-		reqFail := httptest.NewRequest(http.MethodPost, "/api/v1/books/book-nlm-1/notebooklm", nil)
-		reqFail.Header.Set("Authorization", "Bearer "+token)
-		recFail := httptest.NewRecorder()
-		router.ServeHTTP(recFail, reqFail)
-		if recFail.Code != http.StatusBadGateway {
-			t.Fatalf("expected 502 Bad Gateway on upstream failure, got %d", recFail.Code)
-		}
-	})
-
-	// Subtest 2: Google Discovery Engine / NotebookLM Enterprise push
-	t.Run("enterprise_discovery_engine_push", func(t *testing.T) {
-		var createCalled, uploadCalled bool
-		var uploadedMarkdown string
-		var uploadedFileNameHeader string
-
-		gcpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.URL.Path {
-			case "/v1alpha/projects/my-gcp-proj/locations/us-central1/notebooks":
-				createCalled = true
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"name":"projects/my-gcp-proj/locations/us-central1/notebooks/nb-ent-777","notebookId":"nb-ent-777"}`))
-			case "/upload/v1alpha/projects/my-gcp-proj/locations/us-central1/notebooks/nb-ent-777/sources:uploadFile":
-				uploadCalled = true
-				uploadedFileNameHeader = r.Header.Get("X-Goog-Upload-File-Name")
-				b, _ := io.ReadAll(r.Body)
-				uploadedMarkdown = string(b)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"sourceId":"src-1"}`))
-			default:
-				w.WriteHeader(http.StatusNotFound)
-			}
-		}))
-		defer gcpServer.Close()
-
-		router := api.NewRouter(api.RouterConfig{
-			Repo:         f.repo,
-			Ingester:     f.ingester,
-			Scanner:      f.scanner,
-			UploadWorker: f.uploadWorker,
-			AIClient:     f.aiClient,
-			ToolInvoker:  mcp.NewToolExecutor(f.repo, f.aiClient, slog.Default()),
-			NotebookLM: config.NotebookLMConfig{
-				Enabled:   true,
-				Endpoint:  gcpServer.URL,
-				ProjectID: "my-gcp-proj",
-				Location:  "us-central1",
-				APIKey:    "gcp-oauth-token",
-			},
-			Hub:        f.hub,
-			DataDir:    f.dataDir,
-			LibraryDir: f.libDir,
-			JWTSecret:  f.jwtSecret,
-		})
-
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/books/book-nlm-1/notebooklm", nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("expected 200 OK from enterprise push, got %d: %s", rec.Code, rec.Body.String())
-		}
-		if !createCalled || !uploadCalled {
-			t.Fatalf("expected both createCalled (%v) and uploadCalled (%v) to be true", createCalled, uploadCalled)
-		}
-		if uploadedFileNameHeader != "Solaris_ The Novel.md" {
-			t.Errorf("expected X-Goog-Upload-File-Name Solaris_ The Novel.md, got %q", uploadedFileNameHeader)
-		}
-		if !strings.Contains(uploadedMarkdown, "# Solaris: The Novel?") {
-			t.Errorf("expected uploaded markdown to contain book title, got %s", uploadedMarkdown)
-		}
-
-		var resp api.NotebookLMSendResponse
-		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-			t.Fatalf("failed to decode response: %v", err)
-		}
-		if resp.Status != "sent" {
-			t.Errorf("expected status sent, got %q", resp.Status)
-		}
-		if resp.NotebookURL != "https://notebooklm.google.com/notebook/nb-ent-777" {
-			t.Errorf("expected notebook_url https://notebooklm.google.com/notebook/nb-ent-777, got %q", resp.NotebookURL)
-		}
-	})
-}
-
 func TestAPI_ExportBookMarkdown_And_GetSeries(t *testing.T) {
 	f := setupAPITest(t)
 	defer f.db.Close()
@@ -482,7 +258,7 @@ func TestAPI_ExportBookMarkdown_And_GetSeries(t *testing.T) {
 
 	ctx := context.Background()
 	token := f.loginAndGetToken(t)
-	book1 := seedNotebookLMTestBook(t, f)
+	book1 := seedMarkdownTestBook(t, f)
 
 	mdReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+book1.ID+"/markdown", nil)
 	mdReq.Header.Set("Authorization", "Bearer "+token)
@@ -574,4 +350,5 @@ func TestAPI_ExportBookMarkdown_And_GetSeries(t *testing.T) {
 		t.Fatalf("expected files array populated on series book entry, got %+v", serResp.Books[0].Files)
 	}
 }
+
 
