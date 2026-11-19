@@ -1,3 +1,15 @@
+# [1.23.0](https://github.com/theBenForce/shelfd/compare/v1.22.0...v1.23.0) (2026-11-19)
+
+
+### Bug Fixes
+
+* **yoto:** request required OAuth scopes and hide internal plugin settings ([#92](https://github.com/theBenForce/shelfd/issues/92)) ([dc04386](https://github.com/theBenForce/shelfd/commit/dc0438607431f9f1a6e3a28ec5b4e3d40bf546b9))
+
+
+### Features
+
+* **app:** bottom-up UI design system & simplified Settings, Utilities, and Uploads ([#91](https://github.com/theBenForce/shelfd/issues/91)) ([9ac0dfc](https://github.com/theBenForce/shelfd/commit/9ac0dfcc8341ae240adea64815c3218e35b08d8e))
+
 # [1.22.0](https://github.com/theBenForce/shelfd/compare/v1.21.0...v1.22.0) (2026-11-19)
 
 
