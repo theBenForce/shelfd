@@ -66,8 +66,24 @@
     "@shelfd/plugin-project-gutenberg#lint": {
       "dependsOn": ["^build"]
     },
+    "@shelfd/plugin-yoto#test": {
+      "dependsOn": ["^build"]
+    },
+    "@shelfd/plugin-yoto#lint": {
+      "dependsOn": ["^build"]
+    },
+    "@shelfd/plugin-notebooklm#test": {
+      "dependsOn": ["^build"]
+    },
+    "@shelfd/plugin-notebooklm#lint": {
+      "dependsOn": ["^build"]
+    },
     "@shelfd/server#test": {
-      "dependsOn": ["@shelfd/plugin-project-gutenberg#build"],
+      "dependsOn": [
+        "@shelfd/plugin-project-gutenberg#build",
+        "@shelfd/plugin-yoto#build",
+        "@shelfd/plugin-notebooklm#build"
+      ],
       "inputs": [
         "$TURBO_DEFAULT$",
         "**/*.go",

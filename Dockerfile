@@ -43,12 +43,16 @@ FROM node:22-bookworm-slim AS plugin-builder
 WORKDIR /plugins-src
 COPY packages/plugin-sdk ./packages/plugin-sdk
 COPY plugins/project-gutenberg ./plugins/project-gutenberg
+COPY plugins/yoto ./plugins/yoto
+COPY plugins/notebooklm ./plugins/notebooklm
 
 RUN node ./packages/plugin-sdk/scripts/build-sdk.mjs \
-    && node ./packages/plugin-sdk/cli/shelfd-plugin.mjs build ./plugins/project-gutenberg \
-    && mkdir -p /out/builtin-plugins/project-gutenberg/dist \
-    && cp ./plugins/project-gutenberg/plugin.json /out/builtin-plugins/project-gutenberg/plugin.json \
-    && cp ./plugins/project-gutenberg/dist/index.mjs /out/builtin-plugins/project-gutenberg/dist/index.mjs
+    && for pname in project-gutenberg yoto notebooklm; do \
+        node ./packages/plugin-sdk/cli/shelfd-plugin.mjs build "./plugins/$pname" \
+        && mkdir -p "/out/builtin-plugins/$pname/dist" \
+        && cp "./plugins/$pname/plugin.json" "/out/builtin-plugins/$pname/plugin.json" \
+        && cp "./plugins/$pname/dist/index.mjs" "/out/builtin-plugins/$pname/dist/index.mjs"; \
+    done
 
 # ==============================================================================
 # Opt-in Minimal Stage: Pure-Go runtime image without Node/built-in plugins

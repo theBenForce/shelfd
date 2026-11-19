@@ -885,3 +885,366 @@ rl.on('line', async (line) => {
 	}
 }
 
+func TestAPI_RealYotoAndNotebookLMPlugins_EndToEnd(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node runtime not found on PATH; skipping real Yoto and NotebookLM plugin E2E test")
+	}
+
+	repoRoot := filepath.Clean(filepath.Join("..", "..", "..", ".."))
+	sdkCli := filepath.Join(repoRoot, "packages", "plugin-sdk", "cli", "shelfd-plugin.mjs")
+	pluginsDir := t.TempDir()
+
+	for _, pname := range []string{"yoto", "notebooklm"} {
+		srcDir := filepath.Join(repoRoot, "plugins", pname)
+		distFile := filepath.Join(srcDir, "dist", "index.mjs")
+		if _, err := os.Stat(distFile); err != nil {
+			cmd := exec.Command("node", sdkCli, "build", srcDir)
+			if out, bErr := cmd.CombinedOutput(); bErr != nil {
+				t.Fatalf("building %s plugin failed: %v\n%s", pname, bErr, string(out))
+			}
+		}
+		installedDir := filepath.Join(pluginsDir, pname)
+		if err := os.MkdirAll(filepath.Join(installedDir, "dist"), 0755); err != nil {
+			t.Fatalf("mkdir installed %s: %v", pname, err)
+		}
+		mfBytes, err := os.ReadFile(filepath.Join(srcDir, "plugin.json"))
+		if err != nil {
+			t.Fatalf("read %s plugin.json: %v", pname, err)
+		}
+		distBytes, err := os.ReadFile(distFile)
+		if err != nil {
+			t.Fatalf("read %s dist/index.mjs: %v", pname, err)
+		}
+		_ = os.WriteFile(filepath.Join(installedDir, "plugin.json"), mfBytes, 0644)
+		_ = os.WriteFile(filepath.Join(installedDir, "dist", "index.mjs"), distBytes, 0644)
+	}
+
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	ctx := context.Background()
+	ebook := seedNotebookLMTestBook(t, f)
+
+	audioRelPath := "Beatrix Potter/The Tale of Peter Rabbit/peter.mp3"
+	audioFullPath := filepath.Join(f.libDir, audioRelPath)
+	_ = os.MkdirAll(filepath.Dir(audioFullPath), 0755)
+	_ = os.WriteFile(audioFullPath, []byte("ID3-real-yoto-plugin-e2e-audio-stream-payload"), 0644)
+
+	dur := 95.0
+	fileSize := int64(45)
+	audioBook := &repository.Book{
+		ID:              "book-yoto-e2e-1",
+		Title:           "The Tale of Peter Rabbit",
+		BookType:        "audiobook",
+		FilePath:        audioRelPath,
+		FileSizeBytes:   &fileSize,
+		DurationSeconds: &dur,
+	}
+	if err := f.repo.CreateBook(ctx, audioBook); err != nil {
+		t.Fatalf("CreateBook audiobook: %v", err)
+	}
+	chTitle := "Chapter 1: Mr. McGregor's Garden"
+	if err := f.repo.CreateAudioChapters(ctx, []*repository.AudioChapter{
+		{
+			ID:             "ach-yoto-1",
+			BookID:         audioBook.ID,
+			ChapterIndex:   1,
+			Title:          chTitle,
+			StartOffsetSec: 0,
+			DurationSec:    95,
+		},
+	}); err != nil {
+		t.Fatalf("CreateAudioChapters: %v", err)
+	}
+
+	const validYotoIconID = "AC6ySygbay79fIMHmMtYN9ekBo1kwMvRoi4DQW_CZW0"
+	var s3BytesReceived int
+	var savedCardTitle string
+	var webhookReceivedMarkdown string
+
+	var mockUpstream *httptest.Server
+	mockUpstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/oauth/token":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token":  "yoto-e2e-access-tok",
+				"refresh_token": "yoto-e2e-refresh-tok",
+				"token_type":    "Bearer",
+				"expires_in":    3600,
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/content/mine":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"cards": []map[string]any{
+					{
+						"cardId": "card-e2e-1",
+						"title":  "Kids Bedtime Card",
+						"content": map[string]any{
+							"chapters": []map[string]any{{"key": "01", "title": "Ch 1"}},
+						},
+					},
+				},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/media/displayIcons/user/yoto":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"displayIcons": []map[string]any{
+					{
+						"displayIconId": "ic-1",
+						"mediaId":       validYotoIconID,
+						"title":         "Peter Rabbit Icon",
+						"public":        true,
+						"publicTags":    []string{"rabbit", "book"},
+						"url":           mockUpstream.URL + "/icons/" + validYotoIconID + ".png",
+					},
+				},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/media/transcode/audio/uploadUrl":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"upload": map[string]any{
+					"uploadUrl": mockUpstream.URL + "/s3-audio-put",
+					"uploadId":  "up-e2e-1",
+				},
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/s3-audio-put":
+			var buf bytes.Buffer
+			_, _ = buf.ReadFrom(r.Body)
+			s3BytesReceived += buf.Len()
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/media/upload/up-e2e-1/transcoded":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"transcode": map[string]any{
+					"transcodedSha256": "sha256-e2e-peter",
+					"transcodedInfo": map[string]any{
+						"duration": 95.0,
+						"fileSize": 45,
+						"channels": "stereo",
+						"format":   "aac",
+					},
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/content":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			savedCardTitle, _ = body["title"].(string)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"card": map[string]any{
+					"cardId": "card-created-e2e",
+					"title":  savedCardTitle,
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/notebooklm-webhook":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			webhookReceivedMarkdown, _ = body["content"].(string)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"notebook_url": "https://notebooklm.google.com/notebook/nb-e2e-1",
+				"message":      "NotebookLM webhook ok",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockUpstream.Close()
+
+	var shelfdServer *httptest.Server
+	var activeHandler http.Handler
+	shelfdServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		activeHandler.ServeHTTP(w, r)
+	}))
+	defer shelfdServer.Close()
+
+	eventCh, unsub := f.hub.Subscribe()
+	defer unsub()
+
+	toolExec := mcp.NewToolExecutor(f.repo, f.aiClient, slog.Default())
+	pluginHost := plugins.NewHost(f.repo, plugins.HostConfig{
+		PluginsDir:    pluginsDir,
+		APIBase:       shelfdServer.URL,
+		ShelfdVersion: "0.1.0-test",
+		MasterSecret:  f.jwtSecret,
+		IdleTimeout:   30 * time.Second,
+		TokenIssuer: func(userID, username, pluginName string, scopes []string) (string, error) {
+			tok, _, err := api.GeneratePluginInvocationJWT(userID, username, pluginName, scopes, f.jwtSecret, 5*time.Minute)
+			return tok, err
+		},
+		Hub:    f.hub,
+		Logger: slog.Default(),
+	})
+	toolExec.SetPluginProvider(pluginHost)
+
+	activeHandler = api.NewRouter(api.RouterConfig{
+		Repo:            f.repo,
+		Ingester:        f.ingester,
+		Scanner:         f.scanner,
+		UploadWorker:    f.uploadWorker,
+		AIClient:        f.aiClient,
+		ToolInvoker:     toolExec,
+		PluginHost:      pluginHost,
+		Hub:             f.hub,
+		DataDir:         f.dataDir,
+		LibraryDir:      f.libDir,
+		JWTSecret:       f.jwtSecret,
+		Host:            "127.0.0.1",
+		Port:            8080,
+		Version:         "0.1.0-test",
+		DefaultUsername: "admin",
+	})
+
+	pluginHost.Start(ctx)
+	defer pluginHost.Stop()
+
+	userToken := f.loginAndGetToken(t)
+
+	nlmHandoffReq, _ := http.NewRequest(
+		http.MethodPost,
+		shelfdServer.URL+"/api/v1/plugins/notebooklm/actions/send_to_notebooklm/invoke",
+		strings.NewReader(`{"target":{"type":"book","id":"`+ebook.ID+`","title":"`+ebook.Title+`"}}`),
+	)
+	nlmHandoffReq.Header.Set("Authorization", "Bearer "+userToken)
+	nlmHandoffResp, err := http.DefaultClient.Do(nlmHandoffReq)
+	if err != nil || nlmHandoffResp.StatusCode != http.StatusOK {
+		t.Fatalf("NotebookLM zero-config invoke failed: status=%v err=%v", nlmHandoffResp.StatusCode, err)
+	}
+	var handoffRes plugins.ActionResult
+	_ = json.NewDecoder(nlmHandoffResp.Body).Decode(&handoffRes)
+	nlmHandoffResp.Body.Close()
+	if handoffRes.Status != "client_handoff" || handoffRes.DownloadAPIPath != "/api/v1/books/"+ebook.ID+"/markdown" {
+		t.Fatalf("unexpected NotebookLM handoff result: %+v", handoffRes)
+	}
+
+	nlmCfgReq, _ := http.NewRequest(
+		http.MethodPut,
+		shelfdServer.URL+"/api/v1/plugins/notebooklm/config",
+		strings.NewReader(`{"webhook_url":"`+mockUpstream.URL+`/notebooklm-webhook","allow_local_endpoints":true}`),
+	)
+	nlmCfgReq.Header.Set("Authorization", "Bearer "+userToken)
+	nlmCfgResp, err := http.DefaultClient.Do(nlmCfgReq)
+	if err != nil || nlmCfgResp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT notebooklm config failed: %v", err)
+	}
+	nlmCfgResp.Body.Close()
+
+	nlmPushReq, _ := http.NewRequest(
+		http.MethodPost,
+		shelfdServer.URL+"/api/v1/plugins/notebooklm/actions/send_to_notebooklm/invoke",
+		strings.NewReader(`{"target":{"type":"book","id":"`+ebook.ID+`"}}`),
+	)
+	nlmPushReq.Header.Set("Authorization", "Bearer "+userToken)
+	nlmPushResp, err := http.DefaultClient.Do(nlmPushReq)
+	if err != nil || nlmPushResp.StatusCode != http.StatusOK {
+		t.Fatalf("NotebookLM webhook invoke failed: %v", err)
+	}
+	var pushRes plugins.ActionResult
+	_ = json.NewDecoder(nlmPushResp.Body).Decode(&pushRes)
+	nlmPushResp.Body.Close()
+	if pushRes.Status != "completed" || !strings.Contains(webhookReceivedMarkdown, ebook.Title) {
+		t.Fatalf("unexpected NotebookLM webhook result: res=%+v mdLen=%d", pushRes, len(webhookReceivedMarkdown))
+	}
+
+	yotoCfgReq, _ := http.NewRequest(
+		http.MethodPut,
+		shelfdServer.URL+"/api/v1/plugins/yoto/config",
+		strings.NewReader(`{"api_base_url":"`+mockUpstream.URL+`","auth_base_url":"`+mockUpstream.URL+`","client_id":"yoto-e2e-client"}`),
+	)
+	yotoCfgReq.Header.Set("Authorization", "Bearer "+userToken)
+	yotoCfgResp, err := http.DefaultClient.Do(yotoCfgReq)
+	if err != nil || yotoCfgResp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT yoto config failed: %v", err)
+	}
+	yotoCfgResp.Body.Close()
+
+	yotoAuthReq, _ := http.NewRequest(
+		http.MethodPost,
+		shelfdServer.URL+"/api/v1/plugins/yoto/auth/complete",
+		strings.NewReader(`{"method":"oauth_pkce","code":"code-e2e-1","code_verifier":"ver-e2e-1"}`),
+	)
+	yotoAuthReq.Header.Set("Authorization", "Bearer "+userToken)
+	yotoAuthResp, err := http.DefaultClient.Do(yotoAuthReq)
+	if err != nil || yotoAuthResp.StatusCode != http.StatusOK {
+		t.Fatalf("POST yoto auth/complete failed: %v", err)
+	}
+	var authStatus plugins.AuthStatusResult
+	_ = json.NewDecoder(yotoAuthResp.Body).Decode(&authStatus)
+	yotoAuthResp.Body.Close()
+	if !authStatus.Linked {
+		t.Fatalf("expected Yoto authStatus.Linked=true after auth/complete, got %+v", authStatus)
+	}
+
+	yotoPrepReq, _ := http.NewRequest(
+		http.MethodPost,
+		shelfdServer.URL+"/api/v1/plugins/yoto/actions/send_to_yoto/prepare",
+		strings.NewReader(`{"target":{"type":"book","id":"`+audioBook.ID+`"}}`),
+	)
+	yotoPrepReq.Header.Set("Authorization", "Bearer "+userToken)
+	yotoPrepResp, err := http.DefaultClient.Do(yotoPrepReq)
+	if err != nil || yotoPrepResp.StatusCode != http.StatusOK {
+		t.Fatalf("POST yoto actions/prepare failed: %v", err)
+	}
+	var formSpec plugins.ActionFormSpec
+	_ = json.NewDecoder(yotoPrepResp.Body).Decode(&formSpec)
+	yotoPrepResp.Body.Close()
+	if formSpec.AuthRequired || len(formSpec.Fields) < 5 || len(formSpec.Entries) != 1 {
+		t.Fatalf("unexpected Yoto ActionFormSpec: %+v", formSpec)
+	}
+
+	yotoInvReq, _ := http.NewRequest(
+		http.MethodPost,
+		shelfdServer.URL+"/api/v1/plugins/yoto/actions/send_to_yoto/invoke",
+		strings.NewReader(`{"target":{"type":"book","id":"`+audioBook.ID+`","title":"The Tale of Peter Rabbit"},"values":{"playlist_mode":"create","playlist_title":"Peter Rabbit E2E Card"}}`),
+	)
+	yotoInvReq.Header.Set("Authorization", "Bearer "+userToken)
+	yotoInvResp, err := http.DefaultClient.Do(yotoInvReq)
+	if err != nil || yotoInvResp.StatusCode != http.StatusOK {
+		t.Fatalf("POST yoto actions/invoke failed: %v", err)
+	}
+	var yotoJobStart plugins.ActionResult
+	_ = json.NewDecoder(yotoInvResp.Body).Decode(&yotoJobStart)
+	yotoInvResp.Body.Close()
+	if yotoJobStart.Status != "job_started" || yotoJobStart.JobID == "" {
+		t.Fatalf("expected job_started from yoto invoke, got %+v", yotoJobStart)
+	}
+
+	jobDone := false
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) && !jobDone {
+		select {
+		case ev := <-eventCh:
+			if m, ok := ev.Data.(map[string]any); ok && m["kind"] == "job_progress" && m["job_id"] == yotoJobStart.JobID {
+				if jb, ok := m["job"].(*plugins.PluginJob); ok {
+					if jb.Status == "failed" {
+						t.Fatalf("Yoto plugin job failed: %s", jb.Error)
+					}
+					if jb.Status == "completed" {
+						jobDone = true
+					}
+				}
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	if !jobDone {
+		t.Fatalf("timed out waiting for Yoto plugin job %s to complete", yotoJobStart.JobID)
+	}
+	if s3BytesReceived != 45 || savedCardTitle != "Peter Rabbit E2E Card" {
+		t.Fatalf("expected 45 audio bytes streamed and card title 'Peter Rabbit E2E Card', got bytes=%d title=%q", s3BytesReceived, savedCardTitle)
+	}
+
+	mcpCtx := context.WithValue(ctx, mcp.TokenContextKey, &repository.APIToken{UserID: f.user.ID})
+	yotoMcpRes, err := toolExec.ExecuteInProcess(mcpCtx, "yoto_list_playlists", map[string]any{})
+	if err != nil || yotoMcpRes.IsError || !strings.Contains(yotoMcpRes.Content, "Kids Bedtime Card") {
+		t.Fatalf("MCP tool yoto_list_playlists failed: err=%v res=%+v", err, yotoMcpRes)
+	}
+	nlmMcpRes, err := toolExec.ExecuteInProcess(mcpCtx, "notebooklm_send_book_to_notebooklm", map[string]any{"book_id": ebook.ID})
+	if err != nil || nlmMcpRes.IsError || !strings.Contains(nlmMcpRes.Content, "NotebookLM webhook ok") {
+		t.Fatalf("MCP tool notebooklm_send_book_to_notebooklm failed: err=%v res=%+v", err, nlmMcpRes)
+	}
+}
+
+

@@ -1,0 +1,89 @@
+{
+  "name": "notebooklm",
+  "version": "0.1.0",
+  "display_name": "Google NotebookLM",
+  "description": "Export compiled book Markdown, highlights, and notes to Google NotebookLM via browser handoff, webhook bridge, or Google Cloud Discovery Engine.",
+  "homepage": "https://notebooklm.google.com/",
+  "entrypoint": {
+    "command": "node",
+    "args": ["dist/index.mjs"]
+  },
+  "runtime": {
+    "family": "node",
+    "min_version": "22.0.0"
+  },
+  "daemon": false,
+  "capabilities": ["actions", "tools"],
+  "api_scopes": ["books:read"],
+  "permissions": {
+    "network_domains": ["notebooklm.google.com", "discoveryengine.googleapis.com"],
+    "library_read": true,
+    "library_write": false
+  },
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "notebook_url": {
+        "type": "string",
+        "title": "NotebookLM Web URL",
+        "description": "Target NotebookLM browser URL opened after downloading or pushing Markdown.",
+        "default": "https://notebooklm.google.com/"
+      },
+      "webhook_url": {
+        "type": "string",
+        "title": "Webhook / Bridge URL (Optional)",
+        "description": "Optional HTTP(S) webhook bridge endpoint to push compiled book Markdown directly."
+      },
+      "endpoint": {
+        "type": "string",
+        "title": "Discovery Engine Endpoint (Optional)",
+        "description": "Optional custom Google Cloud Discovery Engine API base endpoint."
+      },
+      "project_id": {
+        "type": "string",
+        "title": "Google Cloud Project ID (Optional)",
+        "description": "Google Cloud Project ID for NotebookLM Enterprise Discovery Engine API."
+      },
+      "location": {
+        "type": "string",
+        "title": "Google Cloud Location",
+        "description": "Discovery Engine location (e.g. 'global', 'us', 'eu').",
+        "default": "global"
+      },
+      "api_key": {
+        "type": "string",
+        "title": "Bearer Token / API Key (Optional)",
+        "description": "Optional Bearer token or OAuth access token for Webhook or Google Cloud Discovery Engine.",
+        "x-shelfd-secret": true
+      }
+    }
+  },
+  "actions": [
+    {
+      "name": "send_to_notebooklm",
+      "title": "Send to NotebookLM",
+      "description": "Push compiled book Markdown with highlights and notes to NotebookLM or download for browser handoff.",
+      "icon": "auto_awesome",
+      "targets": ["book"],
+      "media_types": ["ebook"],
+      "mode": "immediate",
+      "execution": "sync"
+    }
+  ],
+  "tools": [
+    {
+      "name": "send_book_to_notebooklm",
+      "description": "Send a Shelfd book's compiled Markdown (metadata, synopsis, highlights, notes, and chapters) to Google NotebookLM or prepare a browser handoff.",
+      "input_schema": {
+        "type": "object",
+        "required": ["book_id"],
+        "properties": {
+          "book_id": {
+            "type": "string",
+            "description": "The Shelfd book ID to send to NotebookLM."
+          }
+        }
+      }
+    }
+  ]
+}

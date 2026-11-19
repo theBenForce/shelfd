@@ -1,0 +1,155 @@
+{
+  "name": "yoto",
+  "version": "0.1.0",
+  "display_name": "Yoto Player",
+  "description": "Send audiobooks and series to Yoto Make Your Own (MYO) cards with 16x16 pixel icons and chapter customization.",
+  "homepage": "https://yotoplay.com",
+  "entrypoint": {
+    "command": "node",
+    "args": ["--optimize-for-size", "--max-old-space-size=24", "--max-semi-space-size=1", "--expose-gc", "dist/index.mjs"]
+  },
+  "runtime": {
+    "family": "node",
+    "min_version": "22.0.0"
+  },
+  "daemon": false,
+  "capabilities": ["actions", "tools", "events"],
+  "api_scopes": ["books:read"],
+  "permissions": {
+    "network_domains": ["api.yotoplay.com", "login.yotoplay.com"],
+    "library_read": true,
+    "library_write": false
+  },
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "client_id": {
+        "type": "string",
+        "title": "Yoto OAuth Client ID",
+        "description": "OAuth 2.0 Client ID from the Yoto Developer Portal."
+      },
+      "client_secret": {
+        "type": "string",
+        "title": "Yoto OAuth Client Secret (Optional)",
+        "description": "Optional OAuth 2.0 Client Secret if your Yoto application is confidential.",
+        "x-shelfd-secret": true
+      },
+      "redirect_uri": {
+        "type": "string",
+        "title": "OAuth Redirect URI",
+        "description": "Optional custom OAuth redirect URI."
+      },
+      "api_base_url": {
+        "type": "string",
+        "title": "Yoto API Base URL",
+        "description": "Upstream Yoto API base URL.",
+        "default": "https://api.yotoplay.com"
+      },
+      "auth_base_url": {
+        "type": "string",
+        "title": "Yoto Auth Base URL",
+        "description": "Upstream Yoto OAuth 2.0 authorization server base URL.",
+        "default": "https://login.yotoplay.com"
+      },
+      "access_token": {
+        "type": "string",
+        "title": "Yoto Access Token",
+        "description": "Active Yoto OAuth 2.0 access token.",
+        "x-shelfd-secret": true
+      },
+      "refresh_token": {
+        "type": "string",
+        "title": "Yoto Refresh Token",
+        "description": "Single-use Yoto OAuth 2.0 refresh token.",
+        "x-shelfd-secret": true
+      },
+      "token_expires_at": {
+        "type": "string",
+        "title": "Token Expiration Timestamp",
+        "description": "ISO-8601 expiration timestamp of the current access token."
+      }
+    }
+  },
+  "auth": {
+    "methods": ["oauth_pkce", "token"],
+    "title": "Yoto Account",
+    "description": "Link your Yoto account via OAuth 2.0 PKCE or paste a Yoto access token.",
+    "callback_param": "code",
+    "fields": [
+      {
+        "key": "client_id",
+        "title": "Yoto Client ID",
+        "placeholder": "Optional custom OAuth Client ID"
+      },
+      {
+        "key": "access_token",
+        "title": "Access Token",
+        "secret": true
+      },
+      {
+        "key": "refresh_token",
+        "title": "Refresh Token (Optional)",
+        "secret": true
+      }
+    ]
+  },
+  "actions": [
+    {
+      "name": "send_to_yoto",
+      "title": "Send to Yoto",
+      "description": "Upload audiobook tracks to a new or existing Yoto Make Your Own (MYO) playlist card.",
+      "icon": "speaker",
+      "targets": ["book", "series"],
+      "media_types": ["audiobook"],
+      "mode": "form",
+      "execution": "job"
+    }
+  ],
+  "tools": [
+    {
+      "name": "list_playlists",
+      "description": "List the user's Yoto Make Your Own (MYO) playlist cards.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Optional search query to filter playlist cards by title."
+          }
+        }
+      }
+    },
+    {
+      "name": "send_to_yoto",
+      "description": "Send a Shelfd audiobook or series to a new or existing Yoto Make Your Own (MYO) card.",
+      "input_schema": {
+        "type": "object",
+        "required": ["target_id"],
+        "properties": {
+          "target_type": {
+            "type": "string",
+            "enum": ["book", "series"],
+            "description": "Target entity type ('book' or 'series'). Defaults to 'book'."
+          },
+          "target_id": {
+            "type": "string",
+            "description": "Shelfd book ID or series ID."
+          },
+          "playlist_mode": {
+            "type": "string",
+            "enum": ["create", "append", "replace"],
+            "description": "Whether to create a new MYO card, append to an existing card, or replace an existing card."
+          },
+          "card_id": {
+            "type": "string",
+            "description": "Existing Yoto cardId (required when playlist_mode is 'append' or 'replace')."
+          },
+          "playlist_title": {
+            "type": "string",
+            "description": "Title for a newly created or replaced Yoto MYO card."
+          }
+        }
+      }
+    }
+  ]
+}
