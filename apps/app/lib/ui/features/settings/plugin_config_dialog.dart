@@ -65,14 +65,31 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
     return prop['x-shelfd-secret'] == true || prop['format'] == 'password';
   }
 
+  bool _isHiddenProp(Map<String, dynamic> prop) {
+    return prop['x-shelfd-hidden'] == true;
+  }
+
   bool _supportsCurlPaste(Map<String, dynamic> prop) {
     return prop['x-shelfd-curl-paste'] == true;
+  }
+
+  Map<String, dynamic> get _visibleProperties {
+    final visible = <String, dynamic>{};
+    for (final entry in _properties.entries) {
+      final prop = entry.value is Map
+          ? Map<String, dynamic>.from(entry.value as Map)
+          : const <String, dynamic>{};
+      if (!_isHiddenProp(prop)) {
+        visible[entry.key] = entry.value;
+      }
+    }
+    return visible;
   }
 
   @override
   void initState() {
     super.initState();
-    for (final entry in _properties.entries) {
+    for (final entry in _visibleProperties.entries) {
       final key = entry.key;
       final prop = entry.value is Map
           ? Map<String, dynamic>.from(entry.value as Map)
@@ -162,7 +179,7 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
       setState(() {
         if (res != null) {
           _secretFieldsSet = res.secretFieldsSet.toSet();
-          for (final entry in _properties.entries) {
+          for (final entry in _visibleProperties.entries) {
             final key = entry.key;
             final prop = entry.value is Map
                 ? Map<String, dynamic>.from(entry.value as Map)
@@ -400,7 +417,7 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
     });
 
     final payload = <String, dynamic>{};
-    for (final entry in _properties.entries) {
+    for (final entry in _visibleProperties.entries) {
       final key = entry.key;
       final prop = entry.value is Map
           ? Map<String, dynamic>.from(entry.value as Map)
@@ -826,7 +843,7 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
   @override
   Widget build(BuildContext context) {
     final colors = ShelfdColors.of(context);
-    final props = _properties;
+    final props = _visibleProperties;
 
     return AlertDialog(
       backgroundColor: colors.surface,

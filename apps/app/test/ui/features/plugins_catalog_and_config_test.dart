@@ -447,4 +447,110 @@ void main() {
     expect(find.text('Not Linked'), findsOneWidget);
     expect(find.byKey(const Key('plugin_auth_oauth_begin_button')), findsOneWidget);
   });
+
+  testWidgets('PluginConfigDialog hides x-shelfd-hidden config_schema properties',
+      (tester) async {
+    setDesktopViewport(tester);
+
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/plugins/yoto/config') {
+        return http.Response(
+          jsonEncode({
+            'config': {
+              'client_id': 'yoto-client-123',
+              'api_base_url': 'https://api.yotoplay.com',
+              'access_token': '__SHELFD_REDACTED__',
+            },
+            'secret_fields_set': ['access_token'],
+          }),
+          200,
+        );
+      }
+      if (request.url.path == '/api/v1/plugins/yoto/auth/status') {
+        return http.Response(
+          jsonEncode({
+            'linked': true,
+            'client_id': 'yoto-client-123',
+            'methods': ['oauth_pkce', 'token'],
+          }),
+          200,
+        );
+      }
+      if (request.url.path == '/api/v1/plugins') {
+        return http.Response(jsonEncode({'plugins': []}), 200);
+      }
+      return http.Response('Not Found', 404);
+    });
+
+    final api = ApiService(
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token-123',
+      client: mockClient,
+    );
+
+    const summary = PluginSummary(
+      name: 'yoto',
+      displayName: 'Yoto Player',
+      version: '0.1.0',
+      enabled: true,
+      status: 'idle',
+      capabilities: ['actions'],
+      configSchema: {
+        'type': 'object',
+        'properties': {
+          'client_id': {
+            'type': 'string',
+            'title': 'Yoto OAuth Client ID',
+            'x-shelfd-hidden': true,
+          },
+          'api_base_url': {
+            'type': 'string',
+            'title': 'Yoto API Base URL',
+            'default': 'https://api.yotoplay.com',
+            'x-shelfd-hidden': true,
+          },
+          'access_token': {
+            'type': 'string',
+            'title': 'Yoto Access Token',
+            'x-shelfd-secret': true,
+            'x-shelfd-hidden': true,
+          },
+        },
+      },
+      auth: PluginAuthSpec(
+        methods: ['oauth_pkce', 'token'],
+        title: 'Yoto Account',
+        description: 'Link your Yoto account via OAuth 2.0 PKCE.',
+        fields: [
+          PluginAuthFieldSpec(
+            key: 'client_id',
+            title: 'Yoto Client ID',
+          ),
+        ],
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          apiServiceProvider.overrideWithValue(api),
+          queueProvider.overrideWith(_FakeQueueNotifier.new),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const Scaffold(
+            body: PluginConfigDialog(plugin: summary),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('plugin_auth_section_yoto')), findsOneWidget);
+    expect(find.text('Yoto OAuth Client ID'), findsNothing);
+    expect(find.text('Yoto API Base URL'), findsNothing);
+    expect(find.text('Yoto Access Token'), findsNothing);
+    expect(find.byKey(const Key('plugin_config_save_button')), findsNothing);
+  });
 }

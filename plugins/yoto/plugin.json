@@ -26,47 +26,55 @@
       "client_id": {
         "type": "string",
         "title": "Yoto OAuth Client ID",
-        "description": "OAuth 2.0 Client ID from the Yoto Developer Portal."
+        "description": "OAuth 2.0 Client ID from the Yoto Developer Portal.",
+        "x-shelfd-hidden": true
       },
       "client_secret": {
         "type": "string",
         "title": "Yoto OAuth Client Secret (Optional)",
         "description": "Optional OAuth 2.0 Client Secret if your Yoto application is confidential.",
-        "x-shelfd-secret": true
+        "x-shelfd-secret": true,
+        "x-shelfd-hidden": true
       },
       "redirect_uri": {
         "type": "string",
         "title": "OAuth Redirect URI",
-        "description": "Optional custom OAuth redirect URI."
+        "description": "Optional custom OAuth redirect URI.",
+        "x-shelfd-hidden": true
       },
       "api_base_url": {
         "type": "string",
         "title": "Yoto API Base URL",
         "description": "Upstream Yoto API base URL.",
-        "default": "https://api.yotoplay.com"
+        "default": "https://api.yotoplay.com",
+        "x-shelfd-hidden": true
       },
       "auth_base_url": {
         "type": "string",
         "title": "Yoto Auth Base URL",
         "description": "Upstream Yoto OAuth 2.0 authorization server base URL.",
-        "default": "https://login.yotoplay.com"
+        "default": "https://login.yotoplay.com",
+        "x-shelfd-hidden": true
       },
       "access_token": {
         "type": "string",
         "title": "Yoto Access Token",
         "description": "Active Yoto OAuth 2.0 access token.",
-        "x-shelfd-secret": true
+        "x-shelfd-secret": true,
+        "x-shelfd-hidden": true
       },
       "refresh_token": {
         "type": "string",
         "title": "Yoto Refresh Token",
         "description": "Single-use Yoto OAuth 2.0 refresh token.",
-        "x-shelfd-secret": true
+        "x-shelfd-secret": true,
+        "x-shelfd-hidden": true
       },
       "token_expires_at": {
         "type": "string",
         "title": "Token Expiration Timestamp",
-        "description": "ISO-8601 expiration timestamp of the current access token."
+        "description": "ISO-8601 expiration timestamp of the current access token.",
+        "x-shelfd-hidden": true
       }
     }
   },
