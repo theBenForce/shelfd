@@ -33,6 +33,14 @@ if [ "$(id -u)" = '0' ]; then
             pname=$(basename "$pdir")
             if [ ! -d "/data/plugins/$pname" ]; then
                 cp -R "$pdir" "/data/plugins/$pname"
+            else
+                if [ -f "$pdir/plugin.json" ]; then
+                    cp -f "$pdir/plugin.json" "/data/plugins/$pname/plugin.json"
+                fi
+                if [ -d "$pdir/dist" ]; then
+                    rm -rf "/data/plugins/$pname/dist"
+                    cp -R "$pdir/dist" "/data/plugins/$pname/dist"
+                fi
             fi
         done
     fi
