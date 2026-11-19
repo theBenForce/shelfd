@@ -6,7 +6,7 @@
   "homepage": "https://yotoplay.com",
   "entrypoint": {
     "command": "node",
-    "args": ["--max-old-space-size=32", "--max-semi-space-size=1", "--expose-gc", "dist/index.mjs"]
+    "args": ["--optimize-for-size", "--max-old-space-size=24", "--max-semi-space-size=1", "--expose-gc", "dist/index.mjs"]
   },
   "runtime": {
     "family": "node",

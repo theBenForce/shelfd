@@ -846,7 +846,7 @@ export async function uploadAudioStream(
     : null;
   if (gcFn) {
     let bytesSinceGc = 0;
-    const GC_INTERVAL_BYTES = 8 * 1024 * 1024;
+    const GC_INTERVAL_BYTES = 2 * 1024 * 1024;
     const meter = new nodeStreamMod.Transform({
       highWaterMark: 16 * 1024,
       transform(chunk: Buffer, _encoding, callback) {
