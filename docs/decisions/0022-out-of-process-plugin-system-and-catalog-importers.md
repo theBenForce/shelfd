@@ -44,9 +44,9 @@ Chosen option: **Out-of-process child plugins over NDJSON JSON-RPC 2.0 on `stdio
    * Storefront plugins implement `catalog/browse`, `catalog/search`, and `catalog/stage`.
    * Plugins stage downloaded files through loopback `POST /api/v1/books/upload/stage` (`status = 'staged'`) with `metadata_defaults`, `source_plugin`, and `source_external_id`.
    * `book_sources` tracks `(plugin_name, external_id)` across staged upload jobs and committed books so Flutter's generic `CatalogBrowserView` displays `Available`, `Staged`, and `In Library` states automatically.
-5. **TypeScript SDK & Opt-In Container Packaging**:
+5. **TypeScript SDK & Default Container Packaging**:
    * `packages/plugin-sdk` (`@shelfd/plugin-sdk`) provides `definePlugin`, `createPoliteFetcher`, `AuthExpiredError` (`-32001`), and the `shelfd-plugin` CLI (`build`, `verify`, `pack`) producing zero-dependency single-file `dist/index.mjs` bundles.
-   * The default `Dockerfile` stage remains a pure-Go minimal image, while an opt-in `runtime-plugins` stage adds Node 22 and seeds `plugins/project-gutenberg`.
+   * The default `Dockerfile` stage (`runtime` / `runtime-plugins`) includes Node 22 and seeds `plugins/project-gutenberg`, while an opt-in `runtime-minimal` stage provides a pure-Go minimal image.
 
 ## Consequences
 
@@ -59,5 +59,5 @@ Chosen option: **Out-of-process child plugins over NDJSON JSON-RPC 2.0 on `stdio
 
 ### Negative consequences
 
-* Running TypeScript plugins requires `node` (>= 22.7) in the host environment or use of the opt-in `runtime-plugins` container target.
+* Running TypeScript plugins requires `node` (>= 22.7) in the host environment when running outside the default `runtime` / `runtime-plugins` container image (or when using the opt-in `runtime-minimal` target).
 * Cold-spawning an idle plugin adds roughly 60-150 ms to the first request after the idle timeout expires.
