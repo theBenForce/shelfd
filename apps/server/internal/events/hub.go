@@ -10,6 +10,7 @@ const (
 	EventBookUpdated EventType = "book_updated"
 	EventQueueStatus EventType = "queue_status"
 	EventScanStatus  EventType = "scan_status"
+	EventPlugin      EventType = "plugin_event"
 )
 
 // Event represents an event payload to broadcast to connected clients.

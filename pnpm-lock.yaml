@@ -29,6 +29,14 @@ importers:
         specifier: workspace:*
         version: link:../app
 
+  packages/plugin-sdk: {}
+
+  plugins/project-gutenberg:
+    devDependencies:
+      '@shelfd/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
 packages:
 
   '@babel/code-frame@7.29.7':

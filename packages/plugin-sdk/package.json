@@ -1,0 +1,33 @@
+{
+  "name": "@shelfd/plugin-sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK, bundler, and verification harness for out-of-process Shelfd plugins",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs"
+    },
+    "./cli": "./dist/cli.mjs"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "shelfd-plugin": "./cli/shelfd-plugin.mjs"
+  },
+  "files": [
+    "dist",
+    "cli",
+    "scripts",
+    "skills"
+  ],
+  "engines": {
+    "node": ">=22.7.0"
+  },
+  "scripts": {
+    "build": "node --no-warnings ./scripts/build-sdk.mjs",
+    "test": "pnpm run build && node --no-warnings --test ./test/*.test.mjs",
+    "lint": "node --no-warnings ./scripts/build-sdk.mjs --check",
+    "clean": "rm -rf dist"
+  }
+}

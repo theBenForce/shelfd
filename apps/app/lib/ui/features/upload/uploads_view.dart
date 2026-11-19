@@ -2,6 +2,7 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../../data/models/upload_job.dart';
 import '../../core/shared_layout.dart';
 import '../../core/theme.dart';
@@ -377,6 +378,26 @@ class _UploadsViewState extends ConsumerState<UploadsView> {
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: colors.onAccent,
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                key: const Key('uploads_browse_storefronts_button'),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: colors.surface,
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
+                  padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16, vertical: AppTokens.space12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTokens.radiusSm)),
+                ),
+                onPressed: () => context.go('/plugins/catalog'),
+                icon: const Icon(Icons.storefront_outlined, size: 16),
+                label: Text(
+                  'Browse Storefronts',
+                  style: AppTypography.bodySans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
                   ),
                 ),
               ),

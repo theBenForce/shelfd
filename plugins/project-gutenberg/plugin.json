@@ -1,0 +1,54 @@
+{
+  "name": "project-gutenberg",
+  "version": "0.1.0",
+  "display_name": "Project Gutenberg",
+  "description": "Search, browse, and stage 70,000+ free public-domain ebooks from Project Gutenberg (powered by Gutendex).",
+  "homepage": "https://www.gutenberg.org",
+  "entrypoint": {
+    "command": "node",
+    "args": ["dist/index.mjs"]
+  },
+  "runtime": {
+    "family": "node",
+    "min_version": "22.0.0"
+  },
+  "daemon": false,
+  "capabilities": ["catalog", "tools", "events"],
+  "catalog_modes": ["browse", "search"],
+  "supported_formats": ["epub"],
+  "api_scopes": ["uploads:stage"],
+  "permissions": {
+    "network_domains": ["gutendex.com", "www.gutenberg.org"],
+    "library_read": false,
+    "library_write": false
+  },
+  "catalog": {
+    "modes": ["browse", "search"],
+    "supported_formats": ["epub"],
+    "search_hint": "Search Project Gutenberg titles, authors, or subjects (e.g. Jane Austen, Sci-Fi)...",
+    "requires_auth": false
+  },
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "default_language": {
+        "type": "string",
+        "title": "Default Language",
+        "description": "Two-letter ISO 639-1 language code (e.g. en, fr, de, es). Leave empty for all languages.",
+        "default": "en"
+      },
+      "prefer_images": {
+        "type": "boolean",
+        "title": "Prefer Illustrated EPUBs",
+        "description": "Prefer EPUBs with illustrations when multiple EPUB variants are offered.",
+        "default": true
+      },
+      "base_url": {
+        "type": "string",
+        "title": "Gutendex API Base URL",
+        "description": "Upstream Gutendex endpoint (override only if self-hosting a Gutendex mirror).",
+        "default": "https://gutendex.com"
+      }
+    }
+  }
+}

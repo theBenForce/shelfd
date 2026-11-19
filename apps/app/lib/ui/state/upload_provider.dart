@@ -324,7 +324,7 @@ class UploadNotifier extends Notifier<UploadState> {
   }
 
   Future<int> commitAllReady() async {
-    final readyJobs = state.stagedJobs.where((j) => j.warnings.isEmpty).toList();
+    final readyJobs = state.readyJobs;
     if (readyJobs.isEmpty) return 0;
 
     state = state.copyWith(isUploading: true, clearError: true);

@@ -357,5 +357,41 @@ type YotoAccount struct {
 	UpdatedAt      time.Time `json:"updated_at" bun:"updated_at,nullzero,default:current_timestamp"`
 }
 
+// PluginState persists enable/disable state and cached manifest metadata for an installed plugin.
+type PluginState struct {
+	bun.BaseModel      `bun:"table:plugins_state"`
+	Name               string    `json:"name" bun:"name,pk"`
+	Enabled            bool      `json:"enabled" bun:"enabled,notnull"`
+	InstalledVersion   string    `json:"installed_version" bun:"installed_version,notnull"`
+	CachedManifestJSON string    `json:"cached_manifest_json" bun:"cached_manifest_json,notnull"`
+	CreatedAt          time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+	UpdatedAt          time.Time `json:"updated_at" bun:"updated_at,nullzero,default:current_timestamp"`
+}
+
+// PluginUserConfig stores per-user JSON configuration (with secret fields encrypted at rest) for a plugin.
+type PluginUserConfig struct {
+	bun.BaseModel `bun:"table:plugin_configs"`
+	ID            string    `json:"id" bun:"id,pk"`
+	UserID        string    `json:"user_id" bun:"user_id,notnull"`
+	PluginName    string    `json:"plugin_name" bun:"plugin_name,notnull"`
+	ConfigJSON    string    `json:"config_json" bun:"config_json,notnull"`
+	CreatedAt     time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+	UpdatedAt     time.Time `json:"updated_at" bun:"updated_at,nullzero,default:current_timestamp"`
+}
+
+// BookSource records external plugin provenance so catalog items reflect staged or in-library status.
+type BookSource struct {
+	bun.BaseModel `bun:"table:book_sources"`
+	ID            string    `json:"id" bun:"id,pk"`
+	PluginName    string    `json:"plugin_name" bun:"plugin_name,notnull"`
+	ExternalID    string    `json:"external_id" bun:"external_id,notnull"`
+	UploadJobID   *string   `json:"upload_job_id,omitempty" bun:"upload_job_id"`
+	BookID        *string   `json:"book_id,omitempty" bun:"book_id"`
+	MetadataJSON  *string   `json:"metadata_json,omitempty" bun:"metadata_json"`
+	CreatedAt     time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+	UpdatedAt     time.Time `json:"updated_at" bun:"updated_at,nullzero,default:current_timestamp"`
+}
+
+
 
 

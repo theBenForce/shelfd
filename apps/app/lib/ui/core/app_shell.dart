@@ -23,7 +23,8 @@ class AppShell extends ConsumerWidget {
     if (location.startsWith('/search')) {
       return 3;
     }
-    if (location.startsWith('/uploads')) {
+    if (location.startsWith('/uploads') ||
+        location.startsWith('/plugins/catalog')) {
       return 4;
     }
     if (location.startsWith('/utilities')) {

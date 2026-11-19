@@ -2890,3 +2890,274 @@ func (r *SQLiteStorageEngine) DeleteYotoAccount(ctx context.Context, userID stri
 	}
 	return nil
 }
+
+// --- Plugins & Book Sources ---
+
+func (r *SQLiteStorageEngine) GetPluginState(ctx context.Context, name string) (*PluginState, error) {
+	query := `
+		SELECT name, enabled, installed_version, cached_manifest_json, created_at, updated_at
+		FROM plugins_state
+		WHERE name = ?
+	`
+	st := &PluginState{}
+	var enabledInt int
+	err := r.db.QueryRowContext(ctx, query, name).Scan(
+		&st.Name,
+		&enabledInt,
+		&st.InstalledVersion,
+		&st.CachedManifestJSON,
+		&st.CreatedAt,
+		&st.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting plugin state: %w", err)
+	}
+	st.Enabled = enabledInt != 0
+	return st, nil
+}
+
+func (r *SQLiteStorageEngine) ListPluginStates(ctx context.Context) ([]*PluginState, error) {
+	query := `
+		SELECT name, enabled, installed_version, cached_manifest_json, created_at, updated_at
+		FROM plugins_state
+		ORDER BY name ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("listing plugin states: %w", err)
+	}
+	defer rows.Close()
+
+	var res []*PluginState
+	for rows.Next() {
+		st := &PluginState{}
+		var enabledInt int
+		if err := rows.Scan(
+			&st.Name,
+			&enabledInt,
+			&st.InstalledVersion,
+			&st.CachedManifestJSON,
+			&st.CreatedAt,
+			&st.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning plugin state: %w", err)
+		}
+		st.Enabled = enabledInt != 0
+		res = append(res, st)
+	}
+	return res, rows.Err()
+}
+
+func (r *SQLiteStorageEngine) UpsertPluginState(ctx context.Context, state *PluginState) error {
+	now := time.Now().UTC()
+	if state.CreatedAt.IsZero() {
+		state.CreatedAt = now
+	}
+	state.UpdatedAt = now
+	if state.CachedManifestJSON == "" {
+		state.CachedManifestJSON = "{}"
+	}
+	enabledInt := 0
+	if state.Enabled {
+		enabledInt = 1
+	}
+
+	query := `
+		INSERT INTO plugins_state (name, enabled, installed_version, cached_manifest_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (name) DO UPDATE SET
+			enabled = excluded.enabled,
+			installed_version = excluded.installed_version,
+			cached_manifest_json = excluded.cached_manifest_json,
+			updated_at = excluded.updated_at
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		state.Name,
+		enabledInt,
+		state.InstalledVersion,
+		state.CachedManifestJSON,
+		state.CreatedAt,
+		state.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upserting plugin state: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) DeletePluginState(ctx context.Context, name string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM plugins_state WHERE name = ?", name)
+	if err != nil {
+		return fmt.Errorf("deleting plugin state: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) GetPluginUserConfig(ctx context.Context, userID, pluginName string) (*PluginUserConfig, error) {
+	query := `
+		SELECT id, user_id, plugin_name, config_json, created_at, updated_at
+		FROM plugin_configs
+		WHERE user_id = ? AND plugin_name = ?
+	`
+	cfg := &PluginUserConfig{}
+	err := r.db.QueryRowContext(ctx, query, userID, pluginName).Scan(
+		&cfg.ID,
+		&cfg.UserID,
+		&cfg.PluginName,
+		&cfg.ConfigJSON,
+		&cfg.CreatedAt,
+		&cfg.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting plugin user config: %w", err)
+	}
+	return cfg, nil
+}
+
+func (r *SQLiteStorageEngine) UpsertPluginUserConfig(ctx context.Context, cfg *PluginUserConfig) error {
+	if cfg.ID == "" {
+		cfg.ID = ulid.New()
+	}
+	now := time.Now().UTC()
+	if cfg.CreatedAt.IsZero() {
+		cfg.CreatedAt = now
+	}
+	cfg.UpdatedAt = now
+	if cfg.ConfigJSON == "" {
+		cfg.ConfigJSON = "{}"
+	}
+
+	query := `
+		INSERT INTO plugin_configs (id, user_id, plugin_name, config_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (user_id, plugin_name) DO UPDATE SET
+			config_json = excluded.config_json,
+			updated_at = excluded.updated_at
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		cfg.ID,
+		cfg.UserID,
+		cfg.PluginName,
+		cfg.ConfigJSON,
+		cfg.CreatedAt,
+		cfg.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upserting plugin user config: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) DeletePluginUserConfig(ctx context.Context, userID, pluginName string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM plugin_configs WHERE user_id = ? AND plugin_name = ?", userID, pluginName)
+	if err != nil {
+		return fmt.Errorf("deleting plugin user config: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) UpsertBookSource(ctx context.Context, src *BookSource) error {
+	if src.ID == "" {
+		src.ID = ulid.New()
+	}
+	now := time.Now().UTC()
+	if src.CreatedAt.IsZero() {
+		src.CreatedAt = now
+	}
+	src.UpdatedAt = now
+
+	query := `
+		INSERT INTO book_sources (id, plugin_name, external_id, upload_job_id, book_id, metadata_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (plugin_name, external_id) DO UPDATE SET
+			upload_job_id = COALESCE(excluded.upload_job_id, book_sources.upload_job_id),
+			book_id = COALESCE(excluded.book_id, book_sources.book_id),
+			metadata_json = COALESCE(excluded.metadata_json, book_sources.metadata_json),
+			updated_at = excluded.updated_at
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		src.ID,
+		src.PluginName,
+		src.ExternalID,
+		src.UploadJobID,
+		src.BookID,
+		src.MetadataJSON,
+		src.CreatedAt,
+		src.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upserting book source: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) GetBookSourcesByExternalIDs(ctx context.Context, pluginName string, externalIDs []string) ([]*BookSource, error) {
+	if len(externalIDs) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(externalIDs))
+	args := make([]any, 0, len(externalIDs)+1)
+	args = append(args, pluginName)
+	for i, id := range externalIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	query := fmt.Sprintf(`
+		SELECT id, plugin_name, external_id, upload_job_id, book_id, metadata_json, created_at, updated_at
+		FROM book_sources
+		WHERE plugin_name = ? AND external_id IN (%s)
+	`, strings.Join(placeholders, ","))
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("querying book sources: %w", err)
+	}
+	defer rows.Close()
+
+	var res []*BookSource
+	for rows.Next() {
+		src := &BookSource{}
+		if err := rows.Scan(
+			&src.ID,
+			&src.PluginName,
+			&src.ExternalID,
+			&src.UploadJobID,
+			&src.BookID,
+			&src.MetadataJSON,
+			&src.CreatedAt,
+			&src.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning book source: %w", err)
+		}
+		res = append(res, src)
+	}
+	return res, rows.Err()
+}
+
+func (r *SQLiteStorageEngine) LinkBookSourceByUploadJob(ctx context.Context, uploadJobID, bookID string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE book_sources SET book_id = ?, updated_at = ? WHERE upload_job_id = ?",
+		bookID, now, uploadJobID,
+	)
+	if err != nil {
+		return fmt.Errorf("linking book source by upload job: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteStorageEngine) DeleteUncommittedBookSourceByUploadJob(ctx context.Context, uploadJobID string) error {
+	_, err := r.db.ExecContext(ctx,
+		"DELETE FROM book_sources WHERE upload_job_id = ? AND book_id IS NULL",
+		uploadJobID,
+	)
+	if err != nil {
+		return fmt.Errorf("deleting uncommitted book source: %w", err)
+	}
+	return nil
+}

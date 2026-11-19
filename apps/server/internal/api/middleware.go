@@ -71,12 +71,14 @@ func AuthMiddleware(repo repository.StorageEngine, jwtSecret string) func(http.H
 			}
 
 			// 2. Try JWT token
+			var jwtClaims *UserClaims
 			if user == nil && jwtSecret != "" {
 				claims, err := ValidateJWT(rawToken, jwtSecret)
 				if err == nil && claims != nil {
 					u, err := repo.GetUserByID(r.Context(), claims.UserID)
 					if err == nil && u != nil {
 						user = u
+						jwtClaims = claims
 					}
 				}
 			}
@@ -98,10 +100,58 @@ func AuthMiddleware(repo repository.StorageEngine, jwtSecret string) func(http.H
 				return
 			}
 
+			// Enforce scope restrictions for plugin-scoped invocation JWTs
+			if jwtClaims != nil && jwtClaims.PluginName != "" {
+				if !PluginScopeAllowsRequest(jwtClaims.Scopes, r.Method, r.URL.Path) {
+					writeJSONError(w, http.StatusForbidden, "Insufficient plugin token scope for requested endpoint")
+					return
+				}
+			}
+
 			ctx := context.WithValue(r.Context(), UserContextKey, user)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// PluginScopeAllowsRequest checks if the declared plugin API scopes permit the HTTP method and path.
+func PluginScopeAllowsRequest(scopes []string, method, path string) bool {
+	hasScope := func(target string) bool {
+		for _, s := range scopes {
+			if strings.EqualFold(strings.TrimSpace(s), target) {
+				return true
+			}
+		}
+		return false
+	}
+
+	cleanPath := strings.TrimRight(path, "/")
+	if cleanPath == "" {
+		cleanPath = "/"
+	}
+
+	if method == http.MethodPost {
+		if cleanPath == "/api/v1/books/upload/stage" {
+			return hasScope("uploads:stage")
+		}
+		if strings.HasPrefix(cleanPath, "/api/v1/books/upload/jobs/") && strings.HasSuffix(cleanPath, "/cover") {
+			return hasScope("uploads:stage")
+		}
+		if cleanPath == "/api/v1/books/upload" {
+			return hasScope("uploads:write")
+		}
+	}
+
+	if method == http.MethodGet || method == http.MethodHead {
+		if cleanPath == "/api/v1/books" || strings.HasPrefix(cleanPath, "/api/v1/books/") ||
+			cleanPath == "/api/v1/search" ||
+			cleanPath == "/api/v1/authors" || strings.HasPrefix(cleanPath, "/api/v1/authors/") ||
+			cleanPath == "/api/v1/genres" || cleanPath == "/api/v1/topics" || cleanPath == "/api/v1/series" {
+			return hasScope("books:read")
+		}
+	}
+
+	return false
 }
 
 // CORSMiddleware enables CORS for Flutter web and cross-origin desktop/mobile apps.

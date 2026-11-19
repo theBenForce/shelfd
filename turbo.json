@@ -16,6 +16,12 @@
         "build/web/**"
       ]
     },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [
+        "dist/**"
+      ]
+    },
     "@shelfd/server#build": {
       "dependsOn": ["^build"],
       "inputs": [
@@ -52,6 +58,21 @@
         "lib/**",
         "test/**",
         "pubspec.yaml"
+      ]
+    },
+    "@shelfd/plugin-project-gutenberg#test": {
+      "dependsOn": ["^build"]
+    },
+    "@shelfd/plugin-project-gutenberg#lint": {
+      "dependsOn": ["^build"]
+    },
+    "@shelfd/server#test": {
+      "dependsOn": ["@shelfd/plugin-project-gutenberg#build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "**/*.go",
+        "go.mod",
+        "go.sum"
       ]
     },
     "lint": {

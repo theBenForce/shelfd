@@ -2360,6 +2360,174 @@ func (r *BunStorageEngine) DeleteYotoAccount(ctx context.Context, userID string)
 	return nil
 }
 
+// --- Plugins & Book Sources ---
+
+func (r *BunStorageEngine) GetPluginState(ctx context.Context, name string) (*PluginState, error) {
+	st := new(PluginState)
+	err := r.db.NewSelect().Model(st).
+		Where("name = ?", name).
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting plugin state: %w", err)
+	}
+	return st, nil
+}
+
+func (r *BunStorageEngine) ListPluginStates(ctx context.Context) ([]*PluginState, error) {
+	var states []*PluginState
+	err := r.db.NewSelect().Model(&states).
+		Order("name ASC").
+		Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing plugin states: %w", err)
+	}
+	return states, nil
+}
+
+func (r *BunStorageEngine) UpsertPluginState(ctx context.Context, state *PluginState) error {
+	now := time.Now().UTC()
+	if state.CreatedAt.IsZero() {
+		state.CreatedAt = now
+	}
+	state.UpdatedAt = now
+	if state.CachedManifestJSON == "" {
+		state.CachedManifestJSON = "{}"
+	}
+
+	q := r.db.NewInsert().Model(state)
+	if r.isPG() {
+		q = q.On("CONFLICT (name) DO UPDATE SET enabled = EXCLUDED.enabled, installed_version = EXCLUDED.installed_version, cached_manifest_json = EXCLUDED.cached_manifest_json, updated_at = EXCLUDED.updated_at")
+	} else {
+		q = q.On("CONFLICT (name) DO UPDATE SET enabled = excluded.enabled, installed_version = excluded.installed_version, cached_manifest_json = excluded.cached_manifest_json, updated_at = excluded.updated_at")
+	}
+	if _, err := q.Exec(ctx); err != nil {
+		return fmt.Errorf("upserting plugin state: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) DeletePluginState(ctx context.Context, name string) error {
+	_, err := r.db.NewDelete().Model((*PluginState)(nil)).
+		Where("name = ?", name).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("deleting plugin state: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) GetPluginUserConfig(ctx context.Context, userID, pluginName string) (*PluginUserConfig, error) {
+	cfg := new(PluginUserConfig)
+	err := r.db.NewSelect().Model(cfg).
+		Where("user_id = ? AND plugin_name = ?", userID, pluginName).
+		Scan(ctx)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting plugin user config: %w", err)
+	}
+	return cfg, nil
+}
+
+func (r *BunStorageEngine) UpsertPluginUserConfig(ctx context.Context, cfg *PluginUserConfig) error {
+	if cfg.ID == "" {
+		cfg.ID = ulid.New()
+	}
+	now := time.Now().UTC()
+	if cfg.CreatedAt.IsZero() {
+		cfg.CreatedAt = now
+	}
+	cfg.UpdatedAt = now
+	if cfg.ConfigJSON == "" {
+		cfg.ConfigJSON = "{}"
+	}
+
+	q := r.db.NewInsert().Model(cfg)
+	if r.isPG() {
+		q = q.On("CONFLICT (user_id, plugin_name) DO UPDATE SET config_json = EXCLUDED.config_json, updated_at = EXCLUDED.updated_at")
+	} else {
+		q = q.On("CONFLICT (user_id, plugin_name) DO UPDATE SET config_json = excluded.config_json, updated_at = excluded.updated_at")
+	}
+	if _, err := q.Exec(ctx); err != nil {
+		return fmt.Errorf("upserting plugin user config: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) DeletePluginUserConfig(ctx context.Context, userID, pluginName string) error {
+	_, err := r.db.NewDelete().Model((*PluginUserConfig)(nil)).
+		Where("user_id = ? AND plugin_name = ?", userID, pluginName).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("deleting plugin user config: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) UpsertBookSource(ctx context.Context, src *BookSource) error {
+	if src.ID == "" {
+		src.ID = ulid.New()
+	}
+	now := time.Now().UTC()
+	if src.CreatedAt.IsZero() {
+		src.CreatedAt = now
+	}
+	src.UpdatedAt = now
+
+	q := r.db.NewInsert().Model(src)
+	if r.isPG() {
+		q = q.On("CONFLICT (plugin_name, external_id) DO UPDATE SET upload_job_id = COALESCE(EXCLUDED.upload_job_id, book_sources.upload_job_id), book_id = COALESCE(EXCLUDED.book_id, book_sources.book_id), metadata_json = COALESCE(EXCLUDED.metadata_json, book_sources.metadata_json), updated_at = EXCLUDED.updated_at")
+	} else {
+		q = q.On("CONFLICT (plugin_name, external_id) DO UPDATE SET upload_job_id = COALESCE(excluded.upload_job_id, book_sources.upload_job_id), book_id = COALESCE(excluded.book_id, book_sources.book_id), metadata_json = COALESCE(excluded.metadata_json, book_sources.metadata_json), updated_at = excluded.updated_at")
+	}
+	if _, err := q.Exec(ctx); err != nil {
+		return fmt.Errorf("upserting book source: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) GetBookSourcesByExternalIDs(ctx context.Context, pluginName string, externalIDs []string) ([]*BookSource, error) {
+	if len(externalIDs) == 0 {
+		return nil, nil
+	}
+	var res []*BookSource
+	err := r.db.NewSelect().Model(&res).
+		Where("plugin_name = ?", pluginName).
+		Where("external_id IN (?)", bun.In(externalIDs)).
+		Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("querying book sources: %w", err)
+	}
+	return res, nil
+}
+
+func (r *BunStorageEngine) LinkBookSourceByUploadJob(ctx context.Context, uploadJobID, bookID string) error {
+	now := time.Now().UTC()
+	_, err := r.db.NewUpdate().Model((*BookSource)(nil)).
+		Set("book_id = ?", bookID).
+		Set("updated_at = ?", now).
+		Where("upload_job_id = ?", uploadJobID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("linking book source by upload job: %w", err)
+	}
+	return nil
+}
+
+func (r *BunStorageEngine) DeleteUncommittedBookSourceByUploadJob(ctx context.Context, uploadJobID string) error {
+	_, err := r.db.NewDelete().Model((*BookSource)(nil)).
+		Where("upload_job_id = ? AND book_id IS NULL", uploadJobID).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("deleting uncommitted book source: %w", err)
+	}
+	return nil
+}
+
 
 
 

@@ -8,9 +8,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shelfd/shelfd/internal/ai"
+	"github.com/shelfd/shelfd/internal/plugins"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/ulid"
 )
+
+// PluginToolProvider supplies dynamic MCP tools exposed by installed plugins.
+type PluginToolProvider interface {
+	AvailableMCPTools() []plugins.ToolDef
+	CallMCPTool(ctx context.Context, qualifiedName string, args map[string]any, userID, username string) (*plugins.ToolCallResult, bool, error)
+}
 
 // isValidID checks if an identifier is a valid ULID or UUID.
 func isValidID(s string) bool {
@@ -24,11 +31,12 @@ func isValidID(s string) bool {
 	return err == nil
 }
 
-// ToolExecutor executes MCP tools against repository and AI services.
+// ToolExecutor executes MCP tools against repository, AI services, and installed plugins.
 type ToolExecutor struct {
-	repo     repository.StorageEngine
-	aiClient ai.Client
-	logger   *slog.Logger
+	repo           repository.StorageEngine
+	aiClient       ai.Client
+	pluginProvider PluginToolProvider
+	logger         *slog.Logger
 }
 
 // NewToolExecutor creates a new ToolExecutor with structured logger.
@@ -43,9 +51,39 @@ func NewToolExecutor(repo repository.StorageEngine, aiClient ai.Client, logger *
 	}
 }
 
+// SetPluginProvider attaches a PluginToolProvider so enabled plugin tools appear on MCP endpoints.
+func (te *ToolExecutor) SetPluginProvider(provider PluginToolProvider) {
+	te.pluginProvider = provider
+}
+
+// AvailableTools returns built-in MCP tools merged with enabled plugin tools.
+func (te *ToolExecutor) AvailableTools() []Tool {
+	tools := AvailableTools()
+	if te.pluginProvider == nil {
+		return tools
+	}
+	for _, pt := range te.pluginProvider.AvailableMCPTools() {
+		tools = append(tools, Tool{
+			Name:        pt.Name,
+			Description: pt.Description,
+			InputSchema: pt.InputSchema,
+		})
+	}
+	return tools
+}
+
 // AvailableToolDefinitions returns the LLM-compatible tool definitions.
 func (te *ToolExecutor) AvailableToolDefinitions() []ai.ToolDefinition {
-	return AvailableToolDefinitions()
+	tools := te.AvailableTools()
+	defs := make([]ai.ToolDefinition, len(tools))
+	for i, t := range tools {
+		defs[i] = ai.ToolDefinition{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.InputSchema,
+		}
+	}
+	return defs
 }
 
 // ExecuteInProcess dispatches a tool call for internal consumers (such as chat agents)
@@ -59,11 +97,37 @@ func (te *ToolExecutor) ExecuteInProcess(ctx context.Context, name string, args 
 	case "read_chapter_content":
 		return te.readChapterContent(ctx, args)
 	default:
+		if te.pluginProvider != nil {
+			userID, username := te.resolveInvokingUser(ctx)
+			res, matched, err := te.pluginProvider.CallMCPTool(ctx, name, args, userID, username)
+			if err != nil {
+				return &ai.ToolExecutionResult{
+					IsError: true,
+					Content: fmt.Sprintf("plugin tool error: %v", err),
+				}, nil
+			}
+			if matched && res != nil {
+				return &ai.ToolExecutionResult{
+					IsError: res.IsError,
+					Content: res.Content,
+				}, nil
+			}
+		}
 		return &ai.ToolExecutionResult{
 			IsError: true,
 			Content: fmt.Sprintf("unknown tool: %s", name),
 		}, nil
 	}
+}
+
+func (te *ToolExecutor) resolveInvokingUser(ctx context.Context) (string, string) {
+	if tok, ok := ctx.Value(TokenContextKey).(*repository.APIToken); ok && tok != nil && tok.UserID != "" {
+		if u, err := te.repo.GetUserByID(ctx, tok.UserID); err == nil && u != nil {
+			return u.ID, u.Username
+		}
+		return tok.UserID, ""
+	}
+	return "", ""
 }
 
 // Execute dispatches a tool call to the appropriate tool implementation for JSON-RPC MCP clients.

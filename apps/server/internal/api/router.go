@@ -7,6 +7,7 @@ import (
 	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/config"
 	"github.com/shelfd/shelfd/internal/events"
+	"github.com/shelfd/shelfd/internal/plugins"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 	"github.com/shelfd/shelfd/internal/worker"
@@ -21,6 +22,7 @@ type RouterConfig struct {
 	UploadWorker    *worker.UploadWorker
 	AIClient        ai.Client
 	ToolInvoker     ai.ToolInvoker
+	PluginHost      *plugins.Host
 	NotebookLM      config.NotebookLMConfig
 	Yoto            config.YotoConfig
 	Hub             *events.Hub
@@ -57,6 +59,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	audioHandler := NewAudiobookHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, logger)
 	metadataHandler := NewMetadataHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
 	yotoHandler := NewYotoHandler(cfg.Repo, cfg.Yoto, cfg.DataDir, cfg.LibraryDir, logger)
+	pluginHandler := NewPluginHandler(cfg.PluginHost, logger)
 
 	auth := AuthMiddleware(cfg.Repo, cfg.JWTSecret)
 
@@ -71,6 +74,19 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("POST /api/v1/auth/tokens", auth(http.HandlerFunc(authHandler.CreateToken)))
 	mux.Handle("GET /api/v1/auth/tokens", auth(http.HandlerFunc(authHandler.ListTokens)))
 	mux.Handle("DELETE /api/v1/auth/tokens/{id}", auth(http.HandlerFunc(authHandler.DeleteToken)))
+
+	// Plugin system routes
+	mux.Handle("GET /api/v1/plugins", auth(http.HandlerFunc(pluginHandler.ListPlugins)))
+	mux.Handle("POST /api/v1/plugins/install", auth(http.HandlerFunc(pluginHandler.InstallPlugin)))
+	mux.Handle("POST /api/v1/plugins/discover", auth(http.HandlerFunc(pluginHandler.DiscoverPlugins)))
+	mux.Handle("GET /api/v1/plugins/{name}", auth(http.HandlerFunc(pluginHandler.GetPlugin)))
+	mux.Handle("POST /api/v1/plugins/{name}/enable", auth(http.HandlerFunc(pluginHandler.EnablePlugin)))
+	mux.Handle("POST /api/v1/plugins/{name}/disable", auth(http.HandlerFunc(pluginHandler.DisablePlugin)))
+	mux.Handle("GET /api/v1/plugins/{name}/config", auth(http.HandlerFunc(pluginHandler.GetConfig)))
+	mux.Handle("PUT /api/v1/plugins/{name}/config", auth(http.HandlerFunc(pluginHandler.UpdateConfig)))
+	mux.Handle("POST /api/v1/plugins/{name}/commands/{command}", auth(http.HandlerFunc(pluginHandler.InvokeCommand)))
+	mux.Handle("GET /api/v1/plugins/{name}/catalog", auth(http.HandlerFunc(pluginHandler.GetCatalog)))
+	mux.Handle("POST /api/v1/plugins/{name}/catalog/stage", auth(http.HandlerFunc(pluginHandler.StageCatalogItems)))
 
 	// Yoto integration routes
 	mux.Handle("GET /api/v1/integrations/yoto/status", auth(http.HandlerFunc(yotoHandler.GetStatus)))

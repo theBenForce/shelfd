@@ -10,21 +10,37 @@ import (
 
 // UserClaims defines the JWT claims issued by Shelfd.
 type UserClaims struct {
-	UserID   string `json:"uid"`
-	Username string `json:"name"`
+	UserID     string   `json:"uid"`
+	Username   string   `json:"name"`
+	PluginName string   `json:"plg,omitempty"`
+	Scopes     []string `json:"scp,omitempty"`
 	jwt.RegisteredClaims
 }
 
 // GenerateJWT creates and signs a new HMAC-SHA256 JWT for an authenticated user.
 func GenerateJWT(userID, username, secret string, duration time.Duration) (string, time.Time, error) {
+	return generateJWTWithScopes(userID, username, "", nil, secret, duration)
+}
+
+// GeneratePluginInvocationJWT creates a short-lived, scope-restricted JWT for a plugin RPC invocation on behalf of a user.
+func GeneratePluginInvocationJWT(userID, username, pluginName string, scopes []string, secret string, duration time.Duration) (string, time.Time, error) {
+	if pluginName == "" {
+		return "", time.Time{}, errors.New("plugin name cannot be empty")
+	}
+	return generateJWTWithScopes(userID, username, pluginName, scopes, secret, duration)
+}
+
+func generateJWTWithScopes(userID, username, pluginName string, scopes []string, secret string, duration time.Duration) (string, time.Time, error) {
 	if secret == "" {
 		return "", time.Time{}, errors.New("jwt secret cannot be empty")
 	}
 
 	expiresAt := time.Now().Add(duration)
 	claims := UserClaims{
-		UserID:   userID,
-		Username: username,
+		UserID:     userID,
+		Username:   username,
+		PluginName: pluginName,
+		Scopes:     scopes,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID,
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
