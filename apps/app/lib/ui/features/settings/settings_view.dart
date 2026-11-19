@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../data/models/plugin.dart';
 import '../../core/app_shell.dart';
+import '../../core/primitives.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
 import '../../core/theme.dart';
@@ -26,6 +27,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   final _confirmPasswordController = TextEditingController();
   final _defaultUsernameController = TextEditingController();
 
+  bool _showPasswordForm = false;
   bool _obscureCurrent = true;
   bool _obscureNew = true;
   bool _obscureConfirm = true;
@@ -44,7 +46,8 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
     final callbackCode = Uri.base.queryParameters['code'];
     if (callbackCode != null && callbackCode.trim().isNotEmpty) {
-      final callbackPlugin = Uri.base.queryParameters['plugin']?.trim() ??
+      final callbackPlugin =
+          Uri.base.queryParameters['plugin']?.trim() ??
           Uri.base.queryParameters['state']?.trim() ??
           storage.getActivePkcePlugin() ??
           'yoto';
@@ -106,16 +109,17 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   }
 
   void _onNavTapped(int index) {
-    if (index == 0) {
-      context.go('/books');
-    } else if (index == 1) {
-      context.go('/series');
-    } else if (index == 2) {
-      context.go('/authors');
-    } else if (index == 3) {
-      context.go('/search');
-    } else if (index == 4) {
-      context.go('/settings');
+    switch (index) {
+      case 0:
+        context.go('/books');
+      case 1:
+        context.go('/search');
+      case 2:
+        context.go('/uploads');
+      case 3:
+        context.go('/utilities');
+      case 4:
+        context.go('/settings');
     }
   }
 
@@ -144,7 +148,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     setState(() => _isChangingPassword = true);
 
     try {
-      await ref.read(authProvider.notifier).changePassword(currentPass, newPass);
+      await ref
+          .read(authProvider.notifier)
+          .changePassword(currentPass, newPass);
       if (mounted) {
         setState(() {
           _isChangingPassword = false;
@@ -156,7 +162,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Password updated successfully!'),
-            backgroundColor: Color(0xFF2B8A3E),
+            backgroundColor: AppTokens.libraryGreen,
           ),
         );
       }
@@ -167,7 +173,8 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           final msg = e.toString();
           if (msg.contains('ApiException')) {
             final colon = msg.indexOf(':');
-            _passwordError = colon != -1 ? msg.substring(colon + 1).trim() : msg;
+            _passwordError =
+                colon != -1 ? msg.substring(colon + 1).trim() : msg;
           } else {
             _passwordError = msg;
           }
@@ -181,700 +188,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     if (mounted) {
       context.go('/connect');
     }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final authState = ref.watch(authProvider);
-    final horizontalPad = Responsive.horizontalPadding(context);
-    final isDesktop = Responsive.isDesktop(context);
-    final currentUsername = authState.user?.username ?? 'Connected User';
-    final colors = context.shelfdColors;
-
-    final hasAppShell = context.findAncestorWidgetOfExactType<AppShell>() != null;
-
-    final topBar = isDesktop
-        ? null
-        : ShelfdTopBar(
-            title: 'Settings',
-            subtitle: 'Homelab Daemon Configuration',
-          );
-
-    final bodyContent = Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: AppTokens.maxReadingWidth),
-        child: ListView(
-          cacheExtent: 1200,
-          padding: EdgeInsets.symmetric(
-            horizontal: horizontalPad,
-            vertical: AppTokens.space24,
-          ),
-          children: [
-            if (isDesktop) ...[
-              Text(
-                'Settings',
-                style: AppTypography.displaySerif(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w600,
-                  color: colors.ink,
-                ),
-              ),
-              const SizedBox(height: AppTokens.space4),
-              Text(
-                'Daemon configuration, security & account',
-                style: AppTypography.bodySans(fontSize: 14, color: colors.secondaryInk),
-              ),
-              const SizedBox(height: AppTokens.space24),
-            ],
-
-            // Appearance & Theme BentoCard
-            Consumer(
-              builder: (context, ref, _) {
-                final readerSettings = ref.watch(readerSettingsProvider);
-                final c = context.shelfdColors;
-                return BentoCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.palette_outlined, size: 20, color: c.accentPrimary),
-                          const SizedBox(width: AppTokens.space8),
-                          Text(
-                            'Appearance & Theme',
-                            style: AppTypography.titleSerif(fontSize: 18, color: c.ink),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: AppTokens.space8),
-                      Text(
-                        'Choose the interface and reading color palette across the application.',
-                        style: AppTypography.captionSans(color: c.secondaryInk),
-                      ),
-                      const SizedBox(height: AppTokens.space16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: SegmentedButton<ReadingThemeMode>(
-                          style: ButtonStyle(
-                            backgroundColor: WidgetStateProperty.resolveWith(
-                              (states) => states.contains(WidgetState.selected)
-                                  ? c.accentContainer
-                                  : c.containerLow,
-                            ),
-                            foregroundColor: WidgetStateProperty.resolveWith(
-                              (states) => states.contains(WidgetState.selected)
-                                  ? c.accentPrimary
-                                  : c.ink,
-                            ),
-                            side: WidgetStatePropertyAll(BorderSide(color: c.border)),
-                          ),
-                          segments: const [
-                            ButtonSegment(
-                              value: ReadingThemeMode.bone,
-                              label: Text('Bone'),
-                              icon: Icon(Icons.light_mode_outlined),
-                            ),
-                            ButtonSegment(
-                              value: ReadingThemeMode.sepia,
-                              label: Text('Sepia'),
-                              icon: Icon(Icons.menu_book_outlined),
-                            ),
-                            ButtonSegment(
-                              value: ReadingThemeMode.dark,
-                              label: Text('Dark'),
-                              icon: Icon(Icons.dark_mode_outlined),
-                            ),
-                          ],
-                          selected: {readerSettings.themeMode},
-                          onSelectionChanged: (set) {
-                            if (set.isNotEmpty) {
-                              ref.read(readerSettingsProvider.notifier).setThemeMode(set.first);
-                            }
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-
-            const SizedBox(height: AppTokens.space20),
-
-            // Account & Security BentoCard
-            BentoCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.shield_outlined, size: 20, color: colors.accentPrimary),
-                      const SizedBox(width: AppTokens.space8),
-                      Text(
-                        'Account & Security',
-                        style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
-                      ),
-                      const Spacer(),
-                      StatusBadge(
-                        label: currentUsername,
-                        backgroundColor: colors.containerLow,
-                        textColor: colors.ink,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: AppTokens.space16),
-                  Divider(color: colors.subtleBorder, height: 1),
-                  const SizedBox(height: AppTokens.space16),
-
-                  // Default Username Preference
-                  Text(
-                    'Default Username',
-                    style: AppTypography.bodySans(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: colors.ink,
-                    ),
-                  ),
-                  const SizedBox(height: AppTokens.space4),
-                  Text(
-                    'Preferred username pre-filled during pairing and server connection.',
-                    style: AppTypography.captionSans(color: colors.mutedInk),
-                  ),
-                  const SizedBox(height: AppTokens.space8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _defaultUsernameController,
-                          style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
-                          decoration: InputDecoration(
-                            hintText: 'e.g. admin or your username',
-                            isDense: true,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              borderSide: BorderSide(color: colors.border),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              borderSide: BorderSide(color: colors.border),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
-                            ),
-                            prefixIcon: Icon(Icons.person_outline, size: 20, color: colors.mutedInk),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: AppTokens.space8),
-                      OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: colors.ink,
-                          side: BorderSide(color: colors.border),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        ),
-                        onPressed: _handleSaveDefaultUsername,
-                        child: const Text('Save'),
-                      ),
-                    ],
-                  ),
-                  if (_usernameSavedMessage != null) ...[
-                    const SizedBox(height: AppTokens.space8),
-                    Text(
-                      _usernameSavedMessage!,
-                      style: AppTypography.captionSans(
-                        color: colors.accentSecondary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: AppTokens.space24),
-                  Divider(color: colors.subtleBorder, height: 1),
-                  const SizedBox(height: AppTokens.space16),
-
-                  // Change Password Sub-section
-                  Text(
-                    'Change Password',
-                    style: AppTypography.bodySans(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: colors.ink,
-                    ),
-                  ),
-                  const SizedBox(height: AppTokens.space4),
-                  Text(
-                    'Update your account credentials on the homelab daemon.',
-                    style: AppTypography.captionSans(color: colors.mutedInk),
-                  ),
-                  const SizedBox(height: AppTokens.space16),
-
-                  if (_passwordError != null) ...[
-                    Container(
-                      padding: const EdgeInsets.all(AppTokens.space12),
-                      decoration: BoxDecoration(
-                        color: colors.errorBg,
-                        borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                        border: Border.all(color: colors.errorBorder),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.error_outline, size: 18, color: colors.errorText),
-                          const SizedBox(width: AppTokens.space8),
-                          Expanded(
-                            child: Text(
-                              _passwordError!,
-                              style: AppTypography.bodySans(color: colors.errorText, fontSize: 13),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: AppTokens.space16),
-                  ],
-
-                  if (_passwordSuccess != null) ...[
-                    Container(
-                      padding: const EdgeInsets.all(AppTokens.space12),
-                      decoration: BoxDecoration(
-                        color: colors.isDark
-                            ? colors.accentSecondaryContainer
-                            : AppTokens.completedBadgeBg,
-                        borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                        border: Border.all(color: colors.accentSecondary.withValues(alpha: 0.4)),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.check_circle_outline, size: 18, color: colors.accentSecondary),
-                          const SizedBox(width: AppTokens.space8),
-                          Expanded(
-                            child: Text(
-                              _passwordSuccess!,
-                              style: AppTypography.bodySans(color: colors.accentSecondary, fontSize: 13),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: AppTokens.space16),
-                  ],
-
-                  Form(
-                    key: _passwordFormKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        TextFormField(
-                          controller: _currentPasswordController,
-                          obscureText: _obscureCurrent,
-                          style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
-                          decoration: InputDecoration(
-                            labelText: 'Current Password',
-                            hintText: '••••••••',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              borderSide: BorderSide(color: colors.border),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              borderSide: BorderSide(color: colors.border),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
-                            ),
-                            prefixIcon: Icon(Icons.lock_outline, color: colors.mutedInk),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscureCurrent ? Icons.visibility_off : Icons.visibility,
-                                color: colors.mutedInk,
-                              ),
-                              onPressed: () => setState(() => _obscureCurrent = !_obscureCurrent),
-                            ),
-                          ),
-                          validator: (v) => (v == null || v.isEmpty) ? 'Current password required' : null,
-                        ),
-                        const SizedBox(height: AppTokens.space16),
-
-                        TextFormField(
-                          controller: _newPasswordController,
-                          obscureText: _obscureNew,
-                          style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
-                          decoration: InputDecoration(
-                            labelText: 'New Password',
-                            hintText: '••••••••',
-                            helperText: 'Minimum 6 characters',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              borderSide: BorderSide(color: colors.border),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              borderSide: BorderSide(color: colors.border),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
-                            ),
-                            prefixIcon: Icon(Icons.lock_reset_outlined, color: colors.mutedInk),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscureNew ? Icons.visibility_off : Icons.visibility,
-                                color: colors.mutedInk,
-                              ),
-                              onPressed: () => setState(() => _obscureNew = !_obscureNew),
-                            ),
-                          ),
-                          validator: (v) {
-                            if (v == null || v.isEmpty) return 'New password required';
-                            if (v.length < 6) return 'Password must be at least 6 characters';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: AppTokens.space16),
-
-                        TextFormField(
-                          controller: _confirmPasswordController,
-                          obscureText: _obscureConfirm,
-                          style: AppTypography.bodySans(fontSize: 14, color: colors.ink),
-                          decoration: InputDecoration(
-                            labelText: 'Confirm New Password',
-                            hintText: '••••••••',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              borderSide: BorderSide(color: colors.border),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              borderSide: BorderSide(color: colors.border),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                              borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
-                            ),
-                            prefixIcon: Icon(Icons.check_circle_outline, color: colors.mutedInk),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscureConfirm ? Icons.visibility_off : Icons.visibility,
-                                color: colors.mutedInk,
-                              ),
-                              onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
-                            ),
-                          ),
-                          validator: (v) {
-                            if (v == null || v.isEmpty) return 'Please confirm new password';
-                            if (v != _newPasswordController.text) return 'Passwords do not match';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: AppTokens.space20),
-
-                        PrimaryButton(
-                          label: 'Update Password',
-                          icon: Icons.check_rounded,
-                          isLoading: _isChangingPassword,
-                          onPressed: _handleChangePassword,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: AppTokens.space20),
-
-            // Uploads & Ingestion Card
-            Consumer(
-              builder: (context, ref, _) {
-                final uploadState = ref.watch(uploadProvider);
-                final c = context.shelfdColors;
-                return BentoCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.cloud_upload_outlined, size: 20, color: c.accentPrimary),
-                          const SizedBox(width: AppTokens.space8),
-                          Text(
-                            'Uploads & Ingestion',
-                            style: AppTypography.titleSerif(fontSize: 18, color: c.ink),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: AppTokens.space12),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(
-                          'Auto-commit uploads without review',
-                          style: AppTypography.bodySans(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: c.ink,
-                          ),
-                        ),
-                        subtitle: Text(
-                          'Automatically ingest dropped EPUBs into /library using extracted metadata without requiring manual approval.',
-                          style: AppTypography.captionSans(color: c.mutedInk),
-                        ),
-                        value: uploadState.autoCommit,
-                        activeTrackColor: c.accentPrimary,
-                        onChanged: (val) => ref.read(uploadProvider.notifier).toggleAutoCommit(val),
-                      ),
-                      const SizedBox(height: AppTokens.space12),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: c.ink,
-                          side: BorderSide(color: c.border),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppTokens.space16,
-                            vertical: AppTokens.space12,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                          ),
-                        ),
-                        icon: const Icon(Icons.cloud_upload_outlined, size: 18),
-                        label: const Text('Open Uploads & Staged Queue'),
-                        onPressed: () => context.go('/uploads'),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-
-            const SizedBox(height: AppTokens.space20),
-
-            // Library Utilities Card
-            BentoCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.handyman_outlined, size: 20, color: colors.accentPrimary),
-                      const SizedBox(width: AppTokens.space8),
-                      Text(
-                        'Library Utilities',
-                        style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: AppTokens.space8),
-                  Text(
-                    'Detect duplicate books, merge book editions, and resolve library conflicts.',
-                    style: AppTypography.captionSans(color: colors.mutedInk),
-                  ),
-                  const SizedBox(height: AppTokens.space12),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: colors.ink,
-                      side: BorderSide(color: colors.border),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppTokens.space16,
-                        vertical: AppTokens.space12,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                      ),
-                    ),
-                    icon: const Icon(Icons.merge_type_rounded, size: 18),
-                    label: const Text('Manage Duplicates & Book Merge'),
-                    onPressed: () => context.go('/utilities'),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: AppTokens.space20),
-
-            // Server & Live Indexing Status Card
-            Consumer(
-              builder: (context, ref, _) {
-                final queueState = ref.watch(queueProvider);
-                final status = queueState.status;
-                final libraryState = ref.watch(libraryProvider);
-                final resolvedBook =
-                    status != null ? resolveBookTitle(status.currentBook, libraryState.books) : null;
-                final progress = status != null ? (status.progressPercent / 100.0).clamp(0.0, 1.0) : 0.0;
-                final c = context.shelfdColors;
-
-                return BentoCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.dns_outlined, size: 20, color: c.accentPrimary),
-                          const SizedBox(width: AppTokens.space8),
-                          Text(
-                            'Server Connection',
-                            style: AppTypography.titleSerif(fontSize: 18, color: c.ink),
-                          ),
-                          const Spacer(),
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: c.accentSecondary,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: AppTokens.space8),
-                          Text(
-                            'Connected',
-                            style: AppTypography.captionSans(color: c.accentSecondary),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: AppTokens.space8),
-                      Text(
-                        'Host: ${authState.serverUrl ?? 'Self-hosted API'}',
-                        style: AppTypography.mono(fontSize: 12, color: c.secondaryInk),
-                      ),
-
-                      if (status != null) ...[
-                        const SizedBox(height: AppTokens.space16),
-                        Divider(color: c.subtleBorder, height: 1),
-                        const SizedBox(height: AppTokens.space16),
-                        Row(
-                          children: [
-                            Icon(Icons.auto_awesome_rounded, size: 16, color: c.accentPrimary),
-                            const SizedBox(width: AppTokens.space8),
-                            Text(
-                              'AI Indexing & Vectors',
-                              style: AppTypography.bodySans(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: c.ink,
-                              ),
-                            ),
-                            const Spacer(),
-                            Text(
-                              '${status.progressPercent.toStringAsFixed(0)}%',
-                              style: AppTypography.mono(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: c.accentPrimary,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: AppTokens.space8),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(2),
-                          child: LinearProgressIndicator(
-                            value: progress,
-                            minHeight: 4,
-                            backgroundColor: c.containerLow,
-                            valueColor: AlwaysStoppedAnimation<Color>(c.accentPrimary),
-                          ),
-                        ),
-                        const SizedBox(height: AppTokens.space8),
-                        Text(
-                          '${status.indexedChapters} of ${status.totalChapters} chapters processed (${status.pendingChapters} pending)',
-                          style: AppTypography.captionSans(color: c.mutedInk),
-                        ),
-                        if (resolvedBook != null && resolvedBook.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            'Now processing: $resolvedBook',
-                            style: AppTypography.captionSans(color: c.ink),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ],
-                      const SizedBox(height: AppTokens.space16),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: c.ink,
-                          side: BorderSide(color: c.border),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppTokens.space16,
-                            vertical: AppTokens.space12,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                          ),
-                        ),
-                        icon: queueState.isLoading
-                            ? SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: c.accentPrimary,
-                                ),
-                              )
-                            : const Icon(Icons.sync_rounded, size: 18),
-                        label: Text(queueState.isLoading ? 'Scanning...' : 'Rescan Library for New Books'),
-                        onPressed: queueState.isLoading
-                            ? null
-                            : () async {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Scanning library for new books...')),
-                                );
-                                await ref.read(bookRepositoryProvider).triggerScan();
-                              },
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-
-            const SizedBox(height: AppTokens.space24),
-
-            // Disconnect / Sign Out Button
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: colors.errorText,
-                side: BorderSide(color: colors.errorBorder),
-                backgroundColor: colors.errorBg.withValues(alpha: 0.35),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                ),
-              ),
-              icon: const Icon(Icons.logout_rounded, size: 18),
-              label: const Text('Disconnect / Sign Out'),
-              onPressed: _handleLogout,
-            ),
-
-            const SizedBox(height: AppTokens.space24),
-
-            // Plugins & Storefronts Card
-            Consumer(
-              builder: (context, ref, _) {
-                final pluginsState = ref.watch(pluginsProvider);
-                final c = context.shelfdColors;
-                return _buildPluginsSettingsCard(context, c, pluginsState);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (hasAppShell) {
-      return Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: topBar,
-        body: bodyContent,
-      );
-    }
-
-    return ShelfdAdaptiveScaffold(
-      currentIndex: 4,
-      onNavTap: _onNavTapped,
-      currentPath: '/settings',
-      onNavigate: (path) => context.go(path),
-      appBar: topBar,
-      body: bodyContent,
-    );
   }
 
   Future<void> _handleInstallPluginZip() async {
@@ -901,102 +214,207 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     }
   }
 
-  Widget _buildPluginsSettingsCard(
+  @override
+  Widget build(BuildContext context) {
+    final authState = ref.watch(authProvider);
+    final horizontalPad = Responsive.horizontalPadding(context);
+    final isDesktop = Responsive.isDesktop(context);
+    final currentUsername = authState.user?.username ?? 'Connected User';
+    final colors = context.shelfdColors;
+
+    final hasAppShell =
+        context.findAncestorWidgetOfExactType<AppShell>() != null;
+
+    final topBar = isDesktop
+        ? null
+        : const ShelfdTopBar(
+            title: 'Settings',
+            subtitle: 'Appearance, plugins, server & account',
+          );
+
+    final bodyContent = Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppTokens.maxReadingWidth),
+        child: ListView(
+          cacheExtent: 1200,
+          padding: EdgeInsets.symmetric(
+            horizontal: horizontalPad,
+            vertical: AppTokens.space24,
+          ),
+          children: [
+            if (isDesktop) ...[
+              const ShelfdPageHeader(
+                title: 'Settings',
+                subtitle: 'Appearance, plugins, server & account',
+              ),
+              const SizedBox(height: AppTokens.space24),
+            ],
+
+            // 1. Appearance & Theme
+            _buildAppearanceCard(),
+            const SizedBox(height: AppTokens.space20),
+
+            // 2. Plugins & Storefronts
+            Consumer(
+              builder: (context, ref, _) {
+                final pluginsState = ref.watch(pluginsProvider);
+                return _buildPluginsCard(context, context.shelfdColors, pluginsState);
+              },
+            ),
+            const SizedBox(height: AppTokens.space20),
+
+            // 3. Server Connection & AI Indexing
+            _buildServerCard(authState.serverUrl),
+            const SizedBox(height: AppTokens.space20),
+
+            // 4. Account & Security (with progressive disclosure for password)
+            _buildAccountCard(colors, currentUsername),
+            const SizedBox(height: AppTokens.space32),
+          ],
+        ),
+      ),
+    );
+
+    if (hasAppShell) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: topBar,
+        body: bodyContent,
+      );
+    }
+
+    return ShelfdAdaptiveScaffold(
+      currentIndex: 4,
+      onNavTap: _onNavTapped,
+      currentPath: '/settings',
+      onNavigate: (path) => context.go(path),
+      appBar: topBar,
+      body: bodyContent,
+    );
+  }
+
+  Widget _buildAppearanceCard() {
+    return Consumer(
+      builder: (context, ref, _) {
+        final readerSettings = ref.watch(readerSettingsProvider);
+        final c = context.shelfdColors;
+        return ShelfdSectionCard(
+          icon: Icons.palette_outlined,
+          title: 'Appearance & Theme',
+          subtitle: 'Choose the interface and reading palette across Shelfd.',
+          child: SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<ReadingThemeMode>(
+              style: ButtonStyle(
+                backgroundColor: WidgetStateProperty.resolveWith(
+                  (states) => states.contains(WidgetState.selected)
+                      ? c.accentContainer
+                      : c.containerLow,
+                ),
+                foregroundColor: WidgetStateProperty.resolveWith(
+                  (states) => states.contains(WidgetState.selected)
+                      ? c.accentPrimary
+                      : c.ink,
+                ),
+                side: WidgetStatePropertyAll(BorderSide(color: c.border)),
+              ),
+              segments: const [
+                ButtonSegment(
+                  value: ReadingThemeMode.bone,
+                  label: Text('Bone'),
+                  icon: Icon(Icons.light_mode_outlined),
+                ),
+                ButtonSegment(
+                  value: ReadingThemeMode.sepia,
+                  label: Text('Sepia'),
+                  icon: Icon(Icons.menu_book_outlined),
+                ),
+                ButtonSegment(
+                  value: ReadingThemeMode.dark,
+                  label: Text('Dark'),
+                  icon: Icon(Icons.dark_mode_outlined),
+                ),
+              ],
+              selected: {readerSettings.themeMode},
+              onSelectionChanged: (set) {
+                if (set.isNotEmpty) {
+                  ref
+                      .read(readerSettingsProvider.notifier)
+                      .setThemeMode(set.first);
+                }
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPluginsCard(
     BuildContext context,
     ShelfdColors c,
     PluginsState pluginsState,
   ) {
-    return BentoCard(
+    return ShelfdSectionCard(
       key: const Key('plugins_settings_card'),
+      icon: Icons.extension_outlined,
+      title: 'Plugins & Storefronts',
+      subtitle:
+          'Connect external book storefronts, outbound actions, or MCP tools.',
+      trailing: Wrap(
+        spacing: AppTokens.space8,
+        runSpacing: AppTokens.space8,
+        children: [
+          ShelfdSecondaryButton(
+            key: const Key('plugins_rescan_button'),
+            label: 'Rescan',
+            icon: Icons.refresh_rounded,
+            compact: true,
+            onPressed: pluginsState.isLoading
+                ? null
+                : () => ref.read(pluginsProvider.notifier).discover(),
+          ),
+          FilledButton.icon(
+            key: const Key('plugins_install_zip_button'),
+            style: FilledButton.styleFrom(
+              backgroundColor: c.accentPrimary,
+              foregroundColor: c.onAccent,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppTokens.space12,
+                vertical: AppTokens.space8,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+              ),
+            ),
+            onPressed:
+                pluginsState.isInstalling ? null : _handleInstallPluginZip,
+            icon: const Icon(Icons.upload_file_rounded, size: 15),
+            label: Text(
+              pluginsState.isInstalling ? 'Installing...' : 'Install .zip',
+              style: AppTypography.bodySans(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: c.onAccent,
+              ),
+            ),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(Icons.extension_outlined, size: 20, color: c.accentPrimary),
-              const SizedBox(width: AppTokens.space8),
-              Expanded(
-                child: Text(
-                  'Plugins & Storefronts',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTypography.titleSerif(fontSize: 18, color: c.ink),
-                ),
-              ),
-              const SizedBox(width: AppTokens.space8),
-              OutlinedButton.icon(
-                key: const Key('plugins_rescan_button'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: c.ink,
-                  side: BorderSide(color: c.border),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppTokens.space12,
-                    vertical: AppTokens.space8,
-                  ),
-                ),
-                onPressed: pluginsState.isLoading
-                    ? null
-                    : () => ref.read(pluginsProvider.notifier).discover(),
-                icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Rescan'),
-              ),
-              const SizedBox(width: AppTokens.space8),
-              FilledButton.icon(
-                key: const Key('plugins_install_zip_button'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: c.accentPrimary,
-                  foregroundColor: c.onAccent,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppTokens.space12,
-                    vertical: AppTokens.space8,
-                  ),
-                ),
-                onPressed:
-                    pluginsState.isInstalling ? null : _handleInstallPluginZip,
-                icon: const Icon(Icons.upload_file_rounded, size: 16),
-                label: Text(
-                  pluginsState.isInstalling ? 'Installing...' : 'Install .zip',
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppTokens.space8),
-          Text(
-            'Install runtime plugins to browse external book storefronts, import bundles into the staged review queue, or expose MCP tools.',
-            style: AppTypography.captionSans(color: c.mutedInk),
-          ),
-          const SizedBox(height: AppTokens.space16),
           if (pluginsState.errorMessage != null) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppTokens.space12),
-              decoration: BoxDecoration(
-                color: c.errorBg,
-                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                border: Border.all(color: c.errorBorder),
-              ),
-              child: Text(
-                pluginsState.errorMessage!,
-                style: AppTypography.bodySans(fontSize: 13, color: c.errorText),
-              ),
+            ShelfdInlineBanner(
+              message: pluginsState.errorMessage!,
+              tone: ShelfdBannerTone.error,
             ),
             const SizedBox(height: AppTokens.space12),
           ],
           if (pluginsState.successMessage != null) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppTokens.space12),
-              decoration: BoxDecoration(
-                color: c.accentSecondaryContainer,
-                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              ),
-              child: Text(
-                pluginsState.successMessage!,
-                style: AppTypography.bodySans(
-                  fontSize: 13,
-                  color: c.accentSecondary,
-                ),
-              ),
+            ShelfdInlineBanner(
+              message: pluginsState.successMessage!,
+              tone: ShelfdBannerTone.success,
             ),
             const SizedBox(height: AppTokens.space12),
           ],
@@ -1012,15 +430,16 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               child: Text(
                 pluginsState.isLoading
                     ? 'Loading installed plugins...'
-                    : 'No plugins installed yet. Upload a .zip plugin archive or place plugins into your server plugins directory.',
+                    : 'No plugins installed yet. Upload a .zip archive or add plugins to your server plugins directory.',
                 style: AppTypography.bodySans(fontSize: 13, color: c.mutedInk),
               ),
             )
           else
-            ...pluginsState.plugins.map((plugin) {
+            ...pluginsState.plugins.asMap().entries.map((entry) {
+              final isLast = entry.key == pluginsState.plugins.length - 1;
               return Padding(
-                padding: const EdgeInsets.only(bottom: AppTokens.space12),
-                child: _buildPluginRowCard(context, c, plugin),
+                padding: EdgeInsets.only(bottom: isLast ? 0 : AppTokens.space12),
+                child: _buildPluginRowCard(context, c, entry.value),
               );
             }),
         ],
@@ -1033,8 +452,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     ShelfdColors c,
     PluginSummary plugin,
   ) {
-    final isHealthy =
-        plugin.status == 'running' || plugin.status == 'idle';
+    final isHealthy = plugin.status == 'running' || plugin.status == 'idle';
     final isError = plugin.status == 'unhealthy';
     final badgeBg = isError
         ? c.errorBg
@@ -1078,7 +496,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               Switch(
                 key: Key('plugin_toggle_${plugin.name}'),
                 value: plugin.enabled,
-                activeTrackColor: c.accentPrimary,
                 onChanged: (val) => ref
                     .read(pluginsProvider.notifier)
                     .setEnabled(plugin.name, val),
@@ -1087,27 +504,27 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           ),
           if (plugin.description != null &&
               plugin.description!.trim().isNotEmpty) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: AppTokens.space4),
             Text(
               plugin.description!,
               style: AppTypography.captionSans(color: c.secondaryInk),
             ),
           ],
           if (plugin.permissions.networkDomains.isNotEmpty) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: AppTokens.space4),
             Text(
               'Domains: ${plugin.permissions.networkDomains.join(', ')}',
               style: AppTypography.mono(fontSize: 11, color: c.mutedInk),
             ),
           ],
           if (plugin.lastError != null && plugin.lastError!.isNotEmpty) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: AppTokens.space4),
             Text(
               plugin.lastError!,
               style: AppTypography.mono(fontSize: 11, color: c.errorText),
             ),
           ],
-          const SizedBox(height: AppTokens.space8),
+          const SizedBox(height: AppTokens.space12),
           Wrap(
             spacing: AppTokens.space8,
             runSpacing: AppTokens.space8,
@@ -1115,37 +532,30 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               if (plugin.hasConfigSchema ||
                   plugin.commands.isNotEmpty ||
                   plugin.hasAuth)
-                OutlinedButton.icon(
+                ShelfdSecondaryButton(
                   key: Key('plugin_configure_${plugin.name}'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: c.ink,
-                    side: BorderSide(color: c.border),
-                  ),
+                  label:
+                      !plugin.configured ? 'Configure (Required)' : 'Configure',
+                  icon: Icons.tune_rounded,
+                  compact: true,
                   onPressed: () {
                     showDialog<bool>(
                       context: context,
                       builder: (_) => PluginConfigDialog(plugin: plugin),
                     );
                   },
-                  icon: const Icon(Icons.tune_rounded, size: 15),
-                  label: Text(
-                    !plugin.configured ? 'Configure (Required)' : 'Configure',
-                  ),
                 ),
-              OutlinedButton.icon(
+              ShelfdSecondaryButton(
                 key: Key('plugin_logs_${plugin.name}'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: c.ink,
-                  side: BorderSide(color: c.border),
-                ),
+                label: 'Logs',
+                icon: Icons.terminal_rounded,
+                compact: true,
                 onPressed: () {
                   showDialog<void>(
                     context: context,
                     builder: (_) => PluginLogsDialog(plugin: plugin),
                   );
                 },
-                icon: const Icon(Icons.terminal_rounded, size: 15),
-                label: const Text('Logs'),
               ),
               if (plugin.hasCatalog && plugin.enabled)
                 FilledButton.icon(
@@ -1153,14 +563,455 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                   style: FilledButton.styleFrom(
                     backgroundColor: c.accentPrimary,
                     foregroundColor: c.onAccent,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppTokens.space12,
+                      vertical: AppTokens.space8,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                    ),
                   ),
                   onPressed: () => context.go(
                     '/plugins/catalog?plugin=${Uri.encodeComponent(plugin.name)}',
                   ),
                   icon: const Icon(Icons.storefront_outlined, size: 15),
-                  label: const Text('Browse Catalog'),
+                  label: Text(
+                    'Browse Catalog',
+                    style: AppTypography.bodySans(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: c.onAccent,
+                    ),
+                  ),
                 ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildServerCard(String? serverUrl) {
+    return Consumer(
+      builder: (context, ref, _) {
+        final queueState = ref.watch(queueProvider);
+        final status = queueState.status;
+        final libraryState = ref.watch(libraryProvider);
+        final resolvedBook = status != null
+            ? resolveBookTitle(status.currentBook, libraryState.books)
+            : null;
+        final progress = status != null
+            ? (status.progressPercent / 100.0).clamp(0.0, 1.0)
+            : 0.0;
+        final c = context.shelfdColors;
+
+        return ShelfdSectionCard(
+          icon: Icons.dns_outlined,
+          title: 'Server Connection',
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: c.accentSecondary,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: AppTokens.space8),
+              Text(
+                'Connected',
+                style: AppTypography.captionSans(
+                  color: c.accentSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Host: ${serverUrl ?? 'Self-hosted API'}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.mono(
+                        fontSize: 12,
+                        color: c.secondaryInk,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AppTokens.space12),
+                  ShelfdSecondaryButton(
+                    label: queueState.isLoading
+                        ? 'Scanning...'
+                        : 'Rescan Library',
+                    icon: Icons.sync_rounded,
+                    isLoading: queueState.isLoading,
+                    compact: true,
+                    onPressed: queueState.isLoading
+                        ? null
+                        : () async {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content:
+                                    Text('Scanning library for new books...'),
+                              ),
+                            );
+                            await ref
+                                .read(bookRepositoryProvider)
+                                .triggerScan();
+                          },
+                  ),
+                ],
+              ),
+              if (status != null) ...[
+                const SizedBox(height: AppTokens.space16),
+                Divider(color: c.subtleBorder, height: 1),
+                const SizedBox(height: AppTokens.space16),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.auto_awesome_rounded,
+                      size: 16,
+                      color: c.accentPrimary,
+                    ),
+                    const SizedBox(width: AppTokens.space8),
+                    Expanded(
+                      child: Text(
+                        'AI Indexing & Vectors',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.bodySans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: c.ink,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppTokens.space8),
+                    Text(
+                      '${status.progressPercent.toStringAsFixed(0)}%',
+                      style: AppTypography.mono(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: c.accentPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppTokens.space8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 4,
+                    backgroundColor: c.containerLow,
+                    valueColor: AlwaysStoppedAnimation<Color>(c.accentPrimary),
+                  ),
+                ),
+                const SizedBox(height: AppTokens.space8),
+                Text(
+                  '${status.indexedChapters} of ${status.totalChapters} chapters processed (${status.pendingChapters} pending)',
+                  style: AppTypography.captionSans(color: c.mutedInk),
+                ),
+                if (resolvedBook != null && resolvedBook.isNotEmpty) ...[
+                  const SizedBox(height: AppTokens.space4),
+                  Text(
+                    'Now processing: $resolvedBook',
+                    style: AppTypography.captionSans(color: c.ink),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAccountCard(ShelfdColors colors, String currentUsername) {
+    return ShelfdSectionCard(
+      icon: Icons.shield_outlined,
+      title: 'Account & Security',
+      trailing: StatusBadge(
+        label: currentUsername,
+        backgroundColor: colors.containerLow,
+        textColor: colors.ink,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Default Username Preference
+          Text(
+            'Default Username',
+            style: AppTypography.bodySans(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: colors.ink,
+            ),
+          ),
+          const SizedBox(height: AppTokens.space4),
+          Text(
+            'Pre-filled when pairing or reconnecting to your server.',
+            style: AppTypography.captionSans(color: colors.mutedInk),
+          ),
+          const SizedBox(height: AppTokens.space8),
+          Row(
+            children: [
+              Expanded(
+                child: TextFormField(
+                  controller: _defaultUsernameController,
+                  style: AppTypography.bodySans(
+                    fontSize: 14,
+                    color: colors.ink,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'e.g. admin or your username',
+                    isDense: true,
+                    prefixIcon: Icon(
+                      Icons.person_outline,
+                      size: 18,
+                      color: colors.mutedInk,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppTokens.space8),
+              ShelfdSecondaryButton(
+                label: 'Save',
+                onPressed: _handleSaveDefaultUsername,
+              ),
+            ],
+          ),
+          if (_usernameSavedMessage != null) ...[
+            const SizedBox(height: AppTokens.space8),
+            Text(
+              _usernameSavedMessage!,
+              style: AppTypography.captionSans(
+                color: colors.accentSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+
+          const SizedBox(height: AppTokens.space20),
+          Divider(color: colors.subtleBorder, height: 1),
+          const SizedBox(height: AppTokens.space12),
+
+          // Progressive Disclosure: Change Password
+          Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              key: const Key('toggle_change_password_button'),
+              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+              onTap: () =>
+                  setState(() => _showPasswordForm = !_showPasswordForm),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppTokens.space8),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.lock_reset_outlined,
+                      size: 18,
+                      color: colors.secondaryInk,
+                    ),
+                    const SizedBox(width: AppTokens.space8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Change Password',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTypography.bodySans(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: colors.ink,
+                            ),
+                          ),
+                          Text(
+                            'Update your account credentials on this server',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTypography.captionSans(
+                              color: colors.mutedInk,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      _showPasswordForm
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      size: 20,
+                      color: colors.mutedInk,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          if (_showPasswordForm) ...[
+            const SizedBox(height: AppTokens.space12),
+            if (_passwordError != null) ...[
+              ShelfdInlineBanner(
+                message: _passwordError!,
+                tone: ShelfdBannerTone.error,
+              ),
+              const SizedBox(height: AppTokens.space12),
+            ],
+            if (_passwordSuccess != null) ...[
+              ShelfdInlineBanner(
+                message: _passwordSuccess!,
+                tone: ShelfdBannerTone.success,
+              ),
+              const SizedBox(height: AppTokens.space12),
+            ],
+            Form(
+              key: _passwordFormKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextFormField(
+                    controller: _currentPasswordController,
+                    obscureText: _obscureCurrent,
+                    style: AppTypography.bodySans(
+                      fontSize: 14,
+                      color: colors.ink,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Current Password',
+                      hintText: '••••••••',
+                      isDense: true,
+                      prefixIcon: Icon(
+                        Icons.lock_outline,
+                        size: 18,
+                        color: colors.mutedInk,
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscureCurrent
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                          size: 18,
+                          color: colors.mutedInk,
+                        ),
+                        onPressed: () =>
+                            setState(() => _obscureCurrent = !_obscureCurrent),
+                      ),
+                    ),
+                    validator: (v) => (v == null || v.isEmpty)
+                        ? 'Current password required'
+                        : null,
+                  ),
+                  const SizedBox(height: AppTokens.space12),
+                  TextFormField(
+                    controller: _newPasswordController,
+                    obscureText: _obscureNew,
+                    style: AppTypography.bodySans(
+                      fontSize: 14,
+                      color: colors.ink,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'New Password',
+                      hintText: '••••••••',
+                      helperText: 'Minimum 6 characters',
+                      isDense: true,
+                      prefixIcon: Icon(
+                        Icons.lock_reset_outlined,
+                        size: 18,
+                        color: colors.mutedInk,
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscureNew ? Icons.visibility_off : Icons.visibility,
+                          size: 18,
+                          color: colors.mutedInk,
+                        ),
+                        onPressed: () =>
+                            setState(() => _obscureNew = !_obscureNew),
+                      ),
+                    ),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) {
+                        return 'New password required';
+                      }
+                      if (v.length < 6) {
+                        return 'Password must be at least 6 characters';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: AppTokens.space12),
+                  TextFormField(
+                    controller: _confirmPasswordController,
+                    obscureText: _obscureConfirm,
+                    style: AppTypography.bodySans(
+                      fontSize: 14,
+                      color: colors.ink,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Confirm New Password',
+                      hintText: '••••••••',
+                      isDense: true,
+                      prefixIcon: Icon(
+                        Icons.check_circle_outline,
+                        size: 18,
+                        color: colors.mutedInk,
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscureConfirm
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                          size: 18,
+                          color: colors.mutedInk,
+                        ),
+                        onPressed: () =>
+                            setState(() => _obscureConfirm = !_obscureConfirm),
+                      ),
+                    ),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) {
+                        return 'Please confirm new password';
+                      }
+                      if (v != _newPasswordController.text) {
+                        return 'Passwords do not match';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: AppTokens.space16),
+                  PrimaryButton(
+                    label: 'Update Password',
+                    icon: Icons.check_rounded,
+                    isLoading: _isChangingPassword,
+                    onPressed: _handleChangePassword,
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: AppTokens.space20),
+          Divider(color: colors.subtleBorder, height: 1),
+          const SizedBox(height: AppTokens.space16),
+
+          // Disconnect / Sign Out cleanly anchored at the bottom of Account
+          ShelfdDangerButton(
+            label: 'Disconnect / Sign Out',
+            icon: Icons.logout_rounded,
+            onPressed: _handleLogout,
           ),
         ],
       ),

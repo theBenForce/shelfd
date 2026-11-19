@@ -440,15 +440,13 @@ class ShelfdBottomNav extends ConsumerWidget {
   int _calculateIndex() {
     if (currentPath != null) {
       final p = currentPath!;
-      if (p.startsWith('/series')) return 1;
-      if (p.startsWith('/authors') || p.startsWith('/author')) return 2;
-      if (p.startsWith('/search')) return 3;
-      if (p.startsWith('/uploads')) return 4;
-      if (p.startsWith('/utilities')) return 5;
-      if (p.startsWith('/settings')) return 6;
-      return 0; // /books, /library, default
+      if (p.startsWith('/search')) return 1;
+      if (p.startsWith('/uploads') || p.startsWith('/plugins/catalog')) return 2;
+      if (p.startsWith('/utilities')) return 3;
+      if (p.startsWith('/settings')) return 4;
+      return 0; // /books, /series, /authors, /genres, /topics, /library
     }
-    return currentIndex.clamp(0, 6);
+    return currentIndex.clamp(0, 4);
   }
 
   void _handleTap(int index) {
@@ -458,21 +456,15 @@ class ShelfdBottomNav extends ConsumerWidget {
           onNavigate!('/books');
           return;
         case 1:
-          onNavigate!('/series');
-          return;
-        case 2:
-          onNavigate!('/authors');
-          return;
-        case 3:
           onNavigate!('/search');
           return;
-        case 4:
+        case 2:
           onNavigate!('/uploads');
           return;
-        case 5:
+        case 3:
           onNavigate!('/utilities');
           return;
-        case 6:
+        case 4:
           onNavigate!('/settings');
           return;
       }
@@ -501,34 +493,12 @@ class ShelfdBottomNav extends ConsumerWidget {
         indicatorColor: colors.containerHigh,
         destinations: [
           NavigationDestination(
-            icon: Icon(Icons.menu_book_outlined, color: colors.secondaryInk),
+            icon: Icon(Icons.local_library_outlined, color: colors.secondaryInk),
             selectedIcon: Icon(
-              Icons.menu_book_rounded,
+              Icons.local_library_rounded,
               color: colors.accentPrimary,
             ),
-            label: 'Books',
-          ),
-          NavigationDestination(
-            icon: Icon(
-              Icons.collections_bookmark_outlined,
-              color: colors.secondaryInk,
-            ),
-            selectedIcon: Icon(
-              Icons.collections_bookmark_rounded,
-              color: colors.accentPrimary,
-            ),
-            label: 'Series',
-          ),
-          NavigationDestination(
-            icon: Icon(
-              Icons.people_outline_rounded,
-              color: colors.secondaryInk,
-            ),
-            selectedIcon: Icon(
-              Icons.people_rounded,
-              color: colors.accentPrimary,
-            ),
-            label: 'Authors',
+            label: 'Library',
           ),
           NavigationDestination(
             icon: Icon(Icons.saved_search_outlined, color: colors.secondaryInk),
@@ -645,7 +615,8 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
     final isSearch =
         p.startsWith('/search') ||
         (widget.currentPath == null && widget.currentIndex == 1);
-    final isUploads = p.startsWith('/uploads');
+    final isUploads =
+        p.startsWith('/uploads') || p.startsWith('/plugins/catalog');
     final isUtilities = p.startsWith('/utilities');
     final isSettings =
         p.startsWith('/settings') ||
@@ -670,56 +641,59 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
         ),
       ),
       padding: const EdgeInsets.symmetric(
-        horizontal: AppTokens.space20,
-        vertical: AppTokens.space24,
+        horizontal: AppTokens.space16,
+        vertical: AppTokens.space16,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Brand Logo & Title
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: colors.accentPrimary,
-                  borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppTokens.space4),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: colors.accentPrimary,
+                    borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                  ),
+                  child: Icon(
+                    Icons.auto_stories_rounded,
+                    color: colors.onAccent,
+                    size: 19,
+                  ),
                 ),
-                child: Icon(
-                  Icons.auto_stories_rounded,
-                  color: colors.onAccent,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: AppTokens.space12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Shelfd',
-                      style: AppTypography.titleSerif(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                        color: colors.ink,
+                const SizedBox(width: AppTokens.space12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Shelfd',
+                        style: AppTypography.titleSerif(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: colors.ink,
+                        ),
                       ),
-                    ),
-                    Text(
-                      'Your Digital Vellum',
-                      style: AppTypography.bodySans(
-                        fontSize: 11,
-                        color: colors.mutedInk,
+                      Text(
+                        'Your Digital Vellum',
+                        style: AppTypography.bodySans(
+                          fontSize: 11,
+                          color: colors.mutedInk,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: AppTokens.space24),
+          const SizedBox(height: AppTokens.space16),
 
           // Scrollable Navigation Links
           Expanded(
@@ -727,6 +701,20 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      left: AppTokens.space12,
+                      bottom: AppTokens.space4,
+                    ),
+                    child: Text(
+                      'BROWSE',
+                      style: AppTypography.labelCaps(
+                        fontSize: 10,
+                        color: colors.mutedInk,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                  ),
                   // Collapsible Library Header Item
                   _SideNavItem(
                     icon: Icons.local_library_outlined,
@@ -802,9 +790,8 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                       onTap: () => _navigate('/topics', 0),
                     ),
                   ],
-                  const SizedBox(height: AppTokens.space8),
+                  const SizedBox(height: 2),
 
-                  // Top-level Navigation Links
                   _SideNavItem(
                     icon: Icons.saved_search_outlined,
                     selectedIcon: Icons.saved_search_rounded,
@@ -812,7 +799,29 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                     isSelected: isSearch,
                     onTap: () => _navigate('/search', 3),
                   ),
-                  const SizedBox(height: AppTokens.space8),
+
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppTokens.space8,
+                    ),
+                    child: Divider(color: colors.subtleBorder, height: 1),
+                  ),
+
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      left: AppTokens.space12,
+                      bottom: AppTokens.space4,
+                    ),
+                    child: Text(
+                      'MANAGE',
+                      style: AppTypography.labelCaps(
+                        fontSize: 10,
+                        color: colors.mutedInk,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                  ),
+
                   _SideNavItem(
                     icon: Icons.cloud_upload_outlined,
                     selectedIcon: Icons.cloud_upload_rounded,
@@ -847,7 +856,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                         : null,
                     onTap: () => _navigate('/uploads', 4),
                   ),
-                  const SizedBox(height: AppTokens.space8),
+                  const SizedBox(height: 2),
                   _SideNavItem(
                     icon: Icons.handyman_outlined,
                     selectedIcon: Icons.handyman_rounded,
@@ -855,7 +864,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                     isSelected: isUtilities,
                     onTap: () => _navigate('/utilities', 5),
                   ),
-                  const SizedBox(height: AppTokens.space8),
+                  const SizedBox(height: 2),
                   _SideNavItem(
                     icon: Icons.settings_outlined,
                     selectedIcon: Icons.settings_rounded,
@@ -874,16 +883,16 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
           const _QueueStatusCard(),
           const SizedBox(height: AppTokens.space12),
 
-          // Rescan Library Button (if callback provided)
+          // Rescan Library Utility Button (tonal style so page primary CTAs lead)
           if (widget.onRescan != null) ...[
             SizedBox(
               width: double.infinity,
               height: 40,
               child: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  backgroundColor: colors.accentPrimary,
-                  foregroundColor: colors.onAccent,
-                  side: BorderSide.none,
+                  backgroundColor: colors.surface,
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppTokens.radiusMd),
                   ),
@@ -898,21 +907,21 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                         height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: colors.onAccent,
+                          color: colors.accentPrimary,
                         ),
                       )
-                    : const Icon(Icons.sync_rounded, size: 18),
+                    : Icon(Icons.sync_rounded, size: 17, color: colors.accentPrimary),
                 label: Text(
                   widget.isRescanning ? 'Scanning...' : 'Rescan Library',
                   style: AppTypography.bodySans(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: colors.onAccent,
+                    color: colors.ink,
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: AppTokens.space16),
+            const SizedBox(height: AppTokens.space12),
           ],
 
           // Homelab NAS connection status badge
@@ -985,7 +994,7 @@ class _SideNavItem extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppTokens.radiusMd),
         child: Container(
-          height: AppTokens.minTouchTarget,
+          height: 40,
           padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppTokens.radiusMd),
@@ -1055,7 +1064,7 @@ class _SideNavSubItem extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(AppTokens.radiusMd),
           child: Container(
-            height: 36,
+            height: 32,
             padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppTokens.radiusMd),

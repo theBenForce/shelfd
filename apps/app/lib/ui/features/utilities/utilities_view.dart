@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/models/book.dart';
 import '../../../data/models/duplicate_group.dart';
+import '../../core/primitives.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
 import '../../core/theme.dart';
@@ -22,7 +23,6 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
   @override
   void initState() {
     super.initState();
-    // Auto-scan on initial load if not yet scanned
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final state = ref.read(duplicateBooksProvider);
       if (state.result == null && !state.isScanning) {
@@ -32,7 +32,10 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
   }
 
   void _showMergeOptionsDialog(
-      BuildContext context, DuplicateGroup group, String primaryBookId) {
+    BuildContext context,
+    DuplicateGroup group,
+    String primaryBookId,
+  ) {
     bool transferBookmarks = _mergeOptions.transferBookmarks;
     bool transferHighlights = _mergeOptions.transferHighlights;
     bool mergeMetadata = _mergeOptions.mergeMetadata;
@@ -45,135 +48,80 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
           builder: (context, setDialogState) {
             final colors = context.shelfdColors;
             return AlertDialog(
-              backgroundColor: colors.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppTokens.radiusLg),
-                side: BorderSide(color: colors.border),
-              ),
               title: Row(
                 children: [
-                  Icon(Icons.merge_type_rounded,
-                      size: 22, color: colors.accentPrimary),
+                  Icon(
+                    Icons.merge_type_rounded,
+                    size: 20,
+                    color: colors.accentPrimary,
+                  ),
                   const SizedBox(width: AppTokens.space8),
-                  Text(
-                    'Merge Options',
-                    style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
+                  Expanded(
+                    child: Text(
+                      'Merge Options',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.titleSerif(
+                        fontSize: 18,
+                        color: colors.ink,
+                      ),
+                    ),
                   ),
                 ],
               ),
               content: SizedBox(
-                width: 440,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Configure how duplicate copies are consolidated into the selected primary book:',
-                      style: AppTypography.bodySans(
-                          fontSize: 13, color: colors.secondaryInk),
-                    ),
-                    const SizedBox(height: AppTokens.space16),
-                    CheckboxListTile(
-                      value: transferBookmarks,
-                      title: Text(
-                        'Transfer Bookmarks',
+                width: 420,
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Configure how duplicate copies consolidate into the selected primary book:',
                         style: AppTypography.bodySans(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: colors.ink,
+                          fontSize: 13,
+                          color: colors.secondaryInk,
                         ),
                       ),
-                      subtitle: Text(
-                        'Move all reading bookmarks from duplicate books to primary book',
-                        style: AppTypography.captionSans(
-                          fontSize: 12,
-                          color: colors.mutedInk,
+                      const SizedBox(height: AppTokens.space12),
+                      _buildMergeOptionTile(
+                        colors: colors,
+                        value: transferBookmarks,
+                        title: 'Transfer Bookmarks',
+                        subtitle: 'Move reading bookmarks to the primary book',
+                        onChanged: (val) => setDialogState(
+                          () => transferBookmarks = val ?? true,
                         ),
                       ),
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      activeColor: colors.accentPrimary,
-                      checkColor: colors.onAccent,
-                      onChanged: (val) {
-                        setDialogState(() => transferBookmarks = val ?? true);
-                      },
-                    ),
-                    CheckboxListTile(
-                      value: transferHighlights,
-                      title: Text(
-                        'Transfer Highlights & Notes',
-                        style: AppTypography.bodySans(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: colors.ink,
+                      _buildMergeOptionTile(
+                        colors: colors,
+                        value: transferHighlights,
+                        title: 'Transfer Highlights & Notes',
+                        subtitle: 'Retain all annotations and passages',
+                        onChanged: (val) => setDialogState(
+                          () => transferHighlights = val ?? true,
                         ),
                       ),
-                      subtitle: Text(
-                        'Retain all annotations and highlighted passages',
-                        style: AppTypography.captionSans(
-                          fontSize: 12,
-                          color: colors.mutedInk,
-                        ),
+                      _buildMergeOptionTile(
+                        colors: colors,
+                        value: mergeMetadata,
+                        title: 'Merge Missing Metadata',
+                        subtitle:
+                            'Fill missing descriptions, publishers, dates, and tags',
+                        onChanged: (val) =>
+                            setDialogState(() => mergeMetadata = val ?? true),
                       ),
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      activeColor: colors.accentPrimary,
-                      checkColor: colors.onAccent,
-                      onChanged: (val) {
-                        setDialogState(() => transferHighlights = val ?? true);
-                      },
-                    ),
-                    CheckboxListTile(
-                      value: mergeMetadata,
-                      title: Text(
-                        'Merge Missing Metadata',
-                        style: AppTypography.bodySans(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: colors.ink,
-                        ),
+                      _buildMergeOptionTile(
+                        colors: colors,
+                        value: deleteFiles,
+                        title: 'Delete Duplicate EPUB Files',
+                        subtitle: 'Remove redundant files from disk',
+                        onChanged: (val) =>
+                            setDialogState(() => deleteFiles = val ?? true),
                       ),
-                      subtitle: Text(
-                        'Fill missing descriptions, publishers, dates, and taxonomy from duplicates',
-                        style: AppTypography.captionSans(
-                          fontSize: 12,
-                          color: colors.mutedInk,
-                        ),
-                      ),
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      activeColor: colors.accentPrimary,
-                      checkColor: colors.onAccent,
-                      onChanged: (val) {
-                        setDialogState(() => mergeMetadata = val ?? true);
-                      },
-                    ),
-                    CheckboxListTile(
-                      value: deleteFiles,
-                      title: Text(
-                        'Delete Duplicate EPUB Files',
-                        style: AppTypography.bodySans(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: colors.ink,
-                        ),
-                      ),
-                      subtitle: Text(
-                        'Permanently remove redundant duplicate files from disk to free storage',
-                        style: AppTypography.captionSans(
-                          fontSize: 12,
-                          color: colors.mutedInk,
-                        ),
-                      ),
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      activeColor: colors.accentPrimary,
-                      checkColor: colors.onAccent,
-                      onChanged: (val) {
-                        setDialogState(() => deleteFiles = val ?? true);
-                      },
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               actions: [
@@ -188,14 +136,7 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                     ),
                   ),
                 ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: colors.accentPrimary,
-                    foregroundColor: colors.onAccent,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                    ),
-                  ),
+                FilledButton(
                   onPressed: () {
                     setState(() {
                       _mergeOptions = MergeOptions(
@@ -222,6 +163,35 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
     );
   }
 
+  Widget _buildMergeOptionTile({
+    required ShelfdColors colors,
+    required bool value,
+    required String title,
+    required String subtitle,
+    required ValueChanged<bool?> onChanged,
+  }) {
+    return CheckboxListTile(
+      value: value,
+      title: Text(
+        title,
+        style: AppTypography.bodySans(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: colors.ink,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: AppTypography.captionSans(fontSize: 12, color: colors.mutedInk),
+      ),
+      contentPadding: EdgeInsets.zero,
+      controlAffinity: ListTileControlAffinity.leading,
+      activeColor: colors.accentPrimary,
+      checkColor: colors.onAccent,
+      onChanged: onChanged,
+    );
+  }
+
   String _formatFileSize(int? bytes) {
     if (bytes == null || bytes <= 0) return 'Unknown size';
     if (bytes < 1024) return '$bytes B';
@@ -232,34 +202,77 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(duplicateBooksProvider);
-    final isMobile = Responsive.isMobile(context);
+    final isDesktop = Responsive.isDesktop(context);
+    final horizontalPad = Responsive.horizontalPadding(context);
     final colors = context.shelfdColors;
 
     return Scaffold(
       backgroundColor: colors.background,
+      appBar: isDesktop
+          ? null
+          : ShelfdTopBar(
+              title: 'Utilities & Maintenance',
+              subtitle: 'Find and merge duplicate books',
+              actions: [
+                IconButton(
+                  tooltip: 'Scan for Duplicates',
+                  icon: state.isScanning
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: colors.accentPrimary,
+                          ),
+                        )
+                      : Icon(Icons.sync_rounded, color: colors.ink),
+                  onPressed: state.isScanning
+                      ? null
+                      : () => ref
+                          .read(duplicateBooksProvider.notifier)
+                          .scanForDuplicates(),
+                ),
+              ],
+            ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: EdgeInsets.symmetric(
-            horizontal: isMobile ? AppTokens.space16 : AppTokens.space32,
+            horizontal: horizontalPad,
             vertical: AppTokens.space24,
           ),
           child: Center(
             child: ConstrainedBox(
-              constraints:
-                  const BoxConstraints(maxWidth: AppTokens.maxLibraryWidth),
+              constraints: const BoxConstraints(
+                maxWidth: AppTokens.maxWorkspaceWidth,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Page Header
-                  _buildHeader(context, state),
-                  const SizedBox(height: AppTokens.space24),
+                  if (isDesktop) ...[
+                    ShelfdPageHeader(
+                      title: 'Utilities & Maintenance',
+                      subtitle:
+                          'Consolidate duplicate editions and keep your catalog clean.',
+                      trailing: PrimaryButton(
+                        label: state.isScanning
+                            ? 'Scanning...'
+                            : 'Scan for Duplicates',
+                        icon: Icons.sync_rounded,
+                        isLoading: state.isScanning,
+                        onPressed: state.isScanning
+                            ? null
+                            : () => ref
+                                .read(duplicateBooksProvider.notifier)
+                                .scanForDuplicates(),
+                      ),
+                    ),
+                    const SizedBox(height: AppTokens.space20),
+                  ],
 
-                  // Notifications / Banners
                   if (state.errorMessage != null) ...[
-                    _buildAlertBanner(
-                      context,
+                    ShelfdInlineBanner(
                       message: state.errorMessage!,
-                      isError: true,
+                      tone: ShelfdBannerTone.error,
                       onDismiss: () => ref
                           .read(duplicateBooksProvider.notifier)
                           .clearMessages(),
@@ -267,10 +280,9 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                     const SizedBox(height: AppTokens.space16),
                   ],
                   if (state.successMessage != null) ...[
-                    _buildAlertBanner(
-                      context,
+                    ShelfdInlineBanner(
                       message: state.successMessage!,
-                      isError: false,
+                      tone: ShelfdBannerTone.success,
                       onDismiss: () => ref
                           .read(duplicateBooksProvider.notifier)
                           .clearMessages(),
@@ -278,22 +290,20 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                     const SizedBox(height: AppTokens.space16),
                   ],
 
-                  // Stats & Overview Banner
-                  _buildOverviewCard(context, state),
-                  const SizedBox(height: AppTokens.space24),
+                  // Compact status strip
+                  _buildStatusStrip(context, state),
+                  const SizedBox(height: AppTokens.space20),
 
-                  // Content Area
-                  if (state.isScanning) ...[
-                    _buildScanningState(context),
-                  ] else if (state.result != null &&
-                      state.result!.groups.isNotEmpty) ...[
-                    _buildDuplicateGroupsList(context, state),
-                  ] else if (state.result != null &&
-                      state.result!.groups.isEmpty) ...[
-                    _buildCleanState(context),
-                  ] else ...[
+                  // Main content area
+                  if (state.isScanning)
+                    _buildScanningState(context)
+                  else if (state.result != null &&
+                      state.result!.groups.isNotEmpty)
+                    _buildDuplicateGroupsList(context, state)
+                  else if (state.result != null && state.result!.groups.isEmpty)
+                    _buildCleanState(context)
+                  else
                     _buildInitialScanPrompt(context),
-                  ],
                 ],
               ),
             ),
@@ -303,231 +313,126 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
     );
   }
 
-  Widget _buildHeader(BuildContext context, DuplicateBooksState state) {
-    final isMobile = Responsive.isMobile(context);
+  Widget _buildStatusStrip(BuildContext context, DuplicateBooksState state) {
     final colors = context.shelfdColors;
+    final totalGroups = state.result?.totalGroups ?? 0;
+    final totalDuplicates = state.result?.totalDuplicateBooks ?? 0;
+    final redundantCount =
+        totalDuplicates > totalGroups ? totalDuplicates - totalGroups : 0;
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTokens.space16,
+        vertical: AppTokens.space12,
+      ),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+        border: Border.all(color: colors.subtleBorder),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: AppTokens.space16,
+        runSpacing: AppTokens.space12,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                'Utilities & Maintenance',
-                style: AppTypography.titleSerif(
-                  fontSize: isMobile ? 24 : 30,
-                  fontWeight: FontWeight.w700,
-                  color: colors.ink,
+              Icon(
+                Icons.copy_all_rounded,
+                size: 18,
+                color: colors.accentPrimary,
+              ),
+              const SizedBox(width: AppTokens.space8),
+              Flexible(
+                child: Text(
+                  'Duplicate Books Finder',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.titleSerif(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
                 ),
               ),
-              const SizedBox(height: AppTokens.space4),
-              Text(
-                'Consolidate duplicates, clean library metadata, and optimize storage.',
-                style: AppTypography.bodySans(
-                  fontSize: 14,
-                  color: colors.secondaryInk,
-                ),
+              const SizedBox(width: AppTokens.space8),
+              StatusBadge(
+                label: state.isScanning
+                    ? 'Scanning...'
+                    : state.result == null
+                        ? 'Idle'
+                        : totalGroups > 0
+                            ? '$totalGroups Groups Found'
+                            : 'Library Clean',
+                backgroundColor: totalGroups > 0
+                    ? colors.accentContainer
+                    : (colors.isDark
+                        ? colors.accentSecondaryContainer
+                        : AppTokens.completedBadgeBg),
+                textColor: totalGroups > 0
+                    ? colors.accentPrimary
+                    : colors.accentSecondary,
               ),
             ],
           ),
+          if (state.result != null)
+            Wrap(
+              spacing: AppTokens.space16,
+              runSpacing: AppTokens.space8,
+              children: [
+                _buildInlineMetric(context, 'Groups', '$totalGroups'),
+                _buildInlineMetric(context, 'Redundant', '$redundantCount'),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInlineMetric(BuildContext context, String label, String value) {
+    final colors = context.shelfdColors;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          value,
+          style: AppTypography.mono(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: colors.ink,
+          ),
         ),
-        const SizedBox(width: AppTokens.space16),
-        PrimaryButton(
-          label: state.isScanning ? 'Scanning...' : 'Scan for Duplicates',
-          icon: Icons.sync_rounded,
-          isLoading: state.isScanning,
-          onPressed: state.isScanning
-              ? null
-              : () =>
-                  ref.read(duplicateBooksProvider.notifier).scanForDuplicates(),
+        const SizedBox(width: AppTokens.space4),
+        Text(
+          label,
+          style: AppTypography.captionSans(
+            fontSize: 12,
+            color: colors.mutedInk,
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildAlertBanner(
-    BuildContext context, {
-    required String message,
-    required bool isError,
-    required VoidCallback onDismiss,
-  }) {
-    final colors = context.shelfdColors;
-    final bg = isError
-        ? colors.errorBg
-        : (colors.isDark
-            ? colors.accentSecondaryContainer
-            : AppTokens.completedBadgeBg);
-    final border = isError
-        ? colors.errorBorder
-        : colors.accentSecondary.withValues(alpha: 0.35);
-    final fgColor = isError ? colors.errorText : colors.accentSecondary;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppTokens.space16, vertical: AppTokens.space12),
-      decoration: BoxDecoration(
-        color: bg,
-        border: Border.all(color: border),
-        borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-      ),
-      child: Row(
-        children: [
-          Icon(
-              isError
-                  ? Icons.error_outline_rounded
-                  : Icons.check_circle_outline_rounded,
-              size: 20,
-              color: fgColor),
-          const SizedBox(width: AppTokens.space12),
-          Expanded(
-            child: Text(
-              message,
-              style: AppTypography.bodySans(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: fgColor,
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close_rounded, size: 16),
-            color: fgColor,
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            onPressed: onDismiss,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOverviewCard(BuildContext context, DuplicateBooksState state) {
-    final colors = context.shelfdColors;
-    final totalGroups = state.result?.totalGroups ?? 0;
-    final totalDuplicates = state.result?.totalDuplicateBooks ?? 0;
-
-    return BentoCard(
-      padding: const EdgeInsets.all(AppTokens.space20),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: colors.containerLow,
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              border: Border.all(color: colors.subtleBorder),
-            ),
-            child: Icon(
-              Icons.copy_all_rounded,
-              color: colors.accentPrimary,
-              size: 24,
-            ),
-          ),
-          const SizedBox(width: AppTokens.space16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      'Duplicate Books Finder',
-                      style: AppTypography.titleSerif(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: colors.ink,
-                      ),
-                    ),
-                    const SizedBox(width: AppTokens.space8),
-                    StatusBadge(
-                      label: state.isScanning
-                          ? 'Scanning...'
-                          : state.result == null
-                              ? 'Idle'
-                              : totalGroups > 0
-                                  ? '$totalGroups Groups Found'
-                                  : 'Library Clean',
-                      backgroundColor: totalGroups > 0
-                          ? colors.accentContainer
-                          : (colors.isDark
-                              ? colors.accentSecondaryContainer
-                              : AppTokens.completedBadgeBg),
-                      textColor: totalGroups > 0
-                          ? colors.accentPrimary
-                          : colors.accentSecondary,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppTokens.space4),
-                Text(
-                  'Identifies matching ISBN identifiers, exact title/author pairs, and subtitle variations to merge redundant catalog entries.',
-                  style: AppTypography.bodySans(
-                      fontSize: 13, color: colors.secondaryInk),
-                ),
-              ],
-            ),
-          ),
-          if (state.result != null) ...[
-            const SizedBox(width: AppTokens.space24),
-            _buildStatPill(context, 'Groups', '$totalGroups'),
-            const SizedBox(width: AppTokens.space12),
-            _buildStatPill(context, 'Redundant Copies',
-                '${totalDuplicates > 0 ? totalDuplicates - totalGroups : 0}'),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatPill(BuildContext context, String label, String value) {
-    final colors = context.shelfdColors;
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppTokens.space16, vertical: AppTokens.space8),
-      decoration: BoxDecoration(
-        color: colors.containerLow,
-        borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-        border: Border.all(color: colors.subtleBorder),
-      ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: AppTypography.mono(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: colors.ink,
-            ),
-          ),
-          Text(
-            label,
-            style: AppTypography.captionSans(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: colors.mutedInk,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildScanningState(BuildContext context) {
     final colors = context.shelfdColors;
-    return BentoCard(
-      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+    return ShelfdSectionCard(
+      padding: const EdgeInsets.symmetric(
+        vertical: AppTokens.space48,
+        horizontal: AppTokens.space24,
+      ),
       child: Center(
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             CircularProgressIndicator(
-              strokeWidth: 3,
+              strokeWidth: 2.5,
               color: colors.accentPrimary,
             ),
-            const SizedBox(height: AppTokens.space20),
+            const SizedBox(height: AppTokens.space16),
             Text(
               'Scanning library for duplicate books...',
               style: AppTypography.titleSerif(
@@ -536,11 +441,13 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
                 color: colors.ink,
               ),
             ),
-            const SizedBox(height: AppTokens.space8),
+            const SizedBox(height: AppTokens.space4),
             Text(
-              'Analyzing ISBN identifiers, author attributions, and title variations.',
+              'Checking ISBNs, author attributions, and title variations.',
               style: AppTypography.bodySans(
-                  fontSize: 13, color: colors.secondaryInk),
+                fontSize: 13,
+                color: colors.secondaryInk,
+              ),
             ),
           ],
         ),
@@ -549,131 +456,75 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
   }
 
   Widget _buildCleanState(BuildContext context) {
-    final colors = context.shelfdColors;
-    return BentoCard(
-      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
-      child: Center(
-        child: Column(
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: colors.isDark
-                    ? colors.accentSecondaryContainer
-                    : AppTokens.completedBadgeBg,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.check_circle_outline_rounded,
-                color: colors.accentSecondary,
-                size: 32,
-              ),
-            ),
-            const SizedBox(height: AppTokens.space16),
-            Text(
-              'No Duplicate Books Found',
-              style: AppTypography.titleSerif(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: colors.ink,
-              ),
-            ),
-            const SizedBox(height: AppTokens.space8),
-            Text(
-              'All books in your library have distinct identifiers and unique titles.',
-              style: AppTypography.bodySans(
-                  fontSize: 13, color: colors.secondaryInk),
-            ),
-            const SizedBox(height: AppTokens.space20),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: colors.ink,
-                side: BorderSide(color: colors.border),
-              ),
-              onPressed: () =>
-                  ref.read(duplicateBooksProvider.notifier).scanForDuplicates(),
-              icon: const Icon(Icons.sync_rounded, size: 16),
-              label: const Text('Re-scan Library'),
-            ),
-          ],
-        ),
+    return ShelfdEmptyState(
+      icon: Icons.check_circle_outline_rounded,
+      title: 'No Duplicate Books Found',
+      message:
+          'All books in your library have distinct identifiers and unique titles.',
+      positive: true,
+      action: ShelfdSecondaryButton(
+        label: 'Re-scan Library',
+        icon: Icons.sync_rounded,
+        onPressed: () =>
+            ref.read(duplicateBooksProvider.notifier).scanForDuplicates(),
       ),
     );
   }
 
   Widget _buildInitialScanPrompt(BuildContext context) {
-    final colors = context.shelfdColors;
-    return BentoCard(
-      padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
-      child: Center(
-        child: Column(
-          children: [
-            Icon(Icons.search_rounded, size: 40, color: colors.mutedInk),
-            const SizedBox(height: AppTokens.space16),
-            Text(
-              'Duplicate Detection Ready',
-              style: AppTypography.titleSerif(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: colors.ink,
-              ),
-            ),
-            const SizedBox(height: AppTokens.space8),
-            Text(
-              'Scan your collection to discover and merge duplicate books.',
-              style: AppTypography.bodySans(
-                  fontSize: 13, color: colors.secondaryInk),
-            ),
-            const SizedBox(height: AppTokens.space20),
-            PrimaryButton(
-              label: 'Scan for Duplicates',
-              icon: Icons.play_arrow_rounded,
-              onPressed: () =>
-                  ref.read(duplicateBooksProvider.notifier).scanForDuplicates(),
-            ),
-          ],
-        ),
+    return ShelfdEmptyState(
+      icon: Icons.search_rounded,
+      title: 'Duplicate Detection Ready',
+      message: 'Scan your collection to discover and merge duplicate books.',
+      action: PrimaryButton(
+        label: 'Scan for Duplicates',
+        icon: Icons.play_arrow_rounded,
+        onPressed: () =>
+            ref.read(duplicateBooksProvider.notifier).scanForDuplicates(),
       ),
     );
   }
 
   Widget _buildDuplicateGroupsList(
-      BuildContext context, DuplicateBooksState state) {
+    BuildContext context,
+    DuplicateBooksState state,
+  ) {
     final colors = context.shelfdColors;
     final groups = state.result!.groups;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: AppTokens.space12,
+          runSpacing: AppTokens.space4,
           children: [
             Text(
               'Detected Duplicate Sets (${groups.length})',
               style: AppTypography.titleSerif(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
                 color: colors.ink,
               ),
             ),
             Text(
-              'Select primary copy before merging',
-              style: AppTypography.bodySans(
-                  fontSize: 12, color: colors.mutedInk),
+              'Select the primary copy to keep before merging',
+              style: AppTypography.captionSans(color: colors.mutedInk),
             ),
           ],
         ),
-        const SizedBox(height: AppTokens.space16),
+        const SizedBox(height: AppTokens.space12),
         ListView.separated(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: groups.length,
-          separatorBuilder: (context, index) =>
-              const SizedBox(height: AppTokens.space20),
+          separatorBuilder: (_, _) => const SizedBox(height: AppTokens.space16),
           itemBuilder: (context, index) {
             final group = groups[index];
-            final selectedPrimaryId = state.selectedPrimaryBooks[group.id] ??
+            final selectedPrimaryId =
+                state.selectedPrimaryBooks[group.id] ??
                 (group.books.isNotEmpty ? group.books.first.id : '');
             final isMergingThisGroup =
                 state.isMerging && state.mergingGroupId == group.id;
@@ -707,83 +558,84 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
             : AppTokens.completedBadgeBg)
         : colors.accentContainer;
 
-    return BentoCard(
-      padding: const EdgeInsets.all(AppTokens.space20),
+    return ShelfdSectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Group Header
-          Row(
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: AppTokens.space12,
+            runSpacing: AppTokens.space12,
             children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.auto_awesome_rounded,
-                      size: 18,
-                      color: confidenceColor,
-                    ),
-                    const SizedBox(width: AppTokens.space8),
-                    Text(
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.auto_awesome_rounded,
+                    size: 16,
+                    color: confidenceColor,
+                  ),
+                  const SizedBox(width: AppTokens.space8),
+                  Flexible(
+                    child: Text(
                       group.matchReason,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: AppTypography.titleSerif(
                         fontSize: 16,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         color: colors.ink,
                       ),
                     ),
-                    const SizedBox(width: AppTokens.space8),
-                    StatusBadge(
-                      label: '$confidencePct% Match',
-                      backgroundColor: confidenceBg,
-                      textColor: confidenceColor,
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: AppTokens.space8),
+                  StatusBadge(
+                    label: '$confidencePct% Match',
+                    backgroundColor: confidenceBg,
+                    textColor: confidenceColor,
+                  ),
+                ],
               ),
-              // Action Buttons
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  foregroundColor: colors.ink,
-                  side: BorderSide(color: colors.border),
-                ),
-                onPressed: isMerging
-                    ? null
-                    : () => _showMergeOptionsDialog(
-                        context, group, selectedPrimaryId),
-                icon: const Icon(Icons.tune_rounded, size: 16),
-                label: const Text('Options', style: TextStyle(fontSize: 12)),
-              ),
-              const SizedBox(width: AppTokens.space8),
-              PrimaryButton(
-                label: isMerging ? 'Merging...' : 'Merge Group',
-                icon: Icons.call_merge_rounded,
-                isLoading: isMerging,
-                onPressed: isMerging
-                    ? null
-                    : () {
-                        ref.read(duplicateBooksProvider.notifier).mergeGroup(
-                              group: group,
-                              primaryBookId: selectedPrimaryId,
-                              options: _mergeOptions,
-                            );
-                      },
+              Wrap(
+                spacing: AppTokens.space8,
+                runSpacing: AppTokens.space8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ShelfdSecondaryButton(
+                    label: 'Options',
+                    icon: Icons.tune_rounded,
+                    compact: true,
+                    onPressed: isMerging
+                        ? null
+                        : () => _showMergeOptionsDialog(
+                              context,
+                              group,
+                              selectedPrimaryId,
+                            ),
+                  ),
+                  PrimaryButton(
+                    label: isMerging ? 'Merging...' : 'Merge Group',
+                    icon: Icons.call_merge_rounded,
+                    isLoading: isMerging,
+                    onPressed: isMerging
+                        ? null
+                        : () {
+                            ref.read(duplicateBooksProvider.notifier).mergeGroup(
+                                  group: group,
+                                  primaryBookId: selectedPrimaryId,
+                                  options: _mergeOptions,
+                                );
+                          },
+                  ),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: AppTokens.space8),
-          Text(
-            'The selected primary book will be preserved. Bookmarks, highlights, and missing metadata will be transferred from other versions.',
-            style: AppTypography.bodySans(
-                fontSize: 12, color: colors.secondaryInk),
-          ),
           const SizedBox(height: AppTokens.space16),
-
-          // Books in group comparison
           Wrap(
-            spacing: AppTokens.space16,
-            runSpacing: AppTokens.space16,
+            spacing: AppTokens.space12,
+            runSpacing: AppTokens.space12,
             children: group.books.map((book) {
               final isPrimary = book.id == selectedPrimaryId;
               return _buildBookCandidateCard(
@@ -811,126 +663,139 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
   }) {
     final colors = context.shelfdColors;
 
-    return InkWell(
-      onTap: onSelect,
+    return Material(
+      color: isPrimary ? colors.containerLow : colors.surface,
       borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-      child: Container(
-        width: 340,
-        padding: const EdgeInsets.all(AppTokens.space12),
-        decoration: BoxDecoration(
-          color: isPrimary ? colors.containerLow : colors.surface,
-          border: Border.all(
-            color: isPrimary ? colors.accentPrimary : colors.border,
-            width: isPrimary ? 2 : 1,
-          ),
-          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Cover Image Thumbnail
-            SizedBox(
-              width: 54,
-              height: 78,
-              child: TactileBookCover(
-                coverUrl: book.coverUrl,
-                title: book.title,
-                showFallbackTitle: false,
-                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-                showShadow: false,
-              ),
+      child: InkWell(
+        onTap: onSelect,
+        borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+        child: Container(
+          width: 310,
+          padding: const EdgeInsets.all(AppTokens.space12),
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: isPrimary ? colors.accentPrimary : colors.border,
+              width: isPrimary ? 1.5 : 1,
             ),
-            const SizedBox(width: AppTokens.space12),
-
-            // Book Details
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        isPrimary
-                            ? Icons.radio_button_checked
-                            : Icons.radio_button_off,
-                        size: 16,
-                        color: isPrimary
-                            ? colors.accentPrimary
-                            : colors.mutedInk,
-                      ),
-                      const SizedBox(width: AppTokens.space4),
-                      if (isPrimary)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: colors.accentPrimary,
-                            borderRadius:
-                                BorderRadius.circular(AppTokens.radiusPill),
-                          ),
-                          child: Text(
-                            'PRIMARY',
-                            style: AppTypography.mono(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              color: colors.onAccent,
-                              letterSpacing: 0.5,
+            borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 50,
+                height: 74,
+                child: TactileBookCover(
+                  coverUrl: book.coverUrl,
+                  title: book.title,
+                  showFallbackTitle: false,
+                  borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                  showShadow: false,
+                ),
+              ),
+              const SizedBox(width: AppTokens.space12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          isPrimary
+                              ? Icons.radio_button_checked
+                              : Icons.radio_button_off,
+                          size: 16,
+                          color: isPrimary
+                              ? colors.accentPrimary
+                              : colors.mutedInk,
+                        ),
+                        const SizedBox(width: AppTokens.space4),
+                        if (isPrimary)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: colors.accentPrimary,
+                              borderRadius: BorderRadius.circular(
+                                AppTokens.radiusPill,
+                              ),
+                            ),
+                            child: Text(
+                              'PRIMARY',
+                              style: AppTypography.mono(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: colors.onAccent,
+                                letterSpacing: 0.5,
+                              ),
                             ),
                           ),
+                      ],
+                    ),
+                    const SizedBox(height: AppTokens.space4),
+                    Text(
+                      book.title,
+                      style: AppTypography.titleSerif(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: colors.ink,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      book.authorDisplay,
+                      style: AppTypography.bodySans(
+                        fontSize: 12,
+                        color: colors.secondaryInk,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        _buildSmallBadge(
+                          context,
+                          _formatFileSize(book.fileSizeBytes),
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: AppTokens.space4),
-                  Text(
-                    book.title,
-                    style: AppTypography.titleSerif(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: colors.ink,
+                        if (book.publishedDate != null &&
+                            book.publishedDate!.isNotEmpty)
+                          _buildSmallBadge(context, book.publishedDate!),
+                        if (book.bookmarks.isNotEmpty)
+                          _buildSmallBadge(
+                            context,
+                            '${book.bookmarks.length}',
+                            icon: Icons.bookmark_outline_rounded,
+                          ),
+                        if (book.highlights.isNotEmpty)
+                          _buildSmallBadge(
+                            context,
+                            '${book.highlights.length}',
+                            icon: Icons.edit_note_rounded,
+                          ),
+                      ],
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2.0),
-                  Text(
-                    book.authorDisplay,
-                    style: AppTypography.bodySans(
-                      fontSize: 12,
-                      color: colors.secondaryInk,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 6.0),
-
-                  // Metadata Badges
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      _buildSmallBadge(
-                          context, _formatFileSize(book.fileSizeBytes)),
-                      if (book.publishedDate != null &&
-                          book.publishedDate!.isNotEmpty)
-                        _buildSmallBadge(context, book.publishedDate!),
-                      if (book.bookmarks.isNotEmpty)
-                        _buildSmallBadge(
-                            context, '${book.bookmarks.length} 🔖'),
-                      if (book.highlights.isNotEmpty)
-                        _buildSmallBadge(
-                            context, '${book.highlights.length} ✏️'),
-                    ],
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildSmallBadge(BuildContext context, String text) {
+  Widget _buildSmallBadge(
+    BuildContext context,
+    String text, {
+    IconData? icon,
+  }) {
     final colors = context.shelfdColors;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -938,13 +803,22 @@ class _UtilitiesViewState extends ConsumerState<UtilitiesView> {
         color: colors.container,
         borderRadius: BorderRadius.circular(AppTokens.radiusSm),
       ),
-      child: Text(
-        text,
-        style: AppTypography.mono(
-          fontSize: 10,
-          fontWeight: FontWeight.w500,
-          color: colors.secondaryInk,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 11, color: colors.secondaryInk),
+            const SizedBox(width: 3),
+          ],
+          Text(
+            text,
+            style: AppTypography.mono(
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+              color: colors.secondaryInk,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -14,43 +14,34 @@ class AppShell extends ConsumerWidget {
 
   int _calculateSelectedIndex(BuildContext context) {
     final location = GoRouterState.of(context).uri.path;
-    if (location.startsWith('/series')) {
-      return 1;
-    }
-    if (location.startsWith('/authors') || location.startsWith('/author')) {
-      return 2;
-    }
     if (location.startsWith('/search')) {
-      return 3;
+      return 1;
     }
     if (location.startsWith('/uploads') ||
         location.startsWith('/plugins/catalog')) {
-      return 4;
+      return 2;
     }
     if (location.startsWith('/utilities')) {
-      return 5;
+      return 3;
     }
     if (location.startsWith('/settings')) {
-      return 6;
+      return 4;
     }
     return 0;
   }
 
   void _onNavTap(BuildContext context, int index) {
-    if (index == 0) {
-      context.go('/books');
-    } else if (index == 1) {
-      context.go('/series');
-    } else if (index == 2) {
-      context.go('/authors');
-    } else if (index == 3) {
-      context.go('/search');
-    } else if (index == 4) {
-      context.go('/uploads');
-    } else if (index == 5) {
-      context.go('/utilities');
-    } else if (index == 6) {
-      context.go('/settings');
+    switch (index) {
+      case 0:
+        context.go('/books');
+      case 1:
+        context.go('/search');
+      case 2:
+        context.go('/uploads');
+      case 3:
+        context.go('/utilities');
+      case 4:
+        context.go('/settings');
     }
   }
 

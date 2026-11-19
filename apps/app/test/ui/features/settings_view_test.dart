@@ -42,7 +42,7 @@ void main() {
     });
   }
 
-  testWidgets('SettingsView renders account info, default username field, and change password form',
+  testWidgets('SettingsView renders simplified sections and expandable change password form',
       (tester) async {
     setLargeViewport(tester);
 
@@ -61,20 +61,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Settings'), findsWidgets);
+    expect(find.text('Appearance & Theme'), findsOneWidget);
+    expect(find.text('Plugins & Storefronts'), findsOneWidget);
+    expect(find.text('Server Connection'), findsOneWidget);
+    expect(find.text('Rescan Library'), findsOneWidget);
     expect(find.text('Account & Security'), findsOneWidget);
     expect(find.text('Default Username'), findsOneWidget);
     expect(find.text('Change Password'), findsOneWidget);
+    expect(find.text('Disconnect / Sign Out'), findsOneWidget);
+
+    // Password form is collapsed by default for progressive disclosure
+    expect(find.text('Current Password'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('toggle_change_password_button')));
+    await tester.pumpAndSettle();
+
     expect(find.text('Current Password'), findsOneWidget);
     expect(find.text('New Password'), findsOneWidget);
     expect(find.text('Confirm New Password'), findsOneWidget);
     expect(find.text('Update Password'), findsOneWidget);
-    expect(find.text('Uploads & Ingestion'), findsOneWidget);
-    expect(find.text('Open Uploads & Staged Queue'), findsOneWidget);
-    expect(find.text('Library Utilities'), findsOneWidget);
-    expect(find.text('Manage Duplicates & Book Merge'), findsOneWidget);
-    expect(find.text('Server Connection'), findsOneWidget);
-    expect(find.text('Rescan Library for New Books'), findsOneWidget);
-    expect(find.text('Disconnect / Sign Out'), findsOneWidget);
   });
 
   testWidgets('SettingsView validates empty fields and mismatched passwords', (tester) async {
@@ -92,6 +97,9 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('toggle_change_password_button')));
     await tester.pumpAndSettle();
 
     // Tap Update Password with empty inputs
@@ -151,6 +159,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const Key('toggle_change_password_button')));
+    await tester.pumpAndSettle();
+
     await tester.enterText(find.widgetWithText(TextFormField, 'Current Password'), 'validCurrentPass');
     await tester.enterText(find.widgetWithText(TextFormField, 'New Password'), 'brandNewPass123');
     await tester.enterText(find.widgetWithText(TextFormField, 'Confirm New Password'), 'brandNewPass123');
@@ -187,6 +198,9 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('toggle_change_password_button')));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.widgetWithText(TextFormField, 'Current Password'), 'wrongCurrentPass');

@@ -24,6 +24,9 @@ class ShelfdColors extends ThemeExtension<ShelfdColors> {
   final Color errorBg;
   final Color errorBorder;
   final Color errorText;
+  final Color warningBg;
+  final Color warningBorder;
+  final Color warningText;
   final Color cardShadowColor;
   final bool isDark;
 
@@ -47,6 +50,9 @@ class ShelfdColors extends ThemeExtension<ShelfdColors> {
     required this.errorBg,
     required this.errorBorder,
     required this.errorText,
+    required this.warningBg,
+    required this.warningBorder,
+    required this.warningText,
     required this.cardShadowColor,
     required this.isDark,
   });
@@ -71,6 +77,9 @@ class ShelfdColors extends ThemeExtension<ShelfdColors> {
     errorBg: AppTokens.errorBgLight,
     errorBorder: AppTokens.errorBorderLight,
     errorText: AppTokens.errorTextLight,
+    warningBg: AppTokens.warningBgLight,
+    warningBorder: AppTokens.warningBorderLight,
+    warningText: AppTokens.warningTextLight,
     cardShadowColor: Color(0x0D1E1B18),
     isDark: false,
   );
@@ -95,6 +104,9 @@ class ShelfdColors extends ThemeExtension<ShelfdColors> {
     errorBg: AppTokens.errorBgLight,
     errorBorder: AppTokens.errorBorderLight,
     errorText: AppTokens.errorTextLight,
+    warningBg: AppTokens.warningBgLight,
+    warningBorder: AppTokens.warningBorderLight,
+    warningText: AppTokens.warningTextLight,
     cardShadowColor: Color(0x145B4636),
     isDark: false,
   );
@@ -119,6 +131,9 @@ class ShelfdColors extends ThemeExtension<ShelfdColors> {
     errorBg: AppTokens.errorBgDark,
     errorBorder: AppTokens.errorBorderDark,
     errorText: AppTokens.errorTextDark,
+    warningBg: AppTokens.warningBgDark,
+    warningBorder: AppTokens.warningBorderDark,
+    warningText: AppTokens.warningTextDark,
     cardShadowColor: Color(0x40000000),
     isDark: true,
   );
@@ -155,6 +170,9 @@ class ShelfdColors extends ThemeExtension<ShelfdColors> {
     Color? errorBg,
     Color? errorBorder,
     Color? errorText,
+    Color? warningBg,
+    Color? warningBorder,
+    Color? warningText,
     Color? cardShadowColor,
     bool? isDark,
   }) {
@@ -179,6 +197,9 @@ class ShelfdColors extends ThemeExtension<ShelfdColors> {
       errorBg: errorBg ?? this.errorBg,
       errorBorder: errorBorder ?? this.errorBorder,
       errorText: errorText ?? this.errorText,
+      warningBg: warningBg ?? this.warningBg,
+      warningBorder: warningBorder ?? this.warningBorder,
+      warningText: warningText ?? this.warningText,
       cardShadowColor: cardShadowColor ?? this.cardShadowColor,
       isDark: isDark ?? this.isDark,
     );
@@ -212,6 +233,9 @@ class ShelfdColors extends ThemeExtension<ShelfdColors> {
       errorBg: Color.lerp(errorBg, other.errorBg, t)!,
       errorBorder: Color.lerp(errorBorder, other.errorBorder, t)!,
       errorText: Color.lerp(errorText, other.errorText, t)!,
+      warningBg: Color.lerp(warningBg, other.warningBg, t)!,
+      warningBorder: Color.lerp(warningBorder, other.warningBorder, t)!,
+      warningText: Color.lerp(warningText, other.warningText, t)!,
       cardShadowColor: Color.lerp(cardShadowColor, other.cardShadowColor, t)!,
       isDark: t < 0.5 ? isDark : other.isDark,
     );
@@ -240,6 +264,9 @@ class ShelfdColors extends ThemeExtension<ShelfdColors> {
         other.errorBg == errorBg &&
         other.errorBorder == errorBorder &&
         other.errorText == errorText &&
+        other.warningBg == warningBg &&
+        other.warningBorder == warningBorder &&
+        other.warningText == warningText &&
         other.cardShadowColor == cardShadowColor &&
         other.isDark == isDark;
   }
@@ -265,6 +292,9 @@ class ShelfdColors extends ThemeExtension<ShelfdColors> {
         errorBg,
         errorBorder,
         errorText,
+        warningBg,
+        warningBorder,
+        warningText,
         cardShadowColor,
         isDark,
       ]);
@@ -283,283 +313,187 @@ class AppTheme {
   static ThemeData buildTheme(ReadingThemeMode mode) {
     switch (mode) {
       case ReadingThemeMode.bone:
-        const colors = ShelfdColors.bone;
-        return ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.light,
-          scaffoldBackgroundColor: AppTokens.boneBackground,
-          cardColor: AppTokens.boneSurface,
-          dividerColor: AppTokens.crispBorder,
-          extensions: const <ThemeExtension<dynamic>>[colors],
-          colorScheme: const ColorScheme.light(
-            primary: AppTokens.charcoalInk,
-            onPrimary: Colors.white,
-            surface: AppTokens.boneSurface,
-            onSurface: AppTokens.charcoalInk,
-            onSurfaceVariant: AppTokens.mutedCopy,
-            outline: AppTokens.crispBorder,
-          ),
-          textTheme: const TextTheme(
-            bodyMedium: TextStyle(color: AppTokens.charcoalInk),
-            bodyLarge: TextStyle(color: AppTokens.charcoalInk),
-            bodySmall: TextStyle(color: AppTokens.mutedCopy),
-            titleMedium: TextStyle(color: AppTokens.charcoalInk),
-            titleLarge: TextStyle(color: AppTokens.charcoalInk),
-          ),
-          appBarTheme: const AppBarTheme(
-            backgroundColor: AppTokens.boneBackground,
-            foregroundColor: AppTokens.charcoalInk,
-            elevation: 0,
-            scrolledUnderElevation: 0,
-          ),
-          dialogTheme: DialogThemeData(
-            backgroundColor: colors.surface,
-            surfaceTintColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusLg),
-              side: BorderSide(color: colors.border),
-            ),
-          ),
-          bottomSheetTheme: BottomSheetThemeData(
-            backgroundColor: colors.surface,
-            surfaceTintColor: Colors.transparent,
-            modalBackgroundColor: colors.surface,
-          ),
-          cardTheme: CardThemeData(
-            color: colors.surface,
-            surfaceTintColor: Colors.transparent,
-            elevation: 0,
-            margin: EdgeInsets.zero,
-          ),
-          dividerTheme: DividerThemeData(
-            color: colors.border,
-            thickness: 1,
-            space: 1,
-          ),
-          popupMenuTheme: PopupMenuThemeData(
-            color: colors.surface,
-            surfaceTintColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              side: BorderSide(color: colors.border),
-            ),
-          ),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: colors.containerLow,
-            hintStyle: TextStyle(color: colors.mutedInk),
-            labelStyle: TextStyle(color: colors.secondaryInk),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: AppTokens.space12,
-              vertical: AppTokens.space12,
-            ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              borderSide: BorderSide(color: colors.border),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              borderSide: BorderSide(color: colors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
-            ),
-          ),
-          chipTheme: ChipThemeData(
-            backgroundColor: colors.containerLow,
-            selectedColor: colors.accentContainer,
-            side: BorderSide(color: colors.border),
-            labelStyle: TextStyle(color: colors.ink),
-            secondaryLabelStyle: TextStyle(color: colors.accentPrimary),
-          ),
-        );
-
+        return _buildThemeData(ShelfdColors.bone, Brightness.light);
       case ReadingThemeMode.sepia:
-        const colors = ShelfdColors.sepia;
-        return ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.light,
-          scaffoldBackgroundColor: AppTokens.sepiaBackground,
-          cardColor: AppTokens.sepiaSurface,
-          dividerColor: AppTokens.sepiaBorder,
-          extensions: const <ThemeExtension<dynamic>>[colors],
-          colorScheme: const ColorScheme.light(
-            primary: AppTokens.sepiaInk,
-            onPrimary: Colors.white,
-            surface: AppTokens.sepiaSurface,
-            onSurface: AppTokens.sepiaInk,
-            onSurfaceVariant: AppTokens.sepiaCopy,
-            outline: AppTokens.sepiaBorder,
-          ),
-          textTheme: const TextTheme(
-            bodyMedium: TextStyle(color: AppTokens.sepiaInk),
-            bodyLarge: TextStyle(color: AppTokens.sepiaInk),
-            bodySmall: TextStyle(color: AppTokens.sepiaCopy),
-            titleMedium: TextStyle(color: AppTokens.sepiaInk),
-            titleLarge: TextStyle(color: AppTokens.sepiaInk),
-          ),
-          appBarTheme: const AppBarTheme(
-            backgroundColor: AppTokens.sepiaBackground,
-            foregroundColor: AppTokens.sepiaInk,
-            elevation: 0,
-            scrolledUnderElevation: 0,
-          ),
-          dialogTheme: DialogThemeData(
-            backgroundColor: colors.surface,
-            surfaceTintColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusLg),
-              side: BorderSide(color: colors.border),
-            ),
-          ),
-          bottomSheetTheme: BottomSheetThemeData(
-            backgroundColor: colors.surface,
-            surfaceTintColor: Colors.transparent,
-            modalBackgroundColor: colors.surface,
-          ),
-          cardTheme: CardThemeData(
-            color: colors.surface,
-            surfaceTintColor: Colors.transparent,
-            elevation: 0,
-            margin: EdgeInsets.zero,
-          ),
-          dividerTheme: DividerThemeData(
-            color: colors.border,
-            thickness: 1,
-            space: 1,
-          ),
-          popupMenuTheme: PopupMenuThemeData(
-            color: colors.surface,
-            surfaceTintColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              side: BorderSide(color: colors.border),
-            ),
-          ),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: colors.containerLow,
-            hintStyle: TextStyle(color: colors.mutedInk),
-            labelStyle: TextStyle(color: colors.secondaryInk),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: AppTokens.space12,
-              vertical: AppTokens.space12,
-            ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              borderSide: BorderSide(color: colors.border),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              borderSide: BorderSide(color: colors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
-            ),
-          ),
-          chipTheme: ChipThemeData(
-            backgroundColor: colors.containerLow,
-            selectedColor: colors.accentContainer,
-            side: BorderSide(color: colors.border),
-            labelStyle: TextStyle(color: colors.ink),
-            secondaryLabelStyle: TextStyle(color: colors.accentPrimary),
-          ),
-        );
-
+        return _buildThemeData(ShelfdColors.sepia, Brightness.light);
       case ReadingThemeMode.dark:
-        const colors = ShelfdColors.dark;
-        return ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.dark,
-          scaffoldBackgroundColor: AppTokens.darkOledBackground,
-          cardColor: AppTokens.darkOledSurface,
-          dividerColor: AppTokens.darkOledBorder,
-          extensions: const <ThemeExtension<dynamic>>[colors],
-          colorScheme: const ColorScheme.dark(
-            primary: AppTokens.darkOledInk,
-            onPrimary: Colors.black,
-            surface: AppTokens.darkOledSurface,
-            onSurface: AppTokens.darkOledInk,
-            onSurfaceVariant: AppTokens.darkOledCopy,
-            outline: AppTokens.darkOledBorder,
-          ),
-          textTheme: const TextTheme(
-            bodyMedium: TextStyle(color: AppTokens.darkOledInk),
-            bodyLarge: TextStyle(color: AppTokens.darkOledInk),
-            bodySmall: TextStyle(color: AppTokens.darkOledCopy),
-            titleMedium: TextStyle(color: AppTokens.darkOledInk),
-            titleLarge: TextStyle(color: AppTokens.darkOledInk),
-          ),
-          appBarTheme: const AppBarTheme(
-            backgroundColor: AppTokens.darkOledBackground,
-            foregroundColor: AppTokens.darkOledInk,
-            elevation: 0,
-            scrolledUnderElevation: 0,
-          ),
-          dialogTheme: DialogThemeData(
-            backgroundColor: colors.surface,
-            surfaceTintColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusLg),
-              side: BorderSide(color: colors.border),
-            ),
-          ),
-          bottomSheetTheme: BottomSheetThemeData(
-            backgroundColor: colors.surface,
-            surfaceTintColor: Colors.transparent,
-            modalBackgroundColor: colors.surface,
-          ),
-          cardTheme: CardThemeData(
-            color: colors.surface,
-            surfaceTintColor: Colors.transparent,
-            elevation: 0,
-            margin: EdgeInsets.zero,
-          ),
-          dividerTheme: DividerThemeData(
-            color: colors.border,
-            thickness: 1,
-            space: 1,
-          ),
-          popupMenuTheme: PopupMenuThemeData(
-            color: colors.surface,
-            surfaceTintColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              side: BorderSide(color: colors.border),
-            ),
-          ),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: colors.containerLow,
-            hintStyle: TextStyle(color: colors.mutedInk),
-            labelStyle: TextStyle(color: colors.secondaryInk),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: AppTokens.space12,
-              vertical: AppTokens.space12,
-            ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              borderSide: BorderSide(color: colors.border),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              borderSide: BorderSide(color: colors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-              borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
-            ),
-          ),
-          chipTheme: ChipThemeData(
-            backgroundColor: colors.containerLow,
-            selectedColor: colors.accentContainer,
-            side: BorderSide(color: colors.border),
-            labelStyle: TextStyle(color: colors.ink),
-            secondaryLabelStyle: TextStyle(color: colors.accentPrimary),
-          ),
-        );
+        return _buildThemeData(ShelfdColors.dark, Brightness.dark);
     }
+  }
+
+  static ThemeData _buildThemeData(ShelfdColors colors, Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
+    final colorScheme = isDark
+        ? ColorScheme.dark(
+            primary: colors.accentPrimary,
+            onPrimary: colors.onAccent,
+            secondary: colors.accentSecondary,
+            onSecondary: colors.onAccent,
+            surface: colors.surface,
+            onSurface: colors.ink,
+            onSurfaceVariant: colors.secondaryInk,
+            outline: colors.border,
+            outlineVariant: colors.subtleBorder,
+            error: colors.errorText,
+          )
+        : ColorScheme.light(
+            primary: colors.accentPrimary,
+            onPrimary: colors.onAccent,
+            secondary: colors.accentSecondary,
+            onSecondary: colors.onAccent,
+            surface: colors.surface,
+            onSurface: colors.ink,
+            onSurfaceVariant: colors.secondaryInk,
+            outline: colors.border,
+            outlineVariant: colors.subtleBorder,
+            error: colors.errorText,
+          );
+
+    return ThemeData(
+      useMaterial3: true,
+      brightness: brightness,
+      scaffoldBackgroundColor: colors.background,
+      cardColor: colors.surface,
+      dividerColor: colors.border,
+      extensions: <ThemeExtension<dynamic>>[colors],
+      colorScheme: colorScheme,
+      textTheme: TextTheme(
+        bodyMedium: TextStyle(color: colors.ink),
+        bodyLarge: TextStyle(color: colors.ink),
+        bodySmall: TextStyle(color: colors.secondaryInk),
+        titleMedium: TextStyle(color: colors.ink),
+        titleLarge: TextStyle(color: colors.ink),
+      ),
+      appBarTheme: AppBarTheme(
+        backgroundColor: colors.background,
+        foregroundColor: colors.ink,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: colors.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTokens.radiusLg),
+          side: BorderSide(color: colors.border),
+        ),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: colors.surface,
+        surfaceTintColor: Colors.transparent,
+        modalBackgroundColor: colors.surface,
+      ),
+      cardTheme: CardThemeData(
+        color: colors.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        margin: EdgeInsets.zero,
+      ),
+      dividerTheme: DividerThemeData(
+        color: colors.border,
+        thickness: 1,
+        space: 1,
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: colors.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+          side: BorderSide(color: colors.border),
+        ),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: colors.ink,
+        contentTextStyle: TextStyle(color: colors.surface),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+        ),
+      ),
+      switchTheme: SwitchThemeData(
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return colors.accentPrimary;
+          }
+          return colors.containerHigh;
+        }),
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return colors.onAccent;
+          }
+          return colors.secondaryInk;
+        }),
+        trackOutlineColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return Colors.transparent;
+          }
+          return colors.border;
+        }),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: colors.ink,
+          side: BorderSide(color: colors.border),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppTokens.space16,
+            vertical: AppTokens.space12,
+          ),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: colors.accentPrimary,
+          foregroundColor: colors.onAccent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppTokens.space16,
+            vertical: AppTokens.space12,
+          ),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: colors.containerLow,
+        hintStyle: TextStyle(color: colors.mutedInk),
+        labelStyle: TextStyle(color: colors.secondaryInk),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppTokens.space12,
+          vertical: AppTokens.space12,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+          borderSide: BorderSide(color: colors.border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+          borderSide: BorderSide(color: colors.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+          borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+          borderSide: BorderSide(color: colors.errorBorder),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+          borderSide: BorderSide(color: colors.errorText, width: 1.5),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: colors.containerLow,
+        selectedColor: colors.accentContainer,
+        side: BorderSide(color: colors.border),
+        labelStyle: TextStyle(color: colors.ink),
+        secondaryLabelStyle: TextStyle(color: colors.accentPrimary),
+      ),
+    );
   }
 }
