@@ -1,11 +1,14 @@
 import * as httpNs from "node:http";
 import * as httpsNs from "node:https";
+import * as nodeStreamNs from "node:stream";
 import * as streamPromisesNs from "node:stream/promises";
 import { AuthExpiredError, type PluginContext } from "@shelfd/plugin-sdk";
 import { normalizeIcon16x16, normalizeYotoIconUri } from "./image-16x16.ts";
 
 const http: typeof httpNs = (httpNs as unknown as { default?: typeof httpNs }).default ?? httpNs;
 const https: typeof httpsNs = (httpsNs as unknown as { default?: typeof httpsNs }).default ?? httpsNs;
+const nodeStreamMod: typeof nodeStreamNs =
+  (nodeStreamNs as unknown as { default?: typeof nodeStreamNs }).default ?? nodeStreamNs;
 const streamPromises: typeof streamPromisesNs =
   (streamPromisesNs as unknown as { default?: typeof streamPromisesNs }).default ?? streamPromisesNs;
 
@@ -838,6 +841,27 @@ export async function uploadAudioStream(
   }
 
   const nodeStream = stream as NodeJS.ReadableStream;
+  const gcFn = typeof (globalThis as { gc?: () => void }).gc === "function"
+    ? (globalThis as { gc?: () => void }).gc!
+    : null;
+  if (gcFn) {
+    let bytesSinceGc = 0;
+    const GC_INTERVAL_BYTES = 8 * 1024 * 1024;
+    const meter = new nodeStreamMod.Transform({
+      highWaterMark: 16 * 1024,
+      transform(chunk: Buffer, _encoding, callback) {
+        bytesSinceGc += chunk.byteLength;
+        if (bytesSinceGc >= GC_INTERVAL_BYTES) {
+          bytesSinceGc = 0;
+          gcFn();
+        }
+        callback(null, chunk);
+      },
+    });
+    await Promise.all([streamPromises.pipeline(nodeStream, meter, putReq), done]);
+    gcFn();
+    return;
+  }
   await Promise.all([streamPromises.pipeline(nodeStream, putReq), done]);
 }
 
