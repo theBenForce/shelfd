@@ -642,7 +642,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
       ),
       padding: const EdgeInsets.symmetric(
         horizontal: AppTokens.space16,
-        vertical: AppTokens.space24,
+        vertical: AppTokens.space16,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -653,8 +653,8 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
             child: Row(
               children: [
                 Container(
-                  width: 36,
-                  height: 36,
+                  width: 34,
+                  height: 34,
                   decoration: BoxDecoration(
                     color: colors.accentPrimary,
                     borderRadius: BorderRadius.circular(AppTokens.radiusSm),
@@ -662,7 +662,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                   child: Icon(
                     Icons.auto_stories_rounded,
                     color: colors.onAccent,
-                    size: 20,
+                    size: 19,
                   ),
                 ),
                 const SizedBox(width: AppTokens.space12),
@@ -674,7 +674,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                       Text(
                         'Shelfd',
                         style: AppTypography.titleSerif(
-                          fontSize: 22,
+                          fontSize: 20,
                           fontWeight: FontWeight.w700,
                           color: colors.ink,
                         ),
@@ -693,7 +693,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
               ],
             ),
           ),
-          const SizedBox(height: AppTokens.space24),
+          const SizedBox(height: AppTokens.space16),
 
           // Scrollable Navigation Links
           Expanded(
@@ -704,7 +704,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                   Padding(
                     padding: const EdgeInsets.only(
                       left: AppTokens.space12,
-                      bottom: AppTokens.space8,
+                      bottom: AppTokens.space4,
                     ),
                     child: Text(
                       'BROWSE',
@@ -790,7 +790,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                       onTap: () => _navigate('/topics', 0),
                     ),
                   ],
-                  const SizedBox(height: AppTokens.space4),
+                  const SizedBox(height: 2),
 
                   _SideNavItem(
                     icon: Icons.saved_search_outlined,
@@ -802,7 +802,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
 
                   Padding(
                     padding: const EdgeInsets.symmetric(
-                      vertical: AppTokens.space16,
+                      vertical: AppTokens.space8,
                     ),
                     child: Divider(color: colors.subtleBorder, height: 1),
                   ),
@@ -810,7 +810,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                   Padding(
                     padding: const EdgeInsets.only(
                       left: AppTokens.space12,
-                      bottom: AppTokens.space8,
+                      bottom: AppTokens.space4,
                     ),
                     child: Text(
                       'MANAGE',
@@ -856,7 +856,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                         : null,
                     onTap: () => _navigate('/uploads', 4),
                   ),
-                  const SizedBox(height: AppTokens.space4),
+                  const SizedBox(height: 2),
                   _SideNavItem(
                     icon: Icons.handyman_outlined,
                     selectedIcon: Icons.handyman_rounded,
@@ -864,7 +864,7 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
                     isSelected: isUtilities,
                     onTap: () => _navigate('/utilities', 5),
                   ),
-                  const SizedBox(height: AppTokens.space4),
+                  const SizedBox(height: 2),
                   _SideNavItem(
                     icon: Icons.settings_outlined,
                     selectedIcon: Icons.settings_rounded,
@@ -994,7 +994,7 @@ class _SideNavItem extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppTokens.radiusMd),
         child: Container(
-          height: AppTokens.minTouchTarget,
+          height: 40,
           padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppTokens.radiusMd),
@@ -1064,7 +1064,7 @@ class _SideNavSubItem extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(AppTokens.radiusMd),
           child: Container(
-            height: 36,
+            height: 32,
             padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppTokens.radiusMd),

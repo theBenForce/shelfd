@@ -22,38 +22,41 @@ class ShelfdPageHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = ShelfdColors.of(context);
-    return Wrap(
-      alignment: WrapAlignment.spaceBetween,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: AppTokens.space16,
-      runSpacing: AppTokens.space12,
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              title,
-              style: AppTypography.displaySerif(
-                fontSize: 28,
-                fontWeight: FontWeight.w600,
-                color: colors.ink,
-              ),
-            ),
-            if (subtitle != null) ...[
-              const SizedBox(height: AppTokens.space4),
+    return SizedBox(
+      width: double.infinity,
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: AppTokens.space16,
+        runSpacing: AppTokens.space12,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
               Text(
-                subtitle!,
-                style: AppTypography.bodySans(
-                  fontSize: 14,
-                  color: colors.secondaryInk,
+                title,
+                style: AppTypography.displaySerif(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w600,
+                  color: colors.ink,
                 ),
               ),
+              if (subtitle != null) ...[
+                const SizedBox(height: AppTokens.space4),
+                Text(
+                  subtitle!,
+                  style: AppTypography.bodySans(
+                    fontSize: 14,
+                    color: colors.secondaryInk,
+                  ),
+                ),
+              ],
             ],
-          ],
-        ),
-        if (trailing != null) trailing!,
-      ],
+          ),
+          if (trailing != null) trailing!,
+        ],
+      ),
     );
   }
 }
