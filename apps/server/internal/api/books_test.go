@@ -474,3 +474,104 @@ func TestAPI_SendBookToNotebookLM_WebhookAndEnterprise(t *testing.T) {
 		}
 	})
 }
+
+func TestAPI_ExportBookMarkdown_And_GetSeries(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	ctx := context.Background()
+	token := f.loginAndGetToken(t)
+	book1 := seedNotebookLMTestBook(t, f)
+
+	mdReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+book1.ID+"/markdown", nil)
+	mdReq.Header.Set("Authorization", "Bearer "+token)
+	mdRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(mdRec, mdReq)
+	if mdRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on GET /api/v1/books/{id}/markdown, got %d: %s", mdRec.Code, mdRec.Body.String())
+	}
+	if ct := mdRec.Header().Get("Content-Type"); ct != "text/markdown; charset=utf-8" {
+		t.Errorf("expected Content-Type text/markdown; charset=utf-8, got %q", ct)
+	}
+	mdBody := mdRec.Body.String()
+	for _, sub := range []string{
+		"# Solaris: The Novel?",
+		"We don't need other worlds. We need mirrors.",
+		"Key philosophical theme of the book",
+		"### Chapter 1: Arrival",
+	} {
+		if !strings.Contains(mdBody, sub) {
+			t.Errorf("expected /markdown export to contain %q, got:\n%s", sub, mdBody)
+		}
+	}
+
+	seriesList, err := f.repo.ListSeries(ctx)
+	if err != nil || len(seriesList) == 0 {
+		t.Fatalf("expected seeded series SF Masterworks: err=%v len=%d", err, len(seriesList))
+	}
+	seriesID := seriesList[0].ID
+
+	book2 := &repository.Book{
+		ID:       "book-nlm-2",
+		Title:    "Roadside Picnic",
+		BookType: "audiobook",
+		FilePath: "Strugatsky/Roadside Picnic/Roadside.m4b",
+	}
+	if err := f.repo.CreateBook(ctx, book2); err != nil {
+		t.Fatalf("CreateBook 2 failed: %v", err)
+	}
+	seq2 := 2.0
+	if err := f.repo.LinkBookSeries(ctx, book2.ID, seriesID, &seq2); err != nil {
+		t.Fatalf("LinkBookSeries 2 failed: %v", err)
+	}
+	if err := f.repo.CreateBookFiles(ctx, []*repository.BookFile{
+		{
+			ID:       "bf-series-2",
+			BookID:   book2.ID,
+			FilePath: book2.FilePath,
+			FileType: "audiobook",
+		},
+	}); err != nil {
+		t.Fatalf("CreateBookFiles failed: %v", err)
+	}
+
+	serReq := httptest.NewRequest(http.MethodGet, "/api/v1/series/"+seriesID, nil)
+	serReq.Header.Set("Authorization", "Bearer "+token)
+	serRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(serRec, serReq)
+	if serRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on GET /api/v1/series/{id}, got %d: %s", serRec.Code, serRec.Body.String())
+	}
+
+	var serResp struct {
+		Series struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"series"`
+		Books []struct {
+			ID             string   `json:"id"`
+			Title          string   `json:"title"`
+			SequenceNumber *float64 `json:"sequence_number"`
+			Files          []struct {
+				ID string `json:"id"`
+			} `json:"files"`
+		} `json:"books"`
+	}
+	if err := json.Unmarshal(serRec.Body.Bytes(), &serResp); err != nil {
+		t.Fatalf("decode GET /api/v1/series/{id} response: %v", err)
+	}
+	if serResp.Series.ID != seriesID || serResp.Series.Name != "SF Masterworks" {
+		t.Fatalf("unexpected series payload: %+v", serResp.Series)
+	}
+	if len(serResp.Books) != 2 {
+		t.Fatalf("expected 2 books in series, got %d", len(serResp.Books))
+	}
+	if serResp.Books[0].ID != "book-nlm-2" || serResp.Books[1].ID != "book-nlm-1" {
+		t.Fatalf("expected books ordered by sequence_number (2 then 12), got %+v", serResp.Books)
+	}
+	if len(serResp.Books[0].Files) != 1 || serResp.Books[0].Files[0].ID != "bf-series-2" {
+		t.Fatalf("expected files array populated on series book entry, got %+v", serResp.Books[0].Files)
+	}
+}
+

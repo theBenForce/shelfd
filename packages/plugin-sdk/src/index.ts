@@ -1,6 +1,14 @@
 import readline from "node:readline";
 import util from "node:util";
 import type {
+  ActionDef,
+  ActionInvokeRequest,
+  ActionOptionsRequest,
+  ActionPrepareRequest,
+  ActionTarget,
+  AssetUploadRequest,
+  AuthBeginRequest,
+  AuthCompleteRequest,
   CatalogBrowseRequest,
   CatalogDescriptor,
   CatalogSearchRequest,
@@ -140,6 +148,17 @@ function toBlob(data: Uint8Array | ArrayBuffer | Blob, mimeType: string): Blob {
   return new Blob([new Uint8Array(data)], { type: mimeType });
 }
 
+function parseActionTarget(raw: unknown): ActionTarget {
+  const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const rawType = String(obj.type ?? "book");
+  return {
+    type: rawType === "series" ? "series" : "book",
+    id: String(obj.id ?? ""),
+    title: typeof obj.title === "string" ? obj.title : undefined,
+    book_ids: Array.isArray(obj.book_ids) ? obj.book_ids.map((id) => String(id)) : undefined,
+  };
+}
+
 /**
  * Starts the Shelfd NDJSON JSON-RPC 2.0 plugin runtime on process.stdin / process.stdout.
  * Automatically redirects console.log/info/warn to stderr so stdout remains strictly valid NDJSON.
@@ -203,21 +222,95 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
   const buildContext = (rawAuth?: InvocationAuthWire): PluginContext<TConfig> => {
     const userId = typeof rawAuth?.user_id === "string" ? rawAuth.user_id : "";
     const apiBase = (typeof rawAuth?.api_base === "string" && rawAuth.api_base ? rawAuth.api_base : hostApiBase).replace(/\/+$/, "");
-    const invocationToken = typeof rawAuth?.invocation_token === "string" ? rawAuth.invocation_token : "";
+    let currentToken = typeof rawAuth?.invocation_token === "string" ? rawAuth.invocation_token : "";
     const config = ((rawAuth?.config && typeof rawAuth.config === "object") ? rawAuth.config : {}) as TConfig;
 
-    return {
+    const ctx: PluginContext<TConfig> = {
       userId,
       apiBase,
-      invocationToken,
+      get invocationToken(): string {
+        return currentToken;
+      },
       dataDir: hostDataDir,
       config,
+
+      async refreshInvocationToken(): Promise<string> {
+        if (!userId) {
+          throw new Error("Cannot refresh invocation token without an active user_id in invocation context");
+        }
+        const res = (await callHost("host/refresh_token", { user_id: userId })) as { invocation_token?: string } | undefined;
+        const nextToken = typeof res?.invocation_token === "string" ? res.invocation_token : "";
+        if (!nextToken) {
+          throw new Error("Host did not return a refreshed invocation_token");
+        }
+        currentToken = nextToken;
+        return currentToken;
+      },
+
+      async fetchLoopback(path: string, init?: RequestInit): Promise<Response> {
+        if (!apiBase) {
+          throw new Error("Missing Shelfd api_base in invocation context");
+        }
+        if (!currentToken) {
+          throw new Error("Missing scoped invocation_token; ensure required scopes are listed in plugin.json api_scopes");
+        }
+        const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+        const url = `${apiBase}${normalizedPath}`;
+
+        const doFetch = (token: string): Promise<Response> => {
+          const headers = new Headers(init?.headers);
+          headers.set("Authorization", `Bearer ${token}`);
+          return fetch(url, { ...init, headers });
+        };
+
+        const firstRes = await doFetch(currentToken);
+        if (firstRes.status === 401 && userId) {
+          const nextToken = await ctx.refreshInvocationToken();
+          return await doFetch(nextToken);
+        }
+        return firstRes;
+      },
+
+      async openLoopbackStream(path: string): Promise<{ stream: ReadableStream<Uint8Array>; contentLength?: number; contentType?: string }> {
+        const res = await ctx.fetchLoopback(path);
+        if (!res.ok) {
+          const bodyText = await res.text().catch(() => "");
+          throw new Error(`Loopback stream request failed (HTTP ${res.status}): ${bodyText.slice(0, 200)}`);
+        }
+        if (!res.body) {
+          throw new Error("Loopback response did not include a readable body stream");
+        }
+        const rawLen = res.headers.get("content-length");
+        const parsedLen = rawLen ? Number(rawLen) : undefined;
+        const contentLength = parsedLen !== undefined && !Number.isNaN(parsedLen) && parsedLen >= 0 ? parsedLen : undefined;
+        const contentType = res.headers.get("content-type") ?? undefined;
+        return {
+          stream: res.body,
+          contentLength,
+          contentType,
+        };
+      },
+
+      async getBookMarkdown(bookId: string): Promise<{ markdown: string; fileName: string }> {
+        const res = await ctx.fetchLoopback(`/api/v1/books/${encodeURIComponent(bookId)}/markdown`);
+        const markdown = await res.text();
+        if (!res.ok) {
+          throw new Error(`getBookMarkdown failed (HTTP ${res.status}): ${markdown.slice(0, 200)}`);
+        }
+        let fileName = `${bookId}.md`;
+        const disposition = res.headers.get("content-disposition") ?? "";
+        const match = disposition.match(/filename="?([^";]+)"?/i);
+        if (match && match[1]?.trim()) {
+          fileName = match[1].trim();
+        }
+        return { markdown, fileName };
+      },
 
       async stageBook(input: StageBookInput): Promise<StageBookResponse> {
         if (!apiBase) {
           throw new Error("Missing Shelfd api_base in invocation context");
         }
-        if (!invocationToken) {
+        if (!currentToken) {
           throw new Error("Missing scoped invocation_token; ensure \"uploads:stage\" is listed in plugin.json api_scopes");
         }
 
@@ -239,11 +332,8 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
           form.append("metadata_defaults", JSON.stringify(input.metadataDefaults));
         }
 
-        const res = await fetch(`${apiBase}/api/v1/books/upload/stage`, {
+        const res = await ctx.fetchLoopback("/api/v1/books/upload/stage", {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${invocationToken}`,
-          },
           body: form,
         });
 
@@ -279,9 +369,11 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
 
       reportProgress(progress: ProgressNotification): void {
         sendNotification("progress", {
+          job_id: progress.jobId,
           batch_id: progress.batchId,
           current: progress.current,
           total: progress.total,
+          percent: progress.percent,
           external_id: progress.externalId,
           title: progress.title,
           status: progress.status ?? "staging",
@@ -293,6 +385,8 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
         sendNotification("log", { level, message });
       },
     };
+
+    return ctx;
   };
 
   const handleRequest = async (msg: WireMessage): Promise<unknown> => {
@@ -327,6 +421,22 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
           input_schema: spec.inputSchema,
         }));
 
+        const actions: ActionDef[] = [];
+        for (const [name, spec] of Object.entries(definition.actions ?? {})) {
+          if (spec.title && spec.targets && spec.targets.length > 0) {
+            actions.push({
+              name,
+              title: spec.title,
+              description: spec.description,
+              icon: spec.icon,
+              targets: spec.targets,
+              media_types: spec.mediaTypes,
+              mode: spec.mode,
+              execution: spec.execution,
+            });
+          }
+        }
+
         let catalog: CatalogDescriptor | undefined = definition.catalog?.descriptor;
         if (definition.catalog && !catalog) {
           const modes: ("browse" | "search")[] = [];
@@ -341,6 +451,8 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
           tools: tools.length > 0 ? tools : undefined,
           commands: commands.length > 0 ? commands : undefined,
           catalog,
+          auth: definition.auth?.spec,
+          actions: actions.length > 0 ? actions : undefined,
         };
       }
 
@@ -368,6 +480,128 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
         const args = (params.args && typeof params.args === "object" ? params.args : {}) as Record<string, unknown>;
         const ctx = buildContext(params.auth as InvocationAuthWire | undefined);
         return (await spec.execute(args, ctx)) ?? { ok: true };
+      }
+
+      case "auth/status": {
+        if (!definition.auth?.status) {
+          throw new PluginRPCError(-32601, `Plugin ${definition.name} does not implement auth/status`);
+        }
+        const ctx = buildContext(params.auth as InvocationAuthWire | undefined);
+        return await definition.auth.status(ctx);
+      }
+
+      case "auth/begin": {
+        if (!definition.auth?.begin) {
+          throw new PluginRPCError(-32601, `Plugin ${definition.name} does not implement auth/begin`);
+        }
+        const ctx = buildContext(params.auth as InvocationAuthWire | undefined);
+        const req: AuthBeginRequest = {
+          method: typeof params.method === "string" ? params.method : undefined,
+          redirect_uri: typeof params.redirect_uri === "string" ? params.redirect_uri : undefined,
+          state: typeof params.state === "string" ? params.state : undefined,
+          code_challenge: typeof params.code_challenge === "string" ? params.code_challenge : undefined,
+          code_challenge_method: typeof params.code_challenge_method === "string" ? params.code_challenge_method : undefined,
+        };
+        return await definition.auth.begin(req, ctx);
+      }
+
+      case "auth/complete": {
+        if (!definition.auth?.complete) {
+          throw new PluginRPCError(-32601, `Plugin ${definition.name} does not implement auth/complete`);
+        }
+        const ctx = buildContext(params.auth as InvocationAuthWire | undefined);
+        const rawValues = params.values && typeof params.values === "object" ? (params.values as Record<string, unknown>) : undefined;
+        const values: Record<string, string> | undefined = rawValues
+          ? Object.fromEntries(Object.entries(rawValues).map(([k, v]) => [k, String(v ?? "")]))
+          : undefined;
+        const req: AuthCompleteRequest = {
+          method: typeof params.method === "string" ? params.method : undefined,
+          code: typeof params.code === "string" ? params.code : undefined,
+          redirect_uri: typeof params.redirect_uri === "string" ? params.redirect_uri : undefined,
+          code_verifier: typeof params.code_verifier === "string" ? params.code_verifier : undefined,
+          state: typeof params.state === "string" ? params.state : undefined,
+          values,
+        };
+        return await definition.auth.complete(req, ctx);
+      }
+
+      case "auth/disconnect": {
+        if (!definition.auth?.disconnect) {
+          throw new PluginRPCError(-32601, `Plugin ${definition.name} does not implement auth/disconnect`);
+        }
+        const ctx = buildContext(params.auth as InvocationAuthWire | undefined);
+        return await definition.auth.disconnect(ctx);
+      }
+
+      case "actions/prepare": {
+        const actionName = String(params.action ?? "");
+        const spec = definition.actions?.[actionName];
+        if (!spec?.prepare) {
+          throw new PluginRPCError(-32601, `Action ${actionName} does not implement actions/prepare`);
+        }
+        const ctx = buildContext(params.auth as InvocationAuthWire | undefined);
+        const req: ActionPrepareRequest = {
+          action: actionName,
+          target: parseActionTarget(params.target),
+          context: (params.context && typeof params.context === "object" ? params.context : undefined) as Record<string, unknown> | undefined,
+        };
+        return await spec.prepare(req, ctx);
+      }
+
+      case "actions/options": {
+        const actionName = String(params.action ?? "");
+        const spec = definition.actions?.[actionName];
+        if (!spec?.options) {
+          throw new PluginRPCError(-32601, `Action ${actionName} does not implement actions/options`);
+        }
+        const ctx = buildContext(params.auth as InvocationAuthWire | undefined);
+        const req: ActionOptionsRequest = {
+          action: actionName,
+          source: String(params.source ?? ""),
+          tab: typeof params.tab === "string" ? params.tab : undefined,
+          query: typeof params.query === "string" ? params.query : undefined,
+          cursor: typeof params.cursor === "string" ? params.cursor : undefined,
+          target: params.target ? parseActionTarget(params.target) : undefined,
+        };
+        return await spec.options(req, ctx);
+      }
+
+      case "actions/upload_asset": {
+        const actionName = String(params.action ?? "");
+        const spec = definition.actions?.[actionName];
+        if (!spec?.uploadAsset) {
+          throw new PluginRPCError(-32601, `Action ${actionName} does not implement actions/upload_asset`);
+        }
+        const ctx = buildContext(params.auth as InvocationAuthWire | undefined);
+        const req: AssetUploadRequest = {
+          action: actionName,
+          field: typeof params.field === "string" ? params.field : undefined,
+          filename: String(params.filename ?? "asset"),
+          mime_type: String(params.mime_type ?? "application/octet-stream"),
+          data_base64: String(params.data_base64 ?? ""),
+        };
+        return await spec.uploadAsset(req, ctx);
+      }
+
+      case "actions/invoke": {
+        const actionName = String(params.action ?? "");
+        const spec = definition.actions?.[actionName];
+        if (!spec?.invoke) {
+          throw new PluginRPCError(-32601, `Unknown action: ${actionName}`);
+        }
+        const ctx = buildContext(params.auth as InvocationAuthWire | undefined);
+        const rawOverrides = params.overrides && typeof params.overrides === "object" ? (params.overrides as Record<string, unknown>) : undefined;
+        const overrides: Record<string, string> | undefined = rawOverrides
+          ? Object.fromEntries(Object.entries(rawOverrides).map(([k, v]) => [k, String(v ?? "")]))
+          : undefined;
+        const req: ActionInvokeRequest = {
+          action: actionName,
+          job_id: typeof params.job_id === "string" ? params.job_id : undefined,
+          target: parseActionTarget(params.target),
+          values: (params.values && typeof params.values === "object" ? params.values : undefined) as Record<string, unknown> | undefined,
+          overrides,
+        };
+        return await spec.invoke(req, ctx);
       }
 
       case "catalog/browse": {

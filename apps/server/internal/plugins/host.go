@@ -24,13 +24,14 @@ import (
 )
 
 const (
-	maxEventPayloadBytes = 64 << 10  // 64 KB cap per plugin notification
-	maxRPCFrameBytes     = 10 << 20  // 10 MB max NDJSON line from plugin stdout
-	maxLogLines          = 100       // Ring buffer size per plugin
-	handshakeTimeout     = 30 * time.Second
-	shutdownGracePeriod  = 5 * time.Second
-	defaultCallTimeout   = 60 * time.Second
-	stageCallTimeout     = 5 * time.Minute
+	maxEventPayloadBytes      = 64 << 10 // 64 KB cap per plugin notification
+	maxRPCFrameBytes          = 10 << 20 // 10 MB max NDJSON line from plugin stdout
+	maxLogLines               = 100      // Ring buffer size per plugin
+	handshakeTimeout          = 30 * time.Second
+	shutdownGracePeriod       = 5 * time.Second
+	defaultCallTimeout        = 60 * time.Second
+	stageCallTimeout          = 5 * time.Minute
+	defaultJobWatchdogTimeout = 5 * time.Minute
 )
 
 var (
@@ -43,14 +44,15 @@ type TokenIssuer func(userID, username, pluginName string, scopes []string) (str
 
 // HostConfig configures the Shelfd Plugin Host.
 type HostConfig struct {
-	PluginsDir    string
-	APIBase       string
-	ShelfdVersion string
-	MasterSecret  string
-	IdleTimeout   time.Duration
-	TokenIssuer   TokenIssuer
-	Hub           *events.Hub
-	Logger        *slog.Logger
+	PluginsDir     string
+	APIBase        string
+	ShelfdVersion  string
+	MasterSecret   string
+	IdleTimeout    time.Duration
+	JobIdleTimeout time.Duration
+	TokenIssuer    TokenIssuer
+	Hub            *events.Hub
+	Logger         *slog.Logger
 }
 
 type pluginProcess struct {
@@ -168,15 +170,17 @@ func (mp *managedPlugin) snapshotLogs() []string {
 
 // Host supervises installed plugins, manages scale-to-zero lifecycles, and dispatches RPCs.
 type Host struct {
-	repo          repository.StorageEngine
-	pluginsDir    string
-	apiBase       string
-	shelfdVersion string
-	masterSecret  string
-	idleTimeout   time.Duration
-	tokenIssuer   TokenIssuer
-	hub           *events.Hub
-	logger        *slog.Logger
+	repo               repository.StorageEngine
+	pluginsDir         string
+	apiBase            string
+	shelfdVersion      string
+	masterSecret       string
+	idleTimeout        time.Duration
+	jobWatchdogTimeout time.Duration
+	tokenIssuer        TokenIssuer
+	hub                *events.Hub
+	jobs               *PluginJobManager
+	logger             *slog.Logger
 
 	mu      sync.RWMutex
 	plugins map[string]*managedPlugin
@@ -196,20 +200,35 @@ func NewHost(repo repository.StorageEngine, cfg HostConfig) *Host {
 	if idleTimeout <= 0 {
 		idleTimeout = 120 * time.Second
 	}
+	jobWatchdog := cfg.JobIdleTimeout
+	if jobWatchdog <= 0 {
+		jobWatchdog = defaultJobWatchdogTimeout
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Host{
-		repo:          repo,
-		pluginsDir:    cfg.PluginsDir,
-		apiBase:       strings.TrimRight(cfg.APIBase, "/"),
-		shelfdVersion: cfg.ShelfdVersion,
-		masterSecret:  cfg.MasterSecret,
-		idleTimeout:   idleTimeout,
-		tokenIssuer:   cfg.TokenIssuer,
-		hub:           cfg.Hub,
-		logger:        logger,
-		plugins:       make(map[string]*managedPlugin),
-		ctx:           ctx,
-		cancel:        cancel,
+		repo:               repo,
+		pluginsDir:         cfg.PluginsDir,
+		apiBase:            strings.TrimRight(cfg.APIBase, "/"),
+		shelfdVersion:      cfg.ShelfdVersion,
+		masterSecret:       cfg.MasterSecret,
+		idleTimeout:        idleTimeout,
+		jobWatchdogTimeout: jobWatchdog,
+		tokenIssuer:        cfg.TokenIssuer,
+		hub:                cfg.Hub,
+		jobs:               NewPluginJobManager(cfg.Hub),
+		logger:             logger,
+		plugins:            make(map[string]*managedPlugin),
+		ctx:                ctx,
+		cancel:             cancel,
+	}
+}
+
+// SetJobWatchdogTimeout overrides the inactivity watchdog timeout for background plugin jobs.
+func (h *Host) SetJobWatchdogTimeout(d time.Duration) {
+	if d > 0 {
+		h.mu.Lock()
+		h.jobWatchdogTimeout = d
+		h.mu.Unlock()
 	}
 }
 
@@ -314,7 +333,7 @@ func (h *Host) Discover(ctx context.Context) error {
 		if st, ok := savedStates[manifest.Name]; ok {
 			enabled = st.Enabled
 			updatedAt = st.UpdatedAt
-			// Merge cached dynamic tools/commands from prior handshake if present
+			// Merge cached dynamic tools/commands/actions/auth from prior handshake if present
 			if st.CachedManifestJSON != "" && st.CachedManifestJSON != "{}" {
 				var cached Manifest
 				if json.Unmarshal([]byte(st.CachedManifestJSON), &cached) == nil {
@@ -326,6 +345,12 @@ func (h *Host) Discover(ctx context.Context) error {
 					}
 					if manifest.Catalog == nil && cached.Catalog != nil {
 						manifest.Catalog = cached.Catalog
+					}
+					if manifest.Auth == nil && cached.Auth != nil {
+						manifest.Auth = cached.Auth
+					}
+					if len(manifest.Actions) == 0 && len(cached.Actions) > 0 {
+						manifest.Actions = cached.Actions
 					}
 				}
 			}
@@ -542,9 +567,11 @@ func (h *Host) GetPluginSummary(ctx context.Context, name string, userID string)
 		APIScopes:        m.APIScopes,
 		Permissions:      m.Permissions,
 		ConfigSchema:     m.ConfigSchema,
+		Auth:             m.Auth,
 		Tools:            m.Tools,
 		Commands:         m.Commands,
 		Catalog:          m.Catalog,
+		Actions:          m.Actions,
 		Configured:       configured,
 		UpdatedAt:        &updatedAt,
 	}, nil
@@ -818,6 +845,347 @@ func (h *Host) StageCatalogItems(ctx context.Context, pluginName string, items [
 	return &res, nil
 }
 
+// GetAuthStatus invokes auth/status on a plugin to check whether the user's account is linked.
+func (h *Host) GetAuthStatus(ctx context.Context, pluginName, userID, username string) (*AuthStatusResult, error) {
+	mp := h.getManaged(pluginName)
+	if mp == nil {
+		return nil, ErrPluginNotFound
+	}
+	auth, err := h.buildInvocationAuth(ctx, mp, userID, username)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := h.invokeRPC(ctx, mp, defaultCallTimeout, "auth/status", AuthStatusParams{
+		Auth: auth,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var res AuthStatusResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("decoding auth/status response: %w", err)
+	}
+	return &res, nil
+}
+
+// BeginAuth invokes auth/begin on a plugin to start an OAuth 2.0 PKCE or interactive login flow.
+func (h *Host) BeginAuth(ctx context.Context, pluginName string, params AuthBeginParams, userID, username string) (*AuthBeginResult, error) {
+	mp := h.getManaged(pluginName)
+	if mp == nil {
+		return nil, ErrPluginNotFound
+	}
+	auth, err := h.buildInvocationAuth(ctx, mp, userID, username)
+	if err != nil {
+		return nil, err
+	}
+	params.Auth = auth
+	raw, err := h.invokeRPC(ctx, mp, defaultCallTimeout, "auth/begin", params)
+	if err != nil {
+		return nil, err
+	}
+	var res AuthBeginResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("decoding auth/begin response: %w", err)
+	}
+	return &res, nil
+}
+
+// CompleteAuth invokes auth/complete on a plugin to exchange an OAuth code or persist tokens.
+func (h *Host) CompleteAuth(ctx context.Context, pluginName string, params AuthCompleteParams, userID, username string) (*AuthStatusResult, error) {
+	mp := h.getManaged(pluginName)
+	if mp == nil {
+		return nil, ErrPluginNotFound
+	}
+	auth, err := h.buildInvocationAuth(ctx, mp, userID, username)
+	if err != nil {
+		return nil, err
+	}
+	params.Auth = auth
+	raw, err := h.invokeRPC(ctx, mp, defaultCallTimeout, "auth/complete", params)
+	if err != nil {
+		return nil, err
+	}
+	var res AuthStatusResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("decoding auth/complete response: %w", err)
+	}
+	return &res, nil
+}
+
+// DisconnectAuth invokes auth/disconnect on a plugin to unlink the user's account credentials.
+func (h *Host) DisconnectAuth(ctx context.Context, pluginName, userID, username string) (*AuthStatusResult, error) {
+	mp := h.getManaged(pluginName)
+	if mp == nil {
+		return nil, ErrPluginNotFound
+	}
+	auth, err := h.buildInvocationAuth(ctx, mp, userID, username)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := h.invokeRPC(ctx, mp, defaultCallTimeout, "auth/disconnect", AuthDisconnectParams{
+		Auth: auth,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var res AuthStatusResult
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &res)
+	}
+	return &res, nil
+}
+
+// PrepareAction invokes actions/prepare on a plugin to build a dynamic ActionFormSpec for a target book or series.
+func (h *Host) PrepareAction(ctx context.Context, pluginName, actionName string, target ActionTarget, reqCtx map[string]any, userID, username string) (*ActionFormSpec, error) {
+	mp := h.getManaged(pluginName)
+	if mp == nil {
+		return nil, ErrPluginNotFound
+	}
+	auth, err := h.buildInvocationAuth(ctx, mp, userID, username)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := h.invokeRPC(ctx, mp, defaultCallTimeout, "actions/prepare", ActionPrepareParams{
+		Action:  actionName,
+		Target:  target,
+		Context: reqCtx,
+		Auth:    auth,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var spec ActionFormSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return nil, fmt.Errorf("decoding actions/prepare response: %w", err)
+	}
+	if spec.Fields == nil {
+		spec.Fields = []InputFieldSpec{}
+	}
+	return &spec, nil
+}
+
+// FetchActionOptions invokes actions/options on a plugin to populate remote_select or asset_picker options.
+func (h *Host) FetchActionOptions(ctx context.Context, pluginName, actionName, source, tab, query, cursor string, target *ActionTarget, userID, username string) (*ActionOptionsResult, error) {
+	mp := h.getManaged(pluginName)
+	if mp == nil {
+		return nil, ErrPluginNotFound
+	}
+	auth, err := h.buildInvocationAuth(ctx, mp, userID, username)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := h.invokeRPC(ctx, mp, defaultCallTimeout, "actions/options", ActionOptionsParams{
+		Action: actionName,
+		Source: source,
+		Tab:    tab,
+		Query:  query,
+		Cursor: cursor,
+		Target: target,
+		Auth:   auth,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var res ActionOptionsResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("decoding actions/options response: %w", err)
+	}
+	if res.Items == nil {
+		res.Items = []OptionItem{}
+	}
+	return &res, nil
+}
+
+// UploadActionAsset invokes actions/upload_asset on a plugin with base64-encoded asset bytes.
+func (h *Host) UploadActionAsset(ctx context.Context, pluginName, actionName, field, filename, mimeType, dataBase64, userID, username string) (*AssetUploadResult, error) {
+	mp := h.getManaged(pluginName)
+	if mp == nil {
+		return nil, ErrPluginNotFound
+	}
+	auth, err := h.buildInvocationAuth(ctx, mp, userID, username)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := h.invokeRPC(ctx, mp, defaultCallTimeout, "actions/upload_asset", AssetUploadParams{
+		Action:     actionName,
+		Field:      field,
+		Filename:   filename,
+		MimeType:   mimeType,
+		DataBase64: dataBase64,
+		Auth:       auth,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var res AssetUploadResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("decoding actions/upload_asset response: %w", err)
+	}
+	return &res, nil
+}
+
+// InvokeAction executes a plugin action either synchronously or as a background tracked PluginJob.
+func (h *Host) InvokeAction(ctx context.Context, pluginName, actionName string, target ActionTarget, values map[string]any, overrides map[string]string, forceAsync bool, userID, username string) (*ActionResult, error) {
+	mp := h.getManaged(pluginName)
+	if mp == nil {
+		return nil, ErrPluginNotFound
+	}
+	auth, err := h.buildInvocationAuth(ctx, mp, userID, username)
+	if err != nil {
+		return nil, err
+	}
+
+	mp.mu.Lock()
+	var matchedDef *ActionDef
+	for i := range mp.manifest.Actions {
+		if mp.manifest.Actions[i].Name == actionName {
+			defCopy := mp.manifest.Actions[i]
+			matchedDef = &defCopy
+			break
+		}
+	}
+	mp.mu.Unlock()
+
+	runAsJob := forceAsync || (matchedDef != nil && strings.EqualFold(matchedDef.Execution, "job"))
+	if !runAsJob {
+		raw, err := h.invokeRPC(ctx, mp, stageCallTimeout, "actions/invoke", ActionInvokeParams{
+			Action:    actionName,
+			Target:    target,
+			Values:    values,
+			Overrides: overrides,
+			Auth:      auth,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var res ActionResult
+		if err := json.Unmarshal(raw, &res); err != nil {
+			return nil, fmt.Errorf("decoding actions/invoke response: %w", err)
+		}
+		if res.Status == "" {
+			res.Status = "completed"
+		}
+		return &res, nil
+	}
+
+	// Ensure process is running and acquire a scale-to-zero lease before returning 202 Accepted
+	mp.mu.Lock()
+	if !mp.enabled {
+		mp.mu.Unlock()
+		return nil, ErrPluginDisabled
+	}
+	mp.activeCalls++
+	mp.lastActivity = time.Now()
+	mp.mu.Unlock()
+
+	proc, err := h.ensureProcess(ctx, mp)
+	if err != nil {
+		mp.mu.Lock()
+		mp.activeCalls--
+		mp.lastActivity = time.Now()
+		mp.mu.Unlock()
+		return nil, err
+	}
+
+	jobTitle := target.Title
+	if jobTitle == "" && matchedDef != nil && matchedDef.Title != "" {
+		jobTitle = matchedDef.Title
+	}
+	job, touchCh := h.jobs.CreateJob(userID, pluginName, actionName, jobTitle, target)
+
+	h.mu.RLock()
+	watchdogDur := h.jobWatchdogTimeout
+	h.mu.RUnlock()
+
+	go func() {
+		defer func() {
+			mp.mu.Lock()
+			mp.activeCalls--
+			mp.lastActivity = time.Now()
+			mp.mu.Unlock()
+		}()
+
+		jobCtx, cancelJob := context.WithCancel(h.ctx)
+		defer cancelJob()
+
+		doneRPC := make(chan struct{})
+		go func() {
+			timer := time.NewTimer(watchdogDur)
+			defer timer.Stop()
+			for {
+				select {
+				case <-doneRPC:
+					return
+				case <-jobCtx.Done():
+					return
+				case <-touchCh:
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					timer.Reset(watchdogDur)
+				case <-timer.C:
+					cancelJob()
+					return
+				}
+			}
+		}()
+
+		raw, callErr := proc.call(jobCtx, "actions/invoke", ActionInvokeParams{
+			Action:    actionName,
+			JobID:     job.ID,
+			Target:    target,
+			Values:    values,
+			Overrides: overrides,
+			Auth:      auth,
+		})
+		close(doneRPC)
+
+		if callErr != nil {
+			errMsg := callErr.Error()
+			if errors.Is(callErr, context.Canceled) && h.ctx.Err() == nil {
+				errMsg = fmt.Sprintf("plugin job timed out after %s without progress activity", watchdogDur)
+			}
+			h.jobs.FailJob(job.ID, errMsg)
+			return
+		}
+
+		var res ActionResult
+		if err := json.Unmarshal(raw, &res); err != nil {
+			h.jobs.FailJob(job.ID, fmt.Sprintf("invalid actions/invoke response: %v", err))
+			return
+		}
+		if res.Status == "" {
+			res.Status = "completed"
+		}
+		h.jobs.CompleteJob(job.ID, &res)
+	}()
+
+	return &ActionResult{
+		Status:  "job_started",
+		JobID:   job.ID,
+		Job:     job,
+		Message: "Background job started",
+	}, nil
+}
+
+// ListUserJobs returns all tracked background plugin jobs for a user.
+func (h *Host) ListUserJobs(userID string) []PluginJob {
+	return h.jobs.ListUserJobs(userID)
+}
+
+// GetJob returns a single tracked background plugin job by ID.
+func (h *Host) GetJob(jobID string) *PluginJob {
+	return h.jobs.GetJob(jobID)
+}
+
+// DismissJob deletes a tracked background plugin job for a user.
+func (h *Host) DismissJob(userID, jobID string) bool {
+	return h.jobs.DismissJob(userID, jobID)
+}
+
 func (h *Host) enrichCatalogPage(ctx context.Context, pluginName string, page *CatalogPage) {
 	if page == nil || len(page.Items) == 0 {
 		return
@@ -1030,6 +1398,12 @@ func (h *Host) ensureProcess(ctx context.Context, mp *managedPlugin) (*pluginPro
 			mp.manifest.SupportedFormats = initRes.Catalog.SupportedFormats
 		}
 	}
+	if initRes.Auth != nil && mp.manifest.Auth == nil {
+		mp.manifest.Auth = initRes.Auth
+	}
+	if len(initRes.Actions) > 0 && len(mp.manifest.Actions) == 0 {
+		mp.manifest.Actions = initRes.Actions
+	}
 	rawCached, _ := json.Marshal(mp.manifest)
 	name := mp.manifest.Name
 	ver := mp.manifest.Version
@@ -1120,6 +1494,13 @@ func (h *Host) spawnAndHandshake(ctx context.Context, mp *managedPlugin, pluginD
 		return nil, nil, fmt.Errorf("invalid initialize response: %w", err)
 	}
 
+	if initRes.Auth != nil && manifest.Auth == nil {
+		manifest.Auth = initRes.Auth
+	}
+	if len(initRes.Actions) > 0 && len(manifest.Actions) == 0 {
+		manifest.Actions = initRes.Actions
+	}
+
 	return proc, &initRes, nil
 }
 
@@ -1208,15 +1589,92 @@ func (h *Host) handlePluginInbound(mp *managedPlugin, pluginName string, proc *p
 			}
 		}
 
+	case "host/refresh_token":
+		var params struct {
+			UserID string `json:"user_id"`
+		}
+		if err := json.Unmarshal(msg.Params, &params); err != nil || strings.TrimSpace(params.UserID) == "" {
+			if len(msg.ID) > 0 {
+				_ = proc.sendJSON(RPCMessage{
+					JSONRPC: "2.0",
+					ID:      msg.ID,
+					Error:   &RPCError{Code: -32602, Message: "user_id is required"},
+				})
+			}
+			return
+		}
+		mp.mu.Lock()
+		scopes := mp.manifest.APIScopes
+		mp.lastActivity = time.Now().UTC()
+		mp.mu.Unlock()
+
+		if h.tokenIssuer == nil {
+			if len(msg.ID) > 0 {
+				_ = proc.sendJSON(RPCMessage{
+					JSONRPC: "2.0",
+					ID:      msg.ID,
+					Error:   &RPCError{Code: -32603, Message: "token issuer is not configured"},
+				})
+			}
+			return
+		}
+		tok, err := h.tokenIssuer(strings.TrimSpace(params.UserID), "", pluginName, scopes)
+		if len(msg.ID) > 0 {
+			if err != nil {
+				_ = proc.sendJSON(RPCMessage{
+					JSONRPC: "2.0",
+					ID:      msg.ID,
+					Error:   &RPCError{Code: -32603, Message: err.Error()},
+				})
+			} else {
+				resRaw, _ := json.Marshal(map[string]any{"invocation_token": tok})
+				_ = proc.sendJSON(RPCMessage{
+					JSONRPC: "2.0",
+					ID:      msg.ID,
+					Result:  resRaw,
+				})
+			}
+		}
+
 	case "event", "progress":
 		if len(msg.Params) > maxEventPayloadBytes {
 			h.logger.Warn("dropping oversized plugin event", "component", "plugin."+pluginName, "bytes", len(msg.Params))
 			return
 		}
+		mp.mu.Lock()
+		mp.lastActivity = time.Now().UTC()
+		mp.mu.Unlock()
+
 		var payload map[string]any
 		if json.Unmarshal(msg.Params, &payload) != nil {
 			payload = map[string]any{"raw": string(msg.Params)}
 		}
+
+		if msg.Method == "progress" {
+			var pMsg struct {
+				JobID   string   `json:"job_id"`
+				BatchID string   `json:"batch_id"`
+				Current int      `json:"current"`
+				Total   int      `json:"total"`
+				Title   string   `json:"title"`
+				Message string   `json:"message"`
+				Percent *float64 `json:"percent"`
+			}
+			if json.Unmarshal(msg.Params, &pMsg) == nil {
+				lookupID := strings.TrimSpace(pMsg.JobID)
+				if lookupID == "" {
+					lookupID = strings.TrimSpace(pMsg.BatchID)
+				}
+				pct := -1.0
+				if pMsg.Percent != nil {
+					pct = *pMsg.Percent
+				}
+				if updated := h.jobs.UpdateProgress(pluginName, lookupID, pMsg.Current, pMsg.Total, pMsg.Title, pMsg.Message, pct); updated != nil {
+					return
+				}
+			}
+		}
+
 		payload["plugin"] = pluginName
 		payload["kind"] = msg.Method
 		if h.hub != nil {

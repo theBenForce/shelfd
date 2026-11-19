@@ -485,3 +485,487 @@ func TestHost_LifecycleScaleToZeroEnvIsolationConfigPatchAndProvenance(t *testin
 		t.Errorf("book-3 expected in_library with book ID, got %+v", page.Items[2])
 	}
 }
+
+const mockActionPluginScript = `
+import readline from 'node:readline';
+
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+let pendingHost = new Map();
+let seq = 0;
+
+function send(obj) {
+  process.stdout.write(JSON.stringify(obj) + '\n');
+}
+
+function callHost(method, params) {
+  seq += 1;
+  const id = 'p-call-' + seq;
+  return new Promise((resolve, reject) => {
+    pendingHost.set(id, { resolve, reject });
+    send({ jsonrpc: '2.0', id, method, params });
+  });
+}
+
+rl.on('line', async (line) => {
+  if (!line.trim()) return;
+  const msg = JSON.parse(line);
+  if (msg.id !== undefined && !msg.method) {
+    const waiter = pendingHost.get(String(msg.id));
+    if (waiter) {
+      pendingHost.delete(String(msg.id));
+      if (msg.error) waiter.reject(new Error(msg.error.message));
+      else waiter.resolve(msg.result);
+    }
+    return;
+  }
+
+  if (msg.method === 'initialize') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        name: 'mock-actions',
+        version: '0.2.0',
+        auth: {
+          methods: ['oauth_pkce', 'token'],
+          title: 'Link Mock Account'
+        },
+        actions: [
+          {
+            name: 'sync_act',
+            title: 'Sync Action',
+            targets: ['book'],
+            media_types: ['ebook'],
+            mode: 'form',
+            execution: 'sync'
+          },
+          {
+            name: 'bg_job',
+            title: 'Background Transfer',
+            targets: ['book', 'series'],
+            media_types: ['audiobook'],
+            mode: 'form',
+            execution: 'job'
+          },
+          {
+            name: 'stall_job',
+            title: 'Stalling Transfer',
+            targets: ['book'],
+            mode: 'immediate',
+            execution: 'job'
+          }
+        ]
+      }
+    });
+    return;
+  }
+
+  if (msg.method === 'shutdown') {
+    send({ jsonrpc: '2.0', id: msg.id, result: { ok: true } });
+    setTimeout(() => process.exit(0), 10);
+    return;
+  }
+
+  if (msg.method === 'auth/status') {
+    const tok = msg.params?.auth?.config?.access_token || '';
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        linked: Boolean(tok),
+        account_label: tok ? 'reader@example.com' : '',
+        methods: ['oauth_pkce', 'token']
+      }
+    });
+    return;
+  }
+
+  if (msg.method === 'auth/begin') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        authorize_url: 'https://login.example.com/oauth?state=' + (msg.params?.state || '') + '&challenge=' + (msg.params?.code_challenge || ''),
+        state: msg.params?.state || ''
+      }
+    });
+    return;
+  }
+
+  if (msg.method === 'auth/complete') {
+    await callHost('config/patch', {
+      user_id: msg.params.auth.user_id,
+      values: { access_token: 'linked-token-' + (msg.params.code || 'direct') }
+    });
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        linked: true,
+        account_label: 'reader@example.com'
+      }
+    });
+    return;
+  }
+
+  if (msg.method === 'auth/disconnect') {
+    await callHost('config/patch', {
+      user_id: msg.params.auth.user_id,
+      values: { access_token: '' }
+    });
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: { linked: false }
+    });
+    return;
+  }
+
+  if (msg.method === 'actions/prepare') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        title: 'Prepare ' + (msg.params?.target?.title || msg.params?.target?.id || ''),
+        submit_label: 'Send Now',
+        entries: [{ id: 'ch-1', index: 1, title: 'Chapter 1' }],
+        fields: [
+          {
+            key: 'mode',
+            kind: 'segmented',
+            title: 'Mode',
+            options: [{ value: 'create', label: 'Create' }, { value: 'append', label: 'Append' }]
+          },
+          {
+            key: 'card_id',
+            kind: 'remote_select',
+            title: 'Target Card',
+            options_source: 'cards',
+            visible_when: { field: 'mode', equals: 'append' }
+          }
+        ]
+      }
+    });
+    return;
+  }
+
+  if (msg.method === 'actions/options') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        items: [
+          { value: 'card-1', label: 'Bedtime Stories (' + (msg.params?.query || 'all') + ')' }
+        ]
+      }
+    });
+    return;
+  }
+
+  if (msg.method === 'actions/upload_asset') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        item: {
+          value: 'yoto://#icon-123',
+          label: msg.params?.filename || 'icon.png',
+          icon_uri: 'yoto://#icon-123'
+        }
+      }
+    });
+    return;
+  }
+
+  if (msg.method === 'actions/invoke') {
+    const act = msg.params?.action;
+    if (act === 'sync_act') {
+      const refreshed = await callHost('host/refresh_token', { user_id: msg.params.auth.user_id });
+      send({
+        jsonrpc: '2.0',
+        id: msg.id,
+        result: {
+          status: 'client_handoff',
+          download_api_path: '/api/v1/books/' + msg.params.target.id + '/markdown',
+          open_url: 'https://notebooklm.google.com/',
+          data: { refreshed_token: refreshed.invocation_token }
+        }
+      });
+      return;
+    }
+
+    if (act === 'bg_job') {
+      for (let step = 1; step <= 3; step++) {
+        await new Promise((r) => setTimeout(r, 220));
+        send({
+          jsonrpc: '2.0',
+          method: 'progress',
+          params: {
+            job_id: msg.params.job_id,
+            current: step,
+            total: 3,
+            percent: Math.round((step / 3) * 100),
+            title: 'Chapter ' + step,
+            message: 'Uploading chapter ' + step
+          }
+        });
+      }
+      const refreshed = await callHost('host/refresh_token', { user_id: msg.params.auth.user_id });
+      send({
+        jsonrpc: '2.0',
+        id: msg.id,
+        result: {
+          status: 'completed',
+          message: 'Uploaded 3 chapters',
+          data: { refreshed_token: refreshed.invocation_token }
+        }
+      });
+      return;
+    }
+
+    if (act === 'stall_job') {
+      return;
+    }
+  }
+});
+`
+
+func TestHost_ActionsManifestAuthRPCsJobLeaseWatchdogAndTokenRefresh(t *testing.T) {
+	validManifest, err := plugins.ParseManifest([]byte(`{
+		"name": "mock-actions",
+		"version": "0.2.0",
+		"entrypoint": {"command": "node", "args": ["index.mjs"]},
+		"capabilities": ["actions", "events"],
+		"api_scopes": ["books:read"]
+	}`))
+	if err != nil {
+		t.Fatalf("ParseManifest rejected valid 'actions' capability: %v", err)
+	}
+	if !validManifest.HasCapability("actions") {
+		t.Fatalf("expected HasCapability('actions') == true")
+	}
+
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+
+	user := &repository.User{Username: "action-reader", PasswordHash: "x"}
+	if err := repo.CreateUser(ctx, user); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	pluginsDir := t.TempDir()
+	pDir := filepath.Join(pluginsDir, "mock-actions")
+	if err := os.MkdirAll(pDir, 0755); err != nil {
+		t.Fatalf("mkdir plugin: %v", err)
+	}
+	manifestJSON := `{
+  "name": "mock-actions",
+  "version": "0.2.0",
+  "display_name": "Mock Actions",
+  "entrypoint": { "command": "node", "args": ["index.mjs"] },
+  "daemon": false,
+  "capabilities": ["actions", "events"],
+  "api_scopes": ["books:read"],
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "access_token": { "type": "string", "x-shelfd-secret": true }
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(pDir, "plugin.json"), []byte(manifestJSON), 0644); err != nil {
+		t.Fatalf("write plugin.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pDir, "index.mjs"), []byte(mockActionPluginScript), 0644); err != nil {
+		t.Fatalf("write index.mjs: %v", err)
+	}
+
+	hub := events.NewHub()
+	eventCh, unsub := hub.Subscribe()
+	defer unsub()
+
+	var tokenCounter int
+	host := plugins.NewHost(repo, plugins.HostConfig{
+		PluginsDir:     pluginsDir,
+		APIBase:        "http://127.0.0.1:8080",
+		ShelfdVersion:  "0.1.0-test",
+		MasterSecret:   "actions-master-secret-key",
+		IdleTimeout:    350 * time.Millisecond,
+		JobIdleTimeout: 5 * time.Second,
+		TokenIssuer: func(userID, username, pluginName string, scopes []string) (string, error) {
+			tokenCounter++
+			return "tok-" + pluginName + "-" + string(rune('0'+tokenCounter)), nil
+		},
+		Hub: hub,
+	})
+	host.Start(ctx)
+	defer host.Stop()
+
+	sum, err := host.GetPluginSummary(ctx, "mock-actions", user.ID)
+	if err != nil {
+		t.Fatalf("GetPluginSummary: %v", err)
+	}
+	if sum.Auth == nil || len(sum.Auth.Methods) != 2 {
+		t.Fatalf("expected cached AuthSpec with 2 methods, got %+v", sum.Auth)
+	}
+	if len(sum.Actions) != 3 {
+		t.Fatalf("expected 3 cached ActionDefs, got %+v", sum.Actions)
+	}
+
+	beginRes, err := host.BeginAuth(ctx, "mock-actions", plugins.AuthBeginParams{
+		Method:        "oauth_pkce",
+		State:         "st-123",
+		CodeChallenge: "chall-456",
+	}, user.ID, user.Username)
+	if err != nil {
+		t.Fatalf("BeginAuth: %v", err)
+	}
+	if !strings.Contains(beginRes.AuthorizeURL, "state=st-123") || !strings.Contains(beginRes.AuthorizeURL, "challenge=chall-456") {
+		t.Fatalf("unexpected AuthorizeURL: %s", beginRes.AuthorizeURL)
+	}
+
+	compRes, err := host.CompleteAuth(ctx, "mock-actions", plugins.AuthCompleteParams{
+		Method: "oauth_pkce",
+		Code:   "code-abc",
+	}, user.ID, user.Username)
+	if err != nil || !compRes.Linked {
+		t.Fatalf("CompleteAuth failed: res=%+v err=%v", compRes, err)
+	}
+
+	statusRes, err := host.GetAuthStatus(ctx, "mock-actions", user.ID, user.Username)
+	if err != nil || !statusRes.Linked || statusRes.AccountLabel != "reader@example.com" {
+		t.Fatalf("GetAuthStatus after link failed: res=%+v err=%v", statusRes, err)
+	}
+
+	formSpec, err := host.PrepareAction(ctx, "mock-actions", "sync_act", plugins.ActionTarget{
+		Type:  "book",
+		ID:    "book-dune",
+		Title: "Dune",
+	}, nil, user.ID, user.Username)
+	if err != nil {
+		t.Fatalf("PrepareAction: %v", err)
+	}
+	if formSpec.Title != "Prepare Dune" || len(formSpec.Fields) != 2 || len(formSpec.Entries) != 1 {
+		t.Fatalf("unexpected ActionFormSpec: %+v", formSpec)
+	}
+	if formSpec.Fields[1].VisibleWhen == nil || formSpec.Fields[1].VisibleWhen.Equals != "append" {
+		t.Fatalf("expected VisibleWhen on second field, got %+v", formSpec.Fields[1])
+	}
+
+	optRes, err := host.FetchActionOptions(ctx, "mock-actions", "sync_act", "cards", "", "bedtime", "", nil, user.ID, user.Username)
+	if err != nil || len(optRes.Items) != 1 || !strings.Contains(optRes.Items[0].Label, "bedtime") {
+		t.Fatalf("FetchActionOptions failed: res=%+v err=%v", optRes, err)
+	}
+
+	assetRes, err := host.UploadActionAsset(ctx, "mock-actions", "sync_act", "icon", "castle.png", "image/png", "aGVsbG8=", user.ID, user.Username)
+	if err != nil || assetRes.Item.Value != "yoto://#icon-123" {
+		t.Fatalf("UploadActionAsset failed: res=%+v err=%v", assetRes, err)
+	}
+
+	syncRes, err := host.InvokeAction(ctx, "mock-actions", "sync_act", plugins.ActionTarget{
+		Type: "book",
+		ID:   "book-dune",
+	}, nil, nil, false, user.ID, user.Username)
+	if err != nil || syncRes.Status != "client_handoff" || syncRes.DownloadAPIPath != "/api/v1/books/book-dune/markdown" {
+		t.Fatalf("InvokeAction sync failed: res=%+v err=%v", syncRes, err)
+	}
+	if refreshedTok, _ := syncRes.Data["refreshed_token"].(string); !strings.HasPrefix(refreshedTok, "tok-mock-actions-") {
+		t.Fatalf("expected host/refresh_token to return new token, got %v", syncRes.Data)
+	}
+
+	jobStartRes, err := host.InvokeAction(ctx, "mock-actions", "bg_job", plugins.ActionTarget{
+		Type:  "book",
+		ID:    "book-peter-rabbit",
+		Title: "Peter Rabbit",
+	}, map[string]any{"mode": "create"}, nil, false, user.ID, user.Username)
+	if err != nil || jobStartRes.Status != "job_started" || jobStartRes.JobID == "" {
+		t.Fatalf("InvokeAction bg_job failed: res=%+v err=%v", jobStartRes, err)
+	}
+	jobID := jobStartRes.JobID
+
+	time.Sleep(450 * time.Millisecond)
+	midSum, _ := host.GetPluginSummary(ctx, "mock-actions", user.ID)
+	if midSum == nil || midSum.Status != plugins.StatusRunning {
+		t.Fatalf("expected plugin to remain StatusRunning during active background job lease, got %+v", midSum)
+	}
+
+	var sawCompletedJobEvent bool
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		j := host.GetJob(jobID)
+		if j != nil && j.Status == "completed" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	for {
+		select {
+		case ev := <-eventCh:
+			if ev.Type == events.EventPlugin {
+				if m, ok := ev.Data.(map[string]any); ok && m["kind"] == "job_progress" && m["job_id"] == jobID {
+					if jb, ok := m["job"].(*plugins.PluginJob); ok && jb.Status == "completed" {
+						sawCompletedJobEvent = true
+					}
+				}
+			}
+			continue
+		default:
+		}
+		break
+	}
+	finalJob := host.GetJob(jobID)
+	if finalJob == nil || finalJob.Status != "completed" || finalJob.Current != 3 || !sawCompletedJobEvent {
+		t.Fatalf("expected completed job with 3 steps and SSE job_progress event, got job=%+v sawEvent=%v", finalJob, sawCompletedJobEvent)
+	}
+
+	reapDeadline := time.Now().Add(2500 * time.Millisecond)
+	reaped := false
+	for time.Now().Before(reapDeadline) {
+		s, _ := host.GetPluginSummary(ctx, "mock-actions", user.ID)
+		if s != nil && s.Status == plugins.StatusIdle {
+			reaped = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !reaped {
+		t.Fatalf("expected plugin to scale to StatusIdle after background job lease released")
+	}
+
+	host.SetJobWatchdogTimeout(250 * time.Millisecond)
+	stallStart, err := host.InvokeAction(ctx, "mock-actions", "stall_job", plugins.ActionTarget{
+		Type:  "book",
+		ID:    "book-stall",
+		Title: "Stall Book",
+	}, nil, nil, false, user.ID, user.Username)
+	if err != nil || stallStart.JobID == "" {
+		t.Fatalf("InvokeAction stall_job failed: %v", err)
+	}
+
+	stallDeadline := time.Now().Add(2 * time.Second)
+	var stalledJob *plugins.PluginJob
+	for time.Now().Before(stallDeadline) {
+		j := host.GetJob(stallStart.JobID)
+		if j != nil && j.Status == "failed" {
+			stalledJob = j
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if stalledJob == nil || stalledJob.Status != "failed" || !strings.Contains(stalledJob.Error, "timed out") {
+		t.Fatalf("expected stalled job to fail via watchdog timeout, got %+v", stalledJob)
+	}
+
+	if !host.DismissJob(user.ID, jobID) {
+		t.Fatalf("expected DismissJob to return true")
+	}
+	if host.GetJob(jobID) != nil {
+		t.Fatalf("expected dismissed job to be removed")
+	}
+
+	discRes, err := host.DisconnectAuth(ctx, "mock-actions", user.ID, user.Username)
+	if err != nil || discRes.Linked {
+		t.Fatalf("DisconnectAuth failed: res=%+v err=%v", discRes, err)
+	}
+}
+

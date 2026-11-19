@@ -70,15 +70,17 @@ type Manifest struct {
 	Entrypoint       EntrypointSpec     `json:"entrypoint"`
 	Runtime          *RuntimeSpec       `json:"runtime,omitempty"`
 	Daemon           bool               `json:"daemon,omitempty"`
-	Capabilities     []string           `json:"capabilities,omitempty"`      // "tools", "commands", "events", "catalog"
+	Capabilities     []string           `json:"capabilities,omitempty"`      // "tools", "commands", "events", "catalog", "actions"
 	CatalogModes     []string           `json:"catalog_modes,omitempty"`     // "browse", "search"
 	SupportedFormats []string           `json:"supported_formats,omitempty"` // e.g. ["epub", "m4b"]
 	APIScopes        []string           `json:"api_scopes,omitempty"`        // "uploads:stage", "uploads:write", "books:read"
 	Permissions      PermissionsSpec    `json:"permissions,omitempty"`
 	ConfigSchema     map[string]any     `json:"config_schema,omitempty"`
+	Auth             *AuthSpec          `json:"auth,omitempty"`
 	Tools            []ToolDef          `json:"tools,omitempty"`
 	Commands         []CommandDef       `json:"commands,omitempty"`
 	Catalog          *CatalogDescriptor `json:"catalog,omitempty"`
+	Actions          []ActionDef        `json:"actions,omitempty"`
 }
 
 // ResolvedDisplayName returns DisplayName or falls back to Name.
@@ -155,6 +157,7 @@ func ValidateManifest(m *Manifest) error {
 		"commands": true,
 		"events":   true,
 		"catalog":  true,
+		"actions":  true,
 	}
 	for _, c := range m.Capabilities {
 		if !validCaps[strings.ToLower(strings.TrimSpace(c))] {
