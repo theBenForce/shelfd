@@ -277,10 +277,7 @@ func main() {
 		AIClient:        aiClient,
 		ToolInvoker:     toolExecutor,
 		PluginHost:      pluginHost,
-		NotebookLM:      cfg.NotebookLM,
-		Yoto:            cfg.Yoto,
 		Hub:             eventHub,
-
 		DataDir:         cfg.Storage.DataDir,
 		LibraryDir:      cfg.Storage.LibraryDir,
 		JWTSecret:       cfg.Server.JWTSecret,

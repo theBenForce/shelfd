@@ -22,7 +22,7 @@ Container Mounts:
 * **Normalized Taxonomy**: Filterable authors, genres, and series with sequence numbers extracted directly from Dublin Core and EPUB 3 / Calibre collections.
 * **Single-Container Homelab Packaging**: Built in Go with embedded SQLite and `sqlite-vec`, packaged into a minimal Alpine container (< 50MB) with PUID/PGID user mapping and graceful signal handling.
 * **Modern Cross-Platform Client**: Flutter-based reading app (`Shelf`) for iOS, Android, and macOS/Desktop featuring Warm Editorial Bone, Sepia, and Dark reading themes.
-* **Yoto Player MYO Integration**: Link a [Yoto](https://yoto.dev/api/) account in Settings and send audiobooks directly to Make Your Own (MYO) playlists with customizable 16×16 pixel display icons per chapter.
+* **Out-of-Process Plugin System & Declarative Actions**: Built-in `project-gutenberg` storefront importer, `yoto` MYO audiobook playlist streamer (with OAuth 2.0 PKCE linking and 16×16 pixel icon customization), and `notebooklm` Markdown exporter/webhook bridge running in isolated child processes over JSON-RPC 2.0 and scoped loopback HTTP.
 
 ---
 
@@ -161,6 +161,7 @@ Add the following to your `claude_desktop_config.json`:
 * `search_library`: Hybrid semantic vector and keyword search across your catalog.
 * `get_book_metadata`: Retrieves detailed metadata, taxonomy, and chapter listings for a book.
 * `read_chapter_content`: Paginated chapter reading with configurable windowing to protect context window limits.
+* Enabled plugins dynamically register additional MCP tools (for example, `project-gutenberg__search_gutenberg`, `yoto__list_playlists`, `yoto__send_to_yoto`, and `notebooklm__send_book_to_notebooklm`).
 
 ---
 
@@ -232,38 +233,20 @@ pnpm --filter @shelfd/app dev
 
 ---
 
-## Yoto Player Integration ("Send to Yoto")
+## Built-in Plugins & Outbound Actions
 
-Shelfd integrates with the [Yoto Developer API](https://yoto.dev/api/) so you can send audiobooks from your library directly to Yoto Make Your Own (MYO) playlists with custom 16×16 pixel chapter icons.
+Shelfd ships three out-of-process plugins in `/data/plugins` that communicate with the Go host over stdio JSON-RPC 2.0 and scoped loopback HTTP (`books:read`, `uploads:stage`):
 
-### 1. Create a Yoto Developer Client ID
-1. Sign in to the [Yoto Developer Portal](https://yoto.dev/) and create an OAuth application.
-2. Add your Shelfd Settings URL as an allowed Redirect URI (for example, `http://localhost:8080/settings` or `https://shelfd.example.com/settings`).
-3. Copy your **Client ID** and either set it on the server via environment variables / `config.yaml` or enter it directly in the Shelfd **Settings** page.
+1. **`project-gutenberg` (Catalog Storefront & Importer)**: Browse and search Project Gutenberg from `/plugins/catalog` (`Free Books`) and stage public-domain EPUBs directly into the upload review queue.
+2. **`yoto` ("Send to Yoto" Outbound Action)**:
+   * Open **Settings → Installed Plugins → Yoto Player (`Configure`)** to enter your Yoto Developer Client ID from [yoto.dev](https://yoto.dev/) and link your account via **Authorize with Yoto (PKCE)** or direct token paste. All secrets and tokens are encrypted at rest (`enc:v1:...`) in `plugin_configs`.
+   * On any audiobook or audiobook series, open the action menu and select **Send to Yoto**. The declarative plugin dialog (`PluginActionDialog`) lets you create a new Make Your Own (MYO) card or append/replace chapters on an existing playlist, auto-convert book cover art to a 16×16 pixel icon, or pick public/custom 16×16 icons per chapter while streaming transfer progress in `PluginJobsBanner`.
+3. **`notebooklm` ("Send to NotebookLM" Outbound Action)**:
+   * On any ebook, open the download/action menu and select **Send to NotebookLM**.
+   * In zero-config mode, the action triggers a `client_handoff` that downloads the compiled book Markdown (`GET /api/v1/books/{id}/markdown` with metadata, highlights, notes, and chapters) and opens `https://notebooklm.google.com/`.
+   * When configured in **Settings → Installed Plugins → Google NotebookLM (`Configure`)** with a webhook bridge URL or Google Cloud Discovery Engine (`project_id`, `location`, `api_key`), the plugin pushes the compiled Markdown server-side with dial-time SSRF protection.
 
-### 2. Server Configuration (Optional)
-You can pre-populate the default Yoto Client ID and redirect URI for all users via `config.yaml` or environment variables:
-
-```yaml
-yoto:
-  client_id: "your-yoto-client-id"
-  redirect_uri: "http://localhost:8080/settings"
-  api_base_url: "https://api.yotoplay.com"
-  auth_base_url: "https://login.yotoplay.com"
-```
-
-Or in `docker-compose.yml`:
-```yaml
-environment:
-  - SHELFD_YOTO_CLIENT_ID=your-yoto-client-id
-  - SHELFD_YOTO_REDIRECT_URI=http://localhost:8080/settings
-```
-
-### 3. Linking Your Account & Sending Audiobooks
-1. Open **Settings → Yoto Player Integration** in the Shelfd app.
-2. Click **Authorize with Yoto (PKCE)** to sign in with Yoto (`user:content:manage user:icons:manage offline_access` scopes), or link directly using a Yoto access/refresh token.
-3. Open any book with audio files, click the **Download** menu, and select **Send to Yoto** (automatically disabled for EPUB-only books without audio).
-4. Choose an existing MYO playlist or create a new one, and configure the 16×16 pixel display icons (default icon, auto-converted book cover, or per-chapter custom icons).
+Custom `.zip` plugin archives can be installed at runtime from **Settings → Installed Plugins (`Install .zip`)** or scaffolded with `packages/plugin-sdk` (`shelfd-plugin verify`).
 
 ---
 
@@ -289,11 +272,8 @@ environment:
 | `SHELFD_AI_SUMMARY_MODEL` | `llama3.2:3b` | Summarization model for chapter ingestion |
 | `SHELFD_MCP_ENABLED` | `true` | Enable or disable MCP endpoints |
 | `SHELFD_MCP_PATH` | `/mcp` | Base path for MCP routes |
-| `SHELFD_YOTO_CLIENT_ID` | `""` | Default Yoto OAuth 2.0 Client ID from yoto.dev |
-| `SHELFD_YOTO_CLIENT_SECRET` | `""` | Optional Yoto OAuth Client Secret |
-| `SHELFD_YOTO_REDIRECT_URI` | `""` | Optional default OAuth Redirect URI |
-| `SHELFD_YOTO_API_BASE_URL` | `https://api.yotoplay.com` | Yoto REST API base URL |
-| `SHELFD_YOTO_AUTH_BASE_URL` | `https://login.yotoplay.com` | Yoto OAuth authorization & token base URL |
+| `SHELFD_PLUGINS_DIR` | `/data/plugins` | Directory containing installed out-of-process plugins |
+| `SHELFD_PLUGINS_IDLE_TIMEOUT_SECONDS` | `120` | Inactivity TTL before non-daemon plugin processes scale to zero |
 
 ---
 
@@ -326,3 +306,4 @@ pnpm clean
   * [ADR-0010: Single-Container Docker & Homelab Deployment](docs/decisions/0010-single-container-docker-and-homelab-deployment.md)
   * [ADR-0011: Asynchronous Upload Processing Queue](docs/decisions/0011-asynchronous-upload-processing-queue.md)
 * [Antigravity Personas & Workflow](.agents/AGENTS.md)
+

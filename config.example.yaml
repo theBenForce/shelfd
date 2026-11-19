@@ -97,14 +97,6 @@ logging:
   # Log format: "text" (human-readable console) or "json" (structured JSON for Loki/Docker)
   format: "text"
 
-yoto:
-  # Optional Yoto Developer Client ID from https://yoto.dev/ for OAuth 2.0 PKCE linking.
-  # Can also be configured in the Shelfd Settings UI or via SHELFD_YOTO_CLIENT_ID.
-  client_id: ""
-  redirect_uri: ""
-  api_base_url: "https://api.yotoplay.com"
-  auth_base_url: "https://login.yotoplay.com"
-
 plugins:
   # Directory containing runtime-installable plugin packages (defaults to <data_dir>/plugins).
   # Can also be overridden via SHELFD_PLUGINS_DIR.

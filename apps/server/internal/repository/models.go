@@ -344,19 +344,6 @@ type OAuthCode struct {
 	CreatedAt           time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 }
 
-// YotoAccount represents a linked Yoto account for a Shelfd user.
-type YotoAccount struct {
-	bun.BaseModel  `bun:"table:yoto_accounts"`
-	ID             string    `json:"id" bun:"id,pk"`
-	UserID         string    `json:"user_id" bun:"user_id,notnull"`
-	ClientID       string    `json:"client_id" bun:"client_id,notnull"`
-	AccessToken    string    `json:"access_token" bun:"access_token,notnull"`
-	RefreshToken   string    `json:"refresh_token" bun:"refresh_token,notnull"`
-	TokenExpiresAt time.Time `json:"token_expires_at" bun:"token_expires_at,notnull"`
-	CreatedAt      time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
-	UpdatedAt      time.Time `json:"updated_at" bun:"updated_at,nullzero,default:current_timestamp"`
-}
-
 // PluginState persists enable/disable state and cached manifest metadata for an installed plugin.
 type PluginState struct {
 	bun.BaseModel      `bun:"table:plugins_state"`
