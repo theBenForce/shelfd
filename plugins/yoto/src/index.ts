@@ -896,7 +896,8 @@ definePlugin<YotoPluginConfig>({
 
       const authBaseUrl = resolveAuthBaseUrl(ctx.config);
       const apiBaseUrl = resolveApiBaseUrl(ctx.config);
-      const authorizeUrl = `${authBaseUrl}/authorize?audience=${encodeURIComponent(apiBaseUrl)}&response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=offline_access%20openid%20profile&code_challenge=${encodeURIComponent(req.code_challenge || "")}&code_challenge_method=S256&state=${encodeURIComponent(req.state || "")}`;
+      const scope = "user:content:manage user:icons:manage offline_access";
+      const authorizeUrl = `${authBaseUrl}/authorize?audience=${encodeURIComponent(apiBaseUrl)}&response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&code_challenge=${encodeURIComponent(req.code_challenge || "")}&code_challenge_method=S256&state=${encodeURIComponent(req.state || "")}`;
 
       return {
         method: req.method || "oauth_pkce",

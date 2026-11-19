@@ -445,6 +445,8 @@ test("yoto plugin RPC end-to-end: PKCE auth, token refresh, options, 16x16 icon 
       auth: { user_id: "u1", api_base: baseUrl, invocation_token: "tok-loop", config: baseConfig },
     });
     assert.ok(beginResp.result.authorize_url.includes("code_challenge=chal-123"));
+    const authUrl = new URL(beginResp.result.authorize_url);
+    assert.equal(authUrl.searchParams.get("scope"), "user:content:manage user:icons:manage offline_access");
 
     const completeResp = await callRpc("auth/complete", {
       method: "oauth_pkce",
