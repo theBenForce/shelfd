@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/models/plugin.dart';
+import '../../core/file_saver/file_saver.dart';
 import '../../core/shared_layout.dart';
 import '../../core/theme.dart';
 import '../../core/tokens.dart';
@@ -25,11 +26,18 @@ class PluginConfigDialog extends ConsumerStatefulWidget {
 
 class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
   final Map<String, TextEditingController> _controllers = {};
+  final Map<String, TextEditingController> _authControllers = {};
+  final TextEditingController _authCodeController = TextEditingController();
   final Map<String, bool> _boolValues = {};
   final Map<String, String> _enumValues = {};
   final Set<String> _obscuredKeys = {};
   final Set<String> _clearedSecrets = {};
   Set<String> _secretFieldsSet = {};
+
+  PluginAuthStatus? _authStatus;
+  bool _isAuthBusy = false;
+  bool _showTokenAuthFields = false;
+  String? _authSuccessMessage;
 
   bool _isLoading = true;
   bool _isSaving = false;
@@ -87,6 +95,25 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
         }
       }
     }
+
+    final authSpec = widget.plugin.auth;
+    if (authSpec != null) {
+      for (final f in authSpec.fields) {
+        _authControllers[f.key] = TextEditingController();
+      }
+      if (!_authControllers.containsKey('access_token')) {
+        _authControllers['access_token'] = TextEditingController();
+      }
+      if (!_authControllers.containsKey('refresh_token')) {
+        _authControllers['refresh_token'] = TextEditingController();
+      }
+      if (!_authControllers.containsKey('client_id')) {
+        _authControllers['client_id'] = TextEditingController();
+      }
+      if (!authSpec.supportsOAuthPkce && authSpec.supportsToken) {
+        _showTokenAuthFields = true;
+      }
+    }
     _loadExistingConfig();
   }
 
@@ -95,36 +122,84 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
     for (final c in _controllers.values) {
       c.dispose();
     }
+    for (final c in _authControllers.values) {
+      c.dispose();
+    }
+    _authCodeController.dispose();
     super.dispose();
+  }
+
+  String _resolveRedirectUri() {
+    final base = Uri.base;
+    final encodedPlugin = Uri.encodeComponent(widget.plugin.name);
+    if (base.scheme == 'http' || base.scheme == 'https') {
+      return '${base.origin}/settings?plugin=$encodedPlugin';
+    }
+    return 'http://localhost:8080/settings?plugin=$encodedPlugin';
   }
 
   Future<void> _loadExistingConfig() async {
     try {
-      final res =
-          await ref.read(pluginsProvider.notifier).fetchConfig(widget.plugin.name);
+      final api = ref.read(apiServiceProvider);
+      PluginConfigResponse? res;
+      if (widget.plugin.hasConfigSchema) {
+        res = await ref
+            .read(pluginsProvider.notifier)
+            .fetchConfig(widget.plugin.name);
+      }
+      PluginAuthStatus? authStatus;
+      if (widget.plugin.hasAuth) {
+        try {
+          authStatus = await api.getPluginAuthStatus(widget.plugin.name);
+        } catch (e) {
+          authStatus = PluginAuthStatus(
+            linked: false,
+            authError: e.toString(),
+          );
+        }
+      }
       if (!mounted) return;
       setState(() {
-        _secretFieldsSet = res.secretFieldsSet.toSet();
-        for (final entry in _properties.entries) {
-          final key = entry.key;
-          final prop = entry.value is Map
-              ? Map<String, dynamic>.from(entry.value as Map)
-              : const <String, dynamic>{};
-          final val = res.config[key];
-          if (val == null) continue;
-          final type = prop['type']?.toString() ?? 'string';
-          if (type == 'boolean') {
-            if (val is bool) _boolValues[key] = val;
-          } else if (_enumValues.containsKey(key)) {
-            _enumValues[key] = val.toString();
-          } else if (_isSecretProp(prop)) {
-            if (val.toString() != kPluginSecretRedactedSentinel) {
-              _controllers[key]?.text = val.toString();
+        if (res != null) {
+          _secretFieldsSet = res.secretFieldsSet.toSet();
+          for (final entry in _properties.entries) {
+            final key = entry.key;
+            final prop = entry.value is Map
+                ? Map<String, dynamic>.from(entry.value as Map)
+                : const <String, dynamic>{};
+            final val = res.config[key];
+            if (val == null) continue;
+            final type = prop['type']?.toString() ?? 'string';
+            if (type == 'boolean') {
+              if (val is bool) _boolValues[key] = val;
+            } else if (_enumValues.containsKey(key)) {
+              _enumValues[key] = val.toString();
+            } else if (_isSecretProp(prop)) {
+              if (val.toString() != kPluginSecretRedactedSentinel) {
+                _controllers[key]?.text = val.toString();
+              } else {
+                _controllers[key]?.clear();
+              }
             } else {
-              _controllers[key]?.clear();
+              _controllers[key]?.text = val.toString();
             }
-          } else {
-            _controllers[key]?.text = val.toString();
+          }
+          for (final entry in _authControllers.entries) {
+            final cfgVal = res.config[entry.key];
+            if (cfgVal != null &&
+                cfgVal.toString().isNotEmpty &&
+                cfgVal.toString() != kPluginSecretRedactedSentinel &&
+                entry.value.text.isEmpty) {
+              entry.value.text = cfgVal.toString();
+            }
+          }
+        }
+        if (authStatus != null) {
+          _authStatus = authStatus;
+          if (authStatus.clientId != null &&
+              authStatus.clientId!.isNotEmpty &&
+              (_authControllers['client_id']?.text.isEmpty ?? false)) {
+            _authControllers['client_id']?.text = authStatus.clientId!;
           }
         }
         _isLoading = false;
@@ -134,6 +209,174 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
       setState(() {
         _isLoading = false;
         _errorMessage = 'Failed to load configuration: $e';
+      });
+    }
+  }
+
+  Future<void> _handleBeginOAuth() async {
+    setState(() {
+      _isAuthBusy = true;
+      _errorMessage = null;
+      _authSuccessMessage = null;
+    });
+    try {
+      final verifier = generatePkceVerifier();
+      final challenge = computePkceS256Challenge(verifier);
+      final storage = ref.read(storageServiceProvider);
+      await storage.savePluginPkceVerifier(widget.plugin.name, verifier);
+
+      final clientId = _authControllers['client_id']?.text.trim() ??
+          _controllers['client_id']?.text.trim() ??
+          '';
+
+      final api = ref.read(apiServiceProvider);
+      final res = await api.beginPluginAuth(widget.plugin.name, {
+        'method': 'oauth_pkce',
+        'redirect_uri': _resolveRedirectUri(),
+        'code_challenge': challenge,
+        'state': widget.plugin.name,
+        if (clientId.isNotEmpty) 'client_id': clientId,
+      });
+
+      if (res.authorizeUrl.isNotEmpty) {
+        await openExternalUrl(res.authorizeUrl);
+      }
+      if (!mounted) return;
+      setState(() {
+        _isAuthBusy = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isAuthBusy = false;
+        _errorMessage = 'Failed to start authorization: $e';
+      });
+    }
+  }
+
+  Future<void> _handleCompleteCodeAuth() async {
+    final code = _authCodeController.text.trim();
+    if (code.isEmpty) {
+      setState(() {
+        _errorMessage = 'Please enter the authorization code from the callback URL.';
+      });
+      return;
+    }
+    setState(() {
+      _isAuthBusy = true;
+      _errorMessage = null;
+      _authSuccessMessage = null;
+    });
+    try {
+      final storage = ref.read(storageServiceProvider);
+      final verifier =
+          storage.getPluginPkceVerifier(widget.plugin.name) ?? '';
+      final clientId = _authControllers['client_id']?.text.trim() ??
+          _controllers['client_id']?.text.trim() ??
+          '';
+      final api = ref.read(apiServiceProvider);
+      final status = await api.completePluginAuth(widget.plugin.name, {
+        'method': 'oauth_pkce',
+        'code': code,
+        if (verifier.isNotEmpty) 'code_verifier': verifier,
+        'redirect_uri': _resolveRedirectUri(),
+        if (clientId.isNotEmpty) 'client_id': clientId,
+      });
+      await storage.clearPluginPkceVerifier(widget.plugin.name);
+      await ref.read(pluginsProvider.notifier).loadPlugins(silent: true);
+      if (!mounted) return;
+      setState(() {
+        _isAuthBusy = false;
+        _authStatus = status;
+        _authCodeController.clear();
+        _authSuccessMessage = '${widget.plugin.displayName} account linked!';
+      });
+      widget.onSaved?.call();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isAuthBusy = false;
+        _errorMessage = 'Failed to exchange authorization code: $e';
+      });
+    }
+  }
+
+  Future<void> _handleCompleteTokenAuth() async {
+    final accessToken = _authControllers['access_token']?.text.trim() ?? '';
+    if (accessToken.isEmpty) {
+      setState(() {
+        _errorMessage = 'Access token is required.';
+      });
+      return;
+    }
+    final refreshToken = _authControllers['refresh_token']?.text.trim() ?? '';
+    final clientId = _authControllers['client_id']?.text.trim() ??
+        _controllers['client_id']?.text.trim() ??
+        '';
+    final credentials = <String, dynamic>{
+      for (final entry in _authControllers.entries)
+        if (entry.value.text.trim().isNotEmpty)
+          entry.key: entry.value.text.trim(),
+    };
+
+    setState(() {
+      _isAuthBusy = true;
+      _errorMessage = null;
+      _authSuccessMessage = null;
+    });
+    try {
+      final api = ref.read(apiServiceProvider);
+      final status = await api.completePluginAuth(widget.plugin.name, {
+        'method': 'token',
+        'access_token': accessToken,
+        if (refreshToken.isNotEmpty) 'refresh_token': refreshToken,
+        if (clientId.isNotEmpty) 'client_id': clientId,
+        'credentials': credentials,
+      });
+      await ref.read(pluginsProvider.notifier).loadPlugins(silent: true);
+      if (!mounted) return;
+      setState(() {
+        _isAuthBusy = false;
+        _authStatus = status;
+        _authControllers['access_token']?.clear();
+        _authControllers['refresh_token']?.clear();
+        _authSuccessMessage = '${widget.plugin.displayName} account linked!';
+      });
+      widget.onSaved?.call();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isAuthBusy = false;
+        _errorMessage = 'Failed to save token: $e';
+      });
+    }
+  }
+
+  Future<void> _handleDisconnectAuth() async {
+    setState(() {
+      _isAuthBusy = true;
+      _errorMessage = null;
+      _authSuccessMessage = null;
+    });
+    try {
+      final api = ref.read(apiServiceProvider);
+      final status = await api.disconnectPluginAuth(widget.plugin.name);
+      await ref
+          .read(storageServiceProvider)
+          .clearPluginPkceVerifier(widget.plugin.name);
+      await ref.read(pluginsProvider.notifier).loadPlugins(silent: true);
+      if (!mounted) return;
+      setState(() {
+        _isAuthBusy = false;
+        _authStatus = status;
+        _authSuccessMessage = '${widget.plugin.displayName} account unlinked.';
+      });
+      widget.onSaved?.call();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isAuthBusy = false;
+        _errorMessage = 'Failed to disconnect account: $e';
       });
     }
   }
@@ -267,6 +510,319 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
     }
   }
 
+  Widget _buildAuthSection(BuildContext context, ShelfdColors colors) {
+    final authSpec = widget.plugin.auth!;
+    final status = _authStatus ?? const PluginAuthStatus();
+    final isLinked = status.linked;
+    final nonSecretFields =
+        authSpec.fields.where((f) => !f.secret).toList(growable: false);
+
+    return Container(
+      key: Key('plugin_auth_section_${widget.plugin.name}'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppTokens.space12),
+      margin: const EdgeInsets.only(bottom: AppTokens.space16),
+      decoration: BoxDecoration(
+        color: colors.containerLow,
+        borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+        border: Border.all(color: colors.subtleBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isLinked ? Icons.verified_user_outlined : Icons.link_rounded,
+                size: 18,
+                color: isLinked ? colors.accentSecondary : colors.accentPrimary,
+              ),
+              const SizedBox(width: AppTokens.space8),
+              Expanded(
+                child: Text(
+                  authSpec.title ?? '${widget.plugin.displayName} Account',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.bodySans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppTokens.space8),
+              StatusBadge(
+                label: isLinked ? 'Connected' : 'Not Linked',
+                backgroundColor: isLinked
+                    ? colors.accentSecondaryContainer
+                    : colors.container,
+                textColor: isLinked ? colors.accentSecondary : colors.mutedInk,
+              ),
+            ],
+          ),
+          if (authSpec.description != null &&
+              authSpec.description!.trim().isNotEmpty) ...[
+            const SizedBox(height: AppTokens.space4),
+            Text(
+              authSpec.description!,
+              style: AppTypography.captionSans(color: colors.secondaryInk),
+            ),
+          ],
+          if (status.authError != null &&
+              status.authError!.trim().isNotEmpty) ...[
+            const SizedBox(height: AppTokens.space12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppTokens.space8),
+              decoration: BoxDecoration(
+                color: colors.errorBg,
+                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                border: Border.all(color: colors.errorBorder),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      status.authError!,
+                      style: AppTypography.captionSans(color: colors.errorText),
+                    ),
+                  ),
+                  const SizedBox(width: AppTokens.space8),
+                  OutlinedButton.icon(
+                    key: const Key('plugin_auth_reconnect_button'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: colors.errorText,
+                      side: BorderSide(color: colors.errorBorder),
+                    ),
+                    onPressed: _isAuthBusy
+                        ? null
+                        : (authSpec.supportsOAuthPkce
+                            ? _handleBeginOAuth
+                            : () => setState(() => _showTokenAuthFields = true)),
+                    icon: const Icon(Icons.refresh_rounded, size: 15),
+                    label: const Text('Reconnect'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (_authSuccessMessage != null) ...[
+            const SizedBox(height: AppTokens.space8),
+            Text(
+              _authSuccessMessage!,
+              style: AppTypography.captionSans(
+                color: colors.accentSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          const SizedBox(height: AppTokens.space12),
+          if (isLinked) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        status.accountLabel ??
+                            'Linked to ${widget.plugin.displayName}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.bodySans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: colors.ink,
+                        ),
+                      ),
+                      if (status.clientId != null &&
+                          status.clientId!.isNotEmpty)
+                        Text(
+                          'Client ID: ${status.clientId}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTypography.mono(
+                            fontSize: 11,
+                            color: colors.mutedInk,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: AppTokens.space8),
+                OutlinedButton.icon(
+                  key: const Key('plugin_auth_disconnect_button'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: colors.errorText,
+                    side: BorderSide(color: colors.errorBorder),
+                  ),
+                  onPressed: _isAuthBusy ? null : _handleDisconnectAuth,
+                  icon: const Icon(Icons.link_off_rounded, size: 16),
+                  label: const Text('Disconnect'),
+                ),
+              ],
+            ),
+          ] else ...[
+            ...nonSecretFields.map((field) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: AppTokens.space8),
+                child: TextFormField(
+                  key: Key('plugin_auth_field_${field.key}'),
+                  controller: _authControllers[field.key],
+                  style: AppTypography.bodySans(fontSize: 13, color: colors.ink),
+                  decoration: InputDecoration(
+                    labelText: field.title,
+                    hintText: field.placeholder,
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                      borderSide: BorderSide(color: colors.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                      borderSide: BorderSide(color: colors.border),
+                    ),
+                  ),
+                ),
+              );
+            }),
+            if (authSpec.supportsOAuthPkce) ...[
+              Wrap(
+                spacing: AppTokens.space8,
+                runSpacing: AppTokens.space8,
+                children: [
+                  FilledButton.icon(
+                    key: const Key('plugin_auth_oauth_begin_button'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: colors.accentPrimary,
+                      foregroundColor: colors.onAccent,
+                    ),
+                    onPressed: _isAuthBusy ? null : _handleBeginOAuth,
+                    icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                    label: const Text('Connect with OAuth (PKCE)'),
+                  ),
+                  if (authSpec.supportsToken)
+                    TextButton.icon(
+                      key: const Key('plugin_auth_toggle_token_button'),
+                      onPressed: () {
+                        setState(() {
+                          _showTokenAuthFields = !_showTokenAuthFields;
+                        });
+                      },
+                      icon: Icon(
+                        _showTokenAuthFields
+                            ? Icons.expand_less_rounded
+                            : Icons.expand_more_rounded,
+                        size: 18,
+                      ),
+                      label: Text(
+                        _showTokenAuthFields
+                            ? 'Hide Token Entry'
+                            : 'Use Access Token Instead',
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: AppTokens.space8),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      key: const Key('plugin_auth_code_field'),
+                      controller: _authCodeController,
+                      style: AppTypography.bodySans(
+                        fontSize: 13,
+                        color: colors.ink,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: 'Authorization Code',
+                        hintText: 'Paste ?code=... from callback redirect',
+                        isDense: true,
+                        border: OutlineInputBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppTokens.radiusSm),
+                          borderSide: BorderSide(color: colors.border),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppTokens.radiusSm),
+                          borderSide: BorderSide(color: colors.border),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AppTokens.space8),
+                  OutlinedButton(
+                    key: const Key('plugin_auth_complete_code_button'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: colors.ink,
+                      side: BorderSide(color: colors.border),
+                    ),
+                    onPressed: _isAuthBusy ? null : _handleCompleteCodeAuth,
+                    child: const Text('Link Code'),
+                  ),
+                ],
+              ),
+            ],
+            if (authSpec.supportsToken &&
+                (_showTokenAuthFields || !authSpec.supportsOAuthPkce)) ...[
+              const SizedBox(height: AppTokens.space12),
+              TextFormField(
+                key: const Key('plugin_auth_field_access_token'),
+                controller: _authControllers['access_token'],
+                style: AppTypography.mono(fontSize: 12, color: colors.ink),
+                decoration: InputDecoration(
+                  labelText: 'Access Token',
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                    borderSide: BorderSide(color: colors.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                    borderSide: BorderSide(color: colors.border),
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppTokens.space8),
+              TextFormField(
+                key: const Key('plugin_auth_field_refresh_token'),
+                controller: _authControllers['refresh_token'],
+                style: AppTypography.mono(fontSize: 12, color: colors.ink),
+                decoration: InputDecoration(
+                  labelText: 'Refresh Token (Optional)',
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                    borderSide: BorderSide(color: colors.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                    borderSide: BorderSide(color: colors.border),
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppTokens.space8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton.icon(
+                  key: const Key('plugin_auth_complete_token_button'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: colors.ink,
+                    side: BorderSide(color: colors.border),
+                  ),
+                  onPressed: _isAuthBusy ? null : _handleCompleteTokenAuth,
+                  icon: const Icon(Icons.check_rounded, size: 16),
+                  label: const Text('Save Token'),
+                ),
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = ShelfdColors.of(context);
@@ -378,7 +934,9 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
                       ),
                       const SizedBox(height: AppTokens.space12),
                     ],
-                    if (props.isEmpty)
+                    if (widget.plugin.hasAuth)
+                      _buildAuthSection(context, colors),
+                    if (props.isEmpty && !widget.plugin.hasAuth)
                       Text(
                         'This plugin has no user-configurable settings.',
                         style: AppTypography.bodySans(

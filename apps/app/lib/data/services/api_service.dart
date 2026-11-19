@@ -18,7 +18,6 @@ import '../models/paginated_books.dart';
 import '../models/plugin.dart';
 import '../models/upload_job.dart';
 import '../models/user.dart';
-import '../models/yoto.dart';
 
 class ApiException implements Exception {
   final int statusCode;
@@ -28,45 +27,6 @@ class ApiException implements Exception {
 
   @override
   String toString() => 'ApiException($statusCode): $message';
-}
-
-class NotebookLMSendResult {
-  final String status;
-  final String notebookUrl;
-  final String? fileName;
-  final String? downloadPath;
-  final String? message;
-
-  const NotebookLMSendResult({
-    required this.status,
-    required this.notebookUrl,
-    this.fileName,
-    this.downloadPath,
-    this.message,
-  });
-
-  bool get isSent => status == 'sent';
-  bool get isClientHandoff => status == 'client_handoff';
-
-  factory NotebookLMSendResult.fromJson(Map<String, dynamic> json) {
-    return NotebookLMSendResult(
-      status: json['status'] as String? ?? 'client_handoff',
-      notebookUrl: json['notebook_url'] as String? ?? 'https://notebooklm.google.com/',
-      fileName: json['file_name'] as String?,
-      downloadPath: json['download_path'] as String?,
-      message: json['message'] as String?,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'status': status,
-      'notebook_url': notebookUrl,
-      if (fileName != null) 'file_name': fileName,
-      if (downloadPath != null) 'download_path': downloadPath,
-      if (message != null) 'message': message,
-    };
-  }
 }
 
 sealed class ShelfdEvent {
@@ -378,16 +338,16 @@ class ApiService {
     return response.bodyBytes;
   }
 
-  String getBookNotebookLMUrl(String bookId) {
+  String getBookMarkdownUrl(String bookId) {
     if (token != null && token!.isNotEmpty) {
-      return _uri('/api/v1/books/$bookId/notebooklm', {'token': token!}).toString();
+      return _uri('/api/v1/books/$bookId/markdown', {'token': token!}).toString();
     }
-    return _uri('/api/v1/books/$bookId/notebooklm').toString();
+    return _uri('/api/v1/books/$bookId/markdown').toString();
   }
 
-  Future<List<int>> downloadBookNotebookLM(String bookId) async {
+  Future<List<int>> downloadBookMarkdown(String bookId) async {
     final response = await client.get(
-      _uri('/api/v1/books/$bookId/notebooklm'),
+      _uri('/api/v1/books/$bookId/markdown'),
       headers: _headers(),
     );
     if (response.statusCode >= 400) {
@@ -396,21 +356,17 @@ class ApiService {
     return response.bodyBytes;
   }
 
-  Future<NotebookLMSendResult> sendBookToNotebookLM(String bookId) async {
-    final response = await client.post(
-      _uri('/api/v1/books/$bookId/notebooklm'),
+  Future<List<int>> downloadApiPathBytes(String apiPath) async {
+    final normalizedPath = apiPath.startsWith('/') ? apiPath : '/$apiPath';
+    final response = await client.get(
+      _uri(normalizedPath),
       headers: _headers(),
-      body: jsonEncode(<String, dynamic>{}),
     );
     if (response.statusCode >= 400) {
       throw ApiException(response.statusCode, response.body);
     }
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return NotebookLMSendResult.fromJson(data);
+    return response.bodyBytes;
   }
-
-  Future<NotebookLMSendResult> sendToNotebookLM(String bookId) =>
-      sendBookToNotebookLM(bookId);
 
   Future<Chapter> getChapter(String bookId, dynamic chapterIdentifier) async {
     final response = await client.get(
@@ -982,155 +938,7 @@ class ApiService {
     }
   }
 
-  // Yoto Integration Endpoints
-  Future<YotoStatus> getYotoStatus() async {
-    final response = await client.get(
-      _uri('/api/v1/integrations/yoto/status'),
-      headers: _headers(),
-    );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return YotoStatus.fromJson(data);
-  }
-
-  Future<YotoStatus> exchangeYotoOAuth({
-    String? code,
-    String? codeVerifier,
-    String? clientId,
-    String? redirectUri,
-    String? accessToken,
-    String? refreshToken,
-  }) async {
-    final response = await client.post(
-      _uri('/api/v1/integrations/yoto/oauth/exchange'),
-      headers: _headers(),
-      body: jsonEncode({
-        if (code != null && code.isNotEmpty) 'code': code,
-        if (codeVerifier != null && codeVerifier.isNotEmpty) 'code_verifier': codeVerifier,
-        if (clientId != null && clientId.isNotEmpty) 'client_id': clientId,
-        if (redirectUri != null && redirectUri.isNotEmpty) 'redirect_uri': redirectUri,
-        if (accessToken != null && accessToken.isNotEmpty) 'access_token': accessToken,
-        if (refreshToken != null && refreshToken.isNotEmpty) 'refresh_token': refreshToken,
-      }),
-    );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return YotoStatus.fromJson(data);
-  }
-
-  Future<void> unlinkYotoAccount() async {
-    final response = await client.post(
-      _uri('/api/v1/integrations/yoto/unlink'),
-      headers: _headers(),
-      body: jsonEncode(<String, dynamic>{}),
-    );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
-  }
-
-  Future<List<YotoPlaylist>> getYotoPlaylists() async {
-    final response = await client.get(
-      _uri('/api/v1/integrations/yoto/playlists'),
-      headers: _headers(),
-    );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    final list = data['playlists'] as List<dynamic>? ?? const [];
-    return list
-        .whereType<Map<String, dynamic>>()
-        .map(YotoPlaylist.fromJson)
-        .toList();
-  }
-
-  Future<YotoIconsCatalog> getYotoIcons() async {
-    final response = await client.get(
-      _uri('/api/v1/integrations/yoto/icons'),
-      headers: _headers(),
-    );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return YotoIconsCatalog.fromJson(data);
-  }
-
-  Future<YotoDisplayIcon> uploadYotoIcon({
-    required String filename,
-    required List<int> bytes,
-  }) async {
-    final uri = _uri('/api/v1/integrations/yoto/icons');
-    final request = http.MultipartRequest('POST', uri);
-    if (token != null && token!.isNotEmpty) {
-      request.headers['Authorization'] = 'Bearer $token';
-    }
-    request.files.add(
-      http.MultipartFile.fromBytes(
-        'file',
-        bytes,
-        filename: filename,
-      ),
-    );
-    final streamedResponse = await client.send(request);
-    final response = await http.Response.fromStream(streamedResponse);
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return YotoDisplayIcon.fromJson(data);
-  }
-
-  Future<SendToYotoResult> sendBookToYoto(
-    String bookId,
-    SendToYotoRequest requestPayload,
-  ) async {
-    final response = await client.post(
-      _uri('/api/v1/books/$bookId/yoto'),
-      headers: _headers(),
-      body: jsonEncode(requestPayload.toJson()),
-    );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return SendToYotoResult.fromJson(data);
-  }
-
-  Future<SendToYotoResult> sendSeriesToYoto(
-    String seriesId,
-    SendToYotoRequest requestPayload,
-  ) async {
-    final response = await client.post(
-      _uri('/api/v1/series/$seriesId/yoto'),
-      headers: _headers(),
-      body: jsonEncode(requestPayload.toJson()),
-    );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return SendToYotoResult.fromJson(data);
-  }
-
-  Future<YotoServerUploadProgress> getYotoUploadProgress() async {
-    final response = await client.get(
-      _uri('/api/v1/integrations/yoto/progress'),
-      headers: _headers(),
-    );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return YotoServerUploadProgress.fromJson(data);
-  }
-
-  // Plugin Management & Storefront Catalog Endpoints
+  // Plugin Management, Storefront Catalog, Auth & Declarative Actions Endpoints
   Never _throwPluginError(http.Response response) {
     String message = response.body;
     try {
@@ -1324,5 +1132,216 @@ class ApiService {
     }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return CatalogStageResult.fromJson(data);
+  }
+
+  Future<PluginAuthStatus> getPluginAuthStatus(String pluginName) async {
+    final encoded = Uri.encodeComponent(pluginName);
+    final response = await client.get(
+      _uri('/api/v1/plugins/$encoded/auth/status'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PluginAuthStatus.fromJson(data);
+  }
+
+  Future<PluginAuthBeginResult> beginPluginAuth(
+    String pluginName,
+    Map<String, dynamic> body,
+  ) async {
+    final encoded = Uri.encodeComponent(pluginName);
+    final response = await client.post(
+      _uri('/api/v1/plugins/$encoded/auth/begin'),
+      headers: _headers(),
+      body: jsonEncode(body),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PluginAuthBeginResult.fromJson(data);
+  }
+
+  Future<PluginAuthStatus> completePluginAuth(
+    String pluginName,
+    Map<String, dynamic> body,
+  ) async {
+    final encoded = Uri.encodeComponent(pluginName);
+    final response = await client.post(
+      _uri('/api/v1/plugins/$encoded/auth/complete'),
+      headers: _headers(),
+      body: jsonEncode(body),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PluginAuthStatus.fromJson(data);
+  }
+
+  Future<PluginAuthStatus> disconnectPluginAuth(String pluginName) async {
+    final encoded = Uri.encodeComponent(pluginName);
+    final response = await client.post(
+      _uri('/api/v1/plugins/$encoded/auth/disconnect'),
+      headers: _headers(),
+      body: jsonEncode(<String, dynamic>{}),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PluginAuthStatus.fromJson(data);
+  }
+
+  Future<PluginActionFormSpec> preparePluginAction(
+    String pluginName,
+    String actionName, {
+    required PluginActionTarget target,
+    Map<String, dynamic>? context,
+  }) async {
+    final encodedPlugin = Uri.encodeComponent(pluginName);
+    final encodedAction = Uri.encodeComponent(actionName);
+    final response = await client.post(
+      _uri('/api/v1/plugins/$encodedPlugin/actions/$encodedAction/prepare'),
+      headers: _headers(),
+      body: jsonEncode({
+        'target': target.toJson(),
+        if (context != null && context.isNotEmpty) 'context': context,
+      }),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PluginActionFormSpec.fromJson(data);
+  }
+
+  Future<PluginActionOptionsResult> getPluginActionOptions(
+    String pluginName,
+    String actionName, {
+    required String source,
+    String? tab,
+    String? query,
+    String? cursor,
+    String? targetType,
+    String? targetId,
+  }) async {
+    final encodedPlugin = Uri.encodeComponent(pluginName);
+    final encodedAction = Uri.encodeComponent(actionName);
+    final params = <String, dynamic>{
+      'source': source,
+      if (tab != null && tab.isNotEmpty) 'tab': tab,
+      if (query != null && query.isNotEmpty) 'q': query,
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+      if (targetType != null && targetType.isNotEmpty) 'target_type': targetType,
+      if (targetId != null && targetId.isNotEmpty) 'target_id': targetId,
+    };
+    final response = await client.get(
+      _uri('/api/v1/plugins/$encodedPlugin/actions/$encodedAction/options', params),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PluginActionOptionsResult.fromJson(data);
+  }
+
+  Future<PluginOptionItem> uploadPluginActionAsset(
+    String pluginName,
+    String actionName, {
+    required String filename,
+    required List<int> bytes,
+    String? field,
+    String? mimeType,
+  }) async {
+    final encodedPlugin = Uri.encodeComponent(pluginName);
+    final encodedAction = Uri.encodeComponent(actionName);
+    final uri = _uri('/api/v1/plugins/$encodedPlugin/actions/$encodedAction/assets');
+    final request = http.MultipartRequest('POST', uri);
+    if (token != null && token!.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+    if (field != null && field.isNotEmpty) {
+      request.fields['field'] = field;
+    }
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        'file',
+        bytes,
+        filename: filename,
+      ),
+    );
+    final streamedResponse = await client.send(request);
+    final response = await http.Response.fromStream(streamedResponse);
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final itemJson = data['item'] is Map
+        ? Map<String, dynamic>.from(data['item'] as Map)
+        : data;
+    return PluginOptionItem.fromJson(itemJson);
+  }
+
+  Future<PluginActionResult> invokePluginAction(
+    String pluginName,
+    String actionName, {
+    required PluginActionTarget target,
+    Map<String, dynamic>? input,
+    Map<String, String>? overrides,
+  }) async {
+    final encodedPlugin = Uri.encodeComponent(pluginName);
+    final encodedAction = Uri.encodeComponent(actionName);
+    final response = await client.post(
+      _uri('/api/v1/plugins/$encodedPlugin/actions/$encodedAction/invoke'),
+      headers: _headers(),
+      body: jsonEncode({
+        'target': target.toJson(),
+        if (input != null && input.isNotEmpty) 'values': input,
+        if (overrides != null && overrides.isNotEmpty) 'overrides': overrides,
+      }),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PluginActionResult.fromJson(data);
+  }
+
+  Future<List<PluginJob>> getPluginJobs() async {
+    final response = await client.get(
+      _uri('/api/v1/plugins/jobs'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final decoded = jsonDecode(response.body);
+    final List<dynamic> list;
+    if (decoded is Map<String, dynamic>) {
+      list = decoded['jobs'] as List<dynamic>? ?? const [];
+    } else if (decoded is List<dynamic>) {
+      list = decoded;
+    } else {
+      list = const [];
+    }
+    return list
+        .whereType<Map>()
+        .map((e) => PluginJob.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  Future<void> dismissPluginJob(String jobId) async {
+    final encoded = Uri.encodeComponent(jobId);
+    final response = await client.delete(
+      _uri('/api/v1/plugins/jobs/$encoded'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400 && response.statusCode != 404) {
+      _throwPluginError(response);
+    }
   }
 }

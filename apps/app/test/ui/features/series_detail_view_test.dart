@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/paginated_books.dart';
+import 'package:shelf/data/models/plugin.dart';
 import 'package:shelf/data/models/series.dart';
 import 'package:shelf/data/repositories/book_repository.dart';
 import 'package:shelf/ui/core/shared_layout.dart';
@@ -43,6 +44,35 @@ class _MockBookRepository implements BookRepository {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _MockPluginsNotifier extends PluginsNotifier {
+  @override
+  PluginsState build() {
+    return const PluginsState(
+      plugins: [
+        PluginSummary(
+          name: 'yoto',
+          displayName: 'Yoto Player',
+          version: '0.1.0',
+          enabled: true,
+          status: 'idle',
+          capabilities: ['actions'],
+          actions: [
+            PluginActionDef(
+              name: 'send_to_yoto',
+              title: 'Send to Yoto',
+              icon: 'speaker',
+              targets: ['book', 'series'],
+              mediaTypes: ['audiobook'],
+              mode: 'form',
+              execution: 'job',
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -62,7 +92,7 @@ void main() {
     expect(list[3].title, 'The Ultimate Guide'); // Unnumbered U
   });
 
-  testWidgets('SeriesDetailView renders header, series sequence badges, and books',
+  testWidgets('SeriesDetailView renders header, series sequence badges, books, and dynamic series plugin action button',
       (tester) async {
     const s = Series(id: 's1', name: 'Percy Jackson');
     final books = [
@@ -94,6 +124,7 @@ void main() {
       ProviderScope(
         overrides: [
           bookRepositoryProvider.overrideWithValue(_MockBookRepository(books)),
+          pluginsProvider.overrideWith(_MockPluginsNotifier.new),
         ],
         child: MaterialApp(
           theme: AppTheme.buildTheme(ReadingThemeMode.bone),
@@ -109,11 +140,14 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    // Verify Series title, book count, and Send to Yoto button
+    // Verify Series title, book count, and dynamic Send to Yoto plugin button
     expect(find.text('Percy Jackson'), findsWidgets);
     expect(find.text('3 Books in Series'), findsOneWidget);
     expect(find.text('3 Books'), findsOneWidget);
-    expect(find.byKey(const Key('send_series_to_yoto_button')), findsOneWidget);
+    expect(
+      find.byKey(const Key('series_plugin_action_yoto_send_to_yoto')),
+      findsOneWidget,
+    );
 
     // Verify books are displayed with TactileBookCover
     expect(find.byType(TactileBookCover), findsNWidgets(3));

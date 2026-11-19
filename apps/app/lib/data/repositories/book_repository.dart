@@ -13,8 +13,6 @@ import '../models/upload_job.dart';
 import '../services/api_service.dart';
 import '../services/storage_service.dart';
 
-export '../services/api_service.dart' show NotebookLMSendResult;
-
 class BookRepository {
   final ApiService apiService;
   final StorageService storageService;
@@ -104,16 +102,10 @@ class BookRepository {
 
   Future<List<int>> downloadBookEpub(String bookId) => apiService.downloadBookEpub(bookId);
 
-  String getBookNotebookLMUrl(String bookId) => apiService.getBookNotebookLMUrl(bookId);
+  String getBookMarkdownUrl(String bookId) => apiService.getBookMarkdownUrl(bookId);
 
-  Future<List<int>> downloadBookNotebookLM(String bookId) =>
-      apiService.downloadBookNotebookLM(bookId);
-
-  Future<NotebookLMSendResult> sendBookToNotebookLM(String bookId) =>
-      apiService.sendBookToNotebookLM(bookId);
-
-  Future<NotebookLMSendResult> sendToNotebookLM(String bookId) =>
-      apiService.sendBookToNotebookLM(bookId);
+  Future<List<int>> downloadBookMarkdown(String bookId) =>
+      apiService.downloadBookMarkdown(bookId);
 
   Future<List<Author>> getAuthors() => apiService.getAuthors();
   Future<List<Genre>> getGenres() => apiService.getGenres();

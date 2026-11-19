@@ -4,39 +4,53 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shelf/data/models/plugin.dart';
 import 'package:shelf/data/services/api_service.dart';
+import 'package:shelf/ui/state/plugins_provider.dart';
 
 void main() {
   group('Plugin & Catalog Models', () {
-    test('PluginSummary and PluginDetail parse manifest, capabilities, and logs', () {
+    test('PluginSummary and PluginDetail parse manifest, capabilities, auth, actions, and logs', () {
       final json = {
-        'name': 'humble-bundle',
-        'display_name': 'Humble Bundle',
-        'version': '1.2.0',
-        'description': 'Import purchased Humble Bundle ebooks',
+        'name': 'yoto',
+        'display_name': 'Yoto Player',
+        'version': '0.1.0',
+        'description': 'Send audiobooks to Yoto MYO cards',
         'enabled': true,
         'daemon': false,
         'status': 'idle',
-        'capabilities': ['catalog', 'commands'],
-        'catalog_modes': ['browse', 'search'],
-        'supported_formats': ['epub', 'm4b'],
-        'api_scopes': ['uploads:stage'],
+        'capabilities': ['actions', 'tools', 'events'],
+        'api_scopes': ['books:read'],
         'permissions': {
-          'network_domains': ['www.humblebundle.com', 'dl.humble.com'],
-          'library_read': false,
+          'network_domains': ['api.yotoplay.com', 'login.yotoplay.com'],
+          'library_read': true,
           'library_write': false,
         },
         'config_schema': {
           'type': 'object',
-          'required': ['session_cookie'],
           'properties': {
-            'session_cookie': {
-              'type': 'string',
-              'title': 'Session Cookie',
-              'x-shelfd-secret': true,
-              'x-shelfd-curl-paste': true,
-            },
+            'client_id': {'type': 'string', 'title': 'Client ID'},
           },
         },
+        'auth': {
+          'methods': ['oauth_pkce', 'token'],
+          'title': 'Yoto Account',
+          'description': 'Link via PKCE or token',
+          'callback_param': 'code',
+          'fields': [
+            {'key': 'client_id', 'title': 'Yoto Client ID', 'secret': false},
+            {'key': 'access_token', 'title': 'Access Token', 'secret': true},
+          ],
+        },
+        'actions': [
+          {
+            'name': 'send_to_yoto',
+            'title': 'Send to Yoto',
+            'icon': 'speaker',
+            'targets': ['book', 'series'],
+            'media_types': ['audiobook'],
+            'mode': 'form',
+            'execution': 'job',
+          },
+        ],
         'commands': [
           {
             'name': 'verify_session',
@@ -53,17 +67,154 @@ void main() {
       };
 
       final detail = PluginDetail.fromJson(json);
-      expect(detail.summary.name, 'humble-bundle');
-      expect(detail.summary.displayName, 'Humble Bundle');
-      expect(detail.summary.hasCatalog, isTrue);
+      expect(detail.summary.name, 'yoto');
+      expect(detail.summary.displayName, 'Yoto Player');
+      expect(detail.summary.hasAuth, isTrue);
+      expect(detail.summary.hasActions, isTrue);
       expect(detail.summary.hasConfigSchema, isTrue);
-      expect(detail.summary.resolvedCatalogModes, ['browse', 'search']);
-      expect(detail.summary.permissions.networkDomains, [
-        'www.humblebundle.com',
-        'dl.humble.com',
-      ]);
-      expect(detail.summary.commands.single.displayTitle, 'Verify Session');
+      expect(detail.summary.auth!.supportsOAuthPkce, isTrue);
+      expect(detail.summary.auth!.supportsToken, isTrue);
+      expect(detail.summary.auth!.fields.length, 2);
+      final action = detail.summary.actions.single;
+      expect(action.name, 'send_to_yoto');
+      expect(action.isForm, isTrue);
+      expect(action.isJob, isTrue);
+      expect(action.matches(targetType: 'book', mediaType: 'audiobook'), isTrue);
+      expect(action.matches(targetType: 'book', mediaType: 'ebook'), isFalse);
+      expect(
+        action.matchesTarget('series', hasEpub: true, hasAudio: true),
+        isTrue,
+      );
+      expect(
+        action.matchesTarget('series', hasEpub: true, hasAudio: false),
+        isFalse,
+      );
       expect(detail.logs.length, 2);
+    });
+
+    test('PluginActionFormSpec, discriminated PluginInputFieldSpec, and visibility rules evaluate cleanly', () {
+      final form = PluginActionFormSpec.fromJson({
+        'title': 'Send "The Hobbit" to Yoto',
+        'submit_label': 'Send to Yoto',
+        'auth_required': false,
+        'entries': [
+          {'id': '0', 'index': 0, 'title': 'An Unexpected Party'},
+          {'id': '1', 'index': 1, 'title': 'Roast Mutton'},
+        ],
+        'fields': [
+          {
+            'key': 'playlist_mode',
+            'kind': 'segmented',
+            'title': 'Destination Card',
+            'default_value': 'create',
+            'options': [
+              {'value': 'create', 'label': 'Create New Card'},
+              {'value': 'append', 'label': 'Add to Existing'},
+            ],
+          },
+          {
+            'key': 'playlist_title',
+            'kind': 'text',
+            'title': 'New Card Title',
+            'default_value': 'The Hobbit',
+            'visible_when': {'field': 'playlist_mode', 'equals': 'create'},
+          },
+          {
+            'key': 'card_id',
+            'kind': 'remote_select',
+            'title': 'Target MYO Playlist',
+            'options_source': 'playlists',
+            'searchable': true,
+            'visible_when': {
+              'field': 'playlist_mode',
+              'in': ['append', 'replace'],
+            },
+          },
+          {
+            'key': 'include_cover',
+            'kind': 'boolean',
+            'title': 'Include Cover Art',
+            'default_value': true,
+          },
+          {
+            'key': 'default_icon',
+            'kind': 'asset_picker',
+            'title': 'Default 16x16 Icon',
+            'default_value': 'yoto:#default',
+            'options_source': 'icons',
+            'asset_shape': 'square_pixel',
+            'allow_upload': true,
+            'tabs': [
+              {'id': 'public', 'label': 'Public Icons', 'searchable': true},
+              {'id': 'custom', 'label': 'My Icons', 'searchable': true},
+            ],
+            'per_entry_override': true,
+            'override_key': 'chapter_icons',
+            'override_label': 'Customize Per-Chapter Icons',
+          },
+        ],
+      });
+
+      expect(form.title, 'Send "The Hobbit" to Yoto');
+      expect(form.entries.length, 2);
+      expect(form.fields.length, 5);
+      expect(form.fields[0], isA<SegmentedFieldSpec>());
+      expect(form.fields[1], isA<TextFieldSpec>());
+      expect(form.fields[2], isA<RemoteSelectFieldSpec>());
+      expect(form.fields[3], isA<BooleanFieldSpec>());
+      expect(form.fields[4], isA<AssetPickerFieldSpec>());
+
+      final valuesCreate = {'playlist_mode': 'create'};
+      expect(form.fields[1].isVisible(valuesCreate), isTrue);
+      expect(form.fields[2].isVisible(valuesCreate), isFalse);
+
+      final valuesAppend = {'playlist_mode': 'append'};
+      expect(form.fields[1].isVisible(valuesAppend), isFalse);
+      expect(form.fields[2].isVisible(valuesAppend), isTrue);
+    });
+
+    test('PluginActionResult and PluginJob parse statuses and progress', () {
+      final handoff = PluginActionResult.fromJson({
+        'status': 'client_handoff',
+        'open_url': 'https://notebooklm.google.com/',
+        'download_api_path': '/api/v1/books/b1/markdown',
+        'file_name': 'Dune.md',
+        'mime_type': 'text/markdown; charset=utf-8',
+        'message': 'Prepared Dune.md',
+      });
+      expect(handoff.isClientHandoff, isTrue);
+      expect(handoff.downloadApiPath, '/api/v1/books/b1/markdown');
+      expect(handoff.openUrl, 'https://notebooklm.google.com/');
+
+      final jobStarted = PluginActionResult.fromJson({
+        'status': 'job_started',
+        'job_id': 'pjob-1',
+        'job': {
+          'id': 'pjob-1',
+          'user_id': 'u1',
+          'plugin': 'yoto',
+          'action': 'send_to_yoto',
+          'title': 'The Hobbit',
+          'target_type': 'book',
+          'target_id': 'b-hobbit',
+          'status': 'running',
+          'current': 1,
+          'total': 2,
+          'item_title': 'Chapter 1',
+          'item_progress_pct': 50.0,
+          'message': 'Uploading Chapter 1',
+        },
+      });
+      expect(jobStarted.isJobStarted, isTrue);
+      expect(jobStarted.job, isNotNull);
+      expect(jobStarted.job!.isActive, isTrue);
+      expect(jobStarted.job!.progressFraction, closeTo(0.5, 0.01));
+    });
+
+    test('RFC 7636 PKCE S256 challenge matches standard test vector', () {
+      const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+      final challenge = computePkceS256Challenge(verifier);
+      expect(challenge, 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM');
     });
 
     test('CatalogPage and CatalogStageResult parse provenance statuses', () {
@@ -119,9 +270,10 @@ void main() {
   });
 
   group('ApiService Plugin Endpoints & SSE', () {
-    test('ApiService calls plugin catalog, config, stage, and decodes plugin_event SSE', () async {
+    test('ApiService calls plugin catalog, config, auth, actions, jobs, and decodes plugin_event SSE', () async {
       Map<String, dynamic>? savedConfigPayload;
       Map<String, dynamic>? stagePayload;
+      Map<String, dynamic>? invokePayload;
 
       final mockClient = MockClient.streaming((request, bodyStream) async {
         final bodyBytes = await bodyStream.toBytes();
@@ -170,6 +322,52 @@ void main() {
           return http.StreamedResponse(Stream.value(bytes), 200);
         }
 
+        if (request.url.path == '/api/v1/plugins/yoto/auth/status') {
+          final bytes = utf8.encode(jsonEncode({
+            'linked': true,
+            'account_label': 'Yoto Account',
+            'client_id': 'cid-1',
+          }));
+          return http.StreamedResponse(Stream.value(bytes), 200);
+        }
+
+        if (request.url.path == '/api/v1/plugins/yoto/actions/send_to_yoto/prepare') {
+          final bytes = utf8.encode(jsonEncode({
+            'title': 'Send to Yoto',
+            'submit_label': 'Send',
+            'fields': [
+              {'key': 'playlist_title', 'kind': 'text', 'title': 'Title'},
+            ],
+          }));
+          return http.StreamedResponse(Stream.value(bytes), 200);
+        }
+
+        if (request.url.path == '/api/v1/plugins/yoto/actions/send_to_yoto/invoke') {
+          invokePayload = jsonDecode(bodyStr) as Map<String, dynamic>;
+          final bytes = utf8.encode(jsonEncode({
+            'status': 'job_started',
+            'job_id': 'pjob-99',
+          }));
+          return http.StreamedResponse(Stream.value(bytes), 200);
+        }
+
+        if (request.url.path == '/api/v1/plugins/jobs') {
+          final bytes = utf8.encode(jsonEncode({
+            'jobs': [
+              {
+                'id': 'pjob-99',
+                'plugin': 'yoto',
+                'action': 'send_to_yoto',
+                'title': 'The Hobbit',
+                'status': 'running',
+                'current': 1,
+                'total': 1,
+              },
+            ],
+          }));
+          return http.StreamedResponse(Stream.value(bytes), 200);
+        }
+
         if (request.url.path == '/api/v1/queue/events') {
           const sse = 'event: plugin_event\n'
               'data: {"plugin":"project-gutenberg","kind":"progress","data":{"message":"Downloading EPUB"}}\n\n';
@@ -199,6 +397,30 @@ void main() {
       ]);
       expect((stagePayload?['items'] as List).first['external_id'], '1342');
       expect(stageRes.results.single.uploadJobId, 'job-1');
+
+      final authStatus = await api.getPluginAuthStatus('yoto');
+      expect(authStatus.linked, isTrue);
+      expect(authStatus.clientId, 'cid-1');
+
+      final form = await api.preparePluginAction(
+        'yoto',
+        'send_to_yoto',
+        target: const PluginActionTarget(type: 'book', id: 'b1', title: 'Hobbit'),
+      );
+      expect(form.fields.single.key, 'playlist_title');
+
+      final invokeRes = await api.invokePluginAction(
+        'yoto',
+        'send_to_yoto',
+        target: const PluginActionTarget(type: 'book', id: 'b1'),
+        input: {'playlist_title': 'Hobbit Card'},
+      );
+      expect(invokePayload?['values']?['playlist_title'], 'Hobbit Card');
+      expect(invokeRes.isJobStarted, isTrue);
+      expect(invokeRes.jobId, 'pjob-99');
+
+      final jobs = await api.getPluginJobs();
+      expect(jobs.single.id, 'pjob-99');
 
       final events = await api.streamEvents().toList();
       expect(events.single, isA<PluginEvent>());

@@ -19,8 +19,8 @@ class StorageService {
   static const _prefixAudioSpeed = 'shelfd_audio_speed_';
   static const _prefixChapter = 'shelfd_chapter_';
   static const _prefixHighlights = 'shelfd_highlights_';
-  static const _keyYotoClientId = 'shelfd_yoto_client_id';
-  static const _keyYotoPkceVerifier = 'shelfd_yoto_pkce_verifier';
+  static const _prefixPluginPkce = 'plugin_pkce_';
+  static const _keyActivePkcePlugin = 'plugin_pkce_active_plugin';
 
   // Server credentials
   String? getServerUrl() => _prefs.getString(_keyServerUrl);
@@ -140,12 +140,29 @@ class StorageService {
     await _prefs.setString('$_prefixHighlights$bookId', jsonEncode(highlights));
   }
 
-  // Yoto integration preferences
-  String? getYotoClientId() => _prefs.getString(_keyYotoClientId);
-  Future<void> saveYotoClientId(String clientId) => _prefs.setString(_keyYotoClientId, clientId);
+  // Generic per-plugin OAuth PKCE helpers
+  String? getPluginPkceVerifier(String pluginName) =>
+      _prefs.getString('$_prefixPluginPkce$pluginName');
 
-  String? getYotoPkceVerifier() => _prefs.getString(_keyYotoPkceVerifier);
-  Future<void> saveYotoPkceVerifier(String verifier) =>
-      _prefs.setString(_keyYotoPkceVerifier, verifier);
-  Future<void> clearYotoPkceVerifier() => _prefs.remove(_keyYotoPkceVerifier);
+  Future<void> savePluginPkceVerifier(String pluginName, String verifier) async {
+    await _prefs.setString('$_prefixPluginPkce$pluginName', verifier);
+    await _prefs.setString(_keyActivePkcePlugin, pluginName);
+  }
+
+  Future<void> clearPluginPkceVerifier(String pluginName) async {
+    await _prefs.remove('$_prefixPluginPkce$pluginName');
+    if (_prefs.getString(_keyActivePkcePlugin) == pluginName) {
+      await _prefs.remove(_keyActivePkcePlugin);
+    }
+  }
+
+  String? getActivePkcePlugin() => _prefs.getString(_keyActivePkcePlugin);
+
+  Future<void> saveActivePkcePlugin(String? pluginName) async {
+    if (pluginName == null || pluginName.trim().isEmpty) {
+      await _prefs.remove(_keyActivePkcePlugin);
+    } else {
+      await _prefs.setString(_keyActivePkcePlugin, pluginName.trim());
+    }
+  }
 }

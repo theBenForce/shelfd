@@ -532,87 +532,86 @@ func TestYotoUIContractVerification(t *testing.T) {
 
 	bookDetail := readDart("lib/ui/features/book_detail/book_detail_view.dart")
 	for _, needle := range []string{
-		"Key('menu_item_send_yoto')",
-		"value: 'yoto'",
-		"enabled: hasAudio",
-		"Send to Yoto",
-		"showSendToYotoDialog(context, book)",
+		"menu_item_plugin_",
+		"PluginActionRunner.runPluginAction",
+		"downloadBookMarkdown",
 	} {
 		if !strings.Contains(bookDetail, needle) {
-			t.Errorf("book_detail_view.dart missing expected Yoto contract %q", needle)
+			t.Errorf("book_detail_view.dart missing expected declarative plugin action contract %q", needle)
 		}
 	}
 
-	sendDialog := readDart("lib/ui/features/book_detail/send_to_yoto_dialog.dart")
+	actionDialog := readDart("lib/ui/features/plugins/plugin_action_dialog.dart")
 	for _, needle := range []string{
-		"Key('send_to_yoto_dialog')",
-		"Key('yoto_change_default_icon_button')",
-		"Key('yoto_use_cover_as_icon_switch')",
-		"Key('yoto_customize_chapter_icons_tile')",
-		"Key('confirm_send_to_yoto_button')",
+		"plugin_action_dialog_",
+		"plugin_action_pick_asset_",
+		"plugin_action_overrides_tile_",
+		"plugin_action_submit_button",
+		"plugin_action_configure_auth_button",
 	} {
-		if !strings.Contains(sendDialog, needle) {
-			t.Errorf("send_to_yoto_dialog.dart missing expected Yoto contract %q", needle)
+		if !strings.Contains(actionDialog, needle) {
+			t.Errorf("plugin_action_dialog.dart missing expected declarative form contract %q", needle)
 		}
 	}
 
-	iconPicker := readDart("lib/ui/features/book_detail/yoto_icon_picker_dialog.dart")
+	assetPicker := readDart("lib/ui/features/plugins/plugin_asset_picker_dialog.dart")
 	for _, needle := range []string{
-		"Key('yoto_icon_picker_dialog')",
-		"Key('yoto_upload_custom_icon_button')",
-		"Key('yoto_icon_search_field')",
+		"Key('plugin_asset_picker_dialog')",
+		"Key('plugin_asset_upload_button')",
+		"Key('plugin_asset_search_field')",
+		"FilterQuality.none",
 	} {
-		if !strings.Contains(iconPicker, needle) {
-			t.Errorf("yoto_icon_picker_dialog.dart missing expected Yoto contract %q", needle)
+		if !strings.Contains(assetPicker, needle) {
+			t.Errorf("plugin_asset_picker_dialog.dart missing expected declarative asset picker contract %q", needle)
 		}
 	}
 
-	settingsView := readDart("lib/ui/features/settings/settings_view.dart")
+	configDialog := readDart("lib/ui/features/settings/plugin_config_dialog.dart")
 	for _, needle := range []string{
-		"Key('yoto_integration_settings_card')",
-		"Yoto Player Integration",
-		"Key('yoto_client_id_field')",
-		"Key('link_yoto_oauth_button')",
-		"Key('unlink_yoto_account_button')",
+		"plugin_auth_section_",
+		"Key('plugin_auth_oauth_begin_button')",
+		"Key('plugin_auth_code_field')",
+		"Key('plugin_auth_complete_code_button')",
+		"Key('plugin_auth_disconnect_button')",
 	} {
-		if !strings.Contains(settingsView, needle) {
-			t.Errorf("settings_view.dart missing expected Yoto contract %q", needle)
+		if !strings.Contains(configDialog, needle) {
+			t.Errorf("plugin_config_dialog.dart missing expected declarative auth contract %q", needle)
 		}
 	}
 
 	seriesDetail := readDart("lib/ui/features/series/series_detail_view.dart")
 	for _, needle := range []string{
-		"Key('send_series_to_yoto_button')",
-		"showSendSeriesToYotoDialog",
+		"series_plugin_action_",
+		"PluginActionRunner.runPluginAction",
 	} {
 		if !strings.Contains(seriesDetail, needle) {
-			t.Errorf("series_detail_view.dart missing expected Yoto contract %q", needle)
+			t.Errorf("series_detail_view.dart missing expected declarative series plugin action contract %q", needle)
 		}
 	}
 
 	sharedLayout := readDart("lib/ui/core/shared_layout.dart")
 	for _, needle := range []string{
-		"YotoUploadQueueBanner",
-		"Key('yoto_upload_queue_banner')",
-		"Key('yoto_current_upload_progress_bar')",
-		"Key('yoto_total_uploads_progress_bar')",
-		"Key('yoto_upload_error_toast')",
+		"PluginJobsBanner",
+		"Key('plugin_jobs_banner')",
+		"Key('plugin_job_current_progress_bar')",
+		"Key('plugin_job_total_progress_bar')",
+		"Key('plugin_job_error_toast')",
 	} {
 		if !strings.Contains(sharedLayout, needle) {
-			t.Errorf("shared_layout.dart missing expected Yoto queue banner contract %q", needle)
+			t.Errorf("shared_layout.dart missing expected PluginJobsBanner contract %q", needle)
 		}
 	}
 
-	yotoProvider := readDart("lib/ui/state/yoto_provider.dart")
+	pluginsProvider := readDart("lib/ui/state/plugins_provider.dart")
 	for _, needle := range []string{
-		"yotoUploadQueueProvider",
-		"enqueueBookUpload",
-		"enqueueSeriesUpload",
-		"currentUploadProgress",
-		"totalUploadsProgress",
+		"pluginJobsProvider",
+		"enqueueOrTrackJob",
+		"currentItemProgress",
+		"totalJobsProgress",
+		"computePkceS256Challenge",
 	} {
-		if !strings.Contains(yotoProvider, needle) {
-			t.Errorf("yoto_provider.dart missing expected Yoto queue state contract %q", needle)
+		if !strings.Contains(pluginsProvider, needle) {
+			t.Errorf("plugins_provider.dart missing expected PluginJobsNotifier contract %q", needle)
 		}
 	}
 }

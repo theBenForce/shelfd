@@ -6,6 +6,7 @@ import '../../../data/models/book.dart';
 import '../../../data/models/book_chat.dart';
 import '../../../data/models/bookmark.dart';
 import '../../../data/models/highlight.dart';
+import '../../../data/models/plugin.dart';
 import '../../core/file_saver/file_saver.dart';
 import '../../core/html_text.dart';
 import '../../core/responsive.dart';
@@ -14,8 +15,8 @@ import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
+import '../plugins/plugin_action_runner.dart';
 import 'edit_book_metadata_dialog.dart';
-import 'send_to_yoto_dialog.dart';
 
 class BookDetailView extends ConsumerStatefulWidget {
   final String bookId;
@@ -142,25 +143,150 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     return '$cleanTitle.$cleanExt';
   }
 
+  bool _hasEbook(Book book) {
+    return book.spine.isNotEmpty ||
+        !book.isAudiobook ||
+        book.files.any(
+          (f) =>
+              f.fileType == 'epub' ||
+              f.filePath.toLowerCase().endsWith('.epub'),
+        );
+  }
+
+  IconData _resolvePluginActionIcon(String? iconName) {
+    switch (iconName) {
+      case 'speaker':
+        return Icons.speaker_rounded;
+      case 'auto_awesome':
+        return Icons.auto_awesome_rounded;
+      default:
+        return Icons.extension_rounded;
+    }
+  }
+
+  Color _resolvePluginActionIconColor(
+    ShelfdColors colors,
+    String? iconName,
+    bool enabled,
+  ) {
+    if (!enabled) return colors.mutedInk;
+    switch (iconName) {
+      case 'speaker':
+        return AppTokens.amberAccent;
+      case 'auto_awesome':
+        return colors.accentPrimary;
+      default:
+        return colors.accentPrimary;
+    }
+  }
+
   void _handleExportMenuSelection(String action, Book book) {
     switch (action) {
       case 'epub':
         _downloadEpub(book);
-        break;
-      case 'notebooklm':
-        _sendToNotebookLM(book);
-        break;
+        return;
       case 'markdown':
         _downloadMarkdown(book);
-        break;
-      case 'yoto':
-        _sendToYoto(book);
-        break;
+        return;
+    }
+
+    if (action.startsWith('plugin:')) {
+      final parts = action.split(':');
+      if (parts.length >= 3) {
+        final pluginName = parts[1];
+        final actionName = parts.sublist(2).join(':');
+        final pluginsState = ref.read(pluginsProvider);
+        final plugin = pluginsState.findByName(pluginName);
+        if (plugin == null || !plugin.enabled) return;
+        PluginActionDef? actionDef;
+        for (final a in plugin.actions) {
+          if (a.name == actionName) {
+            actionDef = a;
+            break;
+          }
+        }
+        if (actionDef != null) {
+          _runBookPluginAction(plugin, actionDef, book);
+        }
+      }
     }
   }
 
-  List<PopupMenuEntry<String>> _buildExportMenuItems(ShelfdColors colors, Book book) {
+  Future<void> _runBookPluginAction(
+    PluginSummary plugin,
+    PluginActionDef action,
+    Book book,
+  ) async {
+    final hasEpub = _hasEbook(book);
     final hasAudio = _hasAudiobook(book);
+    if (!action.matchesTarget('book', hasEpub: hasEpub, hasAudio: hasAudio)) {
+      return;
+    }
+    await PluginActionRunner.runPluginAction(
+      context,
+      ref,
+      plugin: plugin,
+      action: action,
+      target: PluginActionTarget(
+        type: 'book',
+        id: book.id,
+        title: book.title,
+      ),
+    );
+  }
+
+  List<PopupMenuEntry<String>> _buildExportMenuItems(
+    ShelfdColors colors,
+    Book book,
+  ) {
+    final hasAudio = _hasAudiobook(book);
+    final hasEpub = _hasEbook(book);
+    final pluginsState = ref.read(pluginsProvider);
+    final enabledPlugins = pluginsState.plugins.where((p) => p.enabled).toList();
+
+    final pluginMenuItems = <PopupMenuEntry<String>>[];
+    for (final plugin in enabledPlugins) {
+      for (final action in plugin.actions) {
+        if (!action.targets.any((t) => t.toLowerCase() == 'book')) continue;
+        final isEnabled = action.matchesTarget(
+          'book',
+          hasEpub: hasEpub,
+          hasAudio: hasAudio,
+        );
+        pluginMenuItems.add(
+          PopupMenuItem<String>(
+            key: Key('menu_item_plugin_${plugin.name}_${action.name}'),
+            value: 'plugin:${plugin.name}:${action.name}',
+            enabled: isEnabled,
+            child: Row(
+              children: [
+                Icon(
+                  _resolvePluginActionIcon(action.icon),
+                  size: 18,
+                  color: _resolvePluginActionIconColor(
+                    colors,
+                    action.icon,
+                    isEnabled,
+                  ),
+                ),
+                const SizedBox(width: AppTokens.space12),
+                Flexible(
+                  child: Text(
+                    action.title,
+                    style: AppTypography.bodySans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: isEnabled ? colors.ink : colors.mutedInk,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+    }
+
     return [
       PopupMenuItem<String>(
         key: const Key('menu_item_download_epub'),
@@ -182,51 +308,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           ],
         ),
       ),
-      PopupMenuItem<String>(
-        key: const Key('menu_item_send_notebooklm'),
-        value: 'notebooklm',
-        child: Row(
-          children: [
-            Icon(Icons.auto_awesome_rounded, size: 18, color: colors.accentPrimary),
-            const SizedBox(width: AppTokens.space12),
-            Flexible(
-              child: Text(
-                'Send to NotebookLM',
-                style: AppTypography.bodySans(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: colors.ink,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-      PopupMenuItem<String>(
-        key: const Key('menu_item_send_yoto'),
-        value: 'yoto',
-        enabled: hasAudio,
-        child: Row(
-          children: [
-            Icon(
-              Icons.speaker_rounded,
-              size: 18,
-              color: hasAudio ? AppTokens.amberAccent : colors.mutedInk,
-            ),
-            const SizedBox(width: AppTokens.space12),
-            Flexible(
-              child: Text(
-                'Send to Yoto',
-                style: AppTypography.bodySans(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: hasAudio ? colors.ink : colors.mutedInk,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+      ...pluginMenuItems,
       PopupMenuItem<String>(
         key: const Key('menu_item_download_markdown'),
         value: 'markdown',
@@ -248,19 +330,6 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         ),
       ),
     ];
-  }
-
-  Future<void> _sendToYoto(Book book) async {
-    if (!_hasAudiobook(book)) return;
-    final result = await showSendToYotoDialog(context, book);
-    if (result != null && result.status != 'queued' && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result.message),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
   }
 
   Future<void> _downloadEpub(Book book) async {
@@ -316,7 +385,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
 
     try {
       final repo = ref.read(bookRepositoryProvider);
-      final bytes = await repo.downloadBookNotebookLM(book.id);
+      final bytes = await repo.downloadBookMarkdown(book.id);
       final fileName = _sanitizeBookFileName(book.title, 'md');
 
       final saved = await saveDownloadedFile(
@@ -339,79 +408,6 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to download Markdown: $e'),
-            backgroundColor: Colors.red.shade800,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isDownloading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _sendToNotebookLM(Book book) async {
-    if (_isDownloading) return;
-    setState(() {
-      _isDownloading = true;
-    });
-
-    try {
-      final repo = ref.read(bookRepositoryProvider);
-      final result = await repo.sendBookToNotebookLM(book.id);
-      final targetUrl = result.notebookUrl.isNotEmpty
-          ? result.notebookUrl
-          : 'https://notebooklm.google.com/';
-
-      if (result.status == 'sent') {
-        await openExternalUrl(targetUrl);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                (result.message != null && result.message!.isNotEmpty)
-                    ? result.message!
-                    : 'Sent "${book.title}" to NotebookLM',
-              ),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      } else {
-        // Default client_handoff flow: download compiled NotebookLM Markdown bundle and open NotebookLM
-        final bytes = await repo.downloadBookNotebookLM(book.id);
-        final fileName = (result.fileName != null && result.fileName!.isNotEmpty)
-            ? result.fileName!
-            : _sanitizeBookFileName(book.title, 'md');
-
-        await saveDownloadedFile(
-          bytes,
-          fileName,
-          mimeType: 'text/markdown;charset=utf-8',
-        );
-        await openExternalUrl(targetUrl);
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                (result.message != null && result.message!.isNotEmpty)
-                    ? result.message!
-                    : 'Exported $fileName for NotebookLM — upload it as a source!',
-              ),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to send to NotebookLM: $e'),
             backgroundColor: Colors.red.shade800,
             behavior: SnackBarBehavior.floating,
           ),
@@ -505,6 +501,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
   Widget build(BuildContext context) {
     final colors = ShelfdColors.of(context);
     final detailState = ref.watch(bookDetailProvider(widget.bookId));
+    ref.watch(pluginsProvider);
     final horizontalPad = Responsive.horizontalPadding(context);
     final isDesktop = Responsive.isDesktop(context);
 

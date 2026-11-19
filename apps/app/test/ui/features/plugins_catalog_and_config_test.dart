@@ -6,7 +6,6 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/plugin.dart';
-import 'package:shelf/data/models/queue_status.dart';
 import 'package:shelf/data/services/api_service.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/plugins/catalog_browser_view.dart';
@@ -378,5 +377,74 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(enableCalled, isTrue);
+  });
+
+  testWidgets('PluginConfigDialog renders Account Linking section when plugin declares auth',
+      (tester) async {
+    setDesktopViewport(tester);
+
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/plugins/yoto/auth/status') {
+        return http.Response(
+          jsonEncode({
+            'linked': false,
+            'client_id': 'yoto-dev-client',
+            'methods': ['oauth_pkce', 'token'],
+          }),
+          200,
+        );
+      }
+      if (request.url.path == '/api/v1/plugins') {
+        return http.Response(jsonEncode({'plugins': []}), 200);
+      }
+      return http.Response('Not Found', 404);
+    });
+
+    final api = ApiService(
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token-123',
+      client: mockClient,
+    );
+
+    const summary = PluginSummary(
+      name: 'yoto',
+      displayName: 'Yoto Player',
+      version: '0.1.0',
+      enabled: true,
+      status: 'idle',
+      capabilities: ['actions'],
+      auth: PluginAuthSpec(
+        methods: ['oauth_pkce', 'token'],
+        title: 'Yoto Account',
+        description: 'Link your Yoto account via OAuth 2.0 PKCE.',
+        fields: [
+          PluginAuthFieldSpec(
+            key: 'client_id',
+            title: 'Yoto Client ID',
+          ),
+        ],
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          apiServiceProvider.overrideWithValue(api),
+          queueProvider.overrideWith(_FakeQueueNotifier.new),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const Scaffold(
+            body: PluginConfigDialog(plugin: summary),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('plugin_auth_section_yoto')), findsOneWidget);
+    expect(find.text('Not Linked'), findsOneWidget);
+    expect(find.byKey(const Key('plugin_auth_oauth_begin_button')), findsOneWidget);
   });
 }
