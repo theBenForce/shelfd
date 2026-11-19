@@ -1,3 +1,17 @@
+# [1.22.0](https://github.com/theBenForce/shelfd/compare/v1.21.0...v1.22.0) (2026-11-19)
+
+
+### Bug Fixes
+
+* **docker:** bundle Node 22 runtime and builtin plugins in default image ([#85](https://github.com/theBenForce/shelfd/issues/85)) ([679720a](https://github.com/theBenForce/shelfd/commit/679720adb5b79141d3d83bde64d8ce29a4b15bd4))
+
+
+### Features
+
+* **app:** render declarative plugin input interfaces, auth flows, and job progress ([#88](https://github.com/theBenForce/shelfd/issues/88)) ([6820df9](https://github.com/theBenForce/shelfd/commit/6820df9db9c4075445dcf3366015e09534cbb41d))
+* **plugins:** add built-in Yoto and NotebookLM plugins ([#87](https://github.com/theBenForce/shelfd/issues/87)) ([f59ef6c](https://github.com/theBenForce/shelfd/commit/f59ef6c411e2a2f2d7918fbd326e74b24e10f70b))
+* **plugins:** add declarative plugin actions, auth RPCs, and background jobs ([#86](https://github.com/theBenForce/shelfd/issues/86)) ([b9bd0ca](https://github.com/theBenForce/shelfd/commit/b9bd0ca70f6774abf60913eb4b54a33886b43c57))
+
 # [1.21.0](https://github.com/theBenForce/shelfd/compare/v1.20.2...v1.21.0) (2026-11-19)
 
 
