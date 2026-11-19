@@ -1,3 +1,11 @@
+# [1.21.0](https://github.com/theBenForce/shelfd/compare/v1.20.2...v1.21.0) (2026-11-19)
+
+
+### Features
+
+* **audiobook:** preserve playback position on reopen and add read-along mode toggle ([#84](https://github.com/theBenForce/shelfd/issues/84)) ([1c0d607](https://github.com/theBenForce/shelfd/commit/1c0d607cbbf93a91232f194fa6f112b135edfa5c))
+* **plugins:** add runtime plugin host, TypeScript SDK, storefront catalog UI, and agent skills ([#83](https://github.com/theBenForce/shelfd/issues/83)) ([0a13fc5](https://github.com/theBenForce/shelfd/commit/0a13fc5c8f00322af4e12ab5f7fc0ad7702708fa))
+
 ## [1.20.2](https://github.com/theBenForce/shelfd/compare/v1.20.1...v1.20.2) (2026-11-18)
 
 
