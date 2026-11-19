@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ type Config struct {
 	MCP        MCPConfig        `yaml:"mcp"`
 	NotebookLM NotebookLMConfig `yaml:"notebooklm"`
 	Yoto       YotoConfig       `yaml:"yoto"`
+	Plugins    PluginsConfig    `yaml:"plugins"`
 	Auth       AuthConfig       `yaml:"auth"`
 	Logging    LoggingConfig    `yaml:"logging"`
 }
@@ -188,6 +190,31 @@ func (y YotoConfig) ResolvedAuthBaseURL() string {
 	return DefaultYotoAuthBaseURL
 }
 
+// PluginsConfig defines server settings for out-of-process plugins.
+type PluginsConfig struct {
+	Dir                string `yaml:"dir"`
+	IdleTimeoutSeconds int    `yaml:"idle_timeout_seconds,omitempty"`
+}
+
+// ResolvedDir returns the configured plugins directory or <dataDir>/plugins by default.
+func (p PluginsConfig) ResolvedDir(dataDir string) string {
+	if d := strings.TrimSpace(p.Dir); d != "" {
+		return d
+	}
+	if strings.TrimSpace(dataDir) != "" {
+		return filepath.Join(dataDir, "plugins")
+	}
+	return "/data/plugins"
+}
+
+// ResolvedIdleTimeout returns the inactivity TTL before non-daemon plugins are stopped.
+func (p PluginsConfig) ResolvedIdleTimeout() time.Duration {
+	if p.IdleTimeoutSeconds > 0 {
+		return time.Duration(p.IdleTimeoutSeconds) * time.Second
+	}
+	return 120 * time.Second
+}
+
 type AuthConfig struct {
 	AdminUsername string `yaml:"admin_username"`
 	AdminPassword string `yaml:"admin_password"`
@@ -256,6 +283,10 @@ func DefaultConfig() *Config {
 		Yoto: YotoConfig{
 			APIBaseURL:  DefaultYotoAPIBaseURL,
 			AuthBaseURL: DefaultYotoAuthBaseURL,
+		},
+		Plugins: PluginsConfig{
+			Dir:                "",
+			IdleTimeoutSeconds: 120,
 		},
 		Auth: AuthConfig{
 			AdminUsername: "admin",
@@ -861,6 +892,15 @@ func ApplyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("SHELFD_YOTO_AUTH_BASE_URL"); v != "" {
 		cfg.Yoto.AuthBaseURL = strings.TrimSpace(v)
+	}
+
+	if v := os.Getenv("SHELFD_PLUGINS_DIR"); v != "" {
+		cfg.Plugins.Dir = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("SHELFD_PLUGINS_IDLE_TIMEOUT_SECONDS"); v != "" {
+		if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && secs > 0 {
+			cfg.Plugins.IdleTimeoutSeconds = secs
+		}
 	}
 
 	if v := os.Getenv("SHELFD_ADMIN_USERNAME"); v != "" {

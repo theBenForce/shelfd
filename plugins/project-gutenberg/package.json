@@ -1,0 +1,18 @@
+{
+  "name": "@shelfd/plugin-project-gutenberg",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reference Shelfd catalog & MCP plugin for Project Gutenberg (via Gutendex)",
+  "scripts": {
+    "build": "shelfd-plugin build .",
+    "verify": "shelfd-plugin verify .",
+    "pack": "shelfd-plugin pack .",
+    "test": "pnpm run build && shelfd-plugin verify . && node --test ./test/*.test.mjs",
+    "lint": "pnpm run build",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@shelfd/plugin-sdk": "workspace:*"
+  }
+}

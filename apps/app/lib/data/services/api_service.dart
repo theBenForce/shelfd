@@ -15,6 +15,7 @@ import '../models/metadata_search_result.dart';
 import '../models/series.dart';
 import '../models/topic.dart';
 import '../models/paginated_books.dart';
+import '../models/plugin.dart';
 import '../models/upload_job.dart';
 import '../models/user.dart';
 import '../models/yoto.dart';
@@ -90,6 +91,11 @@ class BookUpdatedEvent extends ShelfdEvent {
 class ScanStatusEvent extends ShelfdEvent {
   final Map<String, dynamic> data;
   const ScanStatusEvent(this.data);
+}
+
+class PluginEvent extends ShelfdEvent {
+  final Map<String, dynamic> data;
+  const PluginEvent(this.data);
 }
 
 class ApiService {
@@ -586,6 +592,9 @@ class ApiService {
                 break;
               case 'scan_status':
                 yield ScanStatusEvent(data);
+                break;
+              case 'plugin_event':
+                yield PluginEvent(data);
                 break;
             }
           } catch (_) {
@@ -1119,5 +1128,201 @@ class ApiService {
     }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return YotoServerUploadProgress.fromJson(data);
+  }
+
+  // Plugin Management & Storefront Catalog Endpoints
+  Never _throwPluginError(http.Response response) {
+    String message = response.body;
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic> && decoded['error'] != null) {
+        message = decoded['error'].toString();
+      }
+    } catch (_) {}
+    throw ApiException(response.statusCode, message);
+  }
+
+  Future<List<PluginSummary>> getPlugins() async {
+    final response = await client.get(
+      _uri('/api/v1/plugins'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final list = data['plugins'] as List<dynamic>? ?? const [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(PluginSummary.fromJson)
+        .toList();
+  }
+
+  Future<List<PluginSummary>> discoverPlugins() async {
+    final response = await client.post(
+      _uri('/api/v1/plugins/discover'),
+      headers: _headers(),
+      body: jsonEncode(<String, dynamic>{}),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final list = data['plugins'] as List<dynamic>? ?? const [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(PluginSummary.fromJson)
+        .toList();
+  }
+
+  Future<PluginSummary> installPluginZip({
+    required String filename,
+    required List<int> bytes,
+  }) async {
+    final uri = _uri('/api/v1/plugins/install');
+    final request = http.MultipartRequest('POST', uri);
+    if (token != null && token!.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+    request.files.add(
+      http.MultipartFile.fromBytes(
+        'file',
+        bytes,
+        filename: filename,
+      ),
+    );
+    final streamedResponse = await client.send(request);
+    final response = await http.Response.fromStream(streamedResponse);
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PluginSummary.fromJson(data);
+  }
+
+  Future<PluginDetail> getPluginDetail(String name) async {
+    final encoded = Uri.encodeComponent(name);
+    final response = await client.get(
+      _uri('/api/v1/plugins/$encoded'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PluginDetail.fromJson(data);
+  }
+
+  Future<PluginSummary> setPluginEnabled(String name, bool enabled) async {
+    final encoded = Uri.encodeComponent(name);
+    final action = enabled ? 'enable' : 'disable';
+    final response = await client.post(
+      _uri('/api/v1/plugins/$encoded/$action'),
+      headers: _headers(),
+      body: jsonEncode(<String, dynamic>{}),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PluginSummary.fromJson(data);
+  }
+
+  Future<PluginConfigResponse> getPluginConfig(String name) async {
+    final encoded = Uri.encodeComponent(name);
+    final response = await client.get(
+      _uri('/api/v1/plugins/$encoded/config'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PluginConfigResponse.fromJson(data);
+  }
+
+  Future<PluginConfigResponse> updatePluginConfig(
+    String name,
+    Map<String, dynamic> values,
+  ) async {
+    final encoded = Uri.encodeComponent(name);
+    final response = await client.put(
+      _uri('/api/v1/plugins/$encoded/config'),
+      headers: _headers(),
+      body: jsonEncode(values),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PluginConfigResponse.fromJson(data);
+  }
+
+  Future<Map<String, dynamic>> invokePluginCommand(
+    String name,
+    String command, [
+    Map<String, dynamic>? args,
+  ]) async {
+    final encodedName = Uri.encodeComponent(name);
+    final encodedCmd = Uri.encodeComponent(command);
+    final response = await client.post(
+      _uri('/api/v1/plugins/$encodedName/commands/$encodedCmd'),
+      headers: _headers(),
+      body: jsonEncode(args ?? const <String, dynamic>{}),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final decoded = jsonDecode(response.body);
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+    return {'result': decoded};
+  }
+
+  Future<CatalogPage> getPluginCatalog(
+    String name, {
+    String? mode,
+    String? query,
+    String? group,
+    String? cursor,
+    String? filter,
+  }) async {
+    final encoded = Uri.encodeComponent(name);
+    final params = <String, dynamic>{
+      if (mode != null && mode.isNotEmpty) 'mode': mode,
+      if (query != null && query.isNotEmpty) 'q': query,
+      if (group != null && group.isNotEmpty) 'group': group,
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+      if (filter != null && filter.isNotEmpty) 'filter': filter,
+    };
+    final response = await client.get(
+      _uri('/api/v1/plugins/$encoded/catalog', params.isNotEmpty ? params : null),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return CatalogPage.fromJson(data);
+  }
+
+  Future<CatalogStageResult> stagePluginCatalogItems(
+    String name,
+    List<CatalogStageItemRequest> items,
+  ) async {
+    final encoded = Uri.encodeComponent(name);
+    final response = await client.post(
+      _uri('/api/v1/plugins/$encoded/catalog/stage'),
+      headers: _headers(),
+      body: jsonEncode({
+        'items': items.map((e) => e.toJson()).toList(),
+      }),
+    );
+    if (response.statusCode >= 400) {
+      _throwPluginError(response);
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return CatalogStageResult.fromJson(data);
   }
 }

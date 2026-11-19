@@ -26,7 +26,16 @@ if [ "$(id -u)" = '0' ]; then
     fi
 
     # Ensure internal data directories exist and are owned by shelfd
-    mkdir -p /data/covers
+    mkdir -p /data/covers /data/plugins
+    if [ -d "/usr/share/shelfd/builtin-plugins" ]; then
+        for pdir in /usr/share/shelfd/builtin-plugins/*; do
+            [ -d "$pdir" ] || continue
+            pname=$(basename "$pdir")
+            if [ ! -d "/data/plugins/$pname" ]; then
+                cp -R "$pdir" "/data/plugins/$pname"
+            fi
+        done
+    fi
     chown -R "$PUID:$PGID" /data
 
     # Audiobookshelf Sanctity (@librarian):

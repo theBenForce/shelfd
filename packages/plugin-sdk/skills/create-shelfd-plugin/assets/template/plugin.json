@@ -1,0 +1,43 @@
+{
+  "name": "starter-catalog",
+  "version": "0.1.0",
+  "display_name": "Starter Catalog",
+  "description": "Starter template for a Shelfd catalog importer plugin.",
+  "entrypoint": {
+    "command": "node",
+    "args": ["dist/index.mjs"]
+  },
+  "runtime": {
+    "family": "node",
+    "min_version": "22.7.0"
+  },
+  "daemon": false,
+  "capabilities": ["catalog", "commands"],
+  "catalog_modes": ["browse", "search"],
+  "supported_formats": ["epub"],
+  "api_scopes": ["uploads:stage"],
+  "permissions": {
+    "network_domains": ["api.example.com"],
+    "library_read": false,
+    "library_write": false
+  },
+  "catalog": {
+    "modes": ["browse", "search"],
+    "supported_formats": ["epub"],
+    "search_hint": "Search books...",
+    "requires_auth": true
+  },
+  "config_schema": {
+    "type": "object",
+    "required": ["api_token"],
+    "properties": {
+      "api_token": {
+        "type": "string",
+        "title": "API Token or Session Cookie",
+        "description": "Paste your credential or a browser Copy-as-cURL command.",
+        "x-shelfd-secret": true,
+        "x-shelfd-curl-paste": true
+      }
+    }
+  }
+}

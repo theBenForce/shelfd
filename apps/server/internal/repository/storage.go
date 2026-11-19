@@ -150,6 +150,19 @@ type StorageEngine interface {
 	UpsertYotoAccount(ctx context.Context, account *YotoAccount) error
 	DeleteYotoAccount(ctx context.Context, userID string) error
 
+	// Plugins & Book Sources
+	GetPluginState(ctx context.Context, name string) (*PluginState, error)
+	ListPluginStates(ctx context.Context) ([]*PluginState, error)
+	UpsertPluginState(ctx context.Context, state *PluginState) error
+	DeletePluginState(ctx context.Context, name string) error
+	GetPluginUserConfig(ctx context.Context, userID, pluginName string) (*PluginUserConfig, error)
+	UpsertPluginUserConfig(ctx context.Context, cfg *PluginUserConfig) error
+	DeletePluginUserConfig(ctx context.Context, userID, pluginName string) error
+	UpsertBookSource(ctx context.Context, src *BookSource) error
+	GetBookSourcesByExternalIDs(ctx context.Context, pluginName string, externalIDs []string) ([]*BookSource, error)
+	LinkBookSourceByUploadJob(ctx context.Context, uploadJobID, bookID string) error
+	DeleteUncommittedBookSourceByUploadJob(ctx context.Context, uploadJobID string) error
+
 	// Lifecycle
 	Close() error
 }

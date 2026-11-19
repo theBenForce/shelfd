@@ -105,3 +105,11 @@ yoto:
   api_base_url: "https://api.yotoplay.com"
   auth_base_url: "https://login.yotoplay.com"
 
+plugins:
+  # Directory containing runtime-installable plugin packages (defaults to <data_dir>/plugins).
+  # Can also be overridden via SHELFD_PLUGINS_DIR.
+  dir: "/data/plugins"
+  # Seconds of inactivity before non-daemon child plugin processes are stopped (default: 120).
+  idle_timeout_seconds: 120
+
+

@@ -57,7 +57,7 @@ func (s *Server) Executor() *ToolExecutor {
 
 // AvailableToolDefinitions returns the LLM-compatible tool definitions.
 func (s *Server) AvailableToolDefinitions() []ai.ToolDefinition {
-	return AvailableToolDefinitions()
+	return s.executor.AvailableToolDefinitions()
 }
 
 // Routes returns an http.Handler with all MCP endpoints registered and authenticated.
@@ -257,7 +257,7 @@ func (s *Server) dispatch(ctx context.Context, req JSONRPCRequest) *JSONRPCRespo
 			JSONRPC: "2.0",
 			ID:      req.ID,
 			Result: ListToolsResult{
-				Tools: AvailableTools(),
+				Tools: s.executor.AvailableTools(),
 			},
 		}
 

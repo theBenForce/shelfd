@@ -20,9 +20,11 @@ import '../../data/services/api_service.dart';
 import '../../data/services/storage_service.dart';
 import '../core/theme.dart';
 import '../features/library/library_query_parser.dart';
+import 'plugins_provider.dart';
 export 'audio_player_provider.dart';
 export 'audio_player_state.dart';
 export 'duplicate_books_provider.dart';
+export 'plugins_provider.dart';
 export 'upload_provider.dart';
 export 'yoto_provider.dart';
 
@@ -890,6 +892,8 @@ class QueueNotifier extends Notifier<QueueState> {
               ref.read(libraryProvider.notifier).updateBook(book);
             case ScanStatusEvent():
               break;
+            case PluginEvent(:final data):
+              ref.read(catalogBrowserProvider.notifier).handlePluginEvent(data);
           }
         },
         onError: (err) {

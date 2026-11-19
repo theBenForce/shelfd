@@ -1,6 +1,8 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../data/models/plugin.dart';
 import '../../core/app_shell.dart';
 import '../../core/file_saver/file_saver.dart';
 import '../../core/responsive.dart';
@@ -9,6 +11,7 @@ import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
+import 'plugin_config_dialog.dart';
 
 class SettingsView extends ConsumerStatefulWidget {
   const SettingsView({super.key});
@@ -1165,6 +1168,17 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               label: const Text('Disconnect / Sign Out'),
               onPressed: _handleLogout,
             ),
+
+            const SizedBox(height: AppTokens.space24),
+
+            // Plugins & Storefronts Card (appended at bottom to preserve existing test scroll offsets)
+            Consumer(
+              builder: (context, ref, _) {
+                final pluginsState = ref.watch(pluginsProvider);
+                final c = context.shelfdColors;
+                return _buildPluginsSettingsCard(context, c, pluginsState);
+              },
+            ),
           ],
         ),
       ),
@@ -1185,6 +1199,294 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       onNavigate: (path) => context.go(path),
       appBar: topBar,
       body: bodyContent,
+    );
+  }
+
+  Future<void> _handleInstallPluginZip() async {
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['zip'],
+        allowMultiple: false,
+      );
+      if (result.isEmpty) return;
+      final file = result.first;
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty || !mounted) return;
+      await ref.read(pluginsProvider.notifier).installZip(
+            filename: file.name,
+            bytes: bytes,
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to read plugin archive: $e')),
+        );
+      }
+    }
+  }
+
+  Widget _buildPluginsSettingsCard(
+    BuildContext context,
+    ShelfdColors c,
+    PluginsState pluginsState,
+  ) {
+    return BentoCard(
+      key: const Key('plugins_settings_card'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.extension_outlined, size: 20, color: c.accentPrimary),
+              const SizedBox(width: AppTokens.space8),
+              Expanded(
+                child: Text(
+                  'Plugins & Storefronts',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.titleSerif(fontSize: 18, color: c.ink),
+                ),
+              ),
+              const SizedBox(width: AppTokens.space8),
+              OutlinedButton.icon(
+                key: const Key('plugins_rescan_button'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: c.ink,
+                  side: BorderSide(color: c.border),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTokens.space12,
+                    vertical: AppTokens.space8,
+                  ),
+                ),
+                onPressed: pluginsState.isLoading
+                    ? null
+                    : () => ref.read(pluginsProvider.notifier).discover(),
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Rescan'),
+              ),
+              const SizedBox(width: AppTokens.space8),
+              FilledButton.icon(
+                key: const Key('plugins_install_zip_button'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: c.accentPrimary,
+                  foregroundColor: c.onAccent,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTokens.space12,
+                    vertical: AppTokens.space8,
+                  ),
+                ),
+                onPressed:
+                    pluginsState.isInstalling ? null : _handleInstallPluginZip,
+                icon: const Icon(Icons.upload_file_rounded, size: 16),
+                label: Text(
+                  pluginsState.isInstalling ? 'Installing...' : 'Install .zip',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppTokens.space8),
+          Text(
+            'Install runtime plugins to browse external book storefronts, import bundles into the staged review queue, or expose MCP tools.',
+            style: AppTypography.captionSans(color: c.mutedInk),
+          ),
+          const SizedBox(height: AppTokens.space16),
+          if (pluginsState.errorMessage != null) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppTokens.space12),
+              decoration: BoxDecoration(
+                color: c.errorBg,
+                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                border: Border.all(color: c.errorBorder),
+              ),
+              child: Text(
+                pluginsState.errorMessage!,
+                style: AppTypography.bodySans(fontSize: 13, color: c.errorText),
+              ),
+            ),
+            const SizedBox(height: AppTokens.space12),
+          ],
+          if (pluginsState.successMessage != null) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppTokens.space12),
+              decoration: BoxDecoration(
+                color: c.accentSecondaryContainer,
+                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+              ),
+              child: Text(
+                pluginsState.successMessage!,
+                style: AppTypography.bodySans(
+                  fontSize: 13,
+                  color: c.accentSecondary,
+                ),
+              ),
+            ),
+            const SizedBox(height: AppTokens.space12),
+          ],
+          if (pluginsState.plugins.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppTokens.space16),
+              decoration: BoxDecoration(
+                color: c.containerLow,
+                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                border: Border.all(color: c.subtleBorder),
+              ),
+              child: Text(
+                pluginsState.isLoading
+                    ? 'Loading installed plugins...'
+                    : 'No plugins installed yet. Upload a .zip plugin archive or place plugins into your server plugins directory.',
+                style: AppTypography.bodySans(fontSize: 13, color: c.mutedInk),
+              ),
+            )
+          else
+            ...pluginsState.plugins.map((plugin) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: AppTokens.space12),
+                child: _buildPluginRowCard(context, c, plugin),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPluginRowCard(
+    BuildContext context,
+    ShelfdColors c,
+    PluginSummary plugin,
+  ) {
+    final isHealthy =
+        plugin.status == 'running' || plugin.status == 'idle';
+    final isError = plugin.status == 'unhealthy';
+    final badgeBg = isError
+        ? c.errorBg
+        : (isHealthy ? c.accentSecondaryContainer : c.container);
+    final badgeFg = isError
+        ? c.errorText
+        : (isHealthy ? c.accentSecondary : c.mutedInk);
+
+    return Container(
+      key: Key('plugin_card_${plugin.name}'),
+      padding: const EdgeInsets.all(AppTokens.space12),
+      decoration: BoxDecoration(
+        color: c.containerLow,
+        borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+        border: Border.all(color: c.subtleBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${plugin.displayName} v${plugin.version}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.bodySans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: c.ink,
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppTokens.space8),
+              StatusBadge(
+                label: plugin.status,
+                backgroundColor: badgeBg,
+                textColor: badgeFg,
+              ),
+              const SizedBox(width: AppTokens.space8),
+              Switch(
+                key: Key('plugin_toggle_${plugin.name}'),
+                value: plugin.enabled,
+                activeTrackColor: c.accentPrimary,
+                onChanged: (val) => ref
+                    .read(pluginsProvider.notifier)
+                    .setEnabled(plugin.name, val),
+              ),
+            ],
+          ),
+          if (plugin.description != null &&
+              plugin.description!.trim().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              plugin.description!,
+              style: AppTypography.captionSans(color: c.secondaryInk),
+            ),
+          ],
+          if (plugin.permissions.networkDomains.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Domains: ${plugin.permissions.networkDomains.join(', ')}',
+              style: AppTypography.mono(fontSize: 11, color: c.mutedInk),
+            ),
+          ],
+          if (plugin.lastError != null && plugin.lastError!.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              plugin.lastError!,
+              style: AppTypography.mono(fontSize: 11, color: c.errorText),
+            ),
+          ],
+          const SizedBox(height: AppTokens.space8),
+          Wrap(
+            spacing: AppTokens.space8,
+            runSpacing: AppTokens.space8,
+            children: [
+              if (plugin.hasConfigSchema || plugin.commands.isNotEmpty)
+                OutlinedButton.icon(
+                  key: Key('plugin_configure_${plugin.name}'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: c.ink,
+                    side: BorderSide(color: c.border),
+                  ),
+                  onPressed: () {
+                    showDialog<bool>(
+                      context: context,
+                      builder: (_) => PluginConfigDialog(plugin: plugin),
+                    );
+                  },
+                  icon: const Icon(Icons.tune_rounded, size: 15),
+                  label: Text(
+                    !plugin.configured ? 'Configure (Required)' : 'Configure',
+                  ),
+                ),
+              OutlinedButton.icon(
+                key: Key('plugin_logs_${plugin.name}'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: c.ink,
+                  side: BorderSide(color: c.border),
+                ),
+                onPressed: () {
+                  showDialog<void>(
+                    context: context,
+                    builder: (_) => PluginLogsDialog(plugin: plugin),
+                  );
+                },
+                icon: const Icon(Icons.terminal_rounded, size: 15),
+                label: const Text('Logs'),
+              ),
+              if (plugin.hasCatalog && plugin.enabled)
+                FilledButton.icon(
+                  key: Key('plugin_browse_${plugin.name}'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: c.accentPrimary,
+                    foregroundColor: c.onAccent,
+                  ),
+                  onPressed: () => context.go(
+                    '/plugins/catalog?plugin=${Uri.encodeComponent(plugin.name)}',
+                  ),
+                  icon: const Icon(Icons.storefront_outlined, size: 15),
+                  label: const Text('Browse Catalog'),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

@@ -8,6 +8,7 @@ import 'features/book_detail/book_detail_view.dart';
 import 'features/connect/connect_view.dart';
 import 'features/genres/genre_detail_view.dart';
 import 'features/library/library_view.dart';
+import 'features/plugins/catalog_browser_view.dart';
 import 'features/reader/reader_view.dart';
 import 'features/search/search_view.dart';
 import 'features/series/series_detail_view.dart';
@@ -162,6 +163,12 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
           GoRoute(
             path: '/uploads',
             builder: (context, state) => const UploadsView(),
+          ),
+          GoRoute(
+            path: '/plugins/catalog',
+            builder: (context, state) => CatalogBrowserView(
+              initialPlugin: state.uri.queryParameters['plugin'],
+            ),
           ),
         ],
       ),

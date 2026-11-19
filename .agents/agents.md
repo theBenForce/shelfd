@@ -21,6 +21,7 @@ This file centralizes the specialized AI team personas and implementation workfl
   * **Embedded Vector Engine**: Manages the single-file database (`/data/sqlite.db`), `vec0` virtual tables, transactional foreign-key cascades, and Cgo build hygiene.
   * **Storage Engine Abstraction**: Maintains the `StorageEngine` interface, isolating SQLite-specific SQL so external PostgreSQL (`pgvector`) can be plugged in without changing domain logic.
   * **Concurrency & Scanners**: Manages non-blocking background workers for library crawling and ingestion queues.
+  * **Out-of-Process Plugin Host & SDK**: Maintains `apps/server/internal/plugins` and `packages/plugin-sdk` following `.agents/skills/plugin-host-maintainer.md` and `skills/create-shelfd-plugin/SKILL.md` (NDJSON JSON-RPC 2.0 over `stdio`, scale-to-zero idle reaping, scoped per-invocation JWTs, and AES-256-GCM user credential encryption).
 
 ### 3. `@mcp` — The AI & Semantic Protocol Specialist
 * **Core Focus**: Model Context Protocol (MCP) server, external AI integration, and token economy.

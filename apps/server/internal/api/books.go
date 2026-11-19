@@ -1582,6 +1582,71 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Apply optional fallback metadata provided by an importer plugin (metadata_defaults JSON)
+	sourcePlugin := strings.TrimSpace(r.FormValue("source_plugin"))
+	sourceExternalID := strings.TrimSpace(r.FormValue("source_external_id"))
+	rawMetaDefaults := strings.TrimSpace(r.FormValue("metadata_defaults"))
+	if rawMetaDefaults != "" {
+		var defaults struct {
+			Title          string   `json:"title"`
+			Authors        []string `json:"authors"`
+			Series         *string  `json:"series"`
+			SequenceNumber *float64 `json:"sequence_number"`
+			Description    *string  `json:"description"`
+			Publisher      *string  `json:"publisher"`
+			Language       *string  `json:"language"`
+			Genres         []string `json:"genres"`
+			Narrator       *string  `json:"narrator"`
+		}
+		if err := json.Unmarshal([]byte(rawMetaDefaults), &defaults); err == nil {
+			if (title == "" || strings.EqualFold(title, "Untitled")) && strings.TrimSpace(defaults.Title) != "" {
+				title = strings.TrimSpace(defaults.Title)
+			}
+			isGenericAuthor := len(authors) == 0 || (len(authors) == 1 && (strings.EqualFold(authors[0], "Unknown") || (defaults.Publisher != nil && strings.EqualFold(authors[0], strings.TrimSpace(*defaults.Publisher)))))
+			if isGenericAuthor && len(defaults.Authors) > 0 {
+				var cleanAuthors []string
+				for _, a := range defaults.Authors {
+					if trimmed := strings.TrimSpace(a); trimmed != "" {
+						cleanAuthors = append(cleanAuthors, trimmed)
+					}
+				}
+				if len(cleanAuthors) > 0 {
+					authors = cleanAuthors
+				}
+			}
+			if (series == nil || strings.TrimSpace(*series) == "") && defaults.Series != nil && strings.TrimSpace(*defaults.Series) != "" {
+				s := strings.TrimSpace(*defaults.Series)
+				series = &s
+				if seqNum == nil {
+					seqNum = defaults.SequenceNumber
+				}
+			}
+			if (desc == nil || strings.TrimSpace(*desc) == "") && defaults.Description != nil && strings.TrimSpace(*defaults.Description) != "" {
+				d := strings.TrimSpace(*defaults.Description)
+				desc = &d
+			}
+			if (pub == nil || strings.TrimSpace(*pub) == "") && defaults.Publisher != nil && strings.TrimSpace(*defaults.Publisher) != "" {
+				p := strings.TrimSpace(*defaults.Publisher)
+				pub = &p
+			}
+			if (lang == nil || strings.TrimSpace(*lang) == "") && defaults.Language != nil && strings.TrimSpace(*defaults.Language) != "" {
+				l := strings.TrimSpace(*defaults.Language)
+				lang = &l
+			}
+			if len(genres) == 0 && len(defaults.Genres) > 0 {
+				for _, g := range defaults.Genres {
+					if trimmed := strings.TrimSpace(g); trimmed != "" {
+						genres = append(genres, trimmed)
+					}
+				}
+			}
+			if (narrator == nil || strings.TrimSpace(*narrator) == "") && defaults.Narrator != nil && strings.TrimSpace(*narrator) != "" {
+				n := strings.TrimSpace(*defaults.Narrator)
+				narrator = &n
+			}
+		}
+	}
+
 	if len(authors) == 0 {
 		authors = []string{"Unknown"}
 	}
@@ -1652,6 +1717,20 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 					}
 					_ = h.repo.CreateUploadJob(r.Context(), job)
 					_ = h.repo.UpdateUploadJobStatus(r.Context(), job.ID, "completed", &updatedBook.ID, nil)
+					if sourcePlugin != "" && sourceExternalID != "" {
+						_ = h.repo.UpsertBookSource(r.Context(), &repository.BookSource{
+							PluginName:  sourcePlugin,
+							ExternalID:  sourceExternalID,
+							UploadJobID: &job.ID,
+							BookID:      &updatedBook.ID,
+							MetadataJSON: func() *string {
+								if rawMetaDefaults == "" {
+									return nil
+								}
+								return &rawMetaDefaults
+							}(),
+						})
+					}
 					_ = os.Remove(stagedPath)
 
 					if h.hub != nil {
@@ -1756,6 +1835,19 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 		_ = os.Remove(filepath.Join(uploadsDir, jobID+".cover"))
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to record staged upload: %v", err))
 		return
+	}
+
+	if sourcePlugin != "" && sourceExternalID != "" {
+		var metaPtr *string
+		if rawMetaDefaults != "" {
+			metaPtr = &rawMetaDefaults
+		}
+		_ = h.repo.UpsertBookSource(r.Context(), &repository.BookSource{
+			PluginName:   sourcePlugin,
+			ExternalID:   sourceExternalID,
+			UploadJobID:  &job.ID,
+			MetadataJSON: metaPtr,
+		})
 	}
 
 	h.broadcastQueueStatus(r.Context())
@@ -2168,9 +2260,42 @@ func (h *BookHandler) CommitUploadJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req CommitUploadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON request body: %v", err))
-		return
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON request body: %v", err))
+			return
+		}
+	}
+
+	if strings.TrimSpace(req.Title) == "" && job.Metadata != nil && *job.Metadata != "" {
+		var stagedMeta StagedMetadataDTO
+		if json.Unmarshal([]byte(*job.Metadata), &stagedMeta) == nil {
+			req.Title = stagedMeta.Title
+			if len(req.Authors) == 0 && strings.TrimSpace(req.Author) == "" {
+				req.Authors = stagedMeta.Authors
+			}
+			if req.Series == nil {
+				req.Series = stagedMeta.Series
+			}
+			if req.SequenceNumber == nil {
+				req.SequenceNumber = stagedMeta.SequenceNumber
+			}
+			if req.Description == nil {
+				req.Description = stagedMeta.Description
+			}
+			if req.Publisher == nil {
+				req.Publisher = stagedMeta.Publisher
+			}
+			if req.Language == nil {
+				req.Language = stagedMeta.Language
+			}
+			if len(req.Genres) == 0 {
+				req.Genres = stagedMeta.Genres
+			}
+			if req.Narrator == nil {
+				req.Narrator = stagedMeta.Narrator
+			}
+		}
 	}
 
 	title := strings.TrimSpace(req.Title)
@@ -2236,6 +2361,7 @@ func (h *BookHandler) CommitUploadJob(w http.ResponseWriter, r *http.Request) {
 				_ = os.Remove(job.StagedPath)
 				_ = os.Remove(stagedCoverPath)
 				_ = h.repo.UpdateUploadJobStatus(r.Context(), job.ID, "completed", &updatedBook.ID, nil)
+				_ = h.repo.LinkBookSourceByUploadJob(r.Context(), job.ID, updatedBook.ID)
 				if h.hub != nil {
 					h.hub.Broadcast(events.Event{
 						Type: events.EventBookAdded,
@@ -2303,6 +2429,7 @@ func (h *BookHandler) CommitUploadJob(w http.ResponseWriter, r *http.Request) {
 	_ = os.Remove(filepath.Join(h.dataDir, "uploads", job.ID+".cover"))
 
 	_ = h.repo.UpdateUploadJobStatus(r.Context(), job.ID, "completed", &book.ID, nil)
+	_ = h.repo.LinkBookSourceByUploadJob(r.Context(), job.ID, book.ID)
 
 	if h.worker != nil {
 		h.worker.Trigger()
@@ -2341,6 +2468,7 @@ func (h *BookHandler) DeleteUploadJob(w http.ResponseWriter, r *http.Request) {
 	if err == nil && job != nil {
 		_ = os.Remove(job.StagedPath)
 		_ = os.Remove(filepath.Join(h.dataDir, "uploads", job.ID+".cover"))
+		_ = h.repo.DeleteUncommittedBookSourceByUploadJob(r.Context(), jobID)
 		_ = h.repo.DeleteUploadJob(r.Context(), jobID)
 		h.broadcastQueueStatus(r.Context())
 	}
