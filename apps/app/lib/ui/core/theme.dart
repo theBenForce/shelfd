@@ -391,7 +391,7 @@ class AppTheme {
         margin: EdgeInsets.zero,
       ),
       dividerTheme: DividerThemeData(
-        color: colors.subtleBorder,
+        color: colors.border,
         thickness: 1,
         space: 1,
       ),
