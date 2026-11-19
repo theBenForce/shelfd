@@ -1,13 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/services/api_service.dart';
+import 'package:shelf/ui/core/theme.dart';
+import 'package:shelf/ui/features/audiobook/audiobook_player_view.dart';
+import 'package:shelf/ui/features/audiobook/widgets/mini_player_bar.dart';
 import 'package:shelf/ui/features/reader/fixed_layout_reader.dart';
 import 'package:shelf/ui/features/reader/html_view.dart';
+import 'package:shelf/ui/features/reader/reader_view.dart';
 import 'package:shelf/ui/state/providers.dart';
+
+class _StubBookDetailNotifier extends BookDetailNotifier {
+  final Book mockBook;
+  _StubBookDetailNotifier(this.mockBook) : super(mockBook.id);
+
+  @override
+  BookDetailState build() => BookDetailState(book: mockBook, isLoading: false);
+
+  @override
+  Future<void> loadBook() async {}
+}
 
 class _MockReadalongApiService extends ApiService {
   _MockReadalongApiService(this.manifest) : super(baseUrl: 'http://localhost:8080');
@@ -381,5 +397,190 @@ void main() {
       await engine.stop();
       await tester.pump();
     });
+
+    testWidgets(
+      'toggles seamlessly between Audiobook player, Read-Along reader, and MiniPlayerBar while preserving playback position',
+      (tester) async {
+        tester.view.physicalSize = const Size(900, 1000);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        SharedPreferences.setMockInitialValues({});
+        final prefs = await SharedPreferences.getInstance();
+
+        final manifest = ReadalongManifest(
+          bookId: 'b-toggle',
+          hasReadalong: true,
+          hasMediaOverlays: true,
+          durationSeconds: 10.0,
+          segments: const [
+            ReadalongSegment(
+              chapterIndex: 1,
+              chapterHref: 'OEBPS/xhtml/page01.xhtml',
+              fragmentId: 'w1',
+              text: 'Page one text',
+              clipBegin: 0.0,
+              clipEnd: 4.0,
+              globalBegin: 0.0,
+              globalEnd: 4.0,
+            ),
+            ReadalongSegment(
+              chapterIndex: 2,
+              chapterHref: 'OEBPS/xhtml/page02.xhtml',
+              fragmentId: 'w2',
+              text: 'Page two text',
+              clipBegin: 4.0,
+              clipEnd: 10.0,
+              globalBegin: 4.0,
+              globalEnd: 10.0,
+            ),
+          ],
+        );
+
+        final book = Book(
+          id: 'b-toggle',
+          title: 'Four Silly Skeletons',
+          layout: 'pre-paginated',
+          bookType: 'ebook',
+          hasReadalong: true,
+          durationSeconds: 10.0,
+          authors: const [Author(id: 'a1', name: 'Sue Hendra')],
+          spine: const [
+            SpineItem(
+              id: 'ch1',
+              bookId: 'b-toggle',
+              chapterIndex: 1,
+              title: 'Page 1',
+              href: 'OEBPS/xhtml/page01.xhtml',
+              pageWidth: 600,
+              pageHeight: 800,
+            ),
+            SpineItem(
+              id: 'ch2',
+              bookId: 'b-toggle',
+              chapterIndex: 2,
+              title: 'Page 2',
+              href: 'OEBPS/xhtml/page02.xhtml',
+              pageWidth: 600,
+              pageHeight: 800,
+            ),
+          ],
+        );
+
+        final engine = SimulatedAudioPlayerEngine(
+          initialDuration: const Duration(seconds: 10),
+        );
+        final api = _MockReadalongApiService(manifest);
+
+        final container = ProviderContainer(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(prefs),
+            apiServiceProvider.overrideWithValue(api),
+            audioPlayerEngineProvider.overrideWithValue(engine),
+            bookDetailProvider('b-toggle').overrideWith(() => _StubBookDetailNotifier(book)),
+          ],
+        );
+        addTearDown(() => container.dispose());
+
+        final router = GoRouter(
+          initialLocation: '/books',
+          routes: [
+            GoRoute(
+              path: '/books',
+              builder: (context, state) => const Scaffold(
+                body: Center(child: Text('Library')),
+                bottomNavigationBar: MiniPlayerBar(),
+              ),
+            ),
+            GoRoute(
+              path: '/books/:bookId/listen',
+              builder: (context, state) => AudiobookPlayerView(
+                bookId: state.pathParameters['bookId']!,
+              ),
+            ),
+            GoRoute(
+              path: '/books/:bookId/read',
+              builder: (context, state) => ReaderView(
+                bookId: state.pathParameters['bookId']!,
+              ),
+            ),
+          ],
+        );
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp.router(
+              theme: AppTheme.buildTheme(ReadingThemeMode.dark),
+              routerConfig: router,
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // 1. Start playing the readalong book as an audiobook and advance to 5.0s (Page 2)
+        router.push('/books/b-toggle/listen');
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(find.byType(AudiobookPlayerView), findsOneWidget);
+        expect(find.byKey(const Key('audio_player_mode_toggle')), findsOneWidget);
+        expect(find.byKey(const Key('switch_to_readalong_button')), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('audio_player_play_pause_button')));
+        await tester.pump();
+        await engine.seek(const Duration(seconds: 5));
+        await tester.pump();
+
+        expect(container.read(audioPlayerProvider).isPlaying, isTrue);
+        expect(container.read(audioPlayerProvider).position, const Duration(seconds: 5));
+        expect(container.read(audioPlayerProvider).playbackMode, AudioPlaybackMode.audiobook);
+
+        // 2. Toggle from Audiobook -> Read-Along
+        await tester.tap(find.byKey(const Key('switch_to_readalong_button')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        // Opens Read-Along directly on Page 2 at 5.0s while keeping playback running
+        expect(find.byType(FixedLayoutReader), findsOneWidget);
+        expect(find.text('Page 2 of 2'), findsOneWidget);
+        expect(find.byKey(const Key('switch_to_audiobook_button')), findsOneWidget);
+        expect(container.read(audioPlayerProvider).isPlaying, isTrue);
+        expect(container.read(audioPlayerProvider).position.inSeconds, greaterThanOrEqualTo(5));
+        expect(container.read(audioPlayerProvider).playbackMode, AudioPlaybackMode.readalong);
+
+        // 3. Toggle from Read-Along -> Audiobook
+        await tester.tap(find.byKey(const Key('switch_to_audiobook_button')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(find.byType(AudiobookPlayerView), findsOneWidget);
+        expect(container.read(audioPlayerProvider).isPlaying, isTrue);
+        expect(container.read(audioPlayerProvider).position.inSeconds, greaterThanOrEqualTo(5));
+        expect(container.read(audioPlayerProvider).playbackMode, AudioPlaybackMode.audiobook);
+
+        // 4. Minimize back to Library and verify MiniPlayerBar mode toggle switches to Read-Along
+        await tester.tap(find.byKey(const Key('audio_player_back_button')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(find.text('Library'), findsOneWidget);
+        expect(find.byKey(const Key('mini_player_mode_toggle')), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('mini_player_mode_toggle')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(find.byType(FixedLayoutReader), findsOneWidget);
+        expect(container.read(audioPlayerProvider).playbackMode, AudioPlaybackMode.readalong);
+        expect(container.read(audioPlayerProvider).position.inSeconds, greaterThanOrEqualTo(5));
+
+        await engine.stop();
+        await tester.pump();
+      },
+    );
   });
 }

@@ -52,7 +52,11 @@ class MiniPlayerBar extends ConsumerWidget {
           InkWell(
             key: const Key('mini_player_tap_area'),
             onTap: () {
-              context.push('/books/${book.id}/listen');
+              if (book.canReadAlong && playerState.playbackMode == AudioPlaybackMode.readalong) {
+                context.push('/books/${book.id}/read');
+              } else {
+                context.push('/books/${book.id}/listen');
+              }
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12, vertical: 8),
@@ -136,6 +140,33 @@ class MiniPlayerBar extends ConsumerWidget {
                       ],
                     ),
                   ),
+
+                  // Toggle between Read-Along and Audiobook when supported
+                  if (book.canReadAlong)
+                    IconButton(
+                      key: const Key('mini_player_mode_toggle'),
+                      iconSize: 20,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                      icon: Icon(
+                        playerState.playbackMode == AudioPlaybackMode.readalong
+                            ? Icons.headphones_rounded
+                            : Icons.menu_book_rounded,
+                        color: AppTokens.amberAccent,
+                      ),
+                      tooltip: playerState.playbackMode == AudioPlaybackMode.readalong
+                          ? 'Switch to Audiobook'
+                          : 'Switch to Read-Along',
+                      onPressed: () {
+                        if (playerState.playbackMode == AudioPlaybackMode.readalong) {
+                          playerNotifier.setPlaybackMode(AudioPlaybackMode.audiobook);
+                          context.push('/books/${book.id}/listen');
+                        } else {
+                          playerNotifier.setPlaybackMode(AudioPlaybackMode.readalong);
+                          context.push('/books/${book.id}/read');
+                        }
+                      },
+                    ),
 
                   // 30s Skip Forward
                   IconButton(

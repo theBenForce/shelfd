@@ -10,6 +10,11 @@ enum AudioPlaybackStatus {
   error,
 }
 
+enum AudioPlaybackMode {
+  audiobook,
+  readalong,
+}
+
 enum SleepTimerOption {
   none,
   min5,
@@ -65,6 +70,7 @@ enum SleepTimerOption {
 class AudioPlayerState {
   final Book? book;
   final AudioPlaybackStatus status;
+  final AudioPlaybackMode playbackMode;
   final Duration position;
   final Duration duration;
   final double speed;
@@ -79,6 +85,7 @@ class AudioPlayerState {
   const AudioPlayerState({
     this.book,
     this.status = AudioPlaybackStatus.idle,
+    this.playbackMode = AudioPlaybackMode.audiobook,
     this.position = Duration.zero,
     this.duration = Duration.zero,
     this.speed = 1.0,
@@ -126,6 +133,7 @@ class AudioPlayerState {
   AudioPlayerState copyWith({
     Book? book,
     AudioPlaybackStatus? status,
+    AudioPlaybackMode? playbackMode,
     Duration? position,
     Duration? duration,
     double? speed,
@@ -143,6 +151,7 @@ class AudioPlayerState {
     return AudioPlayerState(
       book: book ?? this.book,
       status: status ?? this.status,
+      playbackMode: playbackMode ?? this.playbackMode,
       position: position ?? this.position,
       duration: duration ?? this.duration,
       speed: speed ?? this.speed,

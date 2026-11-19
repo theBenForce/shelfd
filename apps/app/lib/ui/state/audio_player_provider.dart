@@ -55,6 +55,11 @@ class JustAudioPlayerEngine implements AudioPlayerEngine {
   @override
   Future<void> setUrl(String url, {Duration? initialPosition}) async {
     await _player.setUrl(url, initialPosition: initialPosition);
+    if (initialPosition != null &&
+        initialPosition > Duration.zero &&
+        (_player.position - initialPosition).abs() > const Duration(seconds: 1)) {
+      await _player.seek(initialPosition);
+    }
   }
 
   @override
@@ -194,6 +199,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
   StreamSubscription? _posSub;
   StreamSubscription? _durSub;
   StreamSubscription? _statusSub;
+  bool _isSettingUpTrack = false;
 
   AudioPlayerEngine get _engine => ref.read(audioPlayerEngineProvider);
   AudioRepository get _repository => ref.read(audioRepositoryProvider);
@@ -210,13 +216,39 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     return const AudioPlayerState();
   }
 
+  void setPlaybackMode(AudioPlaybackMode mode) {
+    if (state.playbackMode != mode) {
+      state = state.copyWith(playbackMode: mode);
+    }
+  }
+
+  void syncBookMetadata(Book book) {
+    if (state.book?.id != book.id) return;
+    final chapters = state.chapters.isNotEmpty ? state.chapters : book.audioChapters;
+    final activeChapter = _resolveChapter(state.position, chapters);
+    final duration = state.duration > Duration.zero
+        ? state.duration
+        : (book.durationSeconds != null && book.durationSeconds! > 0
+            ? Duration(milliseconds: (book.durationSeconds! * 1000).round())
+            : state.duration);
+    state = state.copyWith(
+      book: book,
+      chapters: chapters,
+      activeChapter: activeChapter,
+      duration: duration,
+    );
+  }
+
   void _initSubscriptions() {
     _posSub?.cancel();
     _durSub?.cancel();
     _statusSub?.cancel();
 
     _posSub = _engine.positionStream.listen((pos) {
-      if (state.status == AudioPlaybackStatus.playing || state.status == AudioPlaybackStatus.ready) {
+      if (_isSettingUpTrack) return;
+      if (state.status == AudioPlaybackStatus.playing ||
+          state.status == AudioPlaybackStatus.ready ||
+          state.status == AudioPlaybackStatus.paused) {
         final newActive = _resolveChapter(pos, state.chapters);
         state = state.copyWith(position: pos, activeChapter: newActive);
       }
@@ -229,6 +261,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     });
 
     _statusSub = _engine.statusStream.listen((status) {
+      if (_isSettingUpTrack) return;
       if (status == AudioPlaybackStatus.completed) {
         _onPlaybackCompleted();
       } else {
@@ -252,7 +285,55 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
   }
 
   Future<void> loadBook(Book book, {String? fileId, double? initialPosition, bool autoPlay = false}) async {
+    final isSameLoadedBook = fileId == null &&
+        state.book?.id == book.id &&
+        state.status != AudioPlaybackStatus.idle &&
+        state.status != AudioPlaybackStatus.error;
+
+    if (isSameLoadedBook) {
+      var chapters = state.chapters;
+      if (chapters.isEmpty) {
+        chapters = book.audioChapters.isNotEmpty
+            ? book.audioChapters
+            : await _repository.getChapters(book.id);
+      }
+      var duration = state.duration;
+      if (duration <= Duration.zero) {
+        duration = book.durationSeconds != null && book.durationSeconds! > 0
+            ? Duration(milliseconds: (book.durationSeconds! * 1000).round())
+            : (chapters.isNotEmpty
+                ? Duration(
+                    milliseconds:
+                        ((chapters.last.startOffsetSec + chapters.last.durationSec) * 1000).round(),
+                  )
+                : Duration.zero);
+      }
+      var targetPosition = state.position;
+      if (initialPosition != null) {
+        targetPosition = Duration(milliseconds: (initialPosition * 1000).round());
+        await _engine.seek(targetPosition);
+      }
+      final activeChapter = _resolveChapter(targetPosition, chapters);
+      state = state.copyWith(
+        book: book,
+        chapters: chapters,
+        duration: duration,
+        position: targetPosition,
+        activeChapter: activeChapter,
+      );
+      if (autoPlay && !state.isPlaying) {
+        await play();
+      }
+      return;
+    }
+
     try {
+      if (state.book != null && state.book!.id != book.id) {
+        _syncTimer?.cancel();
+        await _syncProgressToServer();
+      }
+
+      _isSettingUpTrack = true;
       state = state.copyWith(
         book: book,
         status: AudioPlaybackStatus.loading,
@@ -276,7 +357,9 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
                 )
               : Duration.zero);
 
-      final streamUrl = _repository.getStreamUrl(book.id);
+      final streamUrl = fileId != null
+          ? _repository.getFileStreamUrl(book.id, fileId)
+          : _repository.getStreamUrl(book.id);
       final startPos = Duration(milliseconds: (targetPosSec * 1000).round());
 
       await _engine.setUrl(streamUrl, initialPosition: startPos);
@@ -285,21 +368,26 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
       }
 
       final activeChapter = _resolveChapter(startPos, chapters);
+      final resolvedDuration = state.duration > Duration.zero && state.book?.id == book.id
+          ? state.duration
+          : initialDuration;
 
       state = state.copyWith(
         book: book,
         status: AudioPlaybackStatus.ready,
         position: startPos,
-        duration: initialDuration,
+        duration: resolvedDuration,
         speed: progress.speed,
         chapters: chapters,
         activeChapter: activeChapter,
       );
+      _isSettingUpTrack = false;
 
       if (autoPlay) {
         await play();
       }
     } catch (e) {
+      _isSettingUpTrack = false;
       state = state.copyWith(
         status: AudioPlaybackStatus.error,
         errorMessage: 'Failed to load audiobook: $e',
