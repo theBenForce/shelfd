@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shelf/data/models/plugin.dart';
 import 'package:shelf/data/models/upload_job.dart';
 import 'package:shelf/data/services/api_service.dart';
 
@@ -568,17 +569,17 @@ void main() {
       expect(bytes, epubBytes);
     });
 
-    test('getBookNotebookLMUrl returns formatted URL with token', () {
+    test('getBookMarkdownUrl returns formatted URL with token', () {
       final apiService = ApiService(baseUrl: 'http://localhost:8080', token: 'test-token');
-      final url = apiService.getBookNotebookLMUrl('book-123');
-      expect(url, 'http://localhost:8080/api/v1/books/book-123/notebooklm?token=test-token');
+      final url = apiService.getBookMarkdownUrl('book-123');
+      expect(url, 'http://localhost:8080/api/v1/books/book-123/markdown?token=test-token');
     });
 
-    test('downloadBookNotebookLM returns markdown bytes on success', () async {
+    test('downloadBookMarkdown returns markdown bytes on success', () async {
       final mdBytes = utf8.encode('# Dune\n\n## Chapters\n\n### Chapter 1\nArrakis.');
       final mockClient = MockClient((request) async {
         expect(request.method, 'GET');
-        expect(request.url.path, '/api/v1/books/book-123/notebooklm');
+        expect(request.url.path, '/api/v1/books/book-123/markdown');
         expect(request.headers['authorization'], 'Bearer test-token');
         return http.Response.bytes(
           mdBytes,
@@ -595,27 +596,18 @@ void main() {
         token: 'test-token',
         client: mockClient,
       );
-      final bytes = await apiService.downloadBookNotebookLM('book-123');
+      final bytes = await apiService.downloadBookMarkdown('book-123');
       expect(utf8.decode(bytes), contains('# Dune'));
       expect(utf8.decode(bytes), contains('### Chapter 1'));
     });
 
-    test('sendBookToNotebookLM parses client_handoff response', () async {
+    test('downloadApiPathBytes fetches arbitrary API path with auth header', () async {
+      final mdBytes = utf8.encode('# Bundle Content');
       final mockClient = MockClient((request) async {
-        expect(request.method, 'POST');
-        expect(request.url.path, '/api/v1/books/book-123/notebooklm');
+        expect(request.method, 'GET');
+        expect(request.url.path, '/api/v1/books/book-123/markdown');
         expect(request.headers['authorization'], 'Bearer test-token');
-        return http.Response(
-          jsonEncode({
-            'status': 'client_handoff',
-            'notebook_url': 'https://notebooklm.google.com/',
-            'file_name': 'Dune.md',
-            'download_path': '/api/v1/books/book-123/notebooklm',
-            'message': 'NotebookLM bundle ready for download.',
-          }),
-          200,
-          headers: {'content-type': 'application/json'},
-        );
+        return http.Response.bytes(mdBytes, 200);
       });
 
       final apiService = ApiService(
@@ -623,33 +615,52 @@ void main() {
         token: 'test-token',
         client: mockClient,
       );
-      final result = await apiService.sendBookToNotebookLM('book-123');
-      expect(result.status, 'client_handoff');
-      expect(result.isClientHandoff, isTrue);
-      expect(result.isSent, isFalse);
-      expect(result.notebookUrl, 'https://notebooklm.google.com/');
-      expect(result.fileName, 'Dune.md');
-      expect(result.downloadPath, '/api/v1/books/book-123/notebooklm');
+      final bytes = await apiService.downloadApiPathBytes('/api/v1/books/book-123/markdown');
+      expect(utf8.decode(bytes), '# Bundle Content');
     });
 
-    test('sendBookToNotebookLM parses sent response and throws ApiException on 502 error', () async {
-      var shouldFail = false;
+    test('preparePluginAction and invokePluginAction parse declarative form and result', () async {
       final mockClient = MockClient((request) async {
-        expect(request.method, 'POST');
-        expect(request.url.path, '/api/v1/books/book-123/notebooklm');
-        if (shouldFail) {
-          return http.Response(jsonEncode({'error': 'Upstream NotebookLM error'}), 502);
+        if (request.url.path == '/api/v1/plugins/shelfd.yoto/actions/send_to_yoto/prepare') {
+          expect(request.method, 'POST');
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect((body['target'] as Map<String, dynamic>)['id'], 'book-123');
+          return http.Response(
+            jsonEncode({
+              'title': 'Send to Yoto',
+              'submit_label': 'Send to Yoto',
+              'auth_required': false,
+              'entries': [
+                {'id': 'ch-1', 'index': 0, 'title': 'Chapter 1'},
+              ],
+              'fields': [
+                {
+                  'key': 'mode',
+                  'kind': 'segmented',
+                  'title': 'Playlist Destination',
+                  'default_value': 'create',
+                },
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
         }
-        return http.Response(
-          jsonEncode({
-            'status': 'sent',
-            'notebook_url': 'https://notebooklm.google.com/notebook/nb-456',
-            'file_name': 'Dune.md',
-            'message': 'Uploaded to NotebookLM',
-          }),
-          200,
-          headers: {'content-type': 'application/json'},
-        );
+        if (request.url.path == '/api/v1/plugins/shelfd.notebooklm/actions/export_notebooklm/invoke') {
+          expect(request.method, 'POST');
+          return http.Response(
+            jsonEncode({
+              'status': 'client_handoff',
+              'open_url': 'https://notebooklm.google.com/',
+              'file_name': 'Dune.md',
+              'download_api_path': '/api/v1/books/book-123/markdown',
+              'message': 'NotebookLM bundle ready for download.',
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response(jsonEncode({'error': 'Unexpected path'}), 404);
       });
 
       final apiService = ApiService(
@@ -657,17 +668,93 @@ void main() {
         token: 'test-token',
         client: mockClient,
       );
-      final result = await apiService.sendToNotebookLM('book-123');
-      expect(result.status, 'sent');
-      expect(result.isSent, isTrue);
-      expect(result.isClientHandoff, isFalse);
-      expect(result.notebookUrl, 'https://notebooklm.google.com/notebook/nb-456');
 
-      shouldFail = true;
-      expect(
-        () => apiService.sendBookToNotebookLM('book-123'),
-        throwsA(isA<ApiException>().having((e) => e.statusCode, 'statusCode', 502)),
+      const target = PluginActionTarget(type: 'book', id: 'book-123', title: 'Dune');
+      final form = await apiService.preparePluginAction(
+        'shelfd.yoto',
+        'send_to_yoto',
+        target: target,
       );
+      expect(form.title, 'Send to Yoto');
+      expect(form.entries.single.title, 'Chapter 1');
+      expect(form.fields.single.key, 'mode');
+
+      final result = await apiService.invokePluginAction(
+        'shelfd.notebooklm',
+        'export_notebooklm',
+        target: target,
+      );
+      expect(result.status, 'client_handoff');
+      expect(result.isClientHandoff, isTrue);
+      expect(result.openUrl, 'https://notebooklm.google.com/');
+      expect(result.fileName, 'Dune.md');
+      expect(result.downloadApiPath, '/api/v1/books/book-123/markdown');
+    });
+
+    test('plugin auth and jobs endpoints parse status, begin result, and jobs list', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/v1/plugins/shelfd.yoto/auth/status') {
+          return http.Response(
+            jsonEncode({
+              'linked': true,
+              'method': 'oauth_pkce',
+              'account_label': 'Yoto Family',
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.url.path == '/api/v1/plugins/shelfd.yoto/auth/begin') {
+          return http.Response(
+            jsonEncode({
+              'method': 'oauth_pkce',
+              'authorize_url': 'https://login.yotoplay.com/authorize?client_id=cid',
+              'state': 'state-1',
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.url.path == '/api/v1/plugins/jobs') {
+          return http.Response(
+            jsonEncode([
+              {
+                'id': 'job-1',
+                'plugin': 'shelfd.yoto',
+                'action': 'send_to_yoto',
+                'title': 'Dune',
+                'status': 'running',
+                'current': 1,
+                'total': 3,
+              },
+            ]),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response('{}', 200);
+      });
+
+      final apiService = ApiService(
+        baseUrl: 'http://localhost:8080',
+        token: 'test-token',
+        client: mockClient,
+      );
+
+      final status = await apiService.getPluginAuthStatus('shelfd.yoto');
+      expect(status.linked, isTrue);
+      expect(status.accountLabel, 'Yoto Family');
+
+      final begin = await apiService.beginPluginAuth(
+        'shelfd.yoto',
+        {'method': 'oauth_pkce', 'client_id': 'cid'},
+      );
+      expect(begin.authorizeUrl, contains('login.yotoplay.com'));
+
+      final jobs = await apiService.getPluginJobs();
+      expect(jobs.single.id, 'job-1');
+      expect(jobs.single.current, 1);
+      expect(jobs.single.total, 3);
     });
   });
 }

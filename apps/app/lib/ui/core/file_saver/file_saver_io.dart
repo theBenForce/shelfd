@@ -21,7 +21,7 @@ String _inferDialogTitle(String fileName, String? mimeType) {
   if (lower.endsWith('.md') ||
       lower.endsWith('.markdown') ||
       (mimeType != null && mimeType.contains('markdown'))) {
-    return 'Save NotebookLM Markdown';
+    return 'Save Book Markdown';
   }
   return 'Save EPUB';
 }

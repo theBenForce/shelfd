@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../data/models/book.dart';
+import '../../../data/models/plugin.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
 import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
-import '../book_detail/send_to_yoto_dialog.dart';
+import '../plugins/plugin_action_runner.dart';
 
 int compareSeriesBooks(Book a, Book b) {
   final seqA = a.seriesSequence;
@@ -93,22 +94,42 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
     }
   }
 
-  Future<void> _sendSeriesToYoto(String title, List<Book> audioBooks) async {
-    if (audioBooks.isEmpty) return;
-    final result = await showSendSeriesToYotoDialog(
-      context,
-      seriesId: widget.seriesId,
-      seriesName: title,
-      books: audioBooks,
-    );
-    if (result != null && result.status != 'queued' && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result.message),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+  IconData _resolvePluginActionIcon(String? iconName) {
+    switch (iconName) {
+      case 'speaker':
+        return Icons.speaker_rounded;
+      case 'auto_awesome':
+        return Icons.auto_awesome_rounded;
+      default:
+        return Icons.extension_rounded;
     }
+  }
+
+  Future<void> _runSeriesPluginAction(
+    PluginSummary plugin,
+    PluginActionDef action,
+    String title,
+    List<Book> audioBooks,
+  ) async {
+    final targetBookIds = action.mediaTypes.any(
+              (m) => m.toLowerCase() == 'audiobook',
+            ) &&
+            audioBooks.isNotEmpty
+        ? audioBooks.map((b) => b.id).toList()
+        : _books.map((b) => b.id).toList();
+
+    await PluginActionRunner.runPluginAction(
+      context,
+      ref,
+      plugin: plugin,
+      action: action,
+      target: PluginActionTarget(
+        type: 'series',
+        id: widget.seriesId,
+        title: title,
+        bookIds: targetBookIds,
+      ),
+    );
   }
 
   @override
@@ -122,6 +143,26 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
                 ? _books.first.series!.name
                 : 'Series'));
     final audioBooks = _books.where((b) => b.hasAudio).toList();
+    final hasEpub = _books.any(
+      (b) =>
+          b.spine.isNotEmpty ||
+          !b.isAudiobook ||
+          b.files.any((f) => f.fileType == 'epub'),
+    );
+    final hasAudio = audioBooks.isNotEmpty;
+    final pluginsState = ref.watch(pluginsProvider);
+    final seriesActions = <(PluginSummary, PluginActionDef)>[];
+    for (final plugin in pluginsState.plugins.where((p) => p.enabled)) {
+      for (final action in plugin.actions) {
+        if (action.matchesTarget(
+          'series',
+          hasEpub: hasEpub,
+          hasAudio: hasAudio,
+        )) {
+          seriesActions.add((plugin, action));
+        }
+      }
+    }
 
     return Scaffold(
       backgroundColor: colors.background,
@@ -178,23 +219,36 @@ class _SeriesDetailViewState extends ConsumerState<SeriesDetailView> {
                             ),
                           ),
                         ),
-                        if (audioBooks.isNotEmpty) ...[
-                          OutlinedButton.icon(
-                            key: const Key('send_series_to_yoto_button'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: colors.ink,
-                              side: BorderSide(color: colors.border),
+                        ...seriesActions.expand((entry) {
+                          final plugin = entry.$1;
+                          final action = entry.$2;
+                          return [
+                            OutlinedButton.icon(
+                              key: Key(
+                                'series_plugin_action_${plugin.name}_${action.name}',
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: colors.ink,
+                                side: BorderSide(color: colors.border),
+                              ),
+                              onPressed: () => _runSeriesPluginAction(
+                                plugin,
+                                action,
+                                title,
+                                audioBooks,
+                              ),
+                              icon: Icon(
+                                _resolvePluginActionIcon(action.icon),
+                                size: 16,
+                                color: action.icon == 'speaker'
+                                    ? AppTokens.amberAccent
+                                    : colors.accentPrimary,
+                              ),
+                              label: Text(action.title),
                             ),
-                            onPressed: () => _sendSeriesToYoto(title, audioBooks),
-                            icon: const Icon(
-                              Icons.speaker_rounded,
-                              size: 16,
-                              color: AppTokens.amberAccent,
-                            ),
-                            label: const Text('Send to Yoto'),
-                          ),
-                          const SizedBox(width: AppTokens.space12),
-                        ],
+                            const SizedBox(width: AppTokens.space12),
+                          ];
+                        }),
                         if (_books.isNotEmpty)
                           StatusBadge(
                             label: '${_books.length} Books',

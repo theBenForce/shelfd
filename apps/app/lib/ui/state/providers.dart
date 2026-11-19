@@ -26,7 +26,6 @@ export 'audio_player_state.dart';
 export 'duplicate_books_provider.dart';
 export 'plugins_provider.dart';
 export 'upload_provider.dart';
-export 'yoto_provider.dart';
 
 /// Resolves the default server URL based on the runtime platform and environment.
 /// In local web dev (e.g. localhost:3000), defaults to http://localhost:8080.
@@ -894,6 +893,7 @@ class QueueNotifier extends Notifier<QueueState> {
               break;
             case PluginEvent(:final data):
               ref.read(catalogBrowserProvider.notifier).handlePluginEvent(data);
+              ref.read(pluginJobsProvider.notifier).handlePluginEvent(data);
           }
         },
         onError: (err) {

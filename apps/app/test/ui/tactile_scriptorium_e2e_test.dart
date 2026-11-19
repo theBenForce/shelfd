@@ -15,6 +15,7 @@ import 'package:shelf/data/models/genre.dart';
 import 'package:shelf/data/models/highlight.dart';
 import 'package:shelf/data/models/metadata_search_result.dart';
 import 'package:shelf/data/models/paginated_books.dart';
+import 'package:shelf/data/models/plugin.dart';
 import 'package:shelf/data/models/queue_status.dart';
 import 'package:shelf/data/models/search_result.dart';
 import 'package:shelf/data/models/series.dart';
@@ -147,6 +148,38 @@ class _FakeAudioPlayerNotifier extends AudioPlayerNotifier {
   }) async {
     state = _initial.copyWith(book: book);
   }
+}
+
+class _FakePluginsNotifier extends PluginsNotifier {
+  final PluginsState _initial;
+  _FakePluginsNotifier([
+    this._initial = const PluginsState(
+      plugins: [
+        PluginSummary(
+          name: 'notebooklm',
+          displayName: 'NotebookLM',
+          version: '0.1.0',
+          enabled: true,
+          status: 'idle',
+          capabilities: ['actions'],
+          actions: [
+            PluginActionDef(
+              name: 'send_to_notebooklm',
+              title: 'Send to NotebookLM',
+              icon: 'auto_awesome',
+              targets: ['book'],
+              mediaTypes: ['ebook'],
+              mode: 'immediate',
+              execution: 'sync',
+            ),
+          ],
+        ),
+      ],
+    ),
+  ]);
+
+  @override
+  PluginsState build() => _initial;
 }
 
 class _MockBookRepository implements BookRepository {
@@ -944,7 +977,7 @@ void main() {
         expect(find.textContaining('Chapter 1'), findsWidgets);
       });
 
-      testWidgets('F06-T1-05: Download menu exposes EPUB, NotebookLM, and Markdown export options', (tester) async {
+      testWidgets('F06-T1-05: Download menu exposes EPUB, dynamic plugin actions, and Markdown export options', (tester) async {
         tester.view.physicalSize = const Size(1280, 900);
         tester.view.devicePixelRatio = 1.0;
         addTearDown(() => tester.view.resetPhysicalSize());
@@ -954,6 +987,7 @@ void main() {
             overrides: [
               sharedPreferencesProvider.overrideWithValue(prefs),
               bookDetailProvider('book-42').overrideWith(() => _FakeBookDetailNotifier('book-42', sampleBook)),
+              pluginsProvider.overrideWith(_FakePluginsNotifier.new),
             ],
             child: MaterialApp(
               theme: AppTheme.buildTheme(ReadingThemeMode.bone),
@@ -965,7 +999,10 @@ void main() {
         await tester.tap(find.byKey(const Key('download_hero_menu_button')));
         await tester.pumpAndSettle();
         expect(find.byKey(const Key('menu_item_download_epub')), findsOneWidget);
-        expect(find.byKey(const Key('menu_item_send_notebooklm')), findsOneWidget);
+        expect(
+          find.byKey(const Key('menu_item_plugin_notebooklm_send_to_notebooklm')),
+          findsOneWidget,
+        );
         expect(find.byKey(const Key('menu_item_download_markdown')), findsOneWidget);
       });
     });

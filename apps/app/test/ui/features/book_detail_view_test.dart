@@ -9,6 +9,7 @@ import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/book_chat.dart';
 import 'package:shelf/data/models/bookmark.dart';
 import 'package:shelf/data/models/highlight.dart';
+import 'package:shelf/data/models/plugin.dart';
 import 'package:shelf/data/models/series.dart';
 import 'package:shelf/data/repositories/book_repository.dart';
 import 'package:shelf/data/services/api_service.dart';
@@ -439,7 +440,7 @@ void main() {
     expect(find.text('Page 5'), findsOneWidget);
   });
 
-  testWidgets('BookDetailView Download EPUB dropdown opens and shows multiple export options', (tester) async {
+  testWidgets('BookDetailView Download EPUB dropdown opens and shows dynamic plugin action options', (tester) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(() => tester.view.resetPhysicalSize());
@@ -454,6 +455,7 @@ void main() {
           sharedPreferencesProvider.overrideWithValue(prefs),
           bookRepositoryProvider.overrideWithValue(mockRepo),
           bookDetailProvider('book-42').overrideWith(() => _MockBookDetailNotifier(testBook)),
+          pluginsProvider.overrideWith(_MockPluginsNotifier.new),
         ],
         child: MaterialApp(
           theme: AppTheme.buildTheme(ReadingThemeMode.bone),
@@ -471,8 +473,14 @@ void main() {
 
     // Verify all dropdown options are rendered
     expect(find.byKey(const Key('menu_item_download_epub')), findsOneWidget);
-    expect(find.byKey(const Key('menu_item_send_notebooklm')), findsOneWidget);
-    expect(find.byKey(const Key('menu_item_send_yoto')), findsOneWidget);
+    expect(
+      find.byKey(const Key('menu_item_plugin_notebooklm_send_to_notebooklm')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('menu_item_plugin_yoto_send_to_yoto')),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('menu_item_download_markdown')), findsOneWidget);
     expect(find.text('Send to NotebookLM'), findsOneWidget);
     expect(find.text('Send to Yoto'), findsOneWidget);
@@ -480,20 +488,18 @@ void main() {
 
     // Since testBook has no audio files, "Send to Yoto" must be disabled
     final sendYotoItem = tester.widget<PopupMenuItem<String>>(
-      find.byKey(const Key('menu_item_send_yoto')),
+      find.byKey(const Key('menu_item_plugin_yoto_send_to_yoto')),
     );
     expect(sendYotoItem.enabled, isFalse);
 
-    // Select "Send to NotebookLM"
-    await tester.tap(find.byKey(const Key('menu_item_send_notebooklm')));
+    // Select "Download Markdown (.md)"
+    await tester.tap(find.byKey(const Key('menu_item_download_markdown')));
     await tester.pumpAndSettle();
 
-    expect(mockRepo.sendToNotebookLMCalledWith, 'book-42');
-    expect(mockRepo.downloadNotebookLMCalledWith, 'book-42');
-    expect(find.textContaining('NotebookLM'), findsOneWidget);
+    expect(mockRepo.downloadMarkdownCalledWith, 'book-42');
   });
 
-  testWidgets('BookDetailView enables Send to Yoto menu item when audio files are available', (tester) async {
+  testWidgets('BookDetailView enables Send to Yoto plugin menu item when audio files are available', (tester) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(() => tester.view.resetPhysicalSize());
@@ -520,6 +526,7 @@ void main() {
         overrides: [
           sharedPreferencesProvider.overrideWithValue(prefs),
           bookDetailProvider('book-42').overrideWith(() => _MockBookDetailNotifier(audiobook)),
+          pluginsProvider.overrideWith(_MockPluginsNotifier.new),
         ],
         child: MaterialApp(
           theme: AppTheme.buildTheme(ReadingThemeMode.bone),
@@ -535,14 +542,17 @@ void main() {
     await tester.pumpAndSettle();
 
     final sendYotoItem = tester.widget<PopupMenuItem<String>>(
-      find.byKey(const Key('menu_item_send_yoto')),
+      find.byKey(const Key('menu_item_plugin_yoto_send_to_yoto')),
     );
     expect(sendYotoItem.enabled, isTrue);
 
-    await tester.tap(find.byKey(const Key('menu_item_send_yoto')));
-    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('menu_item_plugin_yoto_send_to_yoto')));
+    await tester.pump();
 
-    expect(find.byKey(const Key('send_to_yoto_dialog')), findsOneWidget);
+    expect(
+      find.byKey(const Key('plugin_action_dialog_yoto_send_to_yoto')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('BookDetailView AppBar Download EPUB dropdown triggers EPUB and Markdown downloads', (tester) async {
@@ -588,7 +598,7 @@ void main() {
     await tester.tap(find.byKey(const Key('menu_item_download_markdown')));
     await tester.pumpAndSettle();
 
-    expect(mockRepo.downloadNotebookLMCalledWith, 'book-42');
+    expect(mockRepo.downloadMarkdownCalledWith, 'book-42');
   });
 
   testWidgets('BookDetailView tapping Bookmark card navigates to reader view', (tester) async {
@@ -688,8 +698,7 @@ void main() {
 
 class _MockBookRepository extends BookRepository {
   String? downloadEpubCalledWith;
-  String? downloadNotebookLMCalledWith;
-  String? sendToNotebookLMCalledWith;
+  String? downloadMarkdownCalledWith;
 
   _MockBookRepository(SharedPreferences prefs)
       : super(
@@ -704,19 +713,56 @@ class _MockBookRepository extends BookRepository {
   }
 
   @override
-  Future<List<int>> downloadBookNotebookLM(String bookId) async {
-    downloadNotebookLMCalledWith = bookId;
+  Future<List<int>> downloadBookMarkdown(String bookId) async {
+    downloadMarkdownCalledWith = bookId;
     return '# The Left Hand of Darkness\n'.codeUnits;
   }
+}
 
+class _MockPluginsNotifier extends PluginsNotifier {
   @override
-  Future<NotebookLMSendResult> sendBookToNotebookLM(String bookId) async {
-    sendToNotebookLMCalledWith = bookId;
-    return const NotebookLMSendResult(
-      status: 'client_handoff',
-      notebookUrl: 'https://notebooklm.google.com/',
-      fileName: 'The Left Hand of Darkness.md',
-      message: 'Exported The Left Hand of Darkness.md for NotebookLM — upload it as a source!',
+  PluginsState build() {
+    return const PluginsState(
+      plugins: [
+        PluginSummary(
+          name: 'notebooklm',
+          displayName: 'NotebookLM',
+          version: '0.1.0',
+          enabled: true,
+          status: 'idle',
+          capabilities: ['actions'],
+          actions: [
+            PluginActionDef(
+              name: 'send_to_notebooklm',
+              title: 'Send to NotebookLM',
+              icon: 'auto_awesome',
+              targets: ['book'],
+              mediaTypes: ['ebook'],
+              mode: 'immediate',
+              execution: 'sync',
+            ),
+          ],
+        ),
+        PluginSummary(
+          name: 'yoto',
+          displayName: 'Yoto Player',
+          version: '0.1.0',
+          enabled: true,
+          status: 'idle',
+          capabilities: ['actions'],
+          actions: [
+            PluginActionDef(
+              name: 'send_to_yoto',
+              title: 'Send to Yoto',
+              icon: 'speaker',
+              targets: ['book', 'series'],
+              mediaTypes: ['audiobook'],
+              mode: 'form',
+              execution: 'job',
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

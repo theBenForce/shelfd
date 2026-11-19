@@ -1351,7 +1351,7 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
               child: Column(
                 children: [
                   Expanded(child: body),
-                  const YotoUploadQueueBanner(),
+                  const PluginJobsBanner(),
                   const MiniPlayerBar(),
                 ],
               ),
@@ -1367,7 +1367,7 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
       body: Column(
         children: [
           Expanded(child: body),
-          const YotoUploadQueueBanner(),
+          const PluginJobsBanner(),
           const MiniPlayerBar(),
         ],
       ),
@@ -1381,38 +1381,43 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
   }
 }
 
-class YotoUploadQueueBanner extends ConsumerWidget {
-  const YotoUploadQueueBanner({super.key});
+class PluginJobsBanner extends ConsumerWidget {
+  const PluginJobsBanner({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    ref.listen<YotoUploadQueueState>(yotoUploadQueueProvider, (previous, next) {
+    ref.listen<PluginJobsState>(pluginJobsProvider, (previous, next) {
       final err = next.latestError;
       if (err != null && err.id != previous?.latestError?.id) {
         final messenger = ScaffoldMessenger.maybeOf(context);
+        final errText = (err.error != null && err.error!.trim().isNotEmpty)
+            ? err.error!.trim()
+            : (err.message ?? 'Plugin job failed');
         messenger?.showSnackBar(
           SnackBar(
-            key: const Key('yoto_upload_error_toast'),
-            content: Text(err.message),
+            key: const Key('plugin_job_error_toast'),
+            content: Text(
+              '${err.plugin} job failed for "${err.title}": $errText',
+            ),
             backgroundColor: Colors.red.shade800,
             behavior: SnackBarBehavior.floating,
           ),
         );
-        ref.read(yotoUploadQueueProvider.notifier).acknowledgeError(err.id);
+        ref.read(pluginJobsProvider.notifier).acknowledgeError(err.id);
       }
     });
 
-    final queueState = ref.watch(yotoUploadQueueProvider);
-    if (!queueState.hasActiveOrPending) {
+    final jobsState = ref.watch(pluginJobsProvider);
+    if (!jobsState.hasActiveJobs) {
       return const SizedBox.shrink();
     }
 
     final colors = ShelfdColors.of(context);
-    final currentPct = (queueState.currentUploadProgress * 100).round();
-    final totalPct = (queueState.totalUploadsProgress * 100).round();
+    final currentPct = (jobsState.currentItemProgress * 100).round();
+    final totalPct = (jobsState.totalJobsProgress * 100).round();
 
     return Container(
-      key: const Key('yoto_upload_queue_banner'),
+      key: const Key('plugin_jobs_banner'),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
         color: colors.surface,
@@ -1426,11 +1431,15 @@ class YotoUploadQueueBanner extends ConsumerWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.speaker_rounded, size: 15, color: colors.accentPrimary),
+              Icon(
+                Icons.extension_rounded,
+                size: 15,
+                color: colors.accentPrimary,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'Current Upload: ${queueState.currentUploadTitle}',
+                  'Active Job: ${jobsState.currentJobDisplayTitle}',
                   style: AppTypography.bodySans(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -1441,11 +1450,15 @@ class YotoUploadQueueBanner extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                '${queueState.currentStageDescription} ($currentPct%)',
-                style: AppTypography.mono(
-                  fontSize: 11,
-                  color: colors.mutedInk,
+              Flexible(
+                child: Text(
+                  '${jobsState.currentStageDescription} ($currentPct%)',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.mono(
+                    fontSize: 11,
+                    color: colors.mutedInk,
+                  ),
                 ),
               ),
             ],
@@ -1454,8 +1467,8 @@ class YotoUploadQueueBanner extends ConsumerWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(3),
             child: LinearProgressIndicator(
-              key: const Key('yoto_current_upload_progress_bar'),
-              value: queueState.currentUploadProgress,
+              key: const Key('plugin_job_current_progress_bar'),
+              value: jobsState.currentItemProgress,
               minHeight: 5,
               backgroundColor: colors.containerHigh,
               valueColor: AlwaysStoppedAnimation<Color>(colors.accentPrimary),
@@ -1466,7 +1479,7 @@ class YotoUploadQueueBanner extends ConsumerWidget {
             children: [
               Expanded(
                 child: Text(
-                  'Total Uploads (${queueState.completedUploadsCount} of ${queueState.totalUploadsCount})',
+                  'Overall Progress (${jobsState.completedItemsCount} of ${jobsState.totalItemsCount})',
                   style: AppTypography.bodySans(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
@@ -1487,8 +1500,8 @@ class YotoUploadQueueBanner extends ConsumerWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(3),
             child: LinearProgressIndicator(
-              key: const Key('yoto_total_uploads_progress_bar'),
-              value: queueState.totalUploadsProgress,
+              key: const Key('plugin_job_total_progress_bar'),
+              value: jobsState.totalJobsProgress,
               minHeight: 5,
               backgroundColor: colors.containerHigh,
               valueColor: AlwaysStoppedAnimation<Color>(
