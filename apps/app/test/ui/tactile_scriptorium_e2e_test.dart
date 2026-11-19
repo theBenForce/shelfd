@@ -2756,6 +2756,9 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        await tester.tap(find.byKey(const Key('toggle_change_password_button')));
+        await tester.pumpAndSettle();
+
         await tester.tap(find.text('Update Password'));
         await tester.pumpAndSettle();
         expect(find.text('Current password required'), findsOneWidget);

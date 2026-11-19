@@ -7,6 +7,7 @@ class AppTokens {
   static const double minTouchTarget = 48.0;
   static const double maxReadingWidth = 720.0;
   static const double maxSearchWidth = 860.0;
+  static const double maxWorkspaceWidth = 1040.0;
   static const double maxLibraryWidth = 1800.0;
   static const double sidebarWidth = 240.0;
   static const double mobileBreakpoint = 640.0;
@@ -120,4 +121,10 @@ class AppTokens {
   static const Color errorBgDark = Color(0xFF2D1618);
   static const Color errorBorderDark = Color(0xFF5C262A);
   static const Color errorTextDark = Color(0xFFFCA5A5);
+  static const Color warningBgLight = Color(0xFFFFF7ED);
+  static const Color warningBorderLight = Color(0xFFFED7AA);
+  static const Color warningTextLight = Color(0xFF9A3412);
+  static const Color warningBgDark = Color(0xFF3A261B);
+  static const Color warningBorderDark = Color(0xFF6B422C);
+  static const Color warningTextDark = Color(0xFFE5A967);
 }

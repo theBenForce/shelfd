@@ -473,7 +473,7 @@ void main() {
       expect(bookEntries.first.displayName, 'Standalone Novel');
     });
 
-    testWidgets('ShelfdBottomNav renders 7 destinations including Uploads and Utilities', (tester) async {
+    testWidgets('ShelfdBottomNav renders 5 destinations including Uploads and Utilities', (tester) async {
       String? navigatedPath;
       const status = QueueStatus(
         totalChapters: 0,
@@ -504,10 +504,8 @@ void main() {
         ),
       );
 
-      // Verify all 7 destinations exist
-      expect(find.text('Books'), findsOneWidget);
-      expect(find.text('Series'), findsOneWidget);
-      expect(find.text('Authors'), findsOneWidget);
+      // Verify all 5 destinations exist
+      expect(find.text('Library'), findsOneWidget);
       expect(find.text('Search'), findsOneWidget);
       expect(find.text('Uploads'), findsOneWidget);
       expect(find.text('Utilities'), findsOneWidget);

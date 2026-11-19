@@ -17,22 +17,22 @@ void main() {
 
     test('ThemeData builders produce valid themes with proper scaffold colors', () {
       final bone = AppTheme.buildTheme(ReadingThemeMode.bone);
-      expect(bone.scaffoldBackgroundColor, AppTokens.boneBackground);
-      expect(bone.colorScheme.primary, AppTokens.charcoalInk);
-      expect(bone.colorScheme.onSurfaceVariant, AppTokens.mutedCopy);
-      expect(bone.textTheme.bodyMedium?.color, AppTokens.charcoalInk);
+      expect(bone.scaffoldBackgroundColor, AppTokens.warmParchment);
+      expect(bone.colorScheme.primary, AppTokens.siennaPrimary);
+      expect(bone.colorScheme.onSurfaceVariant, AppTokens.espressoSecondary);
+      expect(bone.textTheme.bodyMedium?.color, AppTokens.espressoInk);
 
       final sepia = AppTheme.buildTheme(ReadingThemeMode.sepia);
       expect(sepia.scaffoldBackgroundColor, AppTokens.sepiaBackground);
-      expect(sepia.colorScheme.primary, AppTokens.sepiaInk);
+      expect(sepia.colorScheme.primary, AppTokens.siennaPrimary);
       expect(sepia.colorScheme.onSurfaceVariant, AppTokens.sepiaCopy);
       expect(sepia.textTheme.bodyMedium?.color, AppTokens.sepiaInk);
 
       final dark = AppTheme.buildTheme(ReadingThemeMode.dark);
-      expect(dark.scaffoldBackgroundColor, AppTokens.darkOledBackground);
-      expect(dark.colorScheme.primary, AppTokens.darkOledInk);
-      expect(dark.colorScheme.onSurfaceVariant, AppTokens.darkOledCopy);
-      expect(dark.textTheme.bodyMedium?.color, AppTokens.darkOledInk);
+      expect(dark.scaffoldBackgroundColor, AppTokens.walnutBackground);
+      expect(dark.colorScheme.primary, AppTokens.siennaDarkAccent);
+      expect(dark.colorScheme.onSurfaceVariant, AppTokens.walnutSecondary);
+      expect(dark.textTheme.bodyMedium?.color, AppTokens.walnutInk);
     });
 
     test('Tactile Scriptorium tokens and ShelfdColors extension are registered per theme mode', () {
