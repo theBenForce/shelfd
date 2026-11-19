@@ -1,0 +1,990 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Prepend common local toolchain locations (mise, Go, Flutter, Homebrew)
+for extra_dir in \
+  "/tmp/flutter/bin" \
+  "$HOME/flutter/bin" \
+  "$HOME/.local/share/mise/shims" \
+  "$HOME/.local/bin" \
+  "/usr/local/go/bin" \
+  "/opt/homebrew/bin"; do
+  if [[ -d "$extra_dir" && ":$PATH:" != *":$extra_dir:"* ]]; then
+    export PATH="$extra_dir:$PATH"
+  fi
+done
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+
+RUN_ID="${SHELFD_VERIFY_RUN_ID:-default}"
+API_PORT="${SHELFD_VERIFY_PORT:-18080}"
+AI_PORT="${SHELFD_VERIFY_AI_PORT:-${SHELFD_VERIFY_WEB_PORT:-13000}}"
+CDP_PORT="${SHELFD_VERIFY_CDP_PORT:-19222}"
+
+API_URL="http://127.0.0.1:${API_PORT}"
+WEB_URL="${SHELFD_VERIFY_WEB_URL:-${API_URL}}"
+AI_URL="http://127.0.0.1:${AI_PORT}"
+
+RUNTIME_DIR="${SHELFD_RUNTIME_DIR:-/tmp/shelfd-verify-runtime-${RUN_ID}}"
+if [[ -n "${SHELFD_EVIDENCE_DIR:-}" ]]; then
+  EVIDENCE_DIR="${SHELFD_EVIDENCE_DIR}"
+elif [[ "$RUN_ID" == "default" ]]; then
+  EVIDENCE_DIR="/tmp/shelfd-verify-evidence"
+else
+  EVIDENCE_DIR="/tmp/shelfd-verify-evidence-${RUN_ID}"
+fi
+
+ADMIN_USER="${SHELFD_VERIFY_ADMIN_USER:-admin}"
+ADMIN_PASS="${SHELFD_VERIFY_ADMIN_PASS:-shelfd-verify-pass-123}"
+MCP_TOKEN="${SHELFD_VERIFY_MCP_TOKEN:-shelfd_verify_mcp_token_${RUN_ID}}"
+JWT_SECRET="shelfd-verify-jwt-secret-key-32bytes-${RUN_ID}"
+
+SERVER_BIN="${RUNTIME_DIR}/bin/shelfd"
+CONFIG_FILE="${RUNTIME_DIR}/config.yaml"
+LIBRARY_DIR="${RUNTIME_DIR}/library"
+DATA_DIR="${RUNTIME_DIR}/data"
+FIXTURES_DIR="${RUNTIME_DIR}/fixtures"
+CHROME_PROFILE_DIR="${RUNTIME_DIR}/chrome-profile"
+SIDECAR_SUMS="${RUNTIME_DIR}/sidecar-checksums.sha256"
+TOKEN_FILE="${RUNTIME_DIR}/admin.jwt"
+
+SERVER_PID_FILE="${RUNTIME_DIR}/server.pid"
+WEB_PID_FILE="${RUNTIME_DIR}/web.pid"
+BROWSER_PID_FILE="${RUNTIME_DIR}/browser.pid"
+DAEMON_PID_FILE="${RUNTIME_DIR}/daemon.pid"
+
+SERVER_LOG="${RUNTIME_DIR}/server.log"
+WEB_LOG="${RUNTIME_DIR}/web.log"
+BROWSER_LOG="${RUNTIME_DIR}/browser.log"
+
+export SHELFD_VERIFY_CDP_PORT="$CDP_PORT"
+export SHELFD_VERIFY_WEB_URL="$WEB_URL"
+
+run_tool() {
+  local bin="$1"
+  shift
+  if command -v "$bin" >/dev/null 2>&1; then
+    "$bin" "$@"
+  elif command -v mise >/dev/null 2>&1; then
+    mise exec -- "$bin" "$@"
+  else
+    echo "ERROR: Required tool '$bin' not found on PATH (and 'mise' is unavailable)." >&2
+    return 1
+  fi
+}
+
+resolve_chrome_bin() {
+  if [[ -n "${SHELFD_CHROME_BIN:-}" && -x "${SHELFD_CHROME_BIN}" ]]; then
+    echo "${SHELFD_CHROME_BIN}"
+    return 0
+  fi
+  local candidates=(
+    "/usr/lib/chromium/chromium"
+    "$(command -v chromium 2>/dev/null || true)"
+    "$(command -v chromium-browser 2>/dev/null || true)"
+    "$(command -v google-chrome 2>/dev/null || true)"
+    "$(command -v google-chrome-stable 2>/dev/null || true)"
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    "/Applications/Chromium.app/Contents/MacOS/Chromium"
+  )
+  for c in "${candidates[@]}"; do
+    if [[ -n "$c" && -x "$c" ]]; then
+      echo "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+STOP_SIGNAL_FILE="${RUNTIME_DIR}/stop.signal"
+
+is_pid_alive() {
+  local pid_file="$1"
+  local expected="${2:-}"
+  if [[ -f "$pid_file" ]]; then
+    local pid cmdline
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$pid" && "$pid" != "$$" ]] && kill -0 "$pid" 2>/dev/null; then
+      if [[ -n "$expected" ]]; then
+        if [[ -r "/proc/${pid}/cmdline" ]]; then
+          cmdline="$(tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null || true)"
+        else
+          cmdline="$(ps -ww -p "$pid" -o command= 2>/dev/null || true)"
+        fi
+        [[ "$cmdline" == *"$expected"* ]] || return 1
+      fi
+      return 0
+    fi
+  fi
+  return 1
+}
+
+stop_pid_file() {
+  local pid_file="$1"
+  local expected="${2:-}"
+  if [[ ! -f "$pid_file" ]]; then
+    return 0
+  fi
+  local pid
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if is_pid_alive "$pid_file" "$expected"; then
+    kill -TERM "$pid" 2>/dev/null || true
+    for _ in $(seq 1 30); do
+      if ! is_pid_alive "$pid_file" "$expected"; then
+        break
+      fi
+      sleep 0.1
+    done
+    if is_pid_alive "$pid_file" "$expected"; then
+      kill -KILL "$pid" 2>/dev/null || true
+      sleep 0.1
+    fi
+  fi
+  rm -f "$pid_file"
+}
+
+is_stack_reachable() {
+  [[ -f "$TOKEN_FILE" ]] &&
+    curl -fsS "${API_URL}/health" >/dev/null 2>&1 &&
+    curl -fsS "${AI_URL}/__verify_health" >/dev/null 2>&1 &&
+    curl -fsS "http://127.0.0.1:${CDP_PORT}/json/version" >/dev/null 2>&1
+}
+
+check_port_free() {
+  local port="$1"
+  local label="$2"
+  if node -e "
+    const net = require('node:net');
+    const s = net.connect({ host: '127.0.0.1', port: ${port} });
+    s.on('connect', () => { s.destroy(); process.exit(0); });
+    s.on('error', () => process.exit(1));
+  " 2>/dev/null; then
+    echo "ERROR: Port ${port} (${label}) is already in use by another process. Refusing to clobber it; set SHELFD_VERIFY_RUN_ID / SHELFD_VERIFY_PORT / SHELFD_VERIFY_AI_PORT / SHELFD_VERIFY_CDP_PORT." >&2
+    return 1
+  fi
+  return 0
+}
+
+ensure_web_bundle() {
+  local web_dir="${REPO_ROOT}/apps/app/build/web"
+  local main_js="${web_dir}/main.dart.js"
+  local needs_build=0
+
+  if [[ ! -f "$main_js" ]]; then
+    needs_build=1
+  elif find "${REPO_ROOT}/apps/app/lib" -name '*.dart' -newer "$main_js" | grep -q .; then
+    needs_build=1
+  fi
+
+  if [[ "$needs_build" -eq 1 ]]; then
+    echo "==> Building Flutter Web bundle (apps/app/build/web)..."
+    local lock_clean=0
+    if git -C "$REPO_ROOT" diff --quiet -- apps/app/pubspec.lock 2>/dev/null; then
+      lock_clean=1
+    fi
+    (
+      cd "${REPO_ROOT}/apps/app"
+      run_tool flutter build web --release --no-web-resources-cdn
+    )
+    if [[ "$lock_clean" -eq 1 ]]; then
+      git -C "$REPO_ROOT" checkout -- apps/app/pubspec.lock 2>/dev/null || true
+    fi
+  fi
+}
+
+seed_fixtures_and_config() {
+  mkdir -p "${RUNTIME_DIR}/bin" "$LIBRARY_DIR" "$DATA_DIR" "$FIXTURES_DIR" "$EVIDENCE_DIR"
+
+  cat >"$CONFIG_FILE" <<EOF
+server:
+  host: "127.0.0.1"
+  port: ${API_PORT}
+  jwt_secret: "${JWT_SECRET}"
+  web_dir: "${REPO_ROOT}/apps/app/build/web"
+database:
+  type: "sqlite"
+  sqlite:
+    path: "${DATA_DIR}/sqlite.db"
+storage:
+  library_dir: "${LIBRARY_DIR}"
+  data_dir: "${DATA_DIR}"
+ai:
+  provider: "ollama"
+  base_url: "${AI_URL}"
+  embedding_model: "nomic-embed-text"
+  embedding_dimensions: 256
+  chat_model: "llama3.2:3b"
+mcp:
+  enabled: true
+  path: "/mcp"
+auth:
+  admin_username: "${ADMIN_USER}"
+  admin_password: "${ADMIN_PASS}"
+logging:
+  level: "info"
+  format: "text"
+EOF
+
+  LIBRARY_DIR="$LIBRARY_DIR" FIXTURES_DIR="$FIXTURES_DIR" SIDECAR_SUMS="$SIDECAR_SUMS" python3 - <<'PY'
+import hashlib
+import os
+import shutil
+import subprocess
+import zipfile
+
+lib_dir = os.environ["LIBRARY_DIR"]
+fix_dir = os.environ["FIXTURES_DIR"]
+sums_file = os.environ["SIDECAR_SUMS"]
+
+def write_epub(target_path, opf_xml, files):
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    with zipfile.ZipFile(target_path, "w") as zf:
+        mi = zipfile.ZipInfo("mimetype")
+        mi.compress_type = zipfile.ZIP_STORED
+        zf.writestr(mi, b"application/epub+zip")
+        zf.writestr(
+            "META-INF/container.xml",
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>'
+            "</container>",
+            compress_type=zipfile.ZIP_DEFLATED,
+        )
+        zf.writestr("OEBPS/content.opf", opf_xml, compress_type=zipfile.ZIP_DEFLATED)
+        for rel, body in files.items():
+            data = body.encode("utf-8") if isinstance(body, str) else body
+            zf.writestr(f"OEBPS/{rel}", data, compress_type=zipfile.ZIP_DEFLATED)
+
+# 1. Reflowable EPUB: Frank Herbert / Dune / Dune.epub + Audiobookshelf sidecars
+dune_dir = os.path.join(lib_dir, "Frank Herbert", "Dune")
+write_epub(
+    os.path.join(dune_dir, "Dune.epub"),
+    """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="uid">urn:isbn:9780441172719</dc:identifier>
+    <dc:title>Dune</dc:title>
+    <dc:creator>Frank Herbert</dc:creator>
+    <dc:language>en</dc:language>
+    <dc:subject>Science Fiction</dc:subject>
+    <dc:description>On the desert planet Arrakis, Paul Atreides faces the Gom Jabbar test and destiny.</dc:description>
+    <meta property="belongs-to-collection" id="c1">Dune Chronicles</meta>
+    <meta refines="#c1" property="collection-type">series</meta>
+    <meta refines="#c1" property="group-position">1</meta>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="ch2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+    <itemref idref="ch2"/>
+  </spine>
+</package>""",
+    {
+        "nav.xhtml": """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Navigation</title></head>
+<body><nav epub:type="toc"><ol>
+  <li><a href="ch1.xhtml">Chapter 1: The Gom Jabbar</a></li>
+  <li><a href="ch2.xhtml">Chapter 2: Arrakis &amp; Melange</a></li>
+</ol></nav></body></html>""",
+        "ch1.xhtml": """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Chapter 1: The Gom Jabbar</title></head>
+<body>
+  <h1>Chapter 1: The Gom Jabbar</h1>
+  <p>In the week before their departure to Arrakis, an old crone of the Bene Gesserit came to test Paul Atreides with the Gom Jabbar box of pain.</p>
+  <p>I must not fear. Fear is the mind-killer. Fear is the little-death that brings total obliteration.</p>
+</body></html>""",
+        "ch2.xhtml": """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Chapter 2: Arrakis &amp; Melange</title></head>
+<body>
+  <h1>Chapter 2: Arrakis &amp; Melange</h1>
+  <p>Arrakis—Dune—Desert Planet. Only on Arrakis could the spice melange be harvested among the great sandworms of the deep desert.</p>
+</body></html>""",
+    },
+)
+
+meta_path = os.path.join(dune_dir, ".metadata.json")
+desc_path = os.path.join(dune_dir, "desc.txt")
+with open(meta_path, "w", encoding="utf-8") as f:
+    f.write('{"title":"Dune","author":"Frank Herbert","audiobookshelf_sidecar":true}\n')
+with open(desc_path, "w", encoding="utf-8") as f:
+    f.write("Audiobookshelf sidecar description — must never be modified by Shelfd.\n")
+
+with open(sums_file, "w", encoding="utf-8") as sf:
+    for p in (meta_path, desc_path):
+        digest = hashlib.sha256(open(p, "rb").read()).hexdigest()
+        sf.write(f"{digest}  {p}\n")
+
+# 2. Fixed-Layout Read-Along EPUB + MP3: Beatrix Potter / The Tale of Peter Rabbit
+rabbit_dir = os.path.join(lib_dir, "Beatrix Potter", "The Tale of Peter Rabbit")
+write_epub(
+    os.path.join(rabbit_dir, "The Tale of Peter Rabbit.epub"),
+    """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="uid">urn:isbn:9780723247708</dc:identifier>
+    <dc:title>The Tale of Peter Rabbit</dc:title>
+    <dc:creator>Beatrix Potter</dc:creator>
+    <dc:language>en</dc:language>
+    <dc:subject>Children's Literature</dc:subject>
+    <meta property="rendition:layout">pre-paginated</meta>
+    <meta property="media:active-class">-epub-media-overlay-active</meta>
+    <meta property="media:playback-active-class">-epub-media-overlay-playing</meta>
+    <meta property="media:duration" refines="#ov1">0:00:04.000</meta>
+    <meta property="media:duration" refines="#ov2">0:00:05.000</meta>
+    <meta property="media:duration">0:00:09.000</meta>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="p1" href="xhtml/page01.xhtml" media-type="application/xhtml+xml" media-overlay="ov1"/>
+    <item id="p2" href="xhtml/page02.xhtml" media-type="application/xhtml+xml" media-overlay="ov2"/>
+    <item id="ov1" href="smil/page01.smil" media-type="application/smil+xml"/>
+    <item id="ov2" href="smil/page02.smil" media-type="application/smil+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="p1"/>
+    <itemref idref="p2"/>
+  </spine>
+</package>""",
+    {
+        "nav.xhtml": """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Navigation</title></head>
+<body><nav epub:type="toc"><ol>
+  <li><a href="xhtml/page01.xhtml">Page 1</a></li>
+  <li><a href="xhtml/page02.xhtml">Page 2</a></li>
+</ol></nav></body></html>""",
+        "xhtml/page01.xhtml": """<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><meta name="viewport" content="width=600, height=800"/><title>Page 1</title></head>
+<body style="margin:0;width:600px;height:800px;position:relative;font-family:serif;background:#FAF6EE;">
+  <span style="position:absolute;left:40px;top:40px;"/>
+  <span id="w1" style="position:absolute;left:60px;top:120px;font-size:28px;">Once</span>
+  <span id="w2" style="position:absolute;left:140px;top:120px;font-size:28px;">upon</span>
+  <span id="w3" style="position:absolute;left:220px;top:120px;font-size:28px;">four</span>
+  <span id="w4" style="position:absolute;left:295px;top:120px;font-size:28px;">little</span>
+  <span id="w5" style="position:absolute;left:375px;top:120px;font-size:28px;">rabbits.</span>
+</body></html>""",
+        "xhtml/page02.xhtml": """<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><meta name="viewport" content="width=600, height=800"/><title>Page 2</title></head>
+<body style="margin:0;width:600px;height:800px;position:relative;font-family:serif;background:#FAF6EE;">
+  <span id="w6" style="position:absolute;left:60px;top:120px;font-size:28px;">Peter</span>
+  <span id="w7" style="position:absolute;left:145px;top:120px;font-size:28px;">ran</span>
+  <span id="w8" style="position:absolute;left:205px;top:120px;font-size:28px;">into</span>
+  <span id="w9" style="position:absolute;left:275px;top:120px;font-size:28px;">McGregor's</span>
+  <span id="w10" style="position:absolute;left:435px;top:120px;font-size:28px;">garden!</span>
+</body></html>""",
+        "smil/page01.smil": """<?xml version="1.0" encoding="UTF-8"?>
+<smil xmlns="http://www.w3.org/ns/SMIL" version="3.0">
+  <body>
+    <par id="par1"><text src="../xhtml/page01.xhtml#w1"/><audio src="../audio/p1.mp3" clipBegin="0:00:00.000" clipEnd="0:00:01.000"/></par>
+    <par id="par2"><text src="../xhtml/page01.xhtml#w2"/><audio src="../audio/p1.mp3" clipBegin="0:00:01.000" clipEnd="0:00:02.000"/></par>
+    <par id="par3"><text src="../xhtml/page01.xhtml#w3"/><audio src="../audio/p1.mp3" clipBegin="0:00:02.000" clipEnd="0:00:02.800"/></par>
+    <par id="par4"><text src="../xhtml/page01.xhtml#w4"/><audio src="../audio/p1.mp3" clipBegin="0:00:02.800" clipEnd="0:00:03.400"/></par>
+    <par id="par5"><text src="../xhtml/page01.xhtml#w5"/><audio src="../audio/p1.mp3" clipBegin="0:00:03.400" clipEnd="0:00:04.000"/></par>
+  </body>
+</smil>""",
+        "smil/page02.smil": """<?xml version="1.0" encoding="UTF-8"?>
+<smil xmlns="http://www.w3.org/ns/SMIL" version="3.0">
+  <body>
+    <par id="par6"><text src="../xhtml/page02.xhtml#w6"/><audio src="../audio/p2.mp3" clipBegin="0:00:00.000" clipEnd="0:00:01.200"/></par>
+    <par id="par7"><text src="../xhtml/page02.xhtml#w7"/><audio src="../audio/p2.mp3" clipBegin="0:00:01.200" clipEnd="0:00:02.200"/></par>
+    <par id="par8"><text src="../xhtml/page02.xhtml#w8"/><audio src="../audio/p2.mp3" clipBegin="0:00:02.200" clipEnd="0:00:03.100"/></par>
+    <par id="par9"><text src="../xhtml/page02.xhtml#w9"/><audio src="../audio/p2.mp3" clipBegin="0:00:03.100" clipEnd="0:00:04.100"/></par>
+    <par id="par10"><text src="../xhtml/page02.xhtml#w10"/><audio src="../audio/p2.mp3" clipBegin="0:00:04.100" clipEnd="0:00:05.000"/></par>
+  </body>
+</smil>""",
+    },
+)
+
+mp3_path = os.path.join(rabbit_dir, "The Tale of Peter Rabbit.mp3")
+ffmpeg = shutil.which("ffmpeg")
+if ffmpeg:
+    subprocess.run(
+        [
+            ffmpeg, "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=9",
+            "-ac", "1", "-ar", "44100", "-b:a", "64k",
+            "-metadata", "title=The Tale of Peter Rabbit",
+            "-metadata", "artist=Beatrix Potter",
+            mp3_path,
+        ],
+        check=True,
+    )
+else:
+    # Pure-Python valid CBR 64kbps 44.1kHz mono MPEG-1 Layer 3 silent frames (~9.0s = 345 frames * 209 bytes)
+    frame = bytes([0xFF, 0xFB, 0x50, 0xC4]) + b"\x00" * 205
+    with open(mp3_path, "wb") as mf:
+        mf.write(frame * 345)
+
+# 3. Upload fixture outside /library: fixtures/earthsea.epub
+write_epub(
+    os.path.join(fix_dir, "earthsea.epub"),
+    """<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="uid">urn:isbn:9780547773742</dc:identifier>
+    <dc:title>A Wizard of Earthsea</dc:title>
+    <dc:creator>Ursula K. Le Guin</dc:creator>
+    <dc:language>en</dc:language>
+    <dc:subject>Fantasy</dc:subject>
+    <meta property="belongs-to-collection" id="c1">Earthsea Cycle</meta>
+    <meta refines="#c1" property="collection-type">series</meta>
+    <meta refines="#c1" property="group-position">1</meta>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine><itemref idref="ch1"/></spine>
+</package>""",
+    {
+        "nav.xhtml": """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Navigation</title></head>
+<body><nav epub:type="toc"><ol><li><a href="ch1.xhtml">Chapter 1: Warriors in the Mist</a></li></ol></nav></body></html>""",
+        "ch1.xhtml": """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Chapter 1: Warriors in the Mist</title></head>
+<body><h1>Warriors in the Mist</h1><p>The island of Gont, a single mountain that lifts its peak a mile above the storm-racked Northeast Sea, is a land famous for wizards.</p></body></html>""",
+    },
+)
+PY
+}
+
+start_web_and_ai_stub() {
+  local web_root="${REPO_ROOT}/apps/app/build/web"
+  WEB_ROOT="$web_root" AI_PORT="$AI_PORT" nohup node -e '
+    const http = require("node:http");
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const crypto = require("node:crypto");
+
+    const webRoot = process.env.WEB_ROOT;
+    const port = Number(process.env.AI_PORT);
+    const mime = {
+      ".html": "text/html; charset=utf-8",
+      ".js": "application/javascript",
+      ".mjs": "application/javascript",
+      ".wasm": "application/wasm",
+      ".json": "application/json",
+      ".css": "text/css; charset=utf-8",
+      ".png": "image/png",
+      ".svg": "image/svg+xml",
+      ".ttf": "font/ttf",
+      ".otf": "font/otf",
+      ".woff2": "font/woff2",
+    };
+
+    function deterministicVector(text, dims = 256) {
+      const vec = new Array(dims).fill(0);
+      const tokens = String(text || "").toLowerCase().match(/[a-z0-9]+/g) || ["empty"];
+      for (const tok of tokens) {
+        const h = crypto.createHash("sha256").update(tok).digest();
+        for (let i = 0; i < dims; i++) {
+          vec[i] += ((h[i % h.length] / 127.5) - 1.0);
+        }
+      }
+      const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0)) || 1;
+      return vec.map((v) => Number((v / norm).toFixed(6)));
+    }
+
+    const server = http.createServer((req, res) => {
+      const u = new URL(req.url, `http://127.0.0.1:${port}`);
+
+      // External Ollama AI provider boundary for deterministic offline embeddings & summaries
+      if (req.method === "GET" && u.pathname === "/api/tags") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ models: [{ name: "nomic-embed-text" }, { name: "llama3.2:3b" }] }));
+        return;
+      }
+      if (req.method === "POST" && (u.pathname === "/api/embed" || u.pathname === "/api/embeddings")) {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", () => {
+          const parsed = JSON.parse(body || "{}");
+          const inputs = Array.isArray(parsed.input) ? parsed.input : [parsed.input ?? parsed.prompt ?? ""];
+          const embeddings = inputs.map((t) => deterministicVector(t, 256));
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ model: parsed.model || "nomic-embed-text", embeddings, embedding: embeddings[0] }));
+        });
+        return;
+      }
+      if (req.method === "POST" && (u.pathname === "/api/chat" || u.pathname === "/api/generate")) {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", () => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            model: "llama3.2:3b",
+            done: true,
+            response: "Verification summary.",
+            message: { role: "assistant", content: "Verification summary." },
+          }));
+        });
+        return;
+      }
+
+      if (u.pathname === "/__verify_health") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      const rel = decodeURIComponent(u.pathname === "/" ? "index.html" : u.pathname.slice(1));
+      let target = path.resolve(webRoot, rel);
+      if (!target.startsWith(path.resolve(webRoot))) {
+        res.writeHead(403);
+        res.end("Forbidden");
+        return;
+      }
+      if (!fs.existsSync(target) || fs.statSync(target).isDirectory()) {
+        if (path.extname(u.pathname)) {
+          res.writeHead(404);
+          res.end("Not found");
+          return;
+        }
+        target = path.join(webRoot, "index.html");
+      }
+      res.writeHead(200, {
+        "Content-Type": mime[path.extname(target)] || "application/octet-stream",
+        "Cache-Control": "no-cache",
+      });
+      fs.createReadStream(target).pipe(res);
+    });
+
+    server.listen(port, "127.0.0.1");
+  ' >"$WEB_LOG" 2>&1 &
+  echo $! >"$WEB_PID_FILE"
+}
+
+do_launch() {
+  if is_stack_reachable; then
+    echo "Shelfd verification stack already running (API=${API_URL}, WEB=${WEB_URL}, AI=${AI_URL}, CDP=127.0.0.1:${CDP_PORT})"
+    return 0
+  fi
+
+  # Clean any partial stale processes we previously started in this PID namespace
+  stop_pid_file "$BROWSER_PID_FILE" "remote-debugging-port=${CDP_PORT}"
+  stop_pid_file "$WEB_PID_FILE" "WEB_ROOT"
+  stop_pid_file "$SERVER_PID_FILE" "${SERVER_BIN}"
+
+  check_port_free "$API_PORT" "Shelfd API & SPA"
+  check_port_free "$AI_PORT" "Ollama AI Boundary Stub"
+  check_port_free "$CDP_PORT" "Chromium CDP"
+
+  local chrome_bin
+  chrome_bin="$(resolve_chrome_bin)" || {
+    echo "ERROR: No Chromium or Google Chrome executable found. Set SHELFD_CHROME_BIN." >&2
+    return 1
+  }
+
+  rm -rf "$RUNTIME_DIR"
+  seed_fixtures_and_config
+  ensure_web_bundle
+
+  echo "==> Building Shelfd server binary (${SERVER_BIN})..."
+  (
+    cd "${REPO_ROOT}/apps/server"
+    run_tool go build -tags sqlite_fts5 -o "$SERVER_BIN" ./cmd/server
+  )
+
+  start_web_and_ai_stub
+  for _ in $(seq 1 30); do
+    if curl -fsS "${AI_URL}/__verify_health" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.2
+  done
+
+  echo "==> Running initial library scan against disposable library..."
+  (
+    cd "$RUNTIME_DIR"
+    SHELFD_MCP_TOKEN="$MCP_TOKEN" "$SERVER_BIN" -config "$CONFIG_FILE" -scan >>"$SERVER_LOG" 2>&1
+  )
+
+  echo "==> Starting isolated Shelfd daemon on ${API_URL}..."
+  (
+    cd "$RUNTIME_DIR"
+    SHELFD_MCP_TOKEN="$MCP_TOKEN" nohup "$SERVER_BIN" -config "$CONFIG_FILE" >>"$SERVER_LOG" 2>&1 &
+    echo $! >"$SERVER_PID_FILE"
+  )
+
+  for _ in $(seq 1 50); do
+    if curl -fsS "${API_URL}/health" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.2
+  done
+  if ! curl -fsS "${API_URL}/health" >/dev/null 2>&1; then
+    echo "ERROR: Shelfd server failed to become healthy at ${API_URL}/health" >&2
+    tail -n 40 "$SERVER_LOG" >&2 || true
+    return 1
+  fi
+
+  # Authenticate via POST /api/v1/auth/login to store admin JWT for API/upload helpers
+  local login_json
+  login_json="$(curl -fsS -X POST "${API_URL}/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"username\":\"${ADMIN_USER}\",\"password\":\"${ADMIN_PASS}\"}")"
+  printf '%s' "$login_json" | node -e '
+    const fs = require("node:fs");
+    const data = JSON.parse(fs.readFileSync(0, "utf8"));
+    if (!data.token) process.exit(1);
+    process.stdout.write(data.token);
+  ' >"$TOKEN_FILE"
+
+  echo "==> Starting headless Chromium on CDP 127.0.0.1:${CDP_PORT} -> ${WEB_URL}/connect..."
+  mkdir -p "$CHROME_PROFILE_DIR"
+  nohup "$chrome_bin" \
+    --headless=new \
+    --no-sandbox \
+    --disable-gpu \
+    --enable-unsafe-swiftshader \
+    --disable-dev-shm-usage \
+    --mute-audio \
+    --window-size=1440,900 \
+    --autoplay-policy=no-user-gesture-required \
+    --force-renderer-accessibility \
+    --proxy-bypass-list="<-loopback>" \
+    --remote-debugging-port="$CDP_PORT" \
+    --user-data-dir="$CHROME_PROFILE_DIR" \
+    "${WEB_URL}/connect" >"$BROWSER_LOG" 2>&1 &
+  echo $! >"$BROWSER_PID_FILE"
+
+  for _ in $(seq 1 50); do
+    if curl -fsS "http://127.0.0.1:${CDP_PORT}/json/version" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.25
+  done
+  if ! curl -fsS "http://127.0.0.1:${CDP_PORT}/json/version" >/dev/null 2>&1; then
+    echo "ERROR: Chromium CDP failed to start on 127.0.0.1:${CDP_PORT}" >&2
+    tail -n 40 "$BROWSER_LOG" >&2 || true
+    return 1
+  fi
+
+  # Prime console hook and initial Flutter semantics tree
+  node "${SCRIPT_DIR}/browser-cdp.mjs" goto "/connect" --wait-ms 3000 >/dev/null
+
+  echo "LAUNCH OK: API=${API_URL} WEB=${WEB_URL} AI=${AI_URL} CDP=127.0.0.1:${CDP_PORT} RUNTIME=${RUNTIME_DIR} EVIDENCE=${EVIDENCE_DIR}"
+
+  if [[ "${1:-}" == "--foreground" ]]; then
+    echo $$ >"$DAEMON_PID_FILE"
+    shutdown_fg() {
+      stop_pid_file "$BROWSER_PID_FILE" "remote-debugging-port=${CDP_PORT}"
+      stop_pid_file "$WEB_PID_FILE" "WEB_ROOT"
+      stop_pid_file "$SERVER_PID_FILE" "${SERVER_BIN}"
+      exit 0
+    }
+    trap shutdown_fg INT TERM
+    while [[ ! -f "$STOP_SIGNAL_FILE" ]] &&
+          is_pid_alive "$SERVER_PID_FILE" "${SERVER_BIN}" &&
+          is_pid_alive "$WEB_PID_FILE" &&
+          is_pid_alive "$BROWSER_PID_FILE" "remote-debugging-port=${CDP_PORT}"; do
+      sleep 0.25
+    done
+    shutdown_fg
+  fi
+}
+
+do_doctor() {
+  for bin in node python3 curl; do
+    command -v "$bin" >/dev/null 2>&1 || { echo "FAIL: '$bin' missing on PATH" >&2; return 1; }
+  done
+  resolve_chrome_bin >/dev/null || { echo "FAIL: Chromium/Chrome binary missing" >&2; return 1; }
+
+  if [[ "$RUNTIME_DIR" != /tmp/* ]]; then
+    echo "FAIL: RUNTIME_DIR (${RUNTIME_DIR}) must reside under /tmp for isolation" >&2
+    return 1
+  fi
+
+  [[ -f "$TOKEN_FILE" ]] || { echo "FAIL: Missing ${TOKEN_FILE} (run 'launch')" >&2; return 1; }
+  curl -fsS "${AI_URL}/__verify_health" >/dev/null 2>&1 || { echo "FAIL: Ollama AI boundary stub unreachable on ${AI_URL} (run 'launch')" >&2; return 1; }
+
+  local health
+  health="$(curl -fsS "${API_URL}/health" 2>/dev/null)" || { echo "FAIL: Shelfd API server unreachable on ${API_URL} (run 'launch')" >&2; return 1; }
+  [[ "$health" == *'"status":"ok"'* ]] || { echo "FAIL: /health unexpected response: $health" >&2; return 1; }
+
+  # Verify Shelfd SPA handler serves index.html on deep routes (/connect)
+  curl -fsS "${WEB_URL}/connect" | grep -qi "flutter" || {
+    echo "FAIL: Shelfd SPA fallback on ${WEB_URL}/connect did not serve Flutter index.html" >&2
+    return 1
+  }
+
+  # Verify cross-origin CORS preflight permits Cache-Control (SSE invariant)
+  local cors_headers
+  cors_headers="$(curl -fsSI -X OPTIONS "${API_URL}/api/v1/queue/events" \
+    -H "Origin: ${AI_URL}" \
+    -H "Access-Control-Request-Method: GET" \
+    -H "Access-Control-Request-Headers: Authorization, Content-Type, Accept, Cache-Control")"
+  echo "$cors_headers" | grep -qi "Cache-Control" || {
+    echo "FAIL: CORS Access-Control-Allow-Headers missing Cache-Control" >&2
+    return 1
+  }
+
+  # Verify admin JWT auth
+  local token me_resp
+  token="$(cat "$TOKEN_FILE")"
+  me_resp="$(curl -fsS "${API_URL}/api/v1/auth/me" -H "Authorization: Bearer ${token}")"
+  [[ "$me_resp" == *"\"username\":\"${ADMIN_USER}\""* ]] || {
+    echo "FAIL: /api/v1/auth/me rejected admin token: $me_resp" >&2
+    return 1
+  }
+
+  # Verify MCP token auth
+  curl -fsSI "${API_URL}/mcp" -H "Authorization: Bearer ${MCP_TOKEN}" >/dev/null || {
+    echo "FAIL: /mcp HEAD check rejected MCP_TOKEN" >&2
+    return 1
+  }
+
+  # Verify Audiobookshelf sidecar sanctity (.metadata.json & desc.txt untouched)
+  (cd "$RUNTIME_DIR" && sha256sum -c "$SIDECAR_SUMS" >/dev/null) || {
+    echo "FAIL: Audiobookshelf sidecar files (.metadata.json / desc.txt) were modified!" >&2
+    return 1
+  }
+
+  # Verify Chromium CDP target is responsive
+  curl -fsS "http://127.0.0.1:${CDP_PORT}/json/list" | grep -q '"type": *"page"' || {
+    echo "FAIL: No active page target on Chromium CDP 127.0.0.1:${CDP_PORT}" >&2
+    return 1
+  }
+
+  echo "DOCTOR OK: API=${API_URL} WEB=${WEB_URL} AI=${AI_URL} CDP=127.0.0.1:${CDP_PORT} sidecars=untouched auth=valid mcp=valid"
+}
+
+do_api() {
+  local method="${1:?HTTP method required (e.g. GET, POST, PUT, DELETE)}"
+  local endpoint="${2:?API path required (e.g. /api/v1/books)}"
+  local body="${3:-}"
+  local token
+  token="$(cat "$TOKEN_FILE")"
+  if [[ -n "$body" ]]; then
+    curl -fsS -X "$method" "${API_URL}${endpoint}" \
+      -H "Authorization: Bearer ${token}" \
+      -H "Content-Type: application/json" \
+      -d "$body"
+  else
+    curl -fsS -X "$method" "${API_URL}${endpoint}" \
+      -H "Authorization: Bearer ${token}"
+  fi
+  echo
+}
+
+do_upload() {
+  local file_path="${1:-${FIXTURES_DIR}/earthsea.epub}"
+  [[ -f "$file_path" ]] || { echo "ERROR: Upload file not found: $file_path" >&2; return 1; }
+  local token
+  token="$(cat "$TOKEN_FILE")"
+  curl -fsS -X POST "${API_URL}/api/v1/books/upload" \
+    -H "Authorization: Bearer ${token}" \
+    -F "file=@${file_path}"
+  echo
+}
+
+do_mcp() {
+  local tool_name="${1:?MCP tool name required (e.g. search_library, get_book_metadata, read_chapter_content)}"
+  local default_args='{}'
+  local args_json="${2:-$default_args}"
+  API_URL="$API_URL" MCP_TOKEN="$MCP_TOKEN" TOOL_NAME="$tool_name" ARGS_JSON="$args_json" node -e '
+    (async () => {
+      const apiUrl = process.env.API_URL;
+      const token = process.env.MCP_TOKEN;
+      const toolName = process.env.TOOL_NAME;
+      const toolArgs = JSON.parse(process.env.ARGS_JSON || "{}");
+
+      // Streamable HTTP POST directly to /mcp (supported by Shelfd unified MCP handler)
+      const initRes = await fetch(`${apiUrl}/mcp`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            clientInfo: { name: "verify-shelfd", version: "1.0.0" },
+          },
+        }),
+      });
+      if (!initRes.ok) {
+        throw new Error(`MCP initialize failed: HTTP ${initRes.status}`);
+      }
+
+      const callRes = await fetch(`${apiUrl}/mcp`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: toolName, arguments: toolArgs },
+        }),
+      });
+      if (!callRes.ok) {
+        throw new Error(`MCP tools/call failed: HTTP ${callRes.status}`);
+      }
+      const payload = await callRes.json();
+      console.log(JSON.stringify(payload, null, 2));
+      if (payload.error || payload.result?.isError) {
+        process.exit(1);
+      }
+    })().catch((err) => {
+      console.error(err.message);
+      process.exit(1);
+    });
+  '
+}
+
+do_state() {
+  local token
+  token="$(cat "$TOKEN_FILE")"
+  API_URL="$API_URL" WEB_URL="$WEB_URL" AI_URL="$AI_URL" RUNTIME_DIR="$RUNTIME_DIR" EVIDENCE_DIR="$EVIDENCE_DIR" \
+  LIBRARY_DIR="$LIBRARY_DIR" FIXTURES_DIR="$FIXTURES_DIR" ADMIN_USER="$ADMIN_USER" ADMIN_PASS="$ADMIN_PASS" \
+  TOKEN="$token" node -e '
+    (async () => {
+      const res = await fetch(`${process.env.API_URL}/api/v1/books?limit=50`, {
+        headers: { Authorization: `Bearer ${process.env.TOKEN}` },
+      });
+      const data = await res.json();
+      const books = data.books || [];
+      const findBook = (substr) => books.find((b) => b.title.toLowerCase().includes(substr));
+      console.log(JSON.stringify({
+        apiUrl: process.env.API_URL,
+        webUrl: process.env.WEB_URL,
+        aiStubUrl: process.env.AI_URL,
+        runtimeDir: process.env.RUNTIME_DIR,
+        evidenceDir: process.env.EVIDENCE_DIR,
+        libraryDir: process.env.LIBRARY_DIR,
+        uploadFixture: `${process.env.FIXTURES_DIR}/earthsea.epub`,
+        adminUser: process.env.ADMIN_USER,
+        adminPassword: process.env.ADMIN_PASS,
+        books: books.map((b) => ({ id: b.id, title: b.title, hasReadalong: b.has_readalong, bookType: b.book_type })),
+        duneBookId: findBook("dune")?.id || null,
+        peterRabbitBookId: findBook("peter rabbit")?.id || null,
+      }, null, 2));
+    })();
+  '
+}
+
+do_cli() {
+  if [[ "${1:-}" == "--" ]]; then
+    shift
+  fi
+  (
+    cd "$RUNTIME_DIR"
+    SHELFD_MCP_TOKEN="$MCP_TOKEN" "$SERVER_BIN" -config "$CONFIG_FILE" "$@"
+  )
+}
+
+do_evidence() {
+  mkdir -p "$EVIDENCE_DIR"
+  local files=()
+  while IFS= read -r -d '' f; do
+    files+=("$f")
+  done < <(find "$EVIDENCE_DIR" -type f -size +0c -print0 | sort -z)
+
+  if [[ "${#files[@]}" -eq 0 ]]; then
+    echo "FAIL: No non-empty evidence files found in ${EVIDENCE_DIR}" >&2
+    return 1
+  fi
+
+  echo "EVIDENCE OK (${#files[@]} artifact(s) in ${EVIDENCE_DIR}):"
+  for f in "${files[@]}"; do
+    printf "  - %s (%s bytes)\n" "$f" "$(wc -c <"$f" | tr -d ' ')"
+  done
+}
+
+do_cleanup() {
+  if [[ -d "$RUNTIME_DIR" ]]; then
+    touch "$STOP_SIGNAL_FILE" 2>/dev/null || true
+  fi
+  stop_pid_file "$BROWSER_PID_FILE" "remote-debugging-port=${CDP_PORT}"
+  stop_pid_file "$WEB_PID_FILE" "WEB_ROOT"
+  stop_pid_file "$SERVER_PID_FILE" "${SERVER_BIN}"
+  stop_pid_file "$DAEMON_PID_FILE" "control-shelfd"
+
+  for _ in $(seq 1 40); do
+    if ! curl -fsS "${API_URL}/health" >/dev/null 2>&1 &&
+       ! curl -fsS "${AI_URL}/__verify_health" >/dev/null 2>&1 &&
+       ! curl -fsS "http://127.0.0.1:${CDP_PORT}/json/version" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.15
+  done
+
+  if [[ -d "$RUNTIME_DIR" && "$RUNTIME_DIR" == /tmp/* ]]; then
+    rm -rf "$RUNTIME_DIR"
+  fi
+
+  echo "CLEANUP OK: Removed runtime ${RUNTIME_DIR}; evidence preserved at ${EVIDENCE_DIR}"
+}
+
+subcmd="${1:-help}"
+shift || true
+
+case "$subcmd" in
+  launch)
+    do_launch "$@"
+    ;;
+  doctor)
+    do_doctor "$@"
+    ;;
+  browser)
+    node "${SCRIPT_DIR}/browser-cdp.mjs" "$@"
+    ;;
+  api)
+    do_api "$@"
+    ;;
+  upload)
+    do_upload "$@"
+    ;;
+  mcp)
+    do_mcp "$@"
+    ;;
+  state)
+    do_state "$@"
+    ;;
+  cli)
+    do_cli "$@"
+    ;;
+  evidence)
+    do_evidence "$@"
+    ;;
+  cleanup)
+    do_cleanup "$@"
+    ;;
+  *)
+    cat <<EOF
+Usage: control-shelfd <command> [args...]
+
+Lifecycle:
+  launch                         Build & start isolated Shelfd API, Shelf Web SPA, fixtures, and headless Chromium
+  doctor                         Read-only health, auth, CORS, MCP, CDP, and sidecar-sanctity check
+  state                          Print active ports, credentials, paths, and seeded book IDs as JSON
+  evidence                       Verify and list non-empty proof artifacts in ${EVIDENCE_DIR}
+  cleanup                        Stop recorded PIDs and delete ${RUNTIME_DIR} (keeps ${EVIDENCE_DIR})
+
+Drivers:
+  browser <cmd> [opts]           Drive headless Chromium over CDP (goto, snapshot, click, fill, press, screenshot, console, iframes, eval)
+  api <METHOD> <path> [json]     Send authenticated REST request to ${API_URL}
+  upload [epub-path]             Upload an EPUB via multipart POST /api/v1/books/upload
+  mcp <tool> [args-json]         Invoke an MCP tool over JSON-RPC 2.0 at ${API_URL}/mcp
+  cli -- <shelfd-flags...>       Run compiled shelfd CLI against isolated config.yaml
+EOF
+    ;;
+esac
