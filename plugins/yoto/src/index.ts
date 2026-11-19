@@ -25,6 +25,7 @@ import {
   requestAudioUploadUrl,
   resolveApiBaseUrl,
   resolveAuthBaseUrl,
+  streamLoopbackAudioToUploadUrl,
   uploadAudioStream,
   uploadCoverImage,
   uploadCustomIcon,
@@ -381,13 +382,19 @@ async function uploadBookChaptersToYoto(params: {
       ? `/api/v1/books/${encodeURIComponent(book.id)}/files/${encodeURIComponent(af.id)}/stream`
       : `/api/v1/books/${encodeURIComponent(book.id)}/audio`;
 
-    const { stream, contentLength, contentType } = await ctx.openLoopbackStream(streamPath);
     const upUrl = await requestAudioUploadUrl(apiBaseUrl, accessToken);
     onFileProgress?.(fileIdx, "uploading", 0.15);
 
-    const fileSize = contentLength ?? af.file_size_bytes ?? book.file_size_bytes ?? 0;
-    const mime = contentType ?? af.mime_type ?? "audio/mpeg";
-    await uploadAudioStream(upUrl.uploadUrl, stream, mime, fileSize > 0 ? fileSize : undefined);
+    const fallbackSize = af.file_size_bytes ?? book.file_size_bytes ?? 0;
+    const fallbackMime = af.mime_type ?? "audio/mpeg";
+    const { contentLength } = await streamLoopbackAudioToUploadUrl(
+      ctx,
+      streamPath,
+      upUrl.uploadUrl,
+      fallbackMime,
+      fallbackSize > 0 ? fallbackSize : undefined
+    );
+    const fileSize = contentLength ?? fallbackSize;
 
     onFileProgress?.(fileIdx, "transcoding", 0.7);
     const transcoded = await waitForTranscoding(apiBaseUrl, accessToken, upUrl.uploadId, 60, pollIntervalMs);

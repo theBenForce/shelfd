@@ -577,3 +577,211 @@ test("yoto plugin RPC end-to-end: PKCE auth, token refresh, options, 16x16 icon 
     mockServer.close();
   }
 });
+
+function readProcVmRssMB(pid) {
+  try {
+    const status = fs.readFileSync(`/proc/${pid}/status`, "utf8");
+    const m = status.match(/^VmRSS:\s+(\d+)\s+kB/m);
+    if (m) {
+      return Number(m[1]) / 1024;
+    }
+  } catch {
+    void 0;
+  }
+  return 0;
+}
+
+test("yoto plugin streams 5x 64 MB audiobook uploads with child Node VmRSS under 96 MB", async () => {
+  const STREAM_BYTES = 64 * 1024 * 1024;
+  const CHUNK = Buffer.alloc(64 * 1024, 0x5a);
+  let totalPutBytes = 0;
+
+  const mockServer = http.createServer((req, res) => {
+    const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+
+    if (req.method === "GET" && url.pathname === "/api/v1/books/book-64mb") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          id: "book-64mb",
+          title: "Large 64MB Audiobook",
+          book_type: "audiobook",
+          files: [
+            {
+              id: "file-64mb",
+              book_id: "book-64mb",
+              file_type: "audiobook",
+              file_path: "Author/Large/large.m4b",
+              mime_type: "audio/mp4",
+              file_size_bytes: STREAM_BYTES,
+              duration_seconds: 3600,
+            },
+          ],
+          audio_chapters: [{ chapter_index: 1, title: "Part 1", duration_sec: 3600 }],
+        })
+      );
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/v1/books/book-64mb/files/file-64mb/stream") {
+      res.writeHead(200, {
+        "content-type": "audio/mp4",
+        "content-length": String(STREAM_BYTES),
+      });
+      let sent = 0;
+      const pump = () => {
+        while (sent < STREAM_BYTES) {
+          const rem = Math.min(CHUNK.length, STREAM_BYTES - sent);
+          const slice = rem === CHUNK.length ? CHUNK : CHUNK.subarray(0, rem);
+          sent += rem;
+          if (!res.write(slice)) {
+            res.once("drain", pump);
+            return;
+          }
+        }
+        res.end();
+      };
+      pump();
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/media/transcode/audio/uploadUrl") {
+      const addr = mockServer.address();
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          upload: {
+            uploadUrl: `http://127.0.0.1:${addr.port}/s3-put-64mb`,
+            uploadId: "up-64mb",
+          },
+        })
+      );
+      return;
+    }
+
+    if (req.method === "PUT" && url.pathname === "/s3-put-64mb") {
+      req.on("data", (c) => {
+        totalPutBytes += c.length;
+      });
+      req.on("end", () => {
+        res.writeHead(200);
+        res.end();
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/media/upload/up-64mb/transcoded") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          transcode: {
+            transcodedSha256: "sha256-64mb",
+            transcodedInfo: { duration: 3600, fileSize: STREAM_BYTES, channels: "stereo", format: "aac" },
+          },
+        })
+      );
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/content") {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ card: { cardId: "card-64mb", title: "Large 64MB Audiobook" } }));
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  });
+
+  await new Promise((r) => mockServer.listen(0, "127.0.0.1", r));
+  const baseUrl = `http://127.0.0.1:${mockServer.address().port}`;
+  const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, "plugin.json"), "utf8"));
+  const child = spawn(manifest.entrypoint.command, manifest.entrypoint.args, {
+    cwd: pluginRoot,
+    stdio: ["pipe", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      NO_PROXY: "127.0.0.1,localhost",
+      no_proxy: "127.0.0.1,localhost",
+    },
+  });
+
+  const pending = new Map();
+  let seq = 0;
+  let peakRssMB = 0;
+  const sampleTimer = setInterval(() => {
+    const rss = readProcVmRssMB(child.pid);
+    if (rss > peakRssMB) peakRssMB = rss;
+  }, 15);
+
+  const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+  rl.on("line", (line) => {
+    if (!line.trim()) return;
+    const msg = JSON.parse(line);
+    if (msg.id !== undefined && !msg.method) {
+      const waiter = pending.get(String(msg.id));
+      if (waiter) {
+        pending.delete(String(msg.id));
+        waiter(msg);
+      }
+    }
+  });
+
+  const callRpc = (method, params) => {
+    seq += 1;
+    const id = String(seq);
+    return new Promise((resolve) => {
+      pending.set(id, resolve);
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    });
+  };
+
+  try {
+    await callRpc("initialize", {
+      protocol_version: "2026-11-01",
+      shelfd_version: "0.1.0-test",
+      api_base: baseUrl,
+    });
+
+    const cfg = {
+      client_id: "yoto-test-client",
+      api_base_url: baseUrl,
+      auth_base_url: baseUrl,
+      access_token: "acc-valid",
+      token_expires_at: new Date(Date.now() + 3600_000).toISOString(),
+      poll_interval_ms: 5,
+    };
+
+    for (let i = 0; i < 5; i++) {
+      const resp = await callRpc("actions/invoke", {
+        action: "send_to_yoto",
+        job_id: `job-64mb-${i}`,
+        target: { type: "book", id: "book-64mb" },
+        values: {
+          playlist_mode: "create",
+          playlist_title: "64MB Card",
+          include_cover: false,
+        },
+        auth: { user_id: "u1", api_base: baseUrl, invocation_token: "tok-loop", config: cfg },
+      });
+      assert.equal(resp.result.status, "completed");
+      const rss = readProcVmRssMB(child.pid);
+      if (rss > peakRssMB) peakRssMB = rss;
+    }
+
+    assert.equal(totalPutBytes, 5 * STREAM_BYTES, "all 5x 64 MB streams must be received in full");
+    assert.ok(peakRssMB < 96, `expected child Node peak VmRSS < 96 MB across 5x 64 MB uploads, got ${peakRssMB.toFixed(2)} MB`);
+
+    await callRpc("shutdown", {});
+  } finally {
+    clearInterval(sampleTimer);
+    rl.close();
+    child.kill("SIGKILL");
+    mockServer.closeAllConnections?.();
+    mockServer.close();
+  }
+});
+

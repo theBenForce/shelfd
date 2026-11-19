@@ -1,5 +1,13 @@
+import * as httpNs from "node:http";
+import * as httpsNs from "node:https";
+import * as streamPromisesNs from "node:stream/promises";
 import { AuthExpiredError, type PluginContext } from "@shelfd/plugin-sdk";
 import { normalizeIcon16x16, normalizeYotoIconUri } from "./image-16x16.ts";
+
+const http: typeof httpNs = (httpNs as unknown as { default?: typeof httpNs }).default ?? httpNs;
+const https: typeof httpsNs = (httpsNs as unknown as { default?: typeof httpsNs }).default ?? httpsNs;
+const streamPromises: typeof streamPromisesNs =
+  (streamPromisesNs as unknown as { default?: typeof streamPromisesNs }).default ?? streamPromisesNs;
 
 export const DEFAULT_YOTO_API_BASE_URL = "https://api.yotoplay.com";
 export const DEFAULT_YOTO_AUTH_BASE_URL = "https://login.yotoplay.com";
@@ -731,12 +739,18 @@ export async function requestAudioUploadUrl(apiBaseUrl: string, accessToken: str
   return { uploadUrl, uploadId };
 }
 
-export async function uploadAudioStream(
+function openHttpPutStream(
   uploadUrl: string,
-  stream: ReadableStream<Uint8Array>,
   contentType = "audio/mpeg",
   contentLength?: number
-): Promise<void> {
+): {
+  putReq: http.ClientRequest;
+  done: Promise<void>;
+} {
+  const parsed = new URL(uploadUrl);
+  const isHttps = parsed.protocol === "https:";
+  const mod = isHttps ? https : http;
+
   const headers: Record<string, string> = {
     "Content-Type": contentType || "audio/mpeg",
   };
@@ -744,17 +758,154 @@ export async function uploadAudioStream(
     headers["Content-Length"] = String(contentLength);
   }
 
-  const res = await fetch(uploadUrl, {
-    method: "PUT",
-    headers,
-    body: stream,
-    duplex: "half",
-  } as RequestInit);
+  let putReq!: http.ClientRequest;
+  const done = new Promise<void>((resolve, reject) => {
+    putReq = mod.request(
+      parsed,
+      {
+        method: "PUT",
+        headers,
+        highWaterMark: 16 * 1024,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        let total = 0;
+        res.on("data", (chunk: Buffer) => {
+          if (total < 1024) {
+            chunks.push(chunk);
+            total += chunk.length;
+          }
+        });
+        res.on("end", () => {
+          const status = res.statusCode ?? 0;
+          if (status >= 200 && status < 300) {
+            resolve();
+          } else {
+            const text = Buffer.concat(chunks).toString("utf8").slice(0, 300).trim();
+            reject(new Error(`audio PUT failed with status ${status}: ${text}`));
+          }
+        });
+        res.on("error", reject);
+      }
+    );
+    putReq.on("error", reject);
+  });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`audio PUT failed with status ${res.status}: ${text.slice(0, 300).trim()}`);
+  return { putReq, done };
+}
+
+export async function uploadAudioStream(
+  uploadUrl: string,
+  stream: ReadableStream<Uint8Array> | NodeJS.ReadableStream,
+  contentType = "audio/mpeg",
+  contentLength?: number
+): Promise<void> {
+  const { putReq, done } = openHttpPutStream(uploadUrl, contentType, contentLength);
+
+  if ("getReader" in stream && typeof stream.getReader === "function") {
+    const reader = stream.getReader();
+    try {
+      while (true) {
+        const { done: rDone, value } = await reader.read();
+        if (rDone) break;
+        if (value && value.byteLength > 0) {
+          const buf = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+          if (!putReq.write(buf)) {
+            await new Promise<void>((resolve, reject) => {
+              const onDrain = () => {
+                putReq.removeListener("error", onErr);
+                resolve();
+              };
+              const onErr = (err: Error) => {
+                putReq.removeListener("drain", onDrain);
+                reject(err);
+              };
+              putReq.once("drain", onDrain);
+              putReq.once("error", onErr);
+            });
+          }
+        }
+      }
+      putReq.end();
+    } catch (err) {
+      putReq.destroy(err instanceof Error ? err : new Error(String(err)));
+      throw err;
+    } finally {
+      reader.releaseLock();
+    }
+    await done;
+    return;
   }
+
+  const nodeStream = stream as NodeJS.ReadableStream;
+  await Promise.all([streamPromises.pipeline(nodeStream, putReq), done]);
+}
+
+export async function streamLoopbackAudioToUploadUrl(
+  ctx: PluginContext<YotoPluginConfig>,
+  loopbackPath: string,
+  uploadUrl: string,
+  fallbackMime = "audio/mpeg",
+  fallbackSize?: number
+): Promise<{ contentLength?: number; contentType: string }> {
+  if (!ctx.apiBase) {
+    throw new Error("Missing Shelfd api_base in invocation context");
+  }
+  const normalizedPath = loopbackPath.startsWith("/") ? loopbackPath : `/${loopbackPath}`;
+  const fullUrl = new URL(`${ctx.apiBase}${normalizedPath}`);
+  const isHttps = fullUrl.protocol === "https:";
+  const mod = isHttps ? https : http;
+
+  const openGet = (token: string): Promise<http.IncomingMessage> =>
+    new Promise((resolve, reject) => {
+      const getReq = mod.request(
+        fullUrl,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          highWaterMark: 16 * 1024,
+        },
+        (res) => resolve(res)
+      );
+      getReq.on("error", reject);
+      getReq.end();
+    });
+
+  let srcRes = await openGet(ctx.invocationToken);
+  if (srcRes.statusCode === 401 && ctx.userId) {
+    srcRes.resume();
+    const refreshedToken = await ctx.refreshInvocationToken();
+    srcRes = await openGet(refreshedToken);
+  }
+
+  const statusCode = srcRes.statusCode ?? 0;
+  if (statusCode < 200 || statusCode >= 300) {
+    const errChunks: Buffer[] = [];
+    for await (const c of srcRes) {
+      errChunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+      if (errChunks.length > 8) break;
+    }
+    const errBody = Buffer.concat(errChunks).toString("utf8").slice(0, 200);
+    throw new Error(`Loopback stream request failed (HTTP ${statusCode}): ${errBody}`);
+  }
+
+  const rawLen = srcRes.headers["content-length"];
+  const parsedLen = typeof rawLen === "string" ? Number(rawLen) : undefined;
+  const contentLength =
+    parsedLen !== undefined && !Number.isNaN(parsedLen) && parsedLen > 0
+      ? parsedLen
+      : fallbackSize && fallbackSize > 0
+        ? fallbackSize
+        : undefined;
+  const contentType =
+    (typeof srcRes.headers["content-type"] === "string" && srcRes.headers["content-type"].trim()) ||
+    fallbackMime ||
+    "audio/mpeg";
+
+  await uploadAudioStream(uploadUrl, srcRes, contentType, contentLength);
+  return { contentLength, contentType };
 }
 
 export async function waitForTranscoding(
