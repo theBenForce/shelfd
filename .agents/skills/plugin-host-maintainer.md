@@ -14,6 +14,7 @@ Use this guide when modifying Shelfd's Go plugin host (`apps/server/internal/plu
 
 3. **Encrypted user credentials & sentinel preservation**:
    - Fields marked `"x-shelfd-secret": true` or `"format": "password"` in `config_schema` are encrypted at rest in `plugin_user_configs` with AES-256-GCM (HKDF-SHA256 key derived from `jwt_secret` + plugin name).
+   - Fields marked `"x-shelfd-hidden": true` stay in `config_schema` for server-side encryption/redaction and `config/patch` persistence while being omitted from `PluginConfigDialog`.
    - `GET /api/v1/plugins/{name}/config` masks stored secrets with `"__SHELFD_REDACTED__"`.
    - `PUT /api/v1/plugins/{name}/config` preserves existing ciphertext when receiving `"__SHELFD_REDACTED__"`, extracts cookies or Bearer tokens when `"x-shelfd-curl-paste": true`, and encrypts new values.
    - `config/patch` (`plugin -> host`) merges and encrypts rotated tokens for the active user.

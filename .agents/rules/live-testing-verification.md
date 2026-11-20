@@ -12,11 +12,10 @@
      `Authorization, Content-Type, Accept, Cache-Control`
    - Failure to include `Cache-Control` will break browser Server-Sent Events (SSE) queue connections.
 
-3. **Chrome DevTools MCP Validation**:
-   - For all frontend UI and routing updates, live verification MUST be performed using `chrome-devtools-mcp` against `http://localhost:3000`.
-   - Always inspect `list_console_messages` to ensure zero runtime or CORS errors.
-   - Always verify DOM / a11y trees via `take_snapshot`.
-   - Always capture visual proof using `take_screenshot` and embed screenshots in `walkthrough.md`.
+3. **UI Screenshots via Flutter Golden/Screenshot Tests (No Backend Required)**:
+   - When creating screenshots for UI changes, write Flutter widget/golden tests under `apps/app/test/` using mock repositories and Riverpod provider overrides (no need to run the Go backend or database).
+   - Prefer a Flutter screenshot/golden library such as `golden_screenshot` (with `tester.loadAssets()` for real app fonts and `matchesGoldenFile(...)`) or `alchemist`, generating PNGs via `flutter test --update-goldens`.
+   - Reserve live browser verification (`chrome-devtools-mcp` or `control-shelfd`) for full-stack checks that actually require the Go server (CORS/SSE, fixed-layout EPUB iframes, or end-to-end API flows).
 
 4. **Shell Navigation vs. Fullscreen Reader Invariant**:
    - Persistent `AppShell` (`ShelfdSideNav` on desktop) MUST wrap `/books`, `/series`, `/authors`, `/books/:id`, `/series/:id`, and `/authors/:id`.

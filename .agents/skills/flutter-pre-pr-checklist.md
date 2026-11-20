@@ -23,7 +23,11 @@ Use this checklist whenever modifying Dart/Flutter files under `apps/app/` befor
 - [ ] Guard async methods in `Notifier`s with a `_isDisposed` flag set in `ref.onDispose(() { _isDisposed = true; })` so tests disposing `ProviderScope` early do not throw post-dispose state errors.
 - [ ] Avoid watching authenticated/linked `FutureProvider`s when the parent account state is unlinked.
 
-## 4. Test Execution & CI Gate
+## 4. UI Screenshots (No Backend Required)
+- [ ] When capturing screenshots for UI changes, write Flutter golden/screenshot tests under `apps/app/test/` using mock repositories and Riverpod `.overrideWithValue(...)` / `.overrideWith(...)` — do not spin up the Go backend or database just for UI screenshots.
+- [ ] Use a Flutter golden/screenshot library such as `golden_screenshot` (or `alchemist`) with `matchesGoldenFile(...)` and real font/asset loading, and generate screenshots via `flutter test --update-goldens`.
+
+## 5. Test Execution & CI Gate
 - [ ] Run backend tests: `cd apps/server && go test -tags fts5 ./...`
 - [ ] Run Flutter analyzer and tests locally if `flutter` is installed (`flutter analyze && flutter test && flutter build web`).
 - [ ] After pushing the branch and opening/updating a PR, ALWAYS verify GitHub Actions CI passes (`gh pr checks --watch` or `gh run watch --exit-status`) before asking the user to merge.

@@ -17,8 +17,9 @@ This technical manual instructs the `@qa` and `@reader` personas on conducting l
      ```
    * Missing `Cache-Control` will break browser Server-Sent Events (SSE) queue streaming.
 3. **Automated Visual Proof**:
-   * Every UI change or routing update must be visually verified in Chrome via `chrome-devtools-mcp`.
-   * Screenshots must be saved or copied to the conversation brain artifact directory (`<appDataDir>/brain/<conversation-id>/`) and embedded in `walkthrough.md`.
+   * For UI change screenshots, write Flutter golden/screenshot widget tests (e.g., `golden_screenshot` or `alchemist` with `matchesGoldenFile(...)` and `flutter test --update-goldens`) backed by mock repositories and Riverpod overrides — no live Go backend is needed.
+   * Use Chrome DevTools MCP (`take_screenshot`, `list_console_messages`, `take_snapshot`) only when verifying full-stack runtime behavior (CORS/SSE, fixed-layout EPUB iframes, or live API flows).
+   * Screenshots for walkthroughs must be saved or copied to the conversation brain artifact directory (`<appDataDir>/brain/<conversation-id>/`) and embedded in `walkthrough.md`.
 4. **Shell Navigation vs. Fullscreen Reader**:
    * Detail routes (`/books/:id`, `/series/:id`, `/authors/:id`) and catalog roots (`/books`, `/series`, `/authors`) must retain persistent desktop sidebar navigation (`AppShell`).
    * Reader routes (`/books/:id/read` and `/books/:id/read/:chapter`) must remain outside `AppShell` for fullscreen, distraction-free reading.
