@@ -201,9 +201,22 @@ test("yoto plugin RPC end-to-end: PKCE auth, token refresh, options, 16x16 icon 
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/content/card-existing-1") {
+    if (req.method === "GET" && url.pathname === "/card/card-existing-1") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ card: existingCardStore }));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/content/card-existing-1") {
+      res.writeHead(403, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: {
+            code: "forbidden",
+            message: "User does not have required scope(s): 'user:content:view', 'family:library:view'",
+          },
+        })
+      );
       return;
     }
 
@@ -446,7 +459,7 @@ test("yoto plugin RPC end-to-end: PKCE auth, token refresh, options, 16x16 icon 
     });
     assert.ok(beginResp.result.authorize_url.includes("code_challenge=chal-123"));
     const authUrl = new URL(beginResp.result.authorize_url);
-    assert.equal(authUrl.searchParams.get("scope"), "user:content:manage user:icons:manage offline_access");
+    assert.equal(authUrl.searchParams.get("scope"), "user:content:manage user:content:view user:icons:manage offline_access");
 
     const completeResp = await callRpc("auth/complete", {
       method: "oauth_pkce",

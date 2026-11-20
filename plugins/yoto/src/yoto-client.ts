@@ -433,7 +433,7 @@ export function decodeYotoCard(rawBody: unknown, fallbackCardId = ""): YotoCard 
 export async function getCard(apiBaseUrl: string, accessToken: string, cardId: string): Promise<YotoCard> {
   const base = apiBaseUrl.replace(/\/+$/, "");
   const encodedId = encodeURIComponent(cardId);
-  const endpoints = [`${base}/content/${encodedId}`, `${base}/card/${encodedId}`];
+  const endpoints = [`${base}/card/${encodedId}`, `${base}/content/${encodedId}`];
 
   let lastErr: Error | null = null;
   let bestCard: YotoCard | null = null;
@@ -447,10 +447,14 @@ export async function getCard(apiBaseUrl: string, accessToken: string, cardId: s
           Accept: "application/json",
         },
       });
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401) {
         throw new AuthExpiredError("Yoto session expired. Please re-link your Yoto account.");
       }
       const text = await res.text();
+      if (res.status === 403) {
+        lastErr = new AuthExpiredError("Yoto session expired. Please re-link your Yoto account.");
+        continue;
+      }
       if (!res.ok) {
         lastErr = new Error(`fetching card ${cardId} failed with status ${res.status}: ${text.slice(0, 300).trim()}`);
         continue;
