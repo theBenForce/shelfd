@@ -2,25 +2,30 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"sync"
 
 	"github.com/shelfd/shelfd/internal/events"
+	"github.com/shelfd/shelfd/internal/jobs"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 	"github.com/shelfd/shelfd/internal/worker"
 )
 
 type LibraryHandler struct {
-	repo     repository.StorageEngine
-	scanner  *scanner.Scanner
-	ingester *scanner.Ingester
-	worker   *worker.Worker
-	hub      *events.Hub
-	logger   *slog.Logger
-	mu       sync.Mutex
-	scanning bool
+	repo       repository.StorageEngine
+	scanner    *scanner.Scanner
+	ingester   *scanner.Ingester
+	worker     *worker.Worker
+	hub        *events.Hub
+	jobManager *jobs.Manager
+	logger     *slog.Logger
+	mu         sync.Mutex
+	scanning   bool
+	activeJob  string
 }
 
 func NewLibraryHandler(
@@ -29,18 +34,20 @@ func NewLibraryHandler(
 	ingester *scanner.Ingester,
 	w *worker.Worker,
 	hub *events.Hub,
+	jobManager *jobs.Manager,
 	logger *slog.Logger,
 ) *LibraryHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &LibraryHandler{
-		repo:     repo,
-		scanner:  s,
-		ingester: ingester,
-		worker:   w,
-		hub:      hub,
-		logger:   logger,
+		repo:       repo,
+		scanner:    s,
+		ingester:   ingester,
+		worker:     w,
+		hub:        hub,
+		jobManager: jobManager,
+		logger:     logger,
 	}
 }
 
@@ -52,20 +59,46 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 	h.mu.Lock()
 	if h.scanning {
+		var existingJob *jobs.Job
+		if h.jobManager != nil && h.activeJob != "" {
+			existingJob = h.jobManager.Get(h.activeJob)
+		}
 		h.mu.Unlock()
-		writeJSON(w, http.StatusOK, map[string]string{
+		resp := map[string]any{
 			"status":  "already_scanning",
 			"message": "A library scan is already in progress",
-		})
+		}
+		if existingJob != nil {
+			resp["job"] = existingJob
+		}
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 	h.scanning = true
+
+	var bgJob *jobs.Job
+	if h.jobManager != nil {
+		bgJob = h.jobManager.Create(jobs.CreateOptions{
+			Kind:    jobs.KindLibraryScan,
+			Title:   "Library Rescan",
+			Status:  jobs.StatusRunning,
+			Total:   0,
+			Message: "Discovering library files...",
+		})
+		h.activeJob = bgJob.ID
+	}
 	h.mu.Unlock()
+
+	jobID := ""
+	if bgJob != nil {
+		jobID = bgJob.ID
+	}
 
 	go func() {
 		defer func() {
 			h.mu.Lock()
 			h.scanning = false
+			h.activeJob = ""
 			h.mu.Unlock()
 		}()
 
@@ -92,6 +125,9 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		discovered, err := h.scanner.Scan()
 		if err != nil {
 			h.logger.Error("background scan failed", "error", err)
+			if h.jobManager != nil && jobID != "" {
+				h.jobManager.Fail(jobID, err.Error())
+			}
 			if h.hub != nil {
 				h.hub.Broadcast(events.Event{
 					Type: events.EventScanStatus,
@@ -101,11 +137,37 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.logger.Info("scan discovered files", "count", len(discovered))
+		totalFiles := len(discovered)
+		h.logger.Info("scan discovered files", "count", totalFiles)
+		if h.jobManager != nil && jobID != "" {
+			msg := fmt.Sprintf("Scanning %d files...", totalFiles)
+			if totalFiles == 0 {
+				msg = "No library files found"
+			}
+			zero := 0
+			h.jobManager.UpdateProgress(jobID, jobs.ProgressUpdate{
+				Current: &zero,
+				Total:   &totalFiles,
+				Message: &msg,
+			})
+		}
+
 		newCount := 0
 		modifiedCount := 0
 		unchangedCount := 0
-		for _, f := range discovered {
+		for i, f := range discovered {
+			if h.jobManager != nil && jobID != "" {
+				cur := i + 1
+				itemName := filepath.Base(f.RelativePath)
+				msg := fmt.Sprintf("Scanning %d of %d files...", cur, totalFiles)
+				h.jobManager.UpdateProgress(jobID, jobs.ProgressUpdate{
+					Current:   &cur,
+					Total:     &totalFiles,
+					ItemTitle: &itemName,
+					Message:   &msg,
+				})
+			}
+
 			book, status, err := h.ingester.SyncFile(ctx, f.FullPath, f.RelativePath)
 			if err != nil {
 				h.logger.Error("failed to sync discovered file", "file", f.RelativePath, "error", err)
@@ -157,6 +219,13 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		if h.jobManager != nil && jobID != "" {
+			msg := "Reconciling authors and genres..."
+			h.jobManager.UpdateProgress(jobID, jobs.ProgressUpdate{
+				Message: &msg,
+			})
+		}
+
 		// Reconcile authors and clean up orphaned taxonomy
 		if err := h.repo.ReconcileAuthors(ctx); err != nil {
 			h.logger.Error("failed to reconcile authors after scan", "error", err)
@@ -175,6 +244,15 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 			h.worker.Trigger()
 		}
 
+		if h.jobManager != nil && jobID != "" {
+			summary := fmt.Sprintf("Scan complete: %d new, %d updated, %d unchanged", newCount, modifiedCount, unchangedCount)
+			h.jobManager.Complete(jobID, summary, map[string]any{
+				"new":       newCount,
+				"modified":  modifiedCount,
+				"unchanged": unchangedCount,
+			})
+		}
+
 		if h.hub != nil {
 			h.hub.Broadcast(events.Event{
 				Type: events.EventScanStatus,
@@ -188,8 +266,12 @@ func (h *LibraryHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	writeJSON(w, http.StatusAccepted, map[string]string{
+	resp := map[string]any{
 		"status":  "scan_started",
 		"message": "Library scan initiated in background",
-	})
+	}
+	if bgJob != nil {
+		resp["job"] = bgJob
+	}
+	writeJSON(w, http.StatusAccepted, resp)
 }

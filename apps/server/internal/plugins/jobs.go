@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shelfd/shelfd/internal/events"
+	"github.com/shelfd/shelfd/internal/jobs"
 )
 
 // PluginJob tracks an active or completed background plugin action execution for a user.
@@ -48,10 +49,11 @@ func (j *PluginJob) clone() *PluginJob {
 
 // PluginJobManager manages in-flight and completed background plugin jobs and broadcasts progress events.
 type PluginJobManager struct {
-	mu   sync.RWMutex
-	jobs map[string]*PluginJob
-	seq  atomic.Uint64
-	hub  *events.Hub
+	mu      sync.RWMutex
+	jobs    map[string]*PluginJob
+	seq     atomic.Uint64
+	hub     *events.Hub
+	unified *jobs.Manager
 }
 
 // NewPluginJobManager creates a new PluginJobManager.
@@ -60,6 +62,13 @@ func NewPluginJobManager(hub *events.Hub) *PluginJobManager {
 		jobs: make(map[string]*PluginJob),
 		hub:  hub,
 	}
+}
+
+// SetJobManager attaches a unified jobs.Manager so plugin jobs are mirrored into the global background job registry.
+func (m *PluginJobManager) SetJobManager(jm *jobs.Manager) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.unified = jm
 }
 
 // CreateJob creates and registers a new running PluginJob.
@@ -233,20 +242,87 @@ func (m *PluginJobManager) GetJob(jobID string) *PluginJob {
 // DismissJob removes a job record for the owning user.
 func (m *PluginJobManager) DismissJob(userID, jobID string) bool {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	j, ok := m.jobs[jobID]
 	if !ok {
+		m.mu.Unlock()
 		return false
 	}
 	if userID != "" && j.UserID != "" && j.UserID != userID {
+		m.mu.Unlock()
 		return false
 	}
 	delete(m.jobs, jobID)
+	unified := m.unified
+	m.mu.Unlock()
+
+	if unified != nil {
+		unified.Dismiss(userID, jobID)
+	}
 	return true
 }
 
+// RemoveLocal removes a plugin job from the local map without re-invoking unified.Dismiss (prevents recursion).
+func (m *PluginJobManager) RemoveLocal(userID, jobID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	j, ok := m.jobs[jobID]
+	if !ok {
+		return
+	}
+	if userID != "" && j.UserID != "" && j.UserID != userID {
+		return
+	}
+	delete(m.jobs, jobID)
+}
+
 func (m *PluginJobManager) broadcast(job *PluginJob) {
-	if m.hub == nil || job == nil {
+	if job == nil {
+		return
+	}
+	m.mu.RLock()
+	unified := m.unified
+	m.mu.RUnlock()
+
+	if unified != nil {
+		meta := map[string]any{
+			"plugin":      job.Plugin,
+			"action":      job.Action,
+			"target_type": job.TargetType,
+			"target_id":   job.TargetID,
+		}
+		if job.Result != nil {
+			meta["result"] = job.Result
+		}
+		subtitle := job.Plugin
+		if job.Action != "" {
+			subtitle = fmt.Sprintf("%s • %s", job.Plugin, job.Action)
+		}
+		var completedAt *time.Time
+		if job.Status == jobs.StatusCompleted || job.Status == jobs.StatusFailed {
+			t := job.UpdatedAt
+			completedAt = &t
+		}
+		unified.Upsert(jobs.Job{
+			ID:              job.ID,
+			Kind:            jobs.KindPlugin,
+			UserID:          job.UserID,
+			Title:           job.Title,
+			Subtitle:        subtitle,
+			Status:          job.Status,
+			Current:         job.Current,
+			Total:           job.Total,
+			ItemTitle:       job.ItemTitle,
+			ItemProgressPct: job.ItemProgressPct,
+			Message:         job.Message,
+			Error:           job.Error,
+			Metadata:        meta,
+			StartedAt:       job.StartedAt,
+			UpdatedAt:       job.UpdatedAt,
+			CompletedAt:     completedAt,
+		})
+	}
+
+	if m.hub == nil {
 		return
 	}
 	m.hub.Broadcast(events.Event{

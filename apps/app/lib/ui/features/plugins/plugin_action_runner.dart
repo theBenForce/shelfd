@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../data/models/background_job.dart';
 import '../../../data/models/plugin.dart';
 import '../../../data/services/api_service.dart';
 import '../../core/file_saver/file_saver.dart';
@@ -49,19 +50,24 @@ class PluginActionRunner {
 
       if (result.job != null) {
         ref.read(pluginJobsProvider.notifier).enqueueOrTrackJob(result.job!);
+        ref
+            .read(backgroundJobsProvider.notifier)
+            .upsertJob(BackgroundJob.fromPluginJob(result.job!));
       } else if (result.isJobStarted && result.jobId != null) {
-        ref.read(pluginJobsProvider.notifier).enqueueOrTrackJob(
-              PluginJob(
-                id: result.jobId!,
-                plugin: plugin.name,
-                action: action.name,
-                title: target.title ?? action.title,
-                targetType: target.type,
-                targetId: target.id,
-                status: 'running',
-                message: result.message ?? 'Starting...',
-              ),
-            );
+        final fallback = PluginJob(
+          id: result.jobId!,
+          plugin: plugin.name,
+          action: action.name,
+          title: target.title ?? action.title,
+          targetType: target.type,
+          targetId: target.id,
+          status: 'running',
+          message: result.message ?? 'Starting...',
+        );
+        ref.read(pluginJobsProvider.notifier).enqueueOrTrackJob(fallback);
+        ref
+            .read(backgroundJobsProvider.notifier)
+            .upsertJob(BackgroundJob.fromPluginJob(fallback));
       }
 
       if (result.isClientHandoff) {

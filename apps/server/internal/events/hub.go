@@ -11,6 +11,8 @@ const (
 	EventQueueStatus EventType = "queue_status"
 	EventScanStatus  EventType = "scan_status"
 	EventPlugin      EventType = "plugin_event"
+	EventJobUpdated  EventType = "job_updated"
+	EventJobRemoved  EventType = "job_removed"
 )
 
 // Event represents an event payload to broadcast to connected clients.

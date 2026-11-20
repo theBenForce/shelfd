@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/author.dart';
+import 'package:shelf/data/models/background_job.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/book_chat.dart';
 import 'package:shelf/data/models/bookmark.dart';
@@ -67,6 +68,14 @@ class _FakeQueueNotifier extends QueueNotifier {
 
   @override
   QueueState build() => _initial;
+}
+
+class _FakeBackgroundJobsNotifier extends BackgroundJobsNotifier {
+  final BackgroundJobsState _initial;
+  _FakeBackgroundJobsNotifier([this._initial = const BackgroundJobsState()]);
+
+  @override
+  BackgroundJobsState build() => _initial;
 }
 
 class _FakeLibraryNotifier extends LibraryNotifier {
@@ -238,7 +247,7 @@ class _MockBookRepository implements BookRepository {
   }
 
   @override
-  Future<void> triggerScan() async {}
+  Future<BackgroundJob?> triggerScan() async => null;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -574,10 +583,25 @@ void main() {
           stagedUploads: 3,
           isActive: true,
         );
+        const activeJob = BackgroundJob(
+          id: 'job-ai-42',
+          kind: BackgroundJobKind.aiIndexing,
+          title: 'AI Catalog Indexing',
+          status: 'running',
+          current: 2,
+          total: 4,
+          itemTitle: 'The Left Hand of Darkness',
+          message: 'Chapter 2',
+        );
         await tester.pumpWidget(
           ProviderScope(
             overrides: [
               queueProvider.overrideWith(() => _FakeQueueNotifier(const QueueState(status: status))),
+              backgroundJobsProvider.overrideWith(
+                () => _FakeBackgroundJobsNotifier(
+                  const BackgroundJobsState(jobs: [activeJob]),
+                ),
+              ),
               libraryProvider.overrideWith(() => _FakeLibraryNotifier(const LibraryState(books: [sampleBook]))),
             ],
             child: MaterialApp(
@@ -605,7 +629,7 @@ void main() {
         expect(find.text('Uploads'), findsOneWidget);
         expect(find.text('3'), findsOneWidget);
         expect(find.text('50%'), findsOneWidget);
-        expect(find.text('The Left Hand of Darkness'), findsOneWidget);
+        expect(find.textContaining('The Left Hand of Darkness'), findsOneWidget);
       });
 
       testWidgets('F03-T1-05: PrimaryButton, FilterPillsRow, and showShelfdSettingsModal render with Scriptorium tokens', (tester) async {
@@ -3025,7 +3049,8 @@ void main() {
         ),
       );
       expect(find.text('4'), findsWidgets);
-      expect(find.text('AI Catalog Synced (10 passages)'), findsOneWidget);
+      expect(find.byKey(const Key('background_tasks_sidebar_button')), findsOneWidget);
+      expect(find.byKey(const Key('background_tasks_badge_button')), findsOneWidget);
     });
   });
 

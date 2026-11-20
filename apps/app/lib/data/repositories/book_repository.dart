@@ -1,4 +1,5 @@
 import '../models/author.dart';
+import '../models/background_job.dart';
 import '../models/book.dart';
 import '../models/book_chat.dart';
 import '../models/bookmark.dart';
@@ -111,7 +112,7 @@ class BookRepository {
   Future<List<Genre>> getGenres() => apiService.getGenres();
   Future<List<Topic>> getTopics() => apiService.getTopics();
   Future<List<Series>> getSeries() => apiService.getSeries();
-  Future<void> triggerScan() => apiService.triggerLibraryScan();
+  Future<BackgroundJob?> triggerScan() => apiService.triggerLibraryScan();
 
   Future<Bookmark> createBookmark(
     String bookId, {

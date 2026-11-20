@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../state/providers.dart';
 import 'shared_layout.dart';
-import 'theme.dart';
-import 'typography.dart';
 
 /// Persistent application navigation shell wrapping primary routes in [ShelfdAdaptiveScaffold].
 class AppShell extends ConsumerWidget {
@@ -47,22 +45,17 @@ class AppShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final queueState = ref.watch(queueProvider);
+    // Keep SSE stream connected for real-time queue & background job updates.
+    ref.watch(queueProvider);
+    final bgJobsState = ref.watch(backgroundJobsProvider);
     final currentPath = GoRouterState.of(context).uri.path;
     final currentIndex = _calculateSelectedIndex(context);
-    final colors = ShelfdColors.of(context);
 
     Future<void> handleScan() async {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: colors.containerHigh,
-          content: Text(
-            'Scanning library for new books...',
-            style: AppTypography.bodySans(fontSize: 13, color: colors.ink),
-          ),
-        ),
-      );
-      await ref.read(bookRepositoryProvider).triggerScan();
+      final job = await ref.read(bookRepositoryProvider).triggerScan();
+      if (job != null) {
+        ref.read(backgroundJobsProvider.notifier).upsertJob(job);
+      }
     }
 
     return ShelfdAdaptiveScaffold(
@@ -72,7 +65,7 @@ class AppShell extends ConsumerWidget {
       onNavigate: (path) => context.go(path),
       onRescan: handleScan,
       onUpload: () => context.go('/uploads'),
-      isRescanning: queueState.isLoading,
+      isRescanning: bgJobsState.isLibraryScanning,
       body: child,
     );
   }

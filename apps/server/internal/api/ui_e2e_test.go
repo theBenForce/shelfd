@@ -1666,9 +1666,17 @@ func TestTactileScriptorium_Tier2_BoundaryAndCornerCases(t *testing.T) {
 	t.Run("F03_T2_05_QueueStatusCardActiveVsIdle", func(t *testing.T) {
 		shared := readAppFile(t, "lib/ui/core/shared_layout.dart")
 		assertContainsAll(t, "shared_layout.dart", shared,
-			"AI Catalog Synced",
-			"Checking queue...",
+			"BackgroundTasksSidebarButton",
+			"BackgroundTasksBadgeButton",
+			"BackgroundTasksErrorListener",
 			"resolveBookTitle",
+		)
+		bgUI := readAppFile(t, "lib/ui/core/background_tasks_ui.dart")
+		assertContainsAll(t, "background_tasks_ui.dart", bgUI,
+			"BackgroundTasksSidebarButton",
+			"BackgroundTasksPanelContent",
+			"Clear finished",
+			"Background Tasks",
 		)
 	})
 

@@ -23,6 +23,7 @@ import (
 	"github.com/shelfd/shelfd/internal/config"
 	"github.com/shelfd/shelfd/internal/database"
 	"github.com/shelfd/shelfd/internal/events"
+	"github.com/shelfd/shelfd/internal/jobs"
 	"github.com/shelfd/shelfd/internal/mcp"
 	"github.com/shelfd/shelfd/internal/plugins"
 	"github.com/shelfd/shelfd/internal/repository"
@@ -189,6 +190,10 @@ func main() {
 	// Ensure seed admin user and MCP token exist if no tokens are configured
 	ensureSeedToken(ctx, repo, cfg, logger)
 
+	// Event Hub and unified Background Job Manager for real-time SSE broadcasts
+	eventHub := events.NewHub()
+	jobManager := jobs.NewManager(eventHub)
+
 	// Start background indexing worker
 	workerBatchSize := cfg.AI.Embedder.BatchSize
 	if workerBatchSize <= 0 {
@@ -197,6 +202,7 @@ func main() {
 	chapterWorker := worker.NewWorker(repo, aiClient, worker.Config{
 		BatchSize:    workerBatchSize,
 		PollInterval: 5 * time.Second,
+		JobManager:   jobManager,
 		Logger:       logger,
 	})
 	chapterWorker.Start(ctx)
@@ -208,13 +214,11 @@ func main() {
 	ingester := scanner.NewIngester(repo, cfg.Storage.LibraryDir, cfg.Storage.DataDir)
 	ingester.SetTaxonomyNormalizer(taxService)
 
-	// Event Hub for real-time SSE broadcasts
-	eventHub := events.NewHub()
-
 	// Start background upload worker
 	uploadWorker := worker.NewUploadWorker(repo, ingester, chapterWorker, worker.UploadWorkerConfig{
 		PollInterval: 3 * time.Second,
 		Hub:          eventHub,
+		JobManager:   jobManager,
 		Logger:       logger,
 	})
 	uploadWorker.Start(ctx)
@@ -241,8 +245,9 @@ func main() {
 			tok, _, err := api.GeneratePluginInvocationJWT(userID, username, pluginName, scopes, cfg.Server.JWTSecret, 5*time.Minute)
 			return tok, err
 		},
-		Hub:    eventHub,
-		Logger: logger,
+		Hub:        eventHub,
+		JobManager: jobManager,
+		Logger:     logger,
 	})
 	defer pluginHost.Stop()
 
@@ -278,6 +283,7 @@ func main() {
 		ToolInvoker:     toolExecutor,
 		PluginHost:      pluginHost,
 		Hub:             eventHub,
+		JobManager:      jobManager,
 		DataDir:         cfg.Storage.DataDir,
 		LibraryDir:      cfg.Storage.LibraryDir,
 		JWTSecret:       cfg.Server.JWTSecret,

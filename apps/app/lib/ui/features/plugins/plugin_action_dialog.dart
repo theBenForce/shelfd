@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../data/models/background_job.dart';
 import '../../../data/models/plugin.dart';
 import '../../../data/services/api_service.dart';
 import '../../core/theme.dart';
@@ -333,19 +334,24 @@ class _PluginActionDialogState extends ConsumerState<PluginActionDialog> {
 
       if (result.job != null) {
         ref.read(pluginJobsProvider.notifier).enqueueOrTrackJob(result.job!);
+        ref
+            .read(backgroundJobsProvider.notifier)
+            .upsertJob(BackgroundJob.fromPluginJob(result.job!));
       } else if (result.isJobStarted && result.jobId != null) {
-        ref.read(pluginJobsProvider.notifier).enqueueOrTrackJob(
-              PluginJob(
-                id: result.jobId!,
-                plugin: widget.plugin.name,
-                action: widget.action.name,
-                title: widget.target.title ?? widget.action.title,
-                targetType: widget.target.type,
-                targetId: widget.target.id,
-                status: 'running',
-                message: result.message ?? 'Starting...',
-              ),
-            );
+        final fallback = PluginJob(
+          id: result.jobId!,
+          plugin: widget.plugin.name,
+          action: widget.action.name,
+          title: widget.target.title ?? widget.action.title,
+          targetType: widget.target.type,
+          targetId: widget.target.id,
+          status: 'running',
+          message: result.message ?? 'Starting...',
+        );
+        ref.read(pluginJobsProvider.notifier).enqueueOrTrackJob(fallback);
+        ref
+            .read(backgroundJobsProvider.notifier)
+            .upsertJob(BackgroundJob.fromPluginJob(fallback));
       }
 
       if (mounted) {
