@@ -39,6 +39,7 @@ Chosen option: **Out-of-process child plugins over NDJSON JSON-RPC 2.0 on `stdio
    * Every `catalog/*`, `commands/invoke`, and `tools/call` RPC carries an `InvocationAuth` block containing the active `user_id`, decrypted user config, loopback `api_base`, and a 5-minute JWT restricted to `plugin.json` `api_scopes` (`uploads:stage`, `uploads:write`, `books:read`).
 3. **Encrypted Per-User Config & Smart cURL Paste**:
    * Fields marked `"x-shelfd-secret": true` or `"format": "password"` in `config_schema` are encrypted at rest in `plugin_user_configs` using AES-256-GCM with an HKDF-SHA256 key derived from `jwt_secret` and the plugin name.
+   * Fields marked `"x-shelfd-hidden": true` remain in `config_schema` for server-side encryption, redaction, and `config/patch` persistence while being omitted from the Flutter `PluginConfigDialog` settings form (useful for `auth`-managed OAuth tokens, expirations, and internal base URLs).
    * `GET /api/v1/plugins/{name}/config` masks set secrets with `"__SHELFD_REDACTED__"`, `PUT` preserves unchanged ciphertexts and extracts cookies or Bearer tokens from pasted DevTools cURL commands (`"x-shelfd-curl-paste": true`), and `config/patch` (`plugin -> host`) persists rotated refresh tokens.
 4. **Standardized `"catalog"` Capability & Staged Review Provenance**:
    * Storefront plugins implement `catalog/browse`, `catalog/search`, and `catalog/stage`.

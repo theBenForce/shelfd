@@ -23,8 +23,9 @@ Shelfd runs plugins as isolated child processes over NDJSON JSON-RPC 2.0 on `std
    - Request only the minimum `"api_scopes"` needed (`"uploads:stage"` for importers; `"books:read"` for action plugins reading books, Markdown exports, series metadata, or audio streams).
    - List every external hostname in `"permissions.network_domains"` so operators see them in Settings before enabling the plugin.
    - Mark credentials in `config_schema.properties` with `"x-shelfd-secret": true` so Shelfd encrypts them at rest with AES-256-GCM and masks them with `"__SHELFD_REDACTED__"` in API responses.
+   - Mark internal or `auth`-managed config fields (such as `access_token`, `refresh_token`, `token_expires_at`, `client_id`, `redirect_uri`, or internal base URLs) with `"x-shelfd-hidden": true` so they stay in `config_schema` for server-side encryption/redaction and DB persistence without cluttering the plugin settings dialog.
    - Add `"x-shelfd-curl-paste": true` (and optional `"x-shelfd-cookie-name": "<cookie>"`) on session cookie or Bearer token fields so users can paste a browser DevTools "Copy as cURL" command directly into Settings.
-   - When a plugin supports OAuth 2.0 PKCE or interactive token linking, declare `"auth"` (`methods`: `["oauth_pkce", "token"]`, `title`, `description`, `callback_param`, `fields`) and implement `auth: { status, begin, complete, disconnect }`.
+   - When a plugin supports OAuth 2.0 PKCE or interactive token linking, declare `"auth"` (`methods`: `["oauth_pkce", "token"]`, `title`, `description`, `callback_param`, `fields`) and implement `auth: { status, begin, complete, disconnect }`. Shelfd passes `<origin>/settings?plugin=<name>` as `redirect_uri`; request every API scope required by your endpoints in `auth/begin` (not just `openid profile offline_access`) and assert the `scope` parameter in tests.
    - When a plugin exposes book or series actions, declare `"actions"` in `plugin.json` (`name`, `title`, `description`, `icon`, `targets`: `["book", "series"]`, `media_types`: `["ebook", "audiobook"]`, `mode`: `"immediate" | "form"`, `execution`: `"sync" | "job"`).
 
 4. **Implement handlers with `@shelfd/plugin-sdk`**:
@@ -35,7 +36,7 @@ Shelfd runs plugins as isolated child processes over NDJSON JSON-RPC 2.0 on `std
    - Long-running background jobs (`execution: "job"`) should report progress via `ctx.reportProgress({ jobId: req.job_id, current, total, percent, title, message })` (which resets the host's 5-minute activity watchdog and broadcasts SSE `job_progress` events). `ctx.fetchLoopback` and `ctx.getBookMarkdown` automatically renew expired 5-minute invocation JWTs via `ctx.refreshInvocationToken()` (`host/refresh_token`) on HTTP 401.
    - Never write debug text to `process.stdout`. `definePlugin()` redirects `console.log` to `stderr`, and any raw non-JSON bytes on `stdout` corrupt the JSON-RPC stream.
    - Wrap outbound HTTP calls with `createPoliteFetcher({ minIntervalMs: 350 })` to respect rate limits and `Retry-After` headers.
-   - Throw `new AuthExpiredError("...")` whenever an external service returns HTTP 401/403 so Shelfd prompts the user to update credentials (`-32001`).
+   - Throw `new AuthExpiredError("...")` whenever an external service returns HTTP 401 or a terminal 403 so Shelfd prompts the user to update credentials (`-32001`). When probing multiple fallback endpoints, only abort immediately on HTTP 401; let HTTP 403 try remaining candidate endpoints first in case one endpoint requires a narrower or different OAuth scope.
    - When an API rotates tokens during a request or `auth/complete` finishes, call `await ctx.patchConfig({ access_token, refresh_token })` so Shelfd encrypts and saves the new tokens for the active user.
 
 5. **Build, verify, test, and pack**:

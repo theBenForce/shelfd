@@ -239,7 +239,8 @@ Shelfd ships three out-of-process plugins in `/data/plugins` that communicate wi
 
 1. **`project-gutenberg` (Catalog Storefront & Importer)**: Browse and search Project Gutenberg from `/plugins/catalog` (`Free Books`) and stage public-domain EPUBs directly into the upload review queue.
 2. **`yoto` ("Send to Yoto" Outbound Action)**:
-   * Open **Settings → Installed Plugins → Yoto Player (`Configure`)** to enter your Yoto Developer Client ID from [yoto.dev](https://yoto.dev/) and link your account via **Authorize with Yoto (PKCE)** or direct token paste. All secrets and tokens are encrypted at rest (`enc:v1:...`) in `plugin_configs`.
+   * In the [Yoto Developer Portal](https://yoto.dev/), add `<your-shelfd-origin>/settings?plugin=yoto` (for example `https://shelfd.example.com/settings?plugin=yoto`) as an **Allowed Callback URL**.
+   * Open **Settings → Installed Plugins → Yoto Player (`Configure`)** to enter your Yoto Developer Client ID and link your account via **Connect with OAuth (PKCE)** or direct token paste. All secrets and tokens are encrypted at rest (`enc:v1:...`) in `plugin_configs` and kept hidden from the settings form.
    * On any audiobook or audiobook series, open the action menu and select **Send to Yoto**. The declarative plugin dialog (`PluginActionDialog`) lets you create a new Make Your Own (MYO) card or append/replace chapters on an existing playlist, auto-convert book cover art to a 16×16 pixel icon, or pick public/custom 16×16 icons per chapter while streaming transfer progress in `PluginJobsBanner`.
 3. **`notebooklm` ("Send to NotebookLM" Outbound Action)**:
    * On any ebook, open the download/action menu and select **Send to NotebookLM**.

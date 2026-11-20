@@ -92,6 +92,7 @@
 ### Custom `config_schema` extensions
 
 - `"x-shelfd-secret": true` (or `"format": "password"`): Encrypts the field at rest in `plugin_user_configs` using AES-256-GCM (HKDF-SHA256 key derived from `jwt_secret` + plugin name). Redacts the value to `"__SHELFD_REDACTED__"` on `GET /api/v1/plugins/{name}/config`.
+- `"x-shelfd-hidden": true`: Omits the field from Shelfd's plugin settings form and `Save Settings` payload while keeping it in `config_schema` so server-side encryption (`x-shelfd-secret`), redaction, and `config/patch` persistence continue to work. Useful for `auth`-managed tokens, timestamps, client credentials, and internal endpoints. When all properties are hidden, Shelfd hides the `Save Settings` button and displays only the Account Linking (`auth`) section.
 - `"x-shelfd-curl-paste": true`: Adds a "Paste cURL" button in Shelfd's UI and instructs the Go host to extract `Authorization: Bearer ...` or cookies from pasted `curl` commands before encrypting.
 - `"x-shelfd-cookie-name": "<cookie_name>"`: Extracts a specific cookie value (such as `_simpleauth_sess`) from a pasted `Cookie:` header or `-b` flag.
 
@@ -102,7 +103,7 @@
 Plugins that link user accounts declare `auth` (`AuthSpec`) and implement `auth` handlers in `definePlugin`:
 
 - `auth/status` (`GET /api/v1/plugins/{name}/auth/status`): Returns `AuthStatusResult` (`connected` / `linked`, `configured`, `account_label`, `method`, `message`).
-- `auth/begin` (`POST /api/v1/plugins/{name}/auth/begin`): Accepts `{ method, redirect_uri, state, code_challenge, code_challenge_method }` and returns `AuthBeginResult` (`authorize_url`, `method`, `callback_param`).
+- `auth/begin` (`POST /api/v1/plugins/{name}/auth/begin`): Accepts `{ method, redirect_uri, state, code_challenge, code_challenge_method }` and returns `AuthBeginResult` (`authorize_url`, `method`, `callback_param`). Shelfd's web client passes `<origin>/settings?plugin=<name>` as `redirect_uri`; external OAuth providers must whitelist that callback URL, and `authorize_url` must request all API scopes needed by the plugin's endpoints (missing scopes surface as upstream HTTP `403` even when the access token is valid and unexpired).
 - `auth/complete` (`POST /api/v1/plugins/{name}/auth/complete`): Exchanges OAuth `code` + `code_verifier` or direct `values` / token credentials, persists encrypted tokens via `await ctx.patchConfig(...)`, and returns `AuthStatusResult`.
 - `auth/disconnect` (`POST` or `DELETE /api/v1/plugins/{name}/auth/disconnect`): Clears stored tokens via `await ctx.patchConfig(...)` and returns `AuthStatusResult`.
 
@@ -196,7 +197,7 @@ Every `catalog/*`, `auth/*`, `actions/*`, `commands/invoke`, and `tools/call` ha
 
 ## Error codes
 
-- `-32001` (`AuthExpiredError`): Credentials missing or expired. Shelfd maps this to HTTP `401` on the plugin endpoint and shows an "Update Credentials" prompt.
+- `-32001` (`AuthExpiredError`): Credentials missing, expired, or lacking required scopes. Shelfd maps this to HTTP `401` on the plugin endpoint and shows an "Update Credentials" / reconnect prompt. When probing fallback API endpoints, only throw `AuthExpiredError` immediately on HTTP `401`; record HTTP `403` and try remaining fallback endpoints first before throwing `AuthExpiredError`.
 - `-32601`: Unsupported method or unknown command/tool/action.
 - `-32602`: Invalid parameters.
 
