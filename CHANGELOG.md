@@ -1,3 +1,10 @@
+## [1.23.1](https://github.com/theBenForce/shelfd/compare/v1.23.0...v1.23.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* **yoto:** prefer /card/:id in getCard with 403 fallback and request user:content:view scope ([#93](https://github.com/theBenForce/shelfd/issues/93)) ([32ca135](https://github.com/theBenForce/shelfd/commit/32ca135c10ab19e644ac55914d4bd8b5681dd565))
+
 # [1.23.0](https://github.com/theBenForce/shelfd/compare/v1.22.0...v1.23.0) (2026-11-19)
 
 
