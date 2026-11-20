@@ -384,6 +384,8 @@ func (h *Host) Discover(ctx context.Context) error {
 			existing.enabled = enabled
 			if !enabled {
 				existing.status = StatusDisabled
+			} else if existing.proc == nil && existing.status != StatusStarting {
+				existing.status = StatusIdle
 			}
 			existing.mu.Unlock()
 		} else {
@@ -402,33 +404,80 @@ func (h *Host) Discover(ctx context.Context) error {
 	return nil
 }
 
+// InstallZipOptions configures how a plugin .zip archive is installed or updated.
+type InstallZipOptions struct {
+	// ExpectedName, when non-empty, requires the target plugin to already exist
+	// and requires the archive's manifest.name to match ExpectedName.
+	ExpectedName string
+	// UserID is used to populate user-specific fields (e.g. Configured) on the returned summary.
+	UserID string
+}
+
 // InstallZip extracts a plugin .zip archive into pluginsDir, registers it, and probes its handshake.
 func (h *Host) InstallZip(ctx context.Context, archiveBytes []byte) (*PluginSummary, error) {
-	manifest, err := ExtractPluginZip(archiveBytes, h.pluginsDir)
+	res, err := h.InstallOrUpdateZip(ctx, archiveBytes, InstallZipOptions{})
 	if err != nil {
 		return nil, err
 	}
+	return &res.PluginSummary, nil
+}
 
-	// Stop existing running instance if updating in-place
-	h.mu.RLock()
-	existing := h.plugins[manifest.Name]
-	h.mu.RUnlock()
+// InstallOrUpdateZip stages and validates a plugin .zip archive, stops any existing running
+// process before swapping files on disk, preserves enabled state and .data on updates,
+// re-discovers the plugin, and probes its handshake if enabled.
+func (h *Host) InstallOrUpdateZip(ctx context.Context, archiveBytes []byte, opts InstallZipOptions) (*PluginInstallResult, error) {
+	expectedName := strings.TrimSpace(opts.ExpectedName)
+	if expectedName != "" && h.getManaged(expectedName) == nil {
+		return nil, ErrPluginNotFound
+	}
+
+	manifest, stagingDir, err := StagePluginZip(archiveBytes, h.pluginsDir, expectedName)
+	if err != nil {
+		return nil, err
+	}
+	activated := false
+	defer func() {
+		if !activated {
+			_ = os.RemoveAll(stagingDir)
+		}
+	}()
+
+	existing := h.getManaged(manifest.Name)
+	wasInstalled := existing != nil
+	enabled := true
+	previousVersion := ""
+
+	// Stop existing running instance BEFORE swapping files on disk
 	if existing != nil {
 		existing.mu.Lock()
+		enabled = existing.enabled
+		if existing.manifest != nil {
+			previousVersion = existing.manifest.Version
+		}
 		oldProc := existing.proc
 		existing.proc = nil
 		existing.consecutiveFailures = 0
 		existing.lastError = ""
+		if enabled {
+			existing.status = StatusIdle
+		} else {
+			existing.status = StatusDisabled
+		}
 		existing.mu.Unlock()
 		if oldProc != nil {
 			h.stopProcess(oldProc)
 		}
 	}
 
+	if err := ActivateStagedPlugin(stagingDir, h.pluginsDir, manifest.Name, true); err != nil {
+		return nil, err
+	}
+	activated = true
+
 	rawManifest, _ := json.Marshal(manifest)
 	_ = h.repo.UpsertPluginState(ctx, &repository.PluginState{
 		Name:               manifest.Name,
-		Enabled:            true,
+		Enabled:            enabled,
 		InstalledVersion:   manifest.Version,
 		CachedManifestJSON: string(rawManifest),
 	})
@@ -437,16 +486,22 @@ func (h *Host) InstallZip(ctx context.Context, archiveBytes []byte) (*PluginSumm
 		return nil, err
 	}
 
-	h.mu.RLock()
-	mp := h.plugins[manifest.Name]
-	h.mu.RUnlock()
-	if mp != nil {
+	mp := h.getManaged(manifest.Name)
+	if mp != nil && enabled {
 		if _, err := h.ensureProcess(ctx, mp); err != nil {
 			h.logger.Warn("installed plugin failed initial handshake", "component", "plugin."+manifest.Name, "error", err)
 		}
 	}
 
-	return h.GetPluginSummary(ctx, manifest.Name, "")
+	sum, err := h.GetPluginSummary(ctx, manifest.Name, opts.UserID)
+	if err != nil {
+		return nil, err
+	}
+	return &PluginInstallResult{
+		PluginSummary:   *sum,
+		Updated:         wasInstalled,
+		PreviousVersion: previousVersion,
+	}, nil
 }
 
 // SetEnabled enables or disables an installed plugin.

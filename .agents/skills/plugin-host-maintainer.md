@@ -26,6 +26,10 @@ Use this guide when modifying Shelfd's Go plugin host (`apps/server/internal/plu
    - Any query change to `plugins_state`, `plugin_user_configs`, or `book_sources` must be implemented identically in both `SQLiteStorageEngine` (`sqlite.go`) and `BunStorageEngine` (`bun.go`).
    - Deleting an uncommitted staged upload job must delete its uncommitted `book_sources` row (`DeleteUncommittedBookSourceByUploadJob`), and committing an upload job must link `book_id` (`LinkBookSourceByUploadJob`).
 
-6. **Authoring new plugins**:
+6. **Safe `.zip` install & in-place update lifecycle**:
+   - `Host.InstallOrUpdateZip` must stage and validate archives via `StagePluginZip` (including `ExpectedName` checks for `POST /api/v1/plugins/{name}/update`) **before** stopping the running child process and swapping directories via `ActivateStagedPlugin`.
+   - In-place updates must preserve `.data/` scratch storage, preserve the plugin's `enabled` state (skipping process spawn when disabled), and write `.shelfd-user-managed` so `docker/entrypoint.sh` does not overwrite user-updated plugins on container restart.
+
+7. **Authoring new plugins**:
    - Follow [skills/create-shelfd-plugin/SKILL.md](../../skills/create-shelfd-plugin/SKILL.md) (mirrored in `packages/plugin-sdk/skills/create-shelfd-plugin/SKILL.md`).
    - Keep commercial storefront scrapers in external repositories; only public-domain reference plugins (`plugins/project-gutenberg`) belong in this repository.

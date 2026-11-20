@@ -181,23 +181,32 @@ func ValidateManifest(m *Manifest) error {
 
 const maxPluginArchiveBytes = 50 << 20 // 50 MB limit for extracted plugin bundle
 
-// ExtractPluginZip safely validates and extracts a .zip plugin archive into pluginsDir/<manifest.name>.
-// Enforces Zip-Slip traversal prevention and validates plugin.json before replacing an existing directory.
-func ExtractPluginZip(archiveBytes []byte, pluginsDir string) (*Manifest, error) {
+// UserManagedMarkerFile is written inside a plugin directory when installed or updated via .zip
+// so container entrypoints preserve user-installed versions across restarts.
+const UserManagedMarkerFile = ".shelfd-user-managed"
+
+// ErrPluginNameMismatch is returned when an update archive's manifest name does not match the target plugin.
+var ErrPluginNameMismatch = errors.New("plugin archive name mismatch")
+
+// StagePluginZip safely validates and extracts a .zip plugin archive into a temporary staging
+// directory under pluginsDir without modifying any active plugin directory.
+// If expectedName is non-empty and differs from the archive's manifest name, ErrPluginNameMismatch is returned.
+// On success, the caller owns the returned stagingDir and must either activate it via ActivateStagedPlugin or remove it.
+func StagePluginZip(archiveBytes []byte, pluginsDir string, expectedName string) (*Manifest, string, error) {
 	if len(archiveBytes) == 0 {
-		return nil, errors.New("empty plugin archive")
+		return nil, "", errors.New("empty plugin archive")
 	}
 	if len(archiveBytes) > maxPluginArchiveBytes {
-		return nil, errors.New("plugin archive exceeds 50MB limit")
+		return nil, "", errors.New("plugin archive exceeds 50MB limit")
 	}
 
 	zr, err := zip.NewReader(bytes.NewReader(archiveBytes), int64(len(archiveBytes)))
 	if err != nil {
-		return nil, fmt.Errorf("invalid zip archive: %w", err)
+		return nil, "", fmt.Errorf("invalid zip archive: %w", err)
 	}
 
 	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
-		return nil, fmt.Errorf("creating plugins directory: %w", err)
+		return nil, "", fmt.Errorf("creating plugins directory: %w", err)
 	}
 
 	// Determine whether archive files share a single top-level directory or sit at root
@@ -210,28 +219,32 @@ func ExtractPluginZip(archiveBytes []byte, pluginsDir string) (*Manifest, error)
 		if relName == "plugin.json" && !f.FileInfo().IsDir() {
 			rc, err := f.Open()
 			if err != nil {
-				return nil, fmt.Errorf("opening plugin.json in archive: %w", err)
+				return nil, "", fmt.Errorf("opening plugin.json in archive: %w", err)
 			}
 			manifestBytes, err = io.ReadAll(io.LimitReader(rc, 1<<20))
 			rc.Close()
 			if err != nil {
-				return nil, fmt.Errorf("reading plugin.json in archive: %w", err)
+				return nil, "", fmt.Errorf("reading plugin.json in archive: %w", err)
 			}
 			break
 		}
 	}
 	if len(manifestBytes) == 0 {
-		return nil, errors.New("archive does not contain a root plugin.json")
+		return nil, "", errors.New("archive does not contain a root plugin.json")
 	}
 
 	manifest, err := ParseManifest(manifestBytes)
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+
+	if expected := strings.TrimSpace(expectedName); expected != "" && manifest.Name != expected {
+		return nil, "", fmt.Errorf("%w: archive contains plugin %q, expected %q", ErrPluginNameMismatch, manifest.Name, expected)
 	}
 
 	stagingDir, err := os.MkdirTemp(pluginsDir, ".install-"+manifest.Name+"-*")
 	if err != nil {
-		return nil, fmt.Errorf("creating staging directory: %w", err)
+		return nil, "", fmt.Errorf("creating staging directory: %w", err)
 	}
 	cleanupStaging := true
 	defer func() {
@@ -252,27 +265,27 @@ func ExtractPluginZip(archiveBytes []byte, pluginsDir string) (*Manifest, error)
 
 		destPath := filepath.Join(stagingDir, filepath.FromSlash(relName))
 		if !strings.HasPrefix(filepath.Clean(destPath), cleanTarget) {
-			return nil, fmt.Errorf("illegal archive file path: %s", f.Name)
+			return nil, "", fmt.Errorf("illegal archive file path: %s", f.Name)
 		}
 
 		if f.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("symlinks are not permitted in plugin archives: %s", f.Name)
+			return nil, "", fmt.Errorf("symlinks are not permitted in plugin archives: %s", f.Name)
 		}
 
 		if f.FileInfo().IsDir() {
 			if err := os.MkdirAll(destPath, 0755); err != nil {
-				return nil, fmt.Errorf("creating directory %s: %w", relName, err)
+				return nil, "", fmt.Errorf("creating directory %s: %w", relName, err)
 			}
 			continue
 		}
 
 		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-			return nil, fmt.Errorf("creating parent directory for %s: %w", relName, err)
+			return nil, "", fmt.Errorf("creating parent directory for %s: %w", relName, err)
 		}
 
 		rc, err := f.Open()
 		if err != nil {
-			return nil, fmt.Errorf("opening archive entry %s: %w", relName, err)
+			return nil, "", fmt.Errorf("opening archive entry %s: %w", relName, err)
 		}
 
 		mode := os.FileMode(0644)
@@ -283,35 +296,93 @@ func ExtractPluginZip(archiveBytes []byte, pluginsDir string) (*Manifest, error)
 		outFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 		if err != nil {
 			rc.Close()
-			return nil, fmt.Errorf("creating file %s: %w", relName, err)
+			return nil, "", fmt.Errorf("creating file %s: %w", relName, err)
 		}
 
 		written, copyErr := io.Copy(outFile, io.LimitReader(rc, maxPluginArchiveBytes-totalExtracted+1))
 		outFile.Close()
 		rc.Close()
 		if copyErr != nil {
-			return nil, fmt.Errorf("extracting %s: %w", relName, copyErr)
+			return nil, "", fmt.Errorf("extracting %s: %w", relName, copyErr)
 		}
 		totalExtracted += written
 		if totalExtracted > maxPluginArchiveBytes {
-			return nil, errors.New("extracted plugin size exceeds 50MB limit")
+			return nil, "", errors.New("extracted plugin size exceeds 50MB limit")
 		}
 	}
 
-	finalDir := filepath.Join(pluginsDir, manifest.Name)
-	// Preserve existing data scratch subdirectory if updating an installed plugin
+	cleanupStaging = false
+	return manifest, stagingDir, nil
+}
+
+// ActivateStagedPlugin swaps a staged plugin directory into pluginsDir/<pluginName>,
+// preserving any existing .data scratch directory and rolling back on rename failure.
+func ActivateStagedPlugin(stagingDir, pluginsDir, pluginName string, markUserManaged bool) error {
+	if markUserManaged {
+		markerPath := filepath.Join(stagingDir, UserManagedMarkerFile)
+		if err := os.WriteFile(markerPath, []byte("zip\n"), 0644); err != nil {
+			return fmt.Errorf("writing user-managed marker: %w", err)
+		}
+	}
+
+	finalDir := filepath.Join(pluginsDir, pluginName)
 	existingScratch := filepath.Join(finalDir, ".data")
 	stagedScratch := filepath.Join(stagingDir, ".data")
+	movedScratch := false
+
 	if info, err := os.Stat(existingScratch); err == nil && info.IsDir() {
-		_ = os.Rename(existingScratch, stagedScratch)
+		_ = os.RemoveAll(stagedScratch)
+		if err := os.Rename(existingScratch, stagedScratch); err == nil {
+			movedScratch = true
+		}
 	}
 
-	_ = os.RemoveAll(finalDir)
+	backupDir := ""
+	if _, err := os.Stat(finalDir); err == nil {
+		tmpBackup, err := os.MkdirTemp(pluginsDir, ".backup-"+pluginName+"-*")
+		if err != nil {
+			if movedScratch {
+				_ = os.Rename(stagedScratch, existingScratch)
+			}
+			return fmt.Errorf("preparing backup directory: %w", err)
+		}
+		_ = os.RemoveAll(tmpBackup)
+		if err := os.Rename(finalDir, tmpBackup); err != nil {
+			if movedScratch {
+				_ = os.Rename(stagedScratch, existingScratch)
+			}
+			return fmt.Errorf("backing up existing plugin directory: %w", err)
+		}
+		backupDir = tmpBackup
+	}
+
 	if err := os.Rename(stagingDir, finalDir); err != nil {
-		return nil, fmt.Errorf("activating plugin directory: %w", err)
+		if backupDir != "" {
+			_ = os.Rename(backupDir, finalDir)
+		}
+		if movedScratch {
+			_ = os.Rename(stagedScratch, existingScratch)
+		}
+		return fmt.Errorf("activating plugin directory: %w", err)
 	}
-	cleanupStaging = false
 
+	if backupDir != "" {
+		_ = os.RemoveAll(backupDir)
+	}
+	return nil
+}
+
+// ExtractPluginZip safely validates and extracts a .zip plugin archive into pluginsDir/<manifest.name>.
+// Enforces Zip-Slip traversal prevention and validates plugin.json before replacing an existing directory.
+func ExtractPluginZip(archiveBytes []byte, pluginsDir string) (*Manifest, error) {
+	manifest, stagingDir, err := StagePluginZip(archiveBytes, pluginsDir, "")
+	if err != nil {
+		return nil, err
+	}
+	if err := ActivateStagedPlugin(stagingDir, pluginsDir, manifest.Name, true); err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return nil, err
+	}
 	return manifest, nil
 }
 

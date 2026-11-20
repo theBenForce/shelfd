@@ -1013,11 +1013,36 @@ class ApiService {
         .toList();
   }
 
-  Future<PluginSummary> installPluginZip({
+  Future<PluginInstallResult> installPluginZip({
     required String filename,
     required List<int> bytes,
   }) async {
-    final uri = _uri('/api/v1/plugins/install');
+    return _uploadPluginZip(
+      path: '/api/v1/plugins/install',
+      filename: filename,
+      bytes: bytes,
+    );
+  }
+
+  Future<PluginInstallResult> updatePluginZip({
+    required String name,
+    required String filename,
+    required List<int> bytes,
+  }) async {
+    final encoded = Uri.encodeComponent(name);
+    return _uploadPluginZip(
+      path: '/api/v1/plugins/$encoded/update',
+      filename: filename,
+      bytes: bytes,
+    );
+  }
+
+  Future<PluginInstallResult> _uploadPluginZip({
+    required String path,
+    required String filename,
+    required List<int> bytes,
+  }) async {
+    final uri = _uri(path);
     final request = http.MultipartRequest('POST', uri);
     if (token != null && token!.isNotEmpty) {
       request.headers['Authorization'] = 'Bearer $token';
@@ -1035,7 +1060,7 @@ class ApiService {
       _throwPluginError(response);
     }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return PluginSummary.fromJson(data);
+    return PluginInstallResult.fromJson(data);
   }
 
   Future<PluginDetail> getPluginDetail(String name) async {

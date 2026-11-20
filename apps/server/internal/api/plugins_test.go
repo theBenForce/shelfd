@@ -1247,4 +1247,173 @@ func TestAPI_RealYotoAndNotebookLMPlugins_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestAPI_PluginsREST_UpdateZipAndNameValidation(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	pluginsDir := t.TempDir()
+	pluginHost := plugins.NewHost(f.repo, plugins.HostConfig{
+		PluginsDir:    pluginsDir,
+		APIBase:       "http://127.0.0.1:0",
+		ShelfdVersion: "0.1.0-test",
+		MasterSecret:  f.jwtSecret,
+		IdleTimeout:   30 * time.Second,
+		TokenIssuer: func(userID, username, pluginName string, scopes []string) (string, error) {
+			tok, _, err := api.GeneratePluginInvocationJWT(userID, username, pluginName, scopes, f.jwtSecret, 5*time.Minute)
+			return tok, err
+		},
+		Hub:    f.hub,
+		Logger: slog.Default(),
+	})
+	defer pluginHost.Stop()
+
+	router := api.NewRouter(api.RouterConfig{
+		Repo:            f.repo,
+		Ingester:        f.ingester,
+		Scanner:         f.scanner,
+		UploadWorker:    f.uploadWorker,
+		AIClient:        f.aiClient,
+		ToolInvoker:     mcp.NewToolExecutor(f.repo, f.aiClient, slog.Default()),
+		PluginHost:      pluginHost,
+		Hub:             f.hub,
+		DataDir:         f.dataDir,
+		LibraryDir:      f.libDir,
+		JWTSecret:       f.jwtSecret,
+		Host:            "127.0.0.1",
+		Port:            8080,
+		Version:         "0.1.0-test",
+		DefaultUsername: "admin",
+	})
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	userToken := f.loginAndGetToken(t)
+
+	makeZip := func(name, version string) []byte {
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		mf, _ := zw.Create("plugin.json")
+		_, _ = mf.Write([]byte(`{
+			"name": "` + name + `",
+			"version": "` + version + `",
+			"display_name": "Zip Update Plugin",
+			"entrypoint": { "command": "node", "args": ["index.mjs"] },
+			"capabilities": ["commands"]
+		}`))
+		js, _ := zw.Create("index.mjs")
+		_, _ = js.Write([]byte(`
+import readline from 'node:readline';
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+rl.on('line', (line) => {
+  if (!line.trim()) return;
+  const msg = JSON.parse(line);
+  if (msg.method === 'initialize') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { name: '` + name + `', version: '` + version + `' } }) + '\n');
+  } else if (msg.method === 'shutdown') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { ok: true } }) + '\n');
+    setTimeout(() => process.exit(0), 10);
+  }
+});
+`))
+		_ = zw.Close()
+		return buf.Bytes()
+	}
+
+	uploadZip := func(endpoint string, zipBytes []byte) *http.Response {
+		var body bytes.Buffer
+		mpw := multipart.NewWriter(&body)
+		fw, _ := mpw.CreateFormFile("file", "plugin.zip")
+		_, _ = fw.Write(zipBytes)
+		_ = mpw.Close()
+
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+endpoint, &body)
+		req.Header.Set("Authorization", "Bearer "+userToken)
+		req.Header.Set("Content-Type", mpw.FormDataContentType())
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST %s failed: %v", endpoint, err)
+		}
+		return resp
+	}
+
+	// 1. Fresh install via POST /api/v1/plugins/install -> 201 Created, updated=false
+	resp1 := uploadZip("/api/v1/plugins/install", makeZip("zip-update", "1.0.0"))
+	defer resp1.Body.Close()
+	if resp1.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %d", resp1.StatusCode)
+	}
+	var res1 plugins.PluginInstallResult
+	if err := json.NewDecoder(resp1.Body).Decode(&res1); err != nil {
+		t.Fatalf("decode res1: %v", err)
+	}
+	if res1.Updated || res1.PreviousVersion != "" || res1.Version != "1.0.0" {
+		t.Fatalf("unexpected res1: %+v", res1)
+	}
+
+	// 2. Targeted update with mismatched plugin name -> 400 Bad Request
+	respMismatch := uploadZip("/api/v1/plugins/zip-update/update", makeZip("other-plugin", "2.0.0"))
+	defer respMismatch.Body.Close()
+	if respMismatch.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for name mismatch, got %d", respMismatch.StatusCode)
+	}
+
+	// 3. Targeted update for non-existent plugin -> 404 Not Found
+	respMissing := uploadZip("/api/v1/plugins/no-such-plugin/update", makeZip("no-such-plugin", "1.0.0"))
+	defer respMissing.Body.Close()
+	if respMissing.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 Not Found for missing plugin, got %d", respMissing.StatusCode)
+	}
+
+	// 4. Targeted update via POST /api/v1/plugins/zip-update/update -> 200 OK, v1.0.0 -> v1.1.0
+	resp2 := uploadZip("/api/v1/plugins/zip-update/update", makeZip("zip-update", "1.1.0"))
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK on targeted update, got %d", resp2.StatusCode)
+	}
+	var res2 plugins.PluginInstallResult
+	if err := json.NewDecoder(resp2.Body).Decode(&res2); err != nil {
+		t.Fatalf("decode res2: %v", err)
+	}
+	if !res2.Updated || res2.PreviousVersion != "1.0.0" || res2.Version != "1.1.0" {
+		t.Fatalf("expected v1.0.0 -> v1.1.0 update, got %+v", res2)
+	}
+
+	// 5. Re-uploading via POST /api/v1/plugins/install also updates in-place -> 200 OK, v1.1.0 -> v1.2.0
+	resp3 := uploadZip("/api/v1/plugins/install", makeZip("zip-update", "1.2.0"))
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK on install-as-update, got %d", resp3.StatusCode)
+	}
+	var res3 plugins.PluginInstallResult
+	if err := json.NewDecoder(resp3.Body).Decode(&res3); err != nil {
+		t.Fatalf("decode res3: %v", err)
+	}
+	if !res3.Updated || res3.PreviousVersion != "1.1.0" || res3.Version != "1.2.0" {
+		t.Fatalf("expected v1.1.0 -> v1.2.0 update, got %+v", res3)
+	}
+
+	// 6. Disable plugin then update -> stays disabled
+	disableReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/plugins/zip-update/disable", nil)
+	disableReq.Header.Set("Authorization", "Bearer "+userToken)
+	disableResp, err := http.DefaultClient.Do(disableReq)
+	if err != nil || disableResp.StatusCode != http.StatusOK {
+		t.Fatalf("disable failed: %v", err)
+	}
+	disableResp.Body.Close()
+
+	resp4 := uploadZip("/api/v1/plugins/zip-update/update", makeZip("zip-update", "1.3.0"))
+	defer resp4.Body.Close()
+	if resp4.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK updating disabled plugin, got %d", resp4.StatusCode)
+	}
+	var res4 plugins.PluginInstallResult
+	if err := json.NewDecoder(resp4.Body).Decode(&res4); err != nil {
+		t.Fatalf("decode res4: %v", err)
+	}
+	if !res4.Updated || res4.PreviousVersion != "1.2.0" || res4.Version != "1.3.0" || res4.Enabled || res4.Status != plugins.StatusDisabled {
+		t.Fatalf("expected disabled plugin updated to v1.3.0 staying disabled, got %+v", res4)
+	}
+}
+
 

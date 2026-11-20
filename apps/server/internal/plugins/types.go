@@ -425,3 +425,10 @@ type PluginDetail struct {
 	PluginSummary
 	Logs []string `json:"logs"`
 }
+
+// PluginInstallResult extends PluginSummary with install/update metadata.
+type PluginInstallResult struct {
+	PluginSummary
+	Updated         bool   `json:"updated"`
+	PreviousVersion string `json:"previous_version,omitempty"`
+}

@@ -427,5 +427,111 @@ void main() {
       final pEvt = events.single as PluginEvent;
       expect(pEvt.data['plugin'], 'project-gutenberg');
     });
+
+    test('PluginInstallResult, formatInstallMessage, and updatePluginZip work end-to-end', () async {
+      final fresh = PluginInstallResult.fromJson({
+        'name': 'yoto',
+        'display_name': 'Yoto Player',
+        'version': '1.0.0',
+        'enabled': true,
+        'status': 'idle',
+        'updated': false,
+      });
+      expect(fresh.updated, isFalse);
+      expect(fresh.previousVersion, isNull);
+      expect(
+        PluginsNotifier.formatInstallMessage(fresh),
+        'Installed Yoto Player v1.0.0.',
+      );
+
+      final upgraded = PluginInstallResult.fromJson({
+        'name': 'yoto',
+        'display_name': 'Yoto Player',
+        'version': '1.1.0',
+        'enabled': true,
+        'status': 'idle',
+        'updated': true,
+        'previous_version': '1.0.0',
+      });
+      expect(upgraded.updated, isTrue);
+      expect(upgraded.previousVersion, '1.0.0');
+      expect(
+        PluginsNotifier.formatInstallMessage(upgraded),
+        'Updated Yoto Player v1.0.0 → v1.1.0.',
+      );
+
+      final reinstalled = PluginInstallResult.fromJson({
+        'name': 'yoto',
+        'display_name': 'Yoto Player',
+        'version': '1.1.0',
+        'enabled': true,
+        'status': 'idle',
+        'updated': true,
+        'previous_version': '1.1.0',
+      });
+      expect(
+        PluginsNotifier.formatInstallMessage(reinstalled),
+        'Reinstalled Yoto Player v1.1.0.',
+      );
+
+      final visitedPaths = <String>[];
+      final mockClient = MockClient((request) async {
+        visitedPaths.add('${request.method} ${request.url.path}');
+        if (request.url.path == '/api/v1/plugins/install') {
+          return http.Response(
+            jsonEncode({
+              'name': 'yoto',
+              'display_name': 'Yoto Player',
+              'version': '1.0.0',
+              'enabled': true,
+              'status': 'idle',
+              'updated': false,
+            }),
+            201,
+          );
+        }
+        if (request.url.path == '/api/v1/plugins/yoto/update') {
+          return http.Response(
+            jsonEncode({
+              'name': 'yoto',
+              'display_name': 'Yoto Player',
+              'version': '1.1.0',
+              'enabled': true,
+              'status': 'idle',
+              'updated': true,
+              'previous_version': '1.0.0',
+            }),
+            200,
+          );
+        }
+        return http.Response('not found', 404);
+      });
+
+      final api = ApiService(
+        baseUrl: 'http://localhost:8080',
+        token: 'jwt-123',
+        client: mockClient,
+      );
+
+      final installRes = await api.installPluginZip(
+        filename: 'yoto-1.0.0.zip',
+        bytes: const [80, 75, 3, 4],
+      );
+      expect(installRes.updated, isFalse);
+      expect(installRes.plugin.version, '1.0.0');
+
+      final updateRes = await api.updatePluginZip(
+        name: 'yoto',
+        filename: 'yoto-1.1.0.zip',
+        bytes: const [80, 75, 3, 4],
+      );
+      expect(updateRes.updated, isTrue);
+      expect(updateRes.previousVersion, '1.0.0');
+      expect(updateRes.plugin.version, '1.1.0');
+      expect(visitedPaths, [
+        'POST /api/v1/plugins/install',
+        'POST /api/v1/plugins/yoto/update',
+      ]);
+    });
   });
 }

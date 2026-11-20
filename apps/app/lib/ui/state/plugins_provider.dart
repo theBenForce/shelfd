@@ -124,6 +124,7 @@ class PluginsState {
   final List<PluginSummary> plugins;
   final bool isLoading;
   final bool isInstalling;
+  final String? updatingPluginName;
   final String? errorMessage;
   final String? successMessage;
 
@@ -131,9 +132,13 @@ class PluginsState {
     this.plugins = const [],
     this.isLoading = false,
     this.isInstalling = false,
+    this.updatingPluginName,
     this.errorMessage,
     this.successMessage,
   });
+
+  bool get isBusyInstallingOrUpdating =>
+      isInstalling || updatingPluginName != null;
 
   List<PluginSummary> get enabledCatalogPlugins =>
       plugins.where((p) => p.enabled && p.hasCatalog).toList();
@@ -153,6 +158,8 @@ class PluginsState {
     List<PluginSummary>? plugins,
     bool? isLoading,
     bool? isInstalling,
+    String? updatingPluginName,
+    bool clearUpdatingPlugin = false,
     String? errorMessage,
     bool clearError = false,
     String? successMessage,
@@ -162,6 +169,9 @@ class PluginsState {
       plugins: plugins ?? this.plugins,
       isLoading: isLoading ?? this.isLoading,
       isInstalling: isInstalling ?? this.isInstalling,
+      updatingPluginName: clearUpdatingPlugin
+          ? null
+          : (updatingPluginName ?? this.updatingPluginName),
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       successMessage:
           clearSuccess ? null : (successMessage ?? this.successMessage),
@@ -237,6 +247,22 @@ class PluginsNotifier extends Notifier<PluginsState> {
     }
   }
 
+  static String formatInstallMessage(PluginInstallResult result) {
+    final name = result.plugin.displayName;
+    final ver = result.plugin.version;
+    if (result.updated) {
+      final prev = result.previousVersion;
+      if (prev != null && prev.isNotEmpty) {
+        if (prev == ver) {
+          return 'Reinstalled $name v$ver.';
+        }
+        return 'Updated $name v$prev → v$ver.';
+      }
+      return 'Updated $name v$ver.';
+    }
+    return 'Installed $name v$ver.';
+  }
+
   Future<PluginSummary?> installZip({
     required String filename,
     required List<int> bytes,
@@ -249,7 +275,7 @@ class PluginsNotifier extends Notifier<PluginsState> {
     );
     try {
       final api = ref.read(apiServiceProvider);
-      final installed = await api.installPluginZip(
+      final result = await api.installPluginZip(
         filename: filename,
         bytes: bytes,
       );
@@ -258,16 +284,53 @@ class PluginsNotifier extends Notifier<PluginsState> {
         state = state.copyWith(
           plugins: list,
           isInstalling: false,
-          successMessage:
-              'Installed ${installed.displayName} v${installed.version}.',
+          successMessage: formatInstallMessage(result),
         );
       }
-      return installed;
+      return result.plugin;
     } catch (e) {
       if (!_isDisposed) {
         state = state.copyWith(
           isInstalling: false,
           errorMessage: 'Failed to install plugin: $e',
+        );
+      }
+      return null;
+    }
+  }
+
+  Future<PluginSummary?> updateZip({
+    required String name,
+    required String filename,
+    required List<int> bytes,
+  }) async {
+    if (_isDisposed) return null;
+    state = state.copyWith(
+      updatingPluginName: name,
+      clearError: true,
+      clearSuccess: true,
+    );
+    try {
+      final api = ref.read(apiServiceProvider);
+      final result = await api.updatePluginZip(
+        name: name,
+        filename: filename,
+        bytes: bytes,
+      );
+      final list = await api.getPlugins();
+      if (!_isDisposed) {
+        state = state.copyWith(
+          plugins: list,
+          clearUpdatingPlugin: true,
+          successMessage: formatInstallMessage(result),
+        );
+      }
+      return result.plugin;
+    } catch (e) {
+      if (!_isDisposed) {
+        state = state.copyWith(
+          clearUpdatingPlugin: true,
+          errorMessage: 'Failed to update plugin "$name": $e',
         );
       }
       return null;
