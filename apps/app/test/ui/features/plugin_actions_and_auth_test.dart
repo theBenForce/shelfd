@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shelf/data/models/background_job.dart';
 import 'package:shelf/data/models/plugin.dart';
 import 'package:shelf/data/services/api_service.dart';
 import 'package:shelf/ui/core/shared_layout.dart';
@@ -598,10 +599,13 @@ void main() {
   });
 
   testWidgets(
-      'PluginJobsBanner renders live SSE job_progress updates, clears on completion, and shows error toast on failure',
+      'BackgroundTasks UI renders live job updates, keeps completed history until cleared, and shows error toast on failure',
       (tester) async {
     final mockClient = MockClient((request) async {
-      if (request.url.path == '/api/v1/plugins/jobs') {
+      if (request.url.path == '/api/v1/jobs') {
+        if (request.method == 'DELETE') {
+          return http.Response(jsonEncode({'cleared': 1}), 200);
+        }
         return http.Response(jsonEncode({'jobs': []}), 200);
       }
       return http.Response('Not Found', 404);
@@ -627,8 +631,9 @@ void main() {
                 capturedRef = ref;
                 return const Column(
                   children: [
-                    Expanded(child: SizedBox()),
-                    PluginJobsBanner(),
+                    BackgroundTasksSidebarButton(),
+                    Expanded(child: BackgroundTasksPanelContent()),
+                    BackgroundTasksErrorListener(),
                   ],
                 );
               },
@@ -639,80 +644,73 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('plugin_jobs_banner')), findsNothing);
+    expect(find.text('Background Tasks'), findsWidgets);
+    expect(find.text('All quiet'), findsOneWidget);
 
-    final notifier = capturedRef.read(pluginJobsProvider.notifier);
-    notifier.handlePluginEvent({
-      'plugin': 'yoto',
-      'kind': 'job_progress',
-      'job': {
-        'id': 'pjob-1',
-        'plugin': 'yoto',
-        'action': 'send_to_yoto',
-        'title': 'The Hobbit',
-        'item_title': 'Chapter 1',
-        'status': 'running',
-        'current': 1,
-        'total': 2,
-        'item_progress_pct': 50.0,
-        'message': 'Uploading Chapter 1 (1/2)',
-      },
-    });
+    final notifier = capturedRef.read(backgroundJobsProvider.notifier);
+    notifier.upsertJob(
+      const BackgroundJob(
+        id: 'pjob-1',
+        kind: BackgroundJobKind.plugin,
+        title: 'The Hobbit',
+        itemTitle: 'Chapter 1',
+        status: 'running',
+        current: 1,
+        total: 2,
+        itemProgressPct: 50.0,
+        message: 'Uploading Chapter 1 (1/2)',
+        metadata: {'plugin': 'yoto', 'action': 'send_to_yoto'},
+      ),
+    );
     await tester.pump();
 
-    expect(find.byKey(const Key('plugin_jobs_banner')), findsOneWidget);
     expect(
-      find.byKey(const Key('plugin_job_current_progress_bar')),
+      find.byKey(const Key('background_tasks_sidebar_progress')),
       findsOneWidget,
     );
-    expect(
-      find.byKey(const Key('plugin_job_total_progress_bar')),
-      findsOneWidget,
-    );
-    expect(
-      find.textContaining('Active Job: The Hobbit • Chapter 1'),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('background_task_card_pjob-1')), findsOneWidget);
+    expect(find.textContaining('Uploading Chapter 1 (1/2)'), findsWidgets);
 
-    // Complete job -> banner clears
-    notifier.handlePluginEvent({
-      'plugin': 'yoto',
-      'kind': 'job_progress',
-      'job': {
-        'id': 'pjob-1',
-        'plugin': 'yoto',
-        'action': 'send_to_yoto',
-        'title': 'The Hobbit',
-        'status': 'completed',
-        'current': 2,
-        'total': 2,
-        'item_progress_pct': 100.0,
-        'message': 'Sent to Yoto',
-      },
-    });
+    // Complete job -> stays in recent history until cleared
+    notifier.upsertJob(
+      const BackgroundJob(
+        id: 'pjob-1',
+        kind: BackgroundJobKind.plugin,
+        title: 'The Hobbit',
+        status: 'completed',
+        current: 2,
+        total: 2,
+        itemProgressPct: 100.0,
+        message: 'Sent to Yoto',
+        metadata: {'plugin': 'yoto', 'action': 'send_to_yoto'},
+      ),
+    );
     await tester.pump();
 
-    expect(find.byKey(const Key('plugin_jobs_banner')), findsNothing);
+    expect(find.text('1 task completed'), findsOneWidget);
+    expect(find.byKey(const Key('background_task_card_pjob-1')), findsOneWidget);
+    expect(
+      find.byKey(const Key('background_tasks_clear_finished')),
+      findsOneWidget,
+    );
 
     // Emit failed job -> shows error toast
-    notifier.handlePluginEvent({
-      'plugin': 'yoto',
-      'kind': 'job_progress',
-      'job': {
-        'id': 'pjob-2',
-        'plugin': 'yoto',
-        'action': 'send_to_yoto',
-        'title': 'The Fellowship of the Ring',
-        'status': 'failed',
-        'error': 'Yoto API rate limit exceeded',
-      },
-    });
+    notifier.upsertJob(
+      const BackgroundJob(
+        id: 'pjob-2',
+        kind: BackgroundJobKind.plugin,
+        title: 'The Fellowship of the Ring',
+        status: 'failed',
+        error: 'Yoto API rate limit exceeded',
+        metadata: {'plugin': 'yoto', 'action': 'send_to_yoto'},
+      ),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.byKey(const Key('plugin_job_error_toast')), findsOneWidget);
+    expect(find.byKey(const Key('background_task_error_toast')), findsOneWidget);
     expect(
-      find.textContaining('yoto job failed for "The Fellowship of the Ring"'),
+      find.textContaining('The Fellowship of the Ring failed: Yoto API rate limit exceeded'),
       findsOneWidget,
     );
   });

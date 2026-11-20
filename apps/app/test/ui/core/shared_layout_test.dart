@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shelf/data/models/author.dart';
+import 'package:shelf/data/models/background_job.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/genre.dart';
 import 'package:shelf/data/models/queue_status.dart';
@@ -18,6 +19,14 @@ class FakeQueueNotifier extends QueueNotifier {
 
   @override
   QueueState build() => _initial;
+}
+
+class FakeBackgroundJobsNotifier extends BackgroundJobsNotifier {
+  final BackgroundJobsState _initial;
+  FakeBackgroundJobsNotifier([this._initial = const BackgroundJobsState()]);
+
+  @override
+  BackgroundJobsState build() => _initial;
 }
 
 class FakeLibraryNotifier extends LibraryNotifier {
@@ -159,22 +168,28 @@ void main() {
       expect(selectedNav, 3);
     });
 
-    testWidgets('ShelfdSideNav renders active AI Indexing progress card', (tester) async {
-      final activeStatus = const QueueStatus(
-        totalChapters: 45,
-        indexedChapters: 15,
-        pendingChapters: 30,
-        pendingUploads: 0,
-        progressPercent: 33.3,
-        isActive: true,
-        currentBook: 'Dune Messiah',
-        currentChapter: 'Chapter 4',
+    testWidgets('ShelfdSideNav renders active background task progress card and opens tasks panel', (tester) async {
+      final activeJob = const BackgroundJob(
+        id: 'job-ai-1',
+        kind: BackgroundJobKind.aiIndexing,
+        title: 'AI Catalog Indexing',
+        status: 'running',
+        current: 15,
+        total: 45,
+        itemTitle: 'Dune Messiah',
+        itemProgressPct: 33.3,
+        message: 'Chapter 4',
       );
 
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            queueProvider.overrideWith(() => FakeQueueNotifier(QueueState(status: activeStatus))),
+            queueProvider.overrideWith(() => FakeQueueNotifier()),
+            backgroundJobsProvider.overrideWith(
+              () => FakeBackgroundJobsNotifier(
+                BackgroundJobsState(jobs: [activeJob]),
+              ),
+            ),
           ],
           child: MaterialApp(
             theme: AppTheme.buildTheme(ReadingThemeMode.bone),
@@ -188,10 +203,17 @@ void main() {
         ),
       );
 
-      expect(find.text('AI Indexing'), findsOneWidget);
+      expect(find.byKey(const Key('background_tasks_sidebar_button')), findsOneWidget);
+      expect(find.text('AI Catalog Indexing'), findsOneWidget);
       expect(find.text('33%'), findsOneWidget);
-      expect(find.text('Dune Messiah'), findsOneWidget);
-      expect(find.text('Chapter 4'), findsOneWidget);
+      expect(find.textContaining('Dune Messiah'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('background_tasks_sidebar_button')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byKey(const Key('background_tasks_panel')), findsOneWidget);
+      expect(find.byKey(const Key('background_task_card_job-ai-1')), findsOneWidget);
     });
 
     test('resolveBookTitle returns matching book title when ID is given', () {
@@ -207,31 +229,12 @@ void main() {
       expect(resolveBookTitle('', books), '');
     });
 
-    testWidgets('ShelfdSideNav resolves book ID to title in AI Indexing card when library contains the book', (tester) async {
-      const bookId = 'c29a4d8b-143e-43c1-aa79-41f879201a11';
-      final activeStatus = const QueueStatus(
-        totalChapters: 45,
-        indexedChapters: 0,
-        pendingChapters: 45,
-        pendingUploads: 0,
-        progressPercent: 0.0,
-        isActive: true,
-        currentBook: bookId,
-        currentChapter: 'Chapter 16 (p.94-101)',
-      );
-
-      final books = [
-        const Book(
-          id: bookId,
-          title: 'Neuromancer',
-        ),
-      ];
-
+    testWidgets('ShelfdSideNav renders idle Background Tasks indicator when no jobs exist', (tester) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            queueProvider.overrideWith(() => FakeQueueNotifier(QueueState(status: activeStatus))),
-            libraryProvider.overrideWith(() => FakeLibraryNotifier(LibraryState(books: books))),
+            queueProvider.overrideWith(() => FakeQueueNotifier()),
+            backgroundJobsProvider.overrideWith(() => FakeBackgroundJobsNotifier()),
           ],
           child: MaterialApp(
             theme: AppTheme.buildTheme(ReadingThemeMode.bone),
@@ -245,41 +248,7 @@ void main() {
         ),
       );
 
-      expect(find.text('AI Indexing'), findsOneWidget);
-      expect(find.text('0%'), findsOneWidget);
-      expect(find.text('Neuromancer'), findsOneWidget);
-      expect(find.text(bookId), findsNothing);
-      expect(find.text('Chapter 16 (p.94-101)'), findsOneWidget);
-    });
-
-    testWidgets('ShelfdSideNav renders synced badge when idle', (tester) async {
-      final idleStatus = const QueueStatus(
-        totalChapters: 50,
-        indexedChapters: 50,
-        pendingChapters: 0,
-        pendingUploads: 0,
-        progressPercent: 100.0,
-        isActive: false,
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            queueProvider.overrideWith(() => FakeQueueNotifier(QueueState(status: idleStatus))),
-          ],
-          child: MaterialApp(
-            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
-            home: Scaffold(
-              body: ShelfdSideNav(
-                currentIndex: 0,
-                onTap: (_) {},
-              ),
-            ),
-          ),
-        ),
-      );
-
-      expect(find.text('AI Catalog Synced (50 passages)'), findsOneWidget);
+      expect(find.text('Background Tasks'), findsOneWidget);
     });
 
     testWidgets('ShelfdAdaptiveScaffold switches between ShelfdBottomNav and ShelfdSideNav', (tester) async {
@@ -626,7 +595,7 @@ void main() {
       }
     });
 
-    testWidgets('ShelfdTopBar default title, onOpenUploads badge, optional onLogout, and QueueStatus fallback percent', (tester) async {
+    testWidgets('ShelfdTopBar default title, onOpenUploads badge, optional onLogout, and active task percent', (tester) async {
       bool openedUploads = false;
       const status = QueueStatus(
         pendingChapters: 2,
@@ -636,11 +605,25 @@ void main() {
         stagedUploads: 4,
         isActive: true,
       );
+      const activeJob = BackgroundJob(
+        id: 'job-scan-50',
+        kind: BackgroundJobKind.libraryScan,
+        title: 'Library Rescan',
+        status: 'running',
+        current: 2,
+        total: 4,
+        message: 'Scanning 2 of 4 files...',
+      );
 
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             queueProvider.overrideWith(() => FakeQueueNotifier(const QueueState(status: status))),
+            backgroundJobsProvider.overrideWith(
+              () => FakeBackgroundJobsNotifier(
+                const BackgroundJobsState(jobs: [activeJob]),
+              ),
+            ),
           ],
           child: MaterialApp(
             theme: AppTheme.buildTheme(ReadingThemeMode.bone),
@@ -674,7 +657,8 @@ void main() {
       expect(openedUploads, isTrue);
 
       await tester.tap(find.text('Open Settings Without Logout'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Disconnect / Sign Out'), findsOneWidget);
     });
   });

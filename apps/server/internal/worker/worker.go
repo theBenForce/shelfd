@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shelfd/shelfd/internal/ai"
+	"github.com/shelfd/shelfd/internal/jobs"
 	"github.com/shelfd/shelfd/internal/repository"
 )
 
@@ -15,6 +16,7 @@ import (
 type Config struct {
 	BatchSize    int
 	PollInterval time.Duration
+	JobManager   *jobs.Manager
 	Logger       *slog.Logger
 }
 
@@ -30,6 +32,7 @@ type RuntimeStatus struct {
 type Worker struct {
 	repo         repository.StorageEngine
 	aiClient     ai.Client
+	jobManager   *jobs.Manager
 	batchSize    int
 	pollInterval time.Duration
 	logger       *slog.Logger
@@ -43,6 +46,7 @@ type Worker struct {
 	currentChapter string
 	isBusy         bool
 	lastProcessed  time.Time
+	activeJobID    string
 
 	listenersMu sync.Mutex
 	listeners   map[chan struct{}]struct{}
@@ -66,6 +70,7 @@ func NewWorker(repo repository.StorageEngine, aiClient ai.Client, cfg Config) *W
 	return &Worker{
 		repo:         repo,
 		aiClient:     aiClient,
+		jobManager:   cfg.JobManager,
 		batchSize:    batchSize,
 		pollInterval: pollInterval,
 		logger:       logger,
@@ -125,6 +130,7 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("getting unindexed paragraphs: %w", err)
 	}
 	if len(unindexedParas) == 0 {
+		w.completeActiveJobIfAny(ctx)
 		return 0, nil
 	}
 
@@ -143,16 +149,21 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 		bookTitle = book.Title
 	}
 
+	var chapterDesc string
+	if len(unindexedParas) == 1 {
+		chapterDesc = fmt.Sprintf("Chapter %d (p.%d-%d)", pFirst.ChapterIndex, pFirst.StartParagraph, pFirst.EndParagraph)
+	} else {
+		chapterDesc = fmt.Sprintf("Chapter %d (%d paragraphs)", pFirst.ChapterIndex, len(unindexedParas))
+	}
+
 	w.statusMu.Lock()
 	w.isBusy = true
 	w.currentBook = bookTitle
-	if len(unindexedParas) == 1 {
-		w.currentChapter = fmt.Sprintf("Chapter %d (p.%d-%d)", pFirst.ChapterIndex, pFirst.StartParagraph, pFirst.EndParagraph)
-	} else {
-		w.currentChapter = fmt.Sprintf("Chapter %d (%d paragraphs)", pFirst.ChapterIndex, len(unindexedParas))
-	}
+	w.currentChapter = chapterDesc
 	w.statusMu.Unlock()
 	w.broadcast()
+
+	jobID := w.ensureAndReportJobProgress(ctx, bookTitle, chapterDesc)
 
 	texts := make([]string, len(unindexedParas))
 	for i, p := range unindexedParas {
@@ -162,11 +173,14 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 	embeddings, err := w.aiClient.GenerateBatchEmbeddings(ctx, texts)
 	if err != nil {
 		w.logger.Error("failed to generate batch embeddings for paragraphs", "count", len(texts), "error", err)
+		w.failActiveJob(jobID, fmt.Sprintf("Embedding generation failed: %v", err))
 		return 0, err
 	}
 
 	if len(embeddings) != len(unindexedParas) {
-		return 0, fmt.Errorf("expected %d embeddings, got %d", len(unindexedParas), len(embeddings))
+		mismatchErr := fmt.Errorf("expected %d embeddings, got %d", len(unindexedParas), len(embeddings))
+		w.failActiveJob(jobID, mismatchErr.Error())
+		return 0, mismatchErr
 	}
 
 	vectorBatch := make([]repository.ParagraphVector, len(unindexedParas))
@@ -179,6 +193,7 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 
 	if err := w.repo.InsertParagraphVectors(ctx, vectorBatch); err != nil {
 		w.logger.Error("failed to insert paragraph vectors", "count", len(vectorBatch), "error", err)
+		w.failActiveJob(jobID, fmt.Sprintf("Saving embeddings failed: %v", err))
 		return 0, err
 	}
 
@@ -187,7 +202,118 @@ func (w *Worker) ProcessBatch(ctx context.Context) (int, error) {
 	w.statusMu.Unlock()
 	w.broadcast()
 
+	w.updateOrCompleteAfterBatch(ctx, jobID, bookTitle, chapterDesc)
+
 	return len(unindexedParas), nil
+}
+
+func (w *Worker) ensureAndReportJobProgress(ctx context.Context, bookTitle, chapterDesc string) string {
+	if w.jobManager == nil {
+		return ""
+	}
+	indexed := 0
+	total := 0
+	pct := 0.0
+	if qStatus, err := w.repo.GetQueueStatus(ctx); err == nil && qStatus != nil {
+		indexed = qStatus.IndexedChapters
+		total = qStatus.TotalChapters
+		pct = qStatus.ProgressPercent
+	}
+
+	w.statusMu.Lock()
+	jobID := w.activeJobID
+	w.statusMu.Unlock()
+
+	if jobID == "" || w.jobManager.Get(jobID) == nil || !w.jobManager.Get(jobID).IsActive() {
+		job := w.jobManager.Create(jobs.CreateOptions{
+			Kind:    jobs.KindAIIndexing,
+			Title:   "AI Catalog Indexing",
+			Status:  jobs.StatusRunning,
+			Total:   total,
+			Message: chapterDesc,
+		})
+		jobID = job.ID
+		w.statusMu.Lock()
+		w.activeJobID = jobID
+		w.statusMu.Unlock()
+	}
+
+	w.jobManager.UpdateProgress(jobID, jobs.ProgressUpdate{
+		Current:         &indexed,
+		Total:           &total,
+		ItemTitle:       &bookTitle,
+		ItemProgressPct: &pct,
+		Message:         &chapterDesc,
+	})
+	return jobID
+}
+
+func (w *Worker) updateOrCompleteAfterBatch(ctx context.Context, jobID, bookTitle, chapterDesc string) {
+	if w.jobManager == nil || jobID == "" {
+		return
+	}
+	qStatus, err := w.repo.GetQueueStatus(ctx)
+	if err != nil || qStatus == nil {
+		return
+	}
+	if qStatus.PendingChapters <= 0 {
+		msg := fmt.Sprintf("Indexed %d passages", qStatus.TotalChapters)
+		w.jobManager.Complete(jobID, msg, map[string]any{
+			"indexed_chapters": qStatus.IndexedChapters,
+			"total_chapters":   qStatus.TotalChapters,
+		})
+		w.statusMu.Lock()
+		if w.activeJobID == jobID {
+			w.activeJobID = ""
+		}
+		w.statusMu.Unlock()
+		return
+	}
+	indexed := qStatus.IndexedChapters
+	total := qStatus.TotalChapters
+	pct := qStatus.ProgressPercent
+	w.jobManager.UpdateProgress(jobID, jobs.ProgressUpdate{
+		Current:         &indexed,
+		Total:           &total,
+		ItemTitle:       &bookTitle,
+		ItemProgressPct: &pct,
+		Message:         &chapterDesc,
+	})
+}
+
+func (w *Worker) completeActiveJobIfAny(ctx context.Context) {
+	if w.jobManager == nil {
+		return
+	}
+	w.statusMu.Lock()
+	jobID := w.activeJobID
+	w.activeJobID = ""
+	w.statusMu.Unlock()
+	if jobID == "" {
+		return
+	}
+	msg := "AI catalog synced"
+	var meta map[string]any
+	if qStatus, err := w.repo.GetQueueStatus(ctx); err == nil && qStatus != nil {
+		msg = fmt.Sprintf("Indexed %d passages", qStatus.TotalChapters)
+		meta = map[string]any{
+			"indexed_chapters": qStatus.IndexedChapters,
+			"total_chapters":   qStatus.TotalChapters,
+		}
+	}
+	w.jobManager.Complete(jobID, msg, meta)
+}
+
+func (w *Worker) failActiveJob(jobID, errMsg string) {
+	if w.jobManager == nil || jobID == "" {
+		return
+	}
+	w.jobManager.Fail(jobID, errMsg)
+	w.statusMu.Lock()
+	if w.activeJobID == jobID {
+		w.activeJobID = ""
+	}
+	w.statusMu.Unlock()
 }
 
 // Trigger signals the worker to immediately process pending chapters.

@@ -3025,7 +3025,8 @@ void main() {
         ),
       );
       expect(find.text('4'), findsWidgets);
-      expect(find.text('AI Catalog Synced (10 passages)'), findsOneWidget);
+      expect(find.byKey(const Key('background_tasks_sidebar_button')), findsOneWidget);
+      expect(find.byKey(const Key('background_tasks_badge_button')), findsOneWidget);
     });
   });
 

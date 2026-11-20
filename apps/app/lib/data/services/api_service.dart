@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/author.dart';
+import '../models/background_job.dart';
 import '../models/book.dart';
 import '../models/book_chat.dart';
 import '../models/bookmark.dart';
@@ -56,6 +57,16 @@ class ScanStatusEvent extends ShelfdEvent {
 class PluginEvent extends ShelfdEvent {
   final Map<String, dynamic> data;
   const PluginEvent(this.data);
+}
+
+class JobUpdatedEvent extends ShelfdEvent {
+  final BackgroundJob job;
+  const JobUpdatedEvent(this.job);
+}
+
+class JobRemovedEvent extends ShelfdEvent {
+  final String jobId;
+  const JobRemovedEvent(this.jobId);
 }
 
 class ApiService {
@@ -486,11 +497,21 @@ class ApiService {
     return data.map((h) => SemanticSearchHit.fromJson(h as Map<String, dynamic>)).toList();
   }
 
-  Future<void> triggerLibraryScan() async {
+  Future<BackgroundJob?> triggerLibraryScan() async {
     final response = await client.post(_uri('/api/v1/library/scan'), headers: _headers());
     if (response.statusCode >= 400) {
       throw ApiException(response.statusCode, response.body);
     }
+    if (response.body.trim().isEmpty) return null;
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic> && decoded['job'] is Map) {
+        return BackgroundJob.fromJson(
+          Map<String, dynamic>.from(decoded['job'] as Map),
+        );
+      }
+    } catch (_) {}
+    return null;
   }
 
   Future<QueueStatus> getQueueStatus() async {
@@ -551,6 +572,15 @@ class ApiService {
                 break;
               case 'plugin_event':
                 yield PluginEvent(data);
+                break;
+              case 'job_updated':
+                yield JobUpdatedEvent(BackgroundJob.fromJson(data));
+                break;
+              case 'job_removed':
+                final jobId = data['job_id']?.toString() ?? '';
+                if (jobId.isNotEmpty) {
+                  yield JobRemovedEvent(jobId);
+                }
                 break;
             }
           } catch (_) {
@@ -1342,6 +1372,50 @@ class ApiService {
     );
     if (response.statusCode >= 400 && response.statusCode != 404) {
       _throwPluginError(response);
+    }
+  }
+
+  Future<List<BackgroundJob>> getBackgroundJobs() async {
+    final response = await client.get(
+      _uri('/api/v1/jobs'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final decoded = jsonDecode(response.body);
+    final List<dynamic> list;
+    if (decoded is Map<String, dynamic>) {
+      list = decoded['jobs'] as List<dynamic>? ?? const [];
+    } else if (decoded is List<dynamic>) {
+      list = decoded;
+    } else {
+      list = const [];
+    }
+    return list
+        .whereType<Map>()
+        .map((e) => BackgroundJob.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  Future<void> dismissBackgroundJob(String jobId) async {
+    final encoded = Uri.encodeComponent(jobId);
+    final response = await client.delete(
+      _uri('/api/v1/jobs/$encoded'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400 && response.statusCode != 404) {
+      throw ApiException(response.statusCode, response.body);
+    }
+  }
+
+  Future<void> clearFinishedBackgroundJobs() async {
+    final response = await client.delete(
+      _uri('/api/v1/jobs'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
     }
   }
 }

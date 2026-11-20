@@ -14,6 +14,7 @@ import (
 	"github.com/shelfd/shelfd/internal/audio"
 	"github.com/shelfd/shelfd/internal/epub"
 	"github.com/shelfd/shelfd/internal/events"
+	"github.com/shelfd/shelfd/internal/jobs"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
 )
@@ -22,6 +23,7 @@ import (
 type UploadWorkerConfig struct {
 	PollInterval time.Duration
 	Hub          *events.Hub
+	JobManager   *jobs.Manager
 	Logger       *slog.Logger
 }
 
@@ -31,6 +33,7 @@ type UploadWorker struct {
 	ingester      *scanner.Ingester
 	chapterWorker *Worker
 	hub           *events.Hub
+	jobManager    *jobs.Manager
 	pollInterval  time.Duration
 	logger        *slog.Logger
 	notifyCh      chan struct{}
@@ -61,6 +64,7 @@ func NewUploadWorker(
 		ingester:      ingester,
 		chapterWorker: chapterWorker,
 		hub:           cfg.Hub,
+		jobManager:    cfg.JobManager,
 		pollInterval:  pollInterval,
 		logger:        logger,
 		notifyCh:      make(chan struct{}, 1),
@@ -95,20 +99,42 @@ func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
 	w.procMu.Lock()
 	defer w.procMu.Unlock()
 
-	jobs, err := w.repo.GetPendingUploadJobs(ctx, 1)
+	pendingJobs, err := w.repo.GetPendingUploadJobs(ctx, 1)
 	if err != nil {
 		return false, fmt.Errorf("getting pending upload jobs: %w", err)
 	}
-	if len(jobs) == 0 {
+	if len(pendingJobs) == 0 {
 		return false, nil
 	}
 
-	job := jobs[0]
+	job := pendingJobs[0]
 	w.logger.Info("processing upload job", "job_id", job.ID, "filename", job.Filename)
 
 	if err := w.repo.UpdateUploadJobStatus(ctx, job.ID, "processing", nil, nil); err != nil {
 		w.logger.Error("failed to mark job processing", "job_id", job.ID, "error", err)
 		return false, err
+	}
+
+	bgJobID := "upload-" + job.ID
+	if w.jobManager != nil {
+		w.jobManager.Create(jobs.CreateOptions{
+			ID:       bgJobID,
+			Kind:     jobs.KindUploadIngest,
+			Title:    "Ingesting Upload",
+			Subtitle: job.Filename,
+			Status:   jobs.StatusRunning,
+			Total:    1,
+			Message:  "Parsing metadata...",
+			Metadata: map[string]any{
+				"upload_job_id": job.ID,
+				"filename":      job.Filename,
+			},
+		})
+	}
+	failBgJob := func(errMsg string) {
+		if w.jobManager != nil {
+			w.jobManager.Fail(bgJobID, errMsg)
+		}
 	}
 
 	// Always ensure staged file and staged cover are removed when done with processing
@@ -120,6 +146,7 @@ func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if _, err := os.Stat(job.StagedPath); os.IsNotExist(err) {
 		errMsg := "staged file not found on disk"
 		_ = w.repo.UpdateUploadJobStatus(ctx, job.ID, "failed", nil, &errMsg)
+		failBgJob(errMsg)
 		w.logger.Error("upload job failed: staged file missing", "job_id", job.ID)
 		return true, nil
 	}
@@ -133,6 +160,7 @@ func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
 		if err != nil {
 			errMsg := fmt.Sprintf("invalid epub archive: %v", err)
 			_ = w.repo.UpdateUploadJobStatus(ctx, job.ID, "failed", nil, &errMsg)
+			failBgJob(errMsg)
 			w.logger.Error("upload job failed: opening epub", "job_id", job.ID, "error", err)
 			return true, nil
 		}
@@ -141,6 +169,7 @@ func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to parse epub metadata: %v", err)
 			_ = w.repo.UpdateUploadJobStatus(ctx, job.ID, "failed", nil, &errMsg)
+			failBgJob(errMsg)
 			w.logger.Error("upload job failed: parsing metadata", "job_id", job.ID, "error", err)
 			return true, nil
 		}
@@ -156,6 +185,7 @@ func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
 		if err != nil {
 			errMsg := fmt.Sprintf("failed to parse audio metadata: %v", err)
 			_ = w.repo.UpdateUploadJobStatus(ctx, job.ID, "failed", nil, &errMsg)
+			failBgJob(errMsg)
 			w.logger.Error("upload job failed: parsing audio metadata", "job_id", job.ID, "error", err)
 			return true, nil
 		}
@@ -169,10 +199,21 @@ func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
 		}
 	}
 
+	if w.jobManager != nil {
+		msg := "Importing into library..."
+		pct := 50.0
+		w.jobManager.UpdateProgress(bgJobID, jobs.ProgressUpdate{
+			ItemTitle:       &title,
+			ItemProgressPct: &pct,
+			Message:         &msg,
+		})
+	}
+
 	stagedFile, err := os.Open(job.StagedPath)
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to open staged file: %v", err)
 		_ = w.repo.UpdateUploadJobStatus(ctx, job.ID, "failed", nil, &errMsg)
+		failBgJob(errMsg)
 		w.logger.Error("upload job failed: opening staged file", "job_id", job.ID, "error", err)
 		return true, nil
 	}
@@ -196,13 +237,22 @@ func (w *UploadWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to ingest book into library: %v", err)
 		_ = w.repo.UpdateUploadJobStatus(ctx, job.ID, "failed", nil, &errMsg)
+		failBgJob(errMsg)
 		w.logger.Error("upload job failed: ingestion error", "job_id", job.ID, "error", err)
 		return true, nil
 	}
 
 	if err := w.repo.UpdateUploadJobStatus(ctx, job.ID, "completed", &book.ID, nil); err != nil {
 		w.logger.Error("failed to mark job completed", "job_id", job.ID, "error", err)
+		failBgJob(err.Error())
 		return true, err
+	}
+
+	if w.jobManager != nil {
+		w.jobManager.Complete(bgJobID, fmt.Sprintf("Added \"%s\" to library", book.Title), map[string]any{
+			"book_id":  book.ID,
+			"filename": job.Filename,
+		})
 	}
 
 	w.logger.Info("upload job completed successfully", "job_id", job.ID, "book_id", book.ID, "title", book.Title)

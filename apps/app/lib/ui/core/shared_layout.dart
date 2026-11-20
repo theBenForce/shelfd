@@ -8,10 +8,12 @@ import '../../data/models/series.dart';
 import '../../data/models/topic.dart';
 import '../features/audiobook/widgets/mini_player_bar.dart';
 import '../state/providers.dart';
+import 'background_tasks_ui.dart';
 import 'responsive.dart';
 import 'theme.dart';
 import 'tokens.dart';
 import 'typography.dart';
+export 'background_tasks_ui.dart';
 
 /// Resolves a book ID to its human-readable title if found in the loaded catalog.
 String? resolveBookTitle(String? bookOrId, List<Book> books) {
@@ -381,9 +383,11 @@ class ShelfdTopBar extends StatelessWidget implements PreferredSizeWidget {
         ],
       ),
       actions: actions ??
-          (onOpenUploads != null
-              ? [ShelfdUploadsBadgeButton(onPressed: onOpenUploads)]
-              : null),
+          [
+            const BackgroundTasksBadgeButton(),
+            if (onOpenUploads != null)
+              ShelfdUploadsBadgeButton(onPressed: onOpenUploads),
+          ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
         child: Container(color: colors.subtleBorder, height: 1),
@@ -879,8 +883,8 @@ class _ShelfdSideNavState extends ConsumerState<ShelfdSideNav> {
 
           const SizedBox(height: AppTokens.space12),
 
-          // Live AI indexing queue progress card
-          const _QueueStatusCard(),
+          // Standardized Background Tasks activity indicator
+          const BackgroundTasksSidebarButton(),
           const SizedBox(height: AppTokens.space12),
 
           // Rescan Library Utility Button (tonal style so page primary CTAs lead)
@@ -1111,208 +1115,6 @@ class _SideNavSubItem extends StatelessWidget {
   }
 }
 
-class _QueueStatusCard extends ConsumerWidget {
-  const _QueueStatusCard();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final colors = ShelfdColors.of(context);
-    final queueState = ref.watch(queueProvider);
-    final status = queueState.status;
-
-    if (status == null) {
-      if (queueState.isLoading) {
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: colors.container.withValues(alpha: 0.6),
-            borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-            border: Border.all(color: colors.subtleBorder),
-          ),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 12,
-                height: 12,
-                child: CircularProgressIndicator(
-                  strokeWidth: 1.5,
-                  color: colors.mutedInk,
-                ),
-              ),
-              const SizedBox(width: AppTokens.space8),
-              Expanded(
-                child: Text(
-                  'Checking queue...',
-                  style: AppTypography.bodySans(
-                    fontSize: 11,
-                    color: colors.mutedInk,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        );
-      }
-      return const SizedBox.shrink();
-    }
-
-    final isActive =
-        status.isActive ||
-        status.pendingChapters > 0 ||
-        status.pendingUploads > 0;
-
-    if (!isActive) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: colors.container.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-          border: Border.all(color: colors.subtleBorder),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.check_circle_outline_rounded,
-              size: 14,
-              color: colors.accentSecondary,
-            ),
-            const SizedBox(width: AppTokens.space8),
-            Expanded(
-              child: Text(
-                'AI Catalog Synced (${status.totalChapters} passages)',
-                style: AppTypography.bodySans(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  color: colors.mutedInk,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final libraryState = ref.watch(libraryProvider);
-    final resolvedBook = resolveBookTitle(
-      status.currentBook,
-      libraryState.books,
-    );
-    final effectivePercent = status.progressPercent > 0
-        ? status.progressPercent
-        : (status.totalChapters > 0 &&
-                  status.pendingChapters < status.totalChapters
-              ? ((status.totalChapters - status.pendingChapters) /
-                        status.totalChapters) *
-                    100.0
-              : 0.0);
-    final progress = (effectivePercent / 100.0).clamp(0.0, 1.0);
-    final title = (resolvedBook != null && resolvedBook.isNotEmpty)
-        ? resolvedBook
-        : (status.pendingUploads > 0
-              ? 'Processing uploads...'
-              : 'Indexing library passages...');
-
-    final subtext =
-        (status.currentChapter != null && status.currentChapter!.isNotEmpty)
-        ? status.currentChapter!
-        : '${status.indexedChapters} of ${status.totalChapters} indexed (${effectivePercent.toStringAsFixed(0)}%)';
-
-    return InkWell(
-      onTap: () => ref.read(queueProvider.notifier).refresh(),
-      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-      child: Container(
-        padding: const EdgeInsets.all(AppTokens.space12),
-        decoration: BoxDecoration(
-          color: colors.surface,
-          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-          border: Border.all(color: colors.subtleBorder),
-          boxShadow: [
-            BoxShadow(
-              color: colors.cardShadowColor,
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: colors.accentPrimary.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Icon(
-                    Icons.auto_awesome_rounded,
-                    size: 14,
-                    color: colors.accentPrimary,
-                  ),
-                ),
-                const SizedBox(width: AppTokens.space8),
-                Expanded(
-                  child: Text(
-                    'AI Indexing',
-                    style: AppTypography.bodySans(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: colors.ink,
-                    ),
-                  ),
-                ),
-                Text(
-                  '${effectivePercent.toStringAsFixed(0)}%',
-                  style: AppTypography.mono(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: colors.accentPrimary,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppTokens.space8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(2),
-              child: LinearProgressIndicator(
-                value: progress,
-                minHeight: 4,
-                backgroundColor: colors.container,
-                valueColor: AlwaysStoppedAnimation<Color>(colors.accentPrimary),
-              ),
-            ),
-            const SizedBox(height: AppTokens.space8),
-            Text(
-              title,
-              style: AppTypography.bodySans(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: colors.ink,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              subtext,
-              style: AppTypography.bodySans(
-                fontSize: 10,
-                color: colors.mutedInk,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class ShelfdAdaptiveScaffold extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onNavTap;
@@ -1360,7 +1162,7 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
               child: Column(
                 children: [
                   Expanded(child: body),
-                  const PluginJobsBanner(),
+                  const BackgroundTasksErrorListener(),
                   const MiniPlayerBar(),
                 ],
               ),
@@ -1376,7 +1178,7 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
       body: Column(
         children: [
           Expanded(child: body),
-          const PluginJobsBanner(),
+          const BackgroundTasksErrorListener(),
           const MiniPlayerBar(),
         ],
       ),
@@ -1385,140 +1187,6 @@ class ShelfdAdaptiveScaffold extends StatelessWidget {
         onTap: onNavTap,
         currentPath: currentPath,
         onNavigate: onNavigate,
-      ),
-    );
-  }
-}
-
-class PluginJobsBanner extends ConsumerWidget {
-  const PluginJobsBanner({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    ref.listen<PluginJobsState>(pluginJobsProvider, (previous, next) {
-      final err = next.latestError;
-      if (err != null && err.id != previous?.latestError?.id) {
-        final messenger = ScaffoldMessenger.maybeOf(context);
-        final errText = (err.error != null && err.error!.trim().isNotEmpty)
-            ? err.error!.trim()
-            : (err.message ?? 'Plugin job failed');
-        messenger?.showSnackBar(
-          SnackBar(
-            key: const Key('plugin_job_error_toast'),
-            content: Text(
-              '${err.plugin} job failed for "${err.title}": $errText',
-            ),
-            backgroundColor: Colors.red.shade800,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        ref.read(pluginJobsProvider.notifier).acknowledgeError(err.id);
-      }
-    });
-
-    final jobsState = ref.watch(pluginJobsProvider);
-    if (!jobsState.hasActiveJobs) {
-      return const SizedBox.shrink();
-    }
-
-    final colors = ShelfdColors.of(context);
-    final currentPct = (jobsState.currentItemProgress * 100).round();
-    final totalPct = (jobsState.totalJobsProgress * 100).round();
-
-    return Container(
-      key: const Key('plugin_jobs_banner'),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        border: Border(
-          top: BorderSide(color: colors.subtleBorder),
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.extension_rounded,
-                size: 15,
-                color: colors.accentPrimary,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'Active Job: ${jobsState.currentJobDisplayTitle}',
-                  style: AppTypography.bodySans(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: colors.ink,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  '${jobsState.currentStageDescription} ($currentPct%)',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTypography.mono(
-                    fontSize: 11,
-                    color: colors.mutedInk,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(3),
-            child: LinearProgressIndicator(
-              key: const Key('plugin_job_current_progress_bar'),
-              value: jobsState.currentItemProgress,
-              minHeight: 5,
-              backgroundColor: colors.containerHigh,
-              valueColor: AlwaysStoppedAnimation<Color>(colors.accentPrimary),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Overall Progress (${jobsState.completedItemsCount} of ${jobsState.totalItemsCount})',
-                  style: AppTypography.bodySans(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: colors.mutedInk,
-                  ),
-                ),
-              ),
-              Text(
-                '$totalPct%',
-                style: AppTypography.mono(
-                  fontSize: 11,
-                  color: colors.mutedInk,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(3),
-            child: LinearProgressIndicator(
-              key: const Key('plugin_job_total_progress_bar'),
-              value: jobsState.totalJobsProgress,
-              minHeight: 5,
-              backgroundColor: colors.containerHigh,
-              valueColor: AlwaysStoppedAnimation<Color>(
-                colors.accentPrimary.withValues(alpha: 0.7),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

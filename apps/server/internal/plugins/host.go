@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/shelfd/shelfd/internal/events"
+	"github.com/shelfd/shelfd/internal/jobs"
 	"github.com/shelfd/shelfd/internal/repository"
 )
 
@@ -52,6 +53,7 @@ type HostConfig struct {
 	JobIdleTimeout time.Duration
 	TokenIssuer    TokenIssuer
 	Hub            *events.Hub
+	JobManager     *jobs.Manager
 	Logger         *slog.Logger
 }
 
@@ -205,6 +207,11 @@ func NewHost(repo repository.StorageEngine, cfg HostConfig) *Host {
 		jobWatchdog = defaultJobWatchdogTimeout
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	pjm := NewPluginJobManager(cfg.Hub)
+	if cfg.JobManager != nil {
+		pjm.SetJobManager(cfg.JobManager)
+		cfg.JobManager.SetOnDismiss(pjm.RemoveLocal)
+	}
 	return &Host{
 		repo:               repo,
 		pluginsDir:         cfg.PluginsDir,
@@ -215,7 +222,7 @@ func NewHost(repo repository.StorageEngine, cfg HostConfig) *Host {
 		jobWatchdogTimeout: jobWatchdog,
 		tokenIssuer:        cfg.TokenIssuer,
 		hub:                cfg.Hub,
-		jobs:               NewPluginJobManager(cfg.Hub),
+		jobs:               pjm,
 		logger:             logger,
 		plugins:            make(map[string]*managedPlugin),
 		ctx:                ctx,

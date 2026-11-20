@@ -6,6 +6,7 @@ import (
 
 	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/events"
+	"github.com/shelfd/shelfd/internal/jobs"
 	"github.com/shelfd/shelfd/internal/plugins"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/scanner"
@@ -23,6 +24,7 @@ type RouterConfig struct {
 	ToolInvoker     ai.ToolInvoker
 	PluginHost      *plugins.Host
 	Hub             *events.Hub
+	JobManager      *jobs.Manager
 	DataDir         string
 	LibraryDir      string
 	JWTSecret       string
@@ -42,15 +44,21 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		logger = slog.Default()
 	}
 
+	jobManager := cfg.JobManager
+	if jobManager == nil {
+		jobManager = jobs.NewManager(cfg.Hub)
+	}
+
 	authHandler := NewAuthHandler(cfg.Repo, cfg.JWTSecret, logger)
 	bookHandler := NewBookHandler(cfg.Repo, cfg.Ingester, cfg.Worker, cfg.UploadWorker, cfg.AIClient, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
 	if cfg.ToolInvoker != nil {
 		bookHandler.SetToolInvoker(cfg.ToolInvoker)
 	}
 	taxHandler := NewTaxonomyHandler(cfg.Repo, cfg.LibraryDir, cfg.DataDir, logger)
-	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, cfg.Hub, logger)
+	libHandler := NewLibraryHandler(cfg.Repo, cfg.Scanner, cfg.Ingester, cfg.Worker, cfg.Hub, jobManager, logger)
 	connHandler := NewConnectHandler(cfg.Host, cfg.Port, cfg.Version, cfg.DefaultUsername)
 	queueHandler := NewQueueHandler(cfg.Repo, cfg.Worker, cfg.UploadWorker, cfg.Hub)
+	jobsHandler := NewJobsHandler(jobManager)
 	utilHandler := NewUtilityHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
 	audioHandler := NewAudiobookHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, logger)
 	metadataHandler := NewMetadataHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
@@ -156,6 +164,11 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	mux.Handle("GET /api/v1/queue/status", auth(http.HandlerFunc(queueHandler.GetStatus)))
 	mux.Handle("GET /api/v1/queue/events", auth(http.HandlerFunc(queueHandler.StreamEvents)))
+
+	// Unified background jobs routes
+	mux.Handle("GET /api/v1/jobs", auth(http.HandlerFunc(jobsHandler.ListJobs)))
+	mux.Handle("DELETE /api/v1/jobs", auth(http.HandlerFunc(jobsHandler.ClearFinishedJobs)))
+	mux.Handle("DELETE /api/v1/jobs/{id}", auth(http.HandlerFunc(jobsHandler.DismissJob)))
 
 	mux.Handle("GET /api/v1/utilities/duplicates", auth(http.HandlerFunc(utilHandler.FindDuplicates)))
 	mux.Handle("POST /api/v1/utilities/merge-books", auth(http.HandlerFunc(utilHandler.MergeBooks)))
