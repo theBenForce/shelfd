@@ -289,7 +289,9 @@ export async function buildPlugin(pluginDir: string): Promise<{ outFile: string;
     "",
   ];
 
-  fs.writeFileSync(outFile, `${headerLines.join("\n")}${chunks.join("\n\n")}\n`, "utf8");
+  const tmpOutFile = `${outFile}.tmp.${process.pid}.${Math.random().toString(36).slice(2)}`;
+  fs.writeFileSync(tmpOutFile, `${headerLines.join("\n")}${chunks.join("\n\n")}\n`, "utf8");
+  fs.renameSync(tmpOutFile, outFile);
   return { outFile, manifest };
 }
 
@@ -618,13 +620,39 @@ export async function verifyPlugin(pluginDir: string): Promise<VerifyReport> {
       stderrLines.push(line);
     });
 
+    let childExitError: Error | null = null;
+    const formatStderrSuffix = (): string =>
+      stderrLines.length > 0 ? `\nPlugin stderr:\n${stderrLines.slice(-20).join("\n")}` : "";
+
+    const failPendingOnExit = (err: Error): void => {
+      if (!childExitError) {
+        childExitError = err;
+      }
+      for (const [id, waiter] of pending.entries()) {
+        pending.delete(id);
+        waiter.reject(childExitError);
+      }
+    };
+
+    child.once("error", (err) => {
+      failPendingOnExit(new Error(`Plugin process error: ${err.message}${formatStderrSuffix()}`));
+    });
+    child.once("exit", (code, signal) => {
+      failPendingOnExit(
+        new Error(`Plugin process exited unexpectedly (code=${String(code)}, signal=${String(signal)})${formatStderrSuffix()}`)
+      );
+    });
+
     const callRpc = (method: string, params: Record<string, unknown>, timeoutMs = 10_000): Promise<Record<string, unknown>> => {
+      if (childExitError) {
+        return Promise.reject(childExitError);
+      }
       reqCounter += 1;
       const id = String(reqCounter);
       return new Promise((resolve, reject) => {
         const t = setTimeout(() => {
           pending.delete(id);
-          reject(new Error(`RPC ${method} timed out after ${timeoutMs}ms`));
+          reject(new Error(`RPC ${method} timed out after ${timeoutMs}ms${formatStderrSuffix()}`));
         }, timeoutMs);
         pending.set(id, {
           resolve: (msg) => {

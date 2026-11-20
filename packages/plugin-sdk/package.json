@@ -26,7 +26,7 @@
   },
   "scripts": {
     "build": "node --no-warnings ./scripts/build-sdk.mjs",
-    "test": "pnpm run build && node --no-warnings --test ./test/*.test.mjs",
+    "test": "node --no-warnings --test ./test/*.test.mjs",
     "lint": "node --no-warnings ./scripts/build-sdk.mjs --check",
     "clean": "rm -rf dist"
   }
