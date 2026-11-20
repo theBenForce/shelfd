@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/author.dart';
+import 'package:shelf/data/models/background_job.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/book_chat.dart';
 import 'package:shelf/data/models/bookmark.dart';
@@ -238,7 +239,7 @@ class _MockBookRepository implements BookRepository {
   }
 
   @override
-  Future<void> triggerScan() async {}
+  Future<BackgroundJob?> triggerScan() async => null;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

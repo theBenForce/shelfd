@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/author.dart';
+import 'package:shelf/data/models/background_job.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/models/genre.dart';
 import 'package:shelf/data/models/series.dart';
@@ -569,8 +570,9 @@ class MockScanBookRepo implements BookRepository {
   StorageService get storageService => throw UnimplementedError();
 
   @override
-  Future<void> triggerScan() async {
+  Future<BackgroundJob?> triggerScan() async {
     scanTriggered = true;
+    return null;
   }
 
   @override
