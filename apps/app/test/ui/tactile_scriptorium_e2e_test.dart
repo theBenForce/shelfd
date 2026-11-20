@@ -70,6 +70,14 @@ class _FakeQueueNotifier extends QueueNotifier {
   QueueState build() => _initial;
 }
 
+class _FakeBackgroundJobsNotifier extends BackgroundJobsNotifier {
+  final BackgroundJobsState _initial;
+  _FakeBackgroundJobsNotifier([this._initial = const BackgroundJobsState()]);
+
+  @override
+  BackgroundJobsState build() => _initial;
+}
+
 class _FakeLibraryNotifier extends LibraryNotifier {
   final LibraryState _initial;
   _FakeLibraryNotifier([this._initial = const LibraryState()]);
@@ -575,10 +583,25 @@ void main() {
           stagedUploads: 3,
           isActive: true,
         );
+        const activeJob = BackgroundJob(
+          id: 'job-ai-42',
+          kind: BackgroundJobKind.aiIndexing,
+          title: 'AI Catalog Indexing',
+          status: 'running',
+          current: 2,
+          total: 4,
+          itemTitle: 'The Left Hand of Darkness',
+          message: 'Chapter 2',
+        );
         await tester.pumpWidget(
           ProviderScope(
             overrides: [
               queueProvider.overrideWith(() => _FakeQueueNotifier(const QueueState(status: status))),
+              backgroundJobsProvider.overrideWith(
+                () => _FakeBackgroundJobsNotifier(
+                  const BackgroundJobsState(jobs: [activeJob]),
+                ),
+              ),
               libraryProvider.overrideWith(() => _FakeLibraryNotifier(const LibraryState(books: [sampleBook]))),
             ],
             child: MaterialApp(
@@ -606,7 +629,7 @@ void main() {
         expect(find.text('Uploads'), findsOneWidget);
         expect(find.text('3'), findsOneWidget);
         expect(find.text('50%'), findsOneWidget);
-        expect(find.text('The Left Hand of Darkness'), findsOneWidget);
+        expect(find.textContaining('The Left Hand of Darkness'), findsOneWidget);
       });
 
       testWidgets('F03-T1-05: PrimaryButton, FilterPillsRow, and showShelfdSettingsModal render with Scriptorium tokens', (tester) async {
