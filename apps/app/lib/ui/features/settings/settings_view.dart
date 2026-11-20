@@ -214,6 +214,31 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     }
   }
 
+  Future<void> _handleUpdatePluginZip(PluginSummary plugin) async {
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['zip'],
+        allowMultiple: false,
+      );
+      if (result.isEmpty) return;
+      final file = result.first;
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty || !mounted) return;
+      await ref.read(pluginsProvider.notifier).updateZip(
+            name: plugin.name,
+            filename: file.name,
+            bytes: bytes,
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to read plugin archive: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
@@ -387,8 +412,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 borderRadius: BorderRadius.circular(AppTokens.radiusSm),
               ),
             ),
-            onPressed:
-                pluginsState.isInstalling ? null : _handleInstallPluginZip,
+            onPressed: pluginsState.isBusyInstallingOrUpdating
+                ? null
+                : _handleInstallPluginZip,
             icon: const Icon(Icons.upload_file_rounded, size: 15),
             label: Text(
               pluginsState.isInstalling ? 'Installing...' : 'Install .zip',
@@ -439,7 +465,12 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               final isLast = entry.key == pluginsState.plugins.length - 1;
               return Padding(
                 padding: EdgeInsets.only(bottom: isLast ? 0 : AppTokens.space12),
-                child: _buildPluginRowCard(context, c, entry.value),
+                child: _buildPluginRowCard(
+                  context,
+                  c,
+                  entry.value,
+                  pluginsState,
+                ),
               );
             }),
         ],
@@ -451,6 +482,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     BuildContext context,
     ShelfdColors c,
     PluginSummary plugin,
+    PluginsState pluginsState,
   ) {
     final isHealthy = plugin.status == 'running' || plugin.status == 'idle';
     final isError = plugin.status == 'unhealthy';
@@ -545,6 +577,17 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                     );
                   },
                 ),
+              ShelfdSecondaryButton(
+                key: Key('plugin_update_${plugin.name}'),
+                label: pluginsState.updatingPluginName == plugin.name
+                    ? 'Updating...'
+                    : 'Update .zip',
+                icon: Icons.system_update_alt_rounded,
+                compact: true,
+                onPressed: pluginsState.isBusyInstallingOrUpdating
+                    ? null
+                    : () => _handleUpdatePluginZip(plugin),
+              ),
               ShelfdSecondaryButton(
                 key: Key('plugin_logs_${plugin.name}'),
                 label: 'Logs',

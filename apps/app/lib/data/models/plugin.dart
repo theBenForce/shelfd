@@ -1114,6 +1114,28 @@ class PluginSummary {
   }
 }
 
+class PluginInstallResult {
+  final PluginSummary plugin;
+  final bool updated;
+  final String? previousVersion;
+
+  const PluginInstallResult({
+    required this.plugin,
+    this.updated = false,
+    this.previousVersion,
+  });
+
+  factory PluginInstallResult.fromJson(Map<String, dynamic> json) {
+    final rawPrev = json['previous_version'] as String?;
+    return PluginInstallResult(
+      plugin: PluginSummary.fromJson(json),
+      updated: json['updated'] as bool? ?? false,
+      previousVersion:
+          (rawPrev != null && rawPrev.trim().isNotEmpty) ? rawPrev.trim() : null,
+    );
+  }
+}
+
 class PluginDetail {
   final PluginSummary summary;
   final List<String> logs;

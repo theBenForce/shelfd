@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -966,6 +967,159 @@ func TestHost_ActionsManifestAuthRPCsJobLeaseWatchdogAndTokenRefresh(t *testing.
 	discRes, err := host.DisconnectAuth(ctx, "mock-actions", user.ID, user.Username)
 	if err != nil || discRes.Linked {
 		t.Fatalf("DisconnectAuth failed: res=%+v err=%v", discRes, err)
+	}
+}
+
+func TestInstallOrUpdateZip_LifecycleAndSafety(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	pluginsDir := t.TempDir()
+
+	host := plugins.NewHost(repo, plugins.HostConfig{
+		PluginsDir:    pluginsDir,
+		APIBase:       "http://127.0.0.1:18080",
+		ShelfdVersion: "0.1.0-test",
+		MasterSecret:  "test-master-secret",
+		IdleTimeout:   30 * time.Second,
+		Hub:           events.NewHub(),
+	})
+	defer host.Stop()
+
+	makePluginZip := func(name, version string) []byte {
+		script := `
+import readline from 'node:readline';
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+rl.on('line', (line) => {
+  if (!line.trim()) return;
+  const msg = JSON.parse(line);
+  if (msg.method === 'initialize') {
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        name: '` + name + `',
+        version: '` + version + `',
+        commands: [{ name: 'ping', title: 'Ping' }]
+      }
+    }) + '\n');
+  } else if (msg.method === 'commands/invoke') {
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: { version: '` + version + `', pid: process.pid }
+    }) + '\n');
+  } else if (msg.method === 'shutdown') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { ok: true } }) + '\n');
+    setTimeout(() => process.exit(0), 10);
+  }
+});
+`
+		return buildZipBytes(t, map[string]string{
+			"plugin.json": `{
+				"name": "` + name + `",
+				"version": "` + version + `",
+				"display_name": "Zip Update Demo",
+				"entrypoint": { "command": "node", "args": ["index.mjs"] },
+				"capabilities": ["commands"]
+			}`,
+			"index.mjs": script,
+		})
+	}
+
+	// 1. Fresh install via InstallOrUpdateZip
+	res1, err := host.InstallOrUpdateZip(ctx, makePluginZip("zip-demo", "1.0.0"), plugins.InstallZipOptions{})
+	if err != nil {
+		t.Fatalf("fresh install failed: %v", err)
+	}
+	if res1.Updated || res1.PreviousVersion != "" {
+		t.Fatalf("expected fresh install metadata, got updated=%v prev=%q", res1.Updated, res1.PreviousVersion)
+	}
+	if res1.Version != "1.0.0" || !res1.Enabled {
+		t.Fatalf("expected enabled v1.0.0, got %+v", res1)
+	}
+	if _, err := os.Stat(filepath.Join(pluginsDir, "zip-demo", plugins.UserManagedMarkerFile)); err != nil {
+		t.Fatalf("expected %s marker file after zip install: %v", plugins.UserManagedMarkerFile, err)
+	}
+
+	// Capture initial PID and write a .data scratch file to verify preservation across updates
+	raw1, err := host.InvokeCommand(ctx, "zip-demo", "ping", nil, "user-1", "admin")
+	if err != nil {
+		t.Fatalf("ping v1.0.0 failed: %v", err)
+	}
+	var ping1 struct {
+		Version string `json:"version"`
+		PID     int    `json:"pid"`
+	}
+	if err := json.Unmarshal(raw1, &ping1); err != nil || ping1.Version != "1.0.0" {
+		t.Fatalf("unexpected ping1: %s (err=%v)", string(raw1), err)
+	}
+
+	scratchPath := filepath.Join(pluginsDir, "zip-demo", ".data", "state.txt")
+	if err := os.MkdirAll(filepath.Dir(scratchPath), 0755); err != nil {
+		t.Fatalf("mkdir .data: %v", err)
+	}
+	if err := os.WriteFile(scratchPath, []byte("keep-me"), 0644); err != nil {
+		t.Fatalf("write scratch file: %v", err)
+	}
+
+	// 2. Reject update when archive name does not match ExpectedName
+	_, err = host.InstallOrUpdateZip(ctx, makePluginZip("wrong-plugin", "2.0.0"), plugins.InstallZipOptions{
+		ExpectedName: "zip-demo",
+	})
+	if !errors.Is(err, plugins.ErrPluginNameMismatch) {
+		t.Fatalf("expected ErrPluginNameMismatch, got %v", err)
+	}
+	// Reject update targeting non-existent plugin
+	_, err = host.InstallOrUpdateZip(ctx, makePluginZip("ghost-plugin", "1.0.0"), plugins.InstallZipOptions{
+		ExpectedName: "ghost-plugin",
+	})
+	if !errors.Is(err, plugins.ErrPluginNotFound) {
+		t.Fatalf("expected ErrPluginNotFound, got %v", err)
+	}
+
+	// 3. In-place update (v1.0.0 -> v1.1.0) with ExpectedName
+	res2, err := host.InstallOrUpdateZip(ctx, makePluginZip("zip-demo", "1.1.0"), plugins.InstallZipOptions{
+		ExpectedName: "zip-demo",
+	})
+	if err != nil {
+		t.Fatalf("update to v1.1.0 failed: %v", err)
+	}
+	if !res2.Updated || res2.PreviousVersion != "1.0.0" || res2.Version != "1.1.0" {
+		t.Fatalf("expected update v1.0.0 -> v1.1.0, got updated=%v prev=%q ver=%q", res2.Updated, res2.PreviousVersion, res2.Version)
+	}
+	// Verify .data preserved
+	scratchData, err := os.ReadFile(scratchPath)
+	if err != nil || string(scratchData) != "keep-me" {
+		t.Fatalf("expected .data/state.txt preserved, got %q (err=%v)", string(scratchData), err)
+	}
+	// Verify new process spawned with new version
+	raw2, err := host.InvokeCommand(ctx, "zip-demo", "ping", nil, "user-1", "admin")
+	if err != nil {
+		t.Fatalf("ping v1.1.0 failed: %v", err)
+	}
+	var ping2 struct {
+		Version string `json:"version"`
+		PID     int    `json:"pid"`
+	}
+	if err := json.Unmarshal(raw2, &ping2); err != nil || ping2.Version != "1.1.0" || ping2.PID == ping1.PID {
+		t.Fatalf("expected new process at v1.1.0 (old pid=%d), got %+v", ping1.PID, ping2)
+	}
+
+	// 4. Disable plugin and update to v1.2.0: must preserve disabled state and not start process
+	if _, err := host.SetEnabled(ctx, "zip-demo", false, "user-1"); err != nil {
+		t.Fatalf("SetEnabled(false) failed: %v", err)
+	}
+	res3, err := host.InstallOrUpdateZip(ctx, makePluginZip("zip-demo", "1.2.0"), plugins.InstallZipOptions{
+		ExpectedName: "zip-demo",
+	})
+	if err != nil {
+		t.Fatalf("update disabled plugin failed: %v", err)
+	}
+	if !res3.Updated || res3.PreviousVersion != "1.1.0" || res3.Version != "1.2.0" {
+		t.Fatalf("unexpected res3: %+v", res3)
+	}
+	if res3.Enabled || res3.Status != plugins.StatusDisabled {
+		t.Fatalf("expected disabled plugin to stay disabled after update, got enabled=%v status=%s", res3.Enabled, res3.Status)
 	}
 }
 

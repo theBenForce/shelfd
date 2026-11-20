@@ -85,6 +85,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/plugins/jobs", auth(http.HandlerFunc(pluginHandler.ListJobs)))
 	mux.Handle("DELETE /api/v1/plugins/jobs/{id}", auth(http.HandlerFunc(pluginHandler.DismissJob)))
 	mux.Handle("GET /api/v1/plugins/{name}", auth(http.HandlerFunc(pluginHandler.GetPlugin)))
+	mux.Handle("POST /api/v1/plugins/{name}/update", auth(http.HandlerFunc(pluginHandler.UpdatePlugin)))
 	mux.Handle("POST /api/v1/plugins/{name}/enable", auth(http.HandlerFunc(pluginHandler.EnablePlugin)))
 	mux.Handle("POST /api/v1/plugins/{name}/disable", auth(http.HandlerFunc(pluginHandler.DisablePlugin)))
 	mux.Handle("GET /api/v1/plugins/{name}/config", auth(http.HandlerFunc(pluginHandler.GetConfig)))

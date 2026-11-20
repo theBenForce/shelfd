@@ -33,6 +33,8 @@ if [ "$(id -u)" = '0' ]; then
             pname=$(basename "$pdir")
             if [ ! -d "/data/plugins/$pname" ]; then
                 cp -R "$pdir" "/data/plugins/$pname"
+            elif [ -f "/data/plugins/$pname/.shelfd-user-managed" ]; then
+                echo "[shelfd] Preserving user-managed plugin '$pname'"
             else
                 if [ -f "$pdir/plugin.json" ]; then
                     cp -f "$pdir/plugin.json" "/data/plugins/$pname/plugin.json"

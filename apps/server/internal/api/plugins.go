@@ -63,6 +63,19 @@ func (h *PluginHandler) DiscoverPlugins(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *PluginHandler) InstallPlugin(w http.ResponseWriter, r *http.Request) {
+	h.installOrUpdatePlugin(w, r, "")
+}
+
+func (h *PluginHandler) UpdatePlugin(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		writeJSONError(w, http.StatusBadRequest, "Plugin name required")
+		return
+	}
+	h.installOrUpdatePlugin(w, r, name)
+}
+
+func (h *PluginHandler) installOrUpdatePlugin(w http.ResponseWriter, r *http.Request, expectedName string) {
 	if h.host == nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "Plugin host is not configured")
 		return
@@ -84,12 +97,34 @@ func (h *PluginHandler) InstallPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sum, err := h.host.InstallZip(r.Context(), data)
+	user := CurrentUser(r.Context())
+	userID := ""
+	if user != nil {
+		userID = user.ID
+	}
+
+	res, err := h.host.InstallOrUpdateZip(r.Context(), data, plugins.InstallZipOptions{
+		ExpectedName: expectedName,
+		UserID:       userID,
+	})
 	if err != nil {
+		if errors.Is(err, plugins.ErrPluginNotFound) {
+			writeJSONError(w, http.StatusNotFound, "Plugin not found")
+			return
+		}
+		if expectedName != "" {
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to update plugin: %v", err))
+			return
+		}
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to install plugin: %v", err))
 		return
 	}
-	writeJSON(w, http.StatusCreated, sum)
+
+	statusCode := http.StatusCreated
+	if res.Updated {
+		statusCode = http.StatusOK
+	}
+	writeJSON(w, statusCode, res)
 }
 
 func (h *PluginHandler) GetPlugin(w http.ResponseWriter, r *http.Request) {
