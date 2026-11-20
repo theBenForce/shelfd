@@ -85,6 +85,10 @@ export interface AuthCompleteRequest {
   redirect_uri?: string;
   code_verifier?: string;
   state?: string;
+  access_token?: string;
+  refresh_token?: string;
+  client_id?: string;
+  credentials?: Record<string, string>;
   values?: Record<string, string>;
 }
 

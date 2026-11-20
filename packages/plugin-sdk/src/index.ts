@@ -514,12 +514,21 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
         const values: Record<string, string> | undefined = rawValues
           ? Object.fromEntries(Object.entries(rawValues).map(([k, v]) => [k, String(v ?? "")]))
           : undefined;
+        const rawCredentials =
+          params.credentials && typeof params.credentials === "object" ? (params.credentials as Record<string, unknown>) : undefined;
+        const credentials: Record<string, string> | undefined = rawCredentials
+          ? Object.fromEntries(Object.entries(rawCredentials).map(([k, v]) => [k, String(v ?? "")]))
+          : undefined;
         const req: AuthCompleteRequest = {
           method: typeof params.method === "string" ? params.method : undefined,
           code: typeof params.code === "string" ? params.code : undefined,
           redirect_uri: typeof params.redirect_uri === "string" ? params.redirect_uri : undefined,
           code_verifier: typeof params.code_verifier === "string" ? params.code_verifier : undefined,
           state: typeof params.state === "string" ? params.state : undefined,
+          access_token: typeof params.access_token === "string" ? params.access_token : undefined,
+          refresh_token: typeof params.refresh_token === "string" ? params.refresh_token : undefined,
+          client_id: typeof params.client_id === "string" ? params.client_id : undefined,
+          credentials,
           values,
         };
         return await definition.auth.complete(req, ctx);

@@ -295,9 +295,10 @@ definePlugin<ActionConfig>({
       };
     },
     async complete(req, ctx) {
-      const tok = req.code ? \`pkce-\${req.code}\` : (req.values?.access_token ?? "manual-tok");
+      const tok = req.code ? \`pkce-\${req.code}\` : (req.access_token || req.credentials?.token || req.values?.access_token || "manual-tok");
       await ctx.patchConfig({ access_token: tok });
-      return { connected: true, configured: true, account_label: "linked-user" };
+      const label = \`\${req.access_token ?? "-"}|\${req.refresh_token ?? "-"}|\${req.client_id ?? "-"}|\${req.credentials?.patronId ?? "-"}|\${req.credentials?.count ?? "-"}\`;
+      return { connected: true, configured: true, account_label: \`[\${label}]\` };
     },
     async disconnect(ctx) {
       await ctx.patchConfig({ access_token: "" });
@@ -492,6 +493,21 @@ definePlugin<ActionConfig>({
     assert.equal(completeRes.result.connected, true);
     assert.equal(patchedConfigs.length, 1);
     assert.equal(patchedConfigs[0].values.access_token, "pkce-oauth-code-99");
+
+    const tokenCompleteRes = await callRpc("auth/complete", {
+      method: "token",
+      access_token: "hoopla-token-xyz",
+      refresh_token: "hoopla-refresh-1",
+      client_id: "www-client",
+      credentials: { token: "cookie-token-abc", patronId: "patron-42", count: 7 },
+      auth: authEnv,
+    });
+    assert.equal(tokenCompleteRes.result.connected, true);
+    assert.equal(
+      tokenCompleteRes.result.account_label,
+      "[hoopla-token-xyz|hoopla-refresh-1|www-client|patron-42|7]"
+    );
+    assert.equal(patchedConfigs[1].values.access_token, "hoopla-token-xyz");
 
     const disconnectRes = await callRpc("auth/disconnect", { auth: authEnv });
     assert.equal(disconnectRes.result.connected, false);
