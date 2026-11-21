@@ -1,3 +1,17 @@
+# [1.24.0](https://github.com/theBenForce/shelfd/compare/v1.23.1...v1.24.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **ci:** eliminate parallel plugin build/test race in Turborepo ([#97](https://github.com/theBenForce/shelfd/issues/97)) ([93a286a](https://github.com/theBenForce/shelfd/commit/93a286a795b5623b3195542bc807c3efcacb86a3))
+
+
+### Features
+
+* **jobs:** unify background tasks and add standardized activity UI ([#95](https://github.com/theBenForce/shelfd/issues/95)) ([4c17ecf](https://github.com/theBenForce/shelfd/commit/4c17ecf4e0c95fb7956d4901a0c8337894bd762c))
+* **plugin-sdk:** pass token-auth credentials through auth/complete ([3582cb8](https://github.com/theBenForce/shelfd/commit/3582cb8f7d6902873828de18aff6c6b783cbac3d))
+* **plugins:** add targeted .zip plugin updates and lifecycle hardening ([#96](https://github.com/theBenForce/shelfd/issues/96)) ([6cf93b3](https://github.com/theBenForce/shelfd/commit/6cf93b37fe25932e5bb50c557ff169c2f6f1de7f))
+
 ## [1.23.1](https://github.com/theBenForce/shelfd/compare/v1.23.0...v1.23.1) (2026-11-20)
 
 
