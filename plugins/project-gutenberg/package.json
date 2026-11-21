@@ -8,7 +8,7 @@
     "build": "shelfd-plugin build .",
     "verify": "shelfd-plugin verify .",
     "pack": "shelfd-plugin pack .",
-    "test": "pnpm run build && shelfd-plugin verify . && node --test ./test/*.test.mjs",
+    "test": "shelfd-plugin verify . && node --test ./test/*.test.mjs",
     "lint": "pnpm run build",
     "clean": "rm -rf dist"
   },

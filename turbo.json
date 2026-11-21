@@ -60,20 +60,23 @@
         "pubspec.yaml"
       ]
     },
+    "@shelfd/plugin-sdk#test": {
+      "dependsOn": ["build"]
+    },
     "@shelfd/plugin-project-gutenberg#test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["build"]
     },
     "@shelfd/plugin-project-gutenberg#lint": {
       "dependsOn": ["^build"]
     },
     "@shelfd/plugin-yoto#test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["build"]
     },
     "@shelfd/plugin-yoto#lint": {
       "dependsOn": ["^build"]
     },
     "@shelfd/plugin-notebooklm#test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["build"]
     },
     "@shelfd/plugin-notebooklm#lint": {
       "dependsOn": ["^build"]
