@@ -182,7 +182,9 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   Future<void> _loadReadalongManifest() async {
     final initialAudio = ref.read(audioPlayerProvider);
     if (initialAudio.book?.id == widget.book.id && initialAudio.status != AudioPlaybackStatus.idle) {
-      ref.read(audioPlayerProvider.notifier).setPlaybackMode(AudioPlaybackMode.readalong);
+      final notifier = ref.read(audioPlayerProvider.notifier);
+      notifier.setPlaybackMode(AudioPlaybackMode.readalong);
+      notifier.syncBookMetadata(widget.book);
     }
 
     if (_readalongManifest != null) {
@@ -290,6 +292,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
     final audioState = ref.read(audioPlayerProvider);
     final notifier = ref.read(audioPlayerProvider.notifier);
     notifier.setPlaybackMode(AudioPlaybackMode.readalong);
+    notifier.syncBookMetadata(widget.book);
     if (audioState.book?.id != widget.book.id ||
         audioState.status == AudioPlaybackStatus.idle ||
         audioState.status == AudioPlaybackStatus.error) {
@@ -608,6 +611,8 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
     bool isThisBookPlaying,
   ) {
     final colors = ShelfdColors.of(context);
+    final pipState = ref.watch(readalongPipProvider);
+    final isPipOpen = pipState.isOpen && pipState.bookId == widget.book.id;
 
     return Container(
       height: 60,
@@ -676,6 +681,29 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                 });
               },
             ),
+            if (pipState.isSupported)
+              IconButton(
+                key: const Key('readalong-pip-button'),
+                icon: Icon(
+                  isPipOpen
+                      ? Icons.picture_in_picture_rounded
+                      : Icons.picture_in_picture_alt_rounded,
+                  color: isPipOpen ? colors.accentPrimary : colors.ink,
+                ),
+                tooltip: isPipOpen ? 'Close Pop-out Read-Along' : 'Pop out Read-Along',
+                onPressed: () {
+                  final manifest = _readalongManifest ??
+                      ReadalongManifest(bookId: widget.book.id, hasReadalong: true);
+                  final currentPage = spread?.leftPage ?? spread?.rightPage;
+                  ref.read(readalongPipProvider.notifier).togglePopout(
+                        book: widget.book,
+                        manifest: manifest,
+                        currentPage: currentPage,
+                        currentChapterIndex: currentPage?.chapterIndex,
+                        currentChapterTitle: spread?.label,
+                      );
+                },
+              ),
             IconButton(
               key: const Key('switch_to_audiobook_button'),
               icon: Icon(Icons.headphones_rounded, color: colors.ink),

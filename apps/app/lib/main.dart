@@ -1,8 +1,10 @@
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:go_router/go_router.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'data/services/storage_service.dart';
 import 'ui/core/theme.dart';
@@ -13,6 +15,22 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (kIsWeb) {
     usePathUrlStrategy();
+  } else {
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.speech());
+    } catch (_) {}
+    if (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.macOS) {
+      try {
+        await JustAudioBackground.init(
+          androidNotificationChannelId: 'com.shelfd.shelf.channel.audio',
+          androidNotificationChannelName: 'Shelfd Audio Playback',
+          androidNotificationOngoing: true,
+        );
+      } catch (_) {}
+    }
   }
   final prefs = await SharedPreferences.getInstance();
   final storage = StorageService(prefs);

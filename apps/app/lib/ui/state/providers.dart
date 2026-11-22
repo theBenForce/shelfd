@@ -27,6 +27,7 @@ export 'audio_player_state.dart';
 export 'background_jobs_provider.dart';
 export 'duplicate_books_provider.dart';
 export 'plugins_provider.dart';
+export 'readalong_pip_provider.dart';
 export 'upload_provider.dart';
 
 /// Resolves the default server URL based on the runtime platform and environment.
