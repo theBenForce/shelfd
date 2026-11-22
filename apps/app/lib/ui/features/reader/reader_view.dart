@@ -75,10 +75,15 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
     final bookRepo = ref.read(bookRepositoryProvider);
     try {
       final book = await bookRepo.getBookDetail(widget.bookId);
-      if (mounted && book.spine.isNotEmpty) {
-        setState(() {
-          _spine = book.spine;
-        });
+      if (mounted) {
+        if (ref.read(audioPlayerProvider).book?.id == widget.bookId) {
+          ref.read(audioPlayerProvider.notifier).syncBookMetadata(book);
+        }
+        if (book.spine.isNotEmpty) {
+          setState(() {
+            _spine = book.spine;
+          });
+        }
       }
     } catch (_) {}
 
@@ -179,6 +184,9 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
     final audioState = ref.read(audioPlayerProvider);
     final notifier = ref.read(audioPlayerProvider.notifier);
     notifier.setPlaybackMode(AudioPlaybackMode.readalong);
+    if (book != null) {
+      notifier.syncBookMetadata(book);
+    }
     final targetBook = book ?? Book(id: widget.bookId, title: _currentChapter?.title ?? 'Book', hasReadalong: true);
     if (audioState.book?.id != widget.bookId ||
         audioState.status == AudioPlaybackStatus.idle ||
@@ -341,6 +349,13 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<BookDetailState>(bookDetailProvider(widget.bookId), (prev, next) {
+      final loadedBook = next.book;
+      if (loadedBook != null &&
+          ref.read(audioPlayerProvider).book?.id == widget.bookId) {
+        ref.read(audioPlayerProvider.notifier).syncBookMetadata(loadedBook);
+      }
+    });
     final bookDetailState = ref.watch(bookDetailProvider(widget.bookId));
     final book = bookDetailState.book;
 
@@ -357,6 +372,8 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
       _onAudioStateChanged(next, effectiveSpine);
     });
     final audioState = ref.watch(audioPlayerProvider);
+    final pipState = ref.watch(readalongPipProvider);
+    final isPipOpen = pipState.isOpen && pipState.bookId == widget.bookId;
     final isThisBookPlaying =
         audioState.book?.id == widget.bookId && audioState.isPlaying;
     final hasReadalong = (book?.canReadAlong ?? false) ||
@@ -475,6 +492,34 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                   });
                 },
               ),
+              if (pipState.isSupported)
+                IconButton(
+                  key: const Key('readalong-pip-button'),
+                  icon: Icon(
+                    isPipOpen
+                        ? Icons.picture_in_picture_rounded
+                        : Icons.picture_in_picture_alt_rounded,
+                    color: isPipOpen ? colors.accentPrimary : colors.ink,
+                  ),
+                  tooltip: isPipOpen ? 'Close Pop-out Read-Along' : 'Pop out Read-Along',
+                  onPressed: () {
+                    final targetBook = book ??
+                        Book(
+                          id: widget.bookId,
+                          title: displayTitle,
+                          hasReadalong: true,
+                          spine: effectiveSpine,
+                        );
+                    final manifest = _readalongManifest ??
+                        ReadalongManifest(bookId: widget.bookId, hasReadalong: true);
+                    ref.read(readalongPipProvider.notifier).togglePopout(
+                          book: targetBook,
+                          manifest: manifest,
+                          currentChapterIndex: _currentChapter?.chapterIndex,
+                          currentChapterTitle: displayTitle,
+                        );
+                  },
+                ),
               IconButton(
                 key: const Key('switch_to_audiobook_button'),
                 icon: const Icon(Icons.headphones_rounded),
