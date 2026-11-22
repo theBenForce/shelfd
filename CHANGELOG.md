@@ -1,3 +1,10 @@
+# [1.25.0](https://github.com/theBenForce/shelfd/compare/v1.24.0...v1.25.0) (2026-11-22)
+
+
+### Features
+
+* **app:** add media session metadata and Chrome read-along PiP ([#98](https://github.com/theBenForce/shelfd/issues/98)) ([4691df4](https://github.com/theBenForce/shelfd/commit/4691df4270d85a509139fdb6dc25cadabe616f6b))
+
 # [1.24.0](https://github.com/theBenForce/shelfd/compare/v1.23.1...v1.24.0) (2026-11-21)
 
 
