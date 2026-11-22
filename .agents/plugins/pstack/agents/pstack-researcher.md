@@ -3,7 +3,7 @@ name: pstack-researcher
 description: "Report-only source and evidence investigator for the how explorer, recall, and verification source waves."
 mainAgent: false
 subagent: true
-model: inherit
+model: flash
 commandExecutionPolicy: sandbox
 tools:
   - view_file

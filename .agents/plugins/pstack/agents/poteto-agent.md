@@ -3,7 +3,7 @@ name: poteto-agent
 description: "Code-writing and helper delegate within a pstack playbook; the parent owns the playbook."
 mainAgent: false
 subagent: true
-model: inherit
+model: pro
 commandExecutionPolicy: sandbox
 tools:
   - view_file

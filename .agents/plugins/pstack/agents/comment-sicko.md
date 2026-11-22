@@ -3,7 +3,7 @@ name: comment-sicko
 description: "Report-only comment review using pstack's Comment Sicko rubric."
 mainAgent: false
 subagent: true
-model: inherit
+model: flash
 commandExecutionPolicy: sandbox
 tools:
   - view_file

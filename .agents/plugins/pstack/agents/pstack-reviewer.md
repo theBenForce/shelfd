@@ -3,7 +3,7 @@ name: pstack-reviewer
 description: "Report-only judge or reviewer for arena, interrogate, reflect, and audit-trail review."
 mainAgent: false
 subagent: true
-model: inherit
+model: pro
 commandExecutionPolicy: sandbox
 tools:
   - view_file

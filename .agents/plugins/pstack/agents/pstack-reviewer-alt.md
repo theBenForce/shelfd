@@ -3,7 +3,7 @@ name: pstack-reviewer-alt
 description: "Second report-only review seat; configure a different model for actual model diversity."
 mainAgent: false
 subagent: true
-model: inherit
+model: pro
 commandExecutionPolicy: sandbox
 tools:
   - view_file
