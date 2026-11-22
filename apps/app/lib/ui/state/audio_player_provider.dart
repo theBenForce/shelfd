@@ -1,16 +1,25 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 import '../../data/models/book.dart';
 import '../../data/repositories/audio_repository.dart';
+import 'media_session_bridge.dart';
 import 'providers.dart';
+
+export 'media_session_metadata.dart';
 
 abstract class AudioPlayerEngine {
   Stream<Duration> get positionStream;
   Stream<Duration?> get durationStream;
   Stream<AudioPlaybackStatus> get statusStream;
 
-  Future<void> setUrl(String url, {Duration? initialPosition});
+  Future<void> setUrl(
+    String url, {
+    Duration? initialPosition,
+    AudioMediaMetadata? metadata,
+  });
   Future<void> play();
   Future<void> pause();
   Future<void> stop();
@@ -53,8 +62,35 @@ class JustAudioPlayerEngine implements AudioPlayerEngine {
   Stream<AudioPlaybackStatus> get statusStream => _statusController.stream;
 
   @override
-  Future<void> setUrl(String url, {Duration? initialPosition}) async {
-    await _player.setUrl(url, initialPosition: initialPosition);
+  Future<void> setUrl(
+    String url, {
+    Duration? initialPosition,
+    AudioMediaMetadata? metadata,
+  }) async {
+    if (!kIsWeb && metadata != null) {
+      try {
+        await _player.setAudioSource(
+          AudioSource.uri(
+            Uri.parse(url),
+            tag: MediaItem(
+              id: metadata.id,
+              title: metadata.title,
+              artist: metadata.artist,
+              album: metadata.album,
+              artUri: metadata.artworkUri,
+              duration: metadata.duration,
+            ),
+          ),
+          initialPosition: initialPosition,
+        );
+      } on AssertionError {
+        await _player.setUrl(url, initialPosition: initialPosition);
+      } on StateError {
+        await _player.setUrl(url, initialPosition: initialPosition);
+      }
+    } else {
+      await _player.setUrl(url, initialPosition: initialPosition);
+    }
     if (initialPosition != null &&
         initialPosition > Duration.zero &&
         (_player.position - initialPosition).abs() > const Duration(seconds: 1)) {
@@ -119,7 +155,11 @@ class SimulatedAudioPlayerEngine implements AudioPlayerEngine {
   Stream<AudioPlaybackStatus> get statusStream => _statusController.stream;
 
   @override
-  Future<void> setUrl(String url, {Duration? initialPosition}) async {
+  Future<void> setUrl(
+    String url, {
+    Duration? initialPosition,
+    AudioMediaMetadata? metadata,
+  }) async {
     _currentPosition = initialPosition ?? Duration.zero;
     _currentStatus = AudioPlaybackStatus.ready;
     _statusController.add(_currentStatus);
@@ -193,6 +233,12 @@ final audioPlayerEngineProvider = Provider<AudioPlayerEngine>((ref) {
   return engine;
 });
 
+final mediaSessionBridgeProvider = Provider<MediaSessionBridge>((ref) {
+  final bridge = createMediaSessionBridge();
+  ref.onDispose(bridge.dispose);
+  return bridge;
+});
+
 class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
   Timer? _syncTimer;
   Timer? _sleepTimerTicker;
@@ -200,13 +246,22 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
   StreamSubscription? _durSub;
   StreamSubscription? _statusSub;
   bool _isSettingUpTrack = false;
+  bool _isDisposed = false;
+  AudioMediaMetadata? _lastMediaMetadata;
+  DateTime? _lastMediaPositionSyncAt;
 
   AudioPlayerEngine get _engine => ref.read(audioPlayerEngineProvider);
   AudioRepository get _repository => ref.read(audioRepositoryProvider);
+  MediaSessionBridge get _mediaSession => ref.read(mediaSessionBridgeProvider);
 
   @override
   AudioPlayerState build() {
+    _isDisposed = false;
+    _lastMediaMetadata = null;
+    _lastMediaPositionSyncAt = null;
+    _bindMediaSessionHandlers();
     ref.onDispose(() {
+      _isDisposed = true;
       _syncTimer?.cancel();
       _sleepTimerTicker?.cancel();
       _posSub?.cancel();
@@ -216,9 +271,77 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     return const AudioPlayerState();
   }
 
+  void _bindMediaSessionHandlers() {
+    _mediaSession.bindHandlers(
+      MediaSessionActionHandlers(
+        onPlay: () {
+          unawaited(play());
+        },
+        onPause: () {
+          unawaited(pause());
+        },
+        onStop: () {
+          unawaited(stop());
+        },
+        onSeek: (position) {
+          unawaited(seek(position));
+        },
+        onSkipForward: (seconds) {
+          unawaited(skipForward(seconds));
+        },
+        onSkipBackward: (seconds) {
+          unawaited(skipBackward(seconds));
+        },
+        onNextChapter: () {
+          unawaited(nextChapter());
+        },
+        onPreviousChapter: () {
+          unawaited(previousChapter());
+        },
+      ),
+    );
+  }
+
+  AudioMediaMetadata? _buildMediaMetadata(AudioPlayerState targetState) {
+    final apiService = ref.read(apiServiceProvider);
+    return AudioMediaMetadata.fromAudioState(
+      targetState,
+      baseUrl: apiService.baseUrl,
+      token: apiService.token,
+      fallbackOrigin: kIsWeb ? Uri.base.origin : null,
+    );
+  }
+
+  void _syncMediaSession({bool forcePosition = false}) {
+    if (_isDisposed) return;
+    if (state.book == null || state.status == AudioPlaybackStatus.idle) return;
+
+    final metadata = _buildMediaMetadata(state);
+    var shouldPushPlaybackState = forcePosition;
+    if (metadata != null && metadata != _lastMediaMetadata) {
+      _lastMediaMetadata = metadata;
+      _mediaSession.updateMetadata(metadata);
+      shouldPushPlaybackState = true;
+    }
+
+    final now = DateTime.now();
+    if (shouldPushPlaybackState ||
+        _lastMediaPositionSyncAt == null ||
+        now.difference(_lastMediaPositionSyncAt!) >= const Duration(seconds: 1)) {
+      _lastMediaPositionSyncAt = now;
+      _mediaSession.updatePlaybackState(
+        status: state.status,
+        position: state.position,
+        duration: state.duration,
+        speed: state.speed,
+      );
+    }
+  }
+
   void setPlaybackMode(AudioPlaybackMode mode) {
     if (state.playbackMode != mode) {
       state = state.copyWith(playbackMode: mode);
+      _syncMediaSession(forcePosition: true);
     }
   }
 
@@ -237,6 +360,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
       activeChapter: activeChapter,
       duration: duration,
     );
+    _syncMediaSession(forcePosition: true);
   }
 
   void _initSubscriptions() {
@@ -245,27 +369,32 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     _statusSub?.cancel();
 
     _posSub = _engine.positionStream.listen((pos) {
-      if (_isSettingUpTrack) return;
+      if (_isSettingUpTrack || _isDisposed) return;
       if (state.status == AudioPlaybackStatus.playing ||
           state.status == AudioPlaybackStatus.ready ||
           state.status == AudioPlaybackStatus.paused) {
         final newActive = _resolveChapter(pos, state.chapters);
+        final chapterChanged = newActive != state.activeChapter;
         state = state.copyWith(position: pos, activeChapter: newActive);
+        _syncMediaSession(forcePosition: chapterChanged);
       }
     });
 
     _durSub = _engine.durationStream.listen((dur) {
+      if (_isDisposed) return;
       if (dur != null && dur > Duration.zero) {
         state = state.copyWith(duration: dur);
+        _syncMediaSession(forcePosition: true);
       }
     });
 
     _statusSub = _engine.statusStream.listen((status) {
-      if (_isSettingUpTrack) return;
+      if (_isSettingUpTrack || _isDisposed) return;
       if (status == AudioPlaybackStatus.completed) {
         _onPlaybackCompleted();
       } else {
         state = state.copyWith(status: status);
+        _syncMediaSession(forcePosition: true);
       }
     });
   }
@@ -321,6 +450,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
         position: targetPosition,
         activeChapter: activeChapter,
       );
+      _syncMediaSession(forcePosition: true);
       if (autoPlay && !state.isPlaying) {
         await play();
       }
@@ -334,6 +464,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
       }
 
       _isSettingUpTrack = true;
+      _bindMediaSessionHandlers();
       state = state.copyWith(
         book: book,
         status: AudioPlaybackStatus.loading,
@@ -361,8 +492,22 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
           ? _repository.getFileStreamUrl(book.id, fileId)
           : _repository.getStreamUrl(book.id);
       final startPos = Duration(milliseconds: (targetPosSec * 1000).round());
+      final initialActiveChapter = _resolveChapter(startPos, chapters);
+      final initialMetadata = _buildMediaMetadata(
+        state.copyWith(
+          book: book,
+          position: startPos,
+          duration: initialDuration,
+          chapters: chapters,
+          activeChapter: initialActiveChapter,
+        ),
+      );
 
-      await _engine.setUrl(streamUrl, initialPosition: startPos);
+      await _engine.setUrl(
+        streamUrl,
+        initialPosition: startPos,
+        metadata: initialMetadata,
+      );
       if (progress.speed != 1.0) {
         await _engine.setSpeed(progress.speed);
       }
@@ -382,6 +527,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
         activeChapter: activeChapter,
       );
       _isSettingUpTrack = false;
+      _syncMediaSession(forcePosition: true);
 
       if (autoPlay) {
         await play();
@@ -392,6 +538,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
         status: AudioPlaybackStatus.error,
         errorMessage: 'Failed to load audiobook: $e',
       );
+      _syncMediaSession(forcePosition: true);
     }
   }
 
@@ -399,6 +546,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     if (state.book == null) return;
     try {
       state = state.copyWith(status: AudioPlaybackStatus.playing);
+      _syncMediaSession(forcePosition: true);
       await _engine.play();
       _startPeriodicSync();
     } catch (e) {
@@ -406,6 +554,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
         status: AudioPlaybackStatus.error,
         errorMessage: 'Failed to start playback: $e',
       );
+      _syncMediaSession(forcePosition: true);
     }
   }
 
@@ -414,6 +563,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     try {
       await _engine.pause();
       state = state.copyWith(status: AudioPlaybackStatus.paused);
+      _syncMediaSession(forcePosition: true);
       _syncTimer?.cancel();
       await _syncProgressToServer();
     } catch (e) {
@@ -421,6 +571,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
         status: AudioPlaybackStatus.error,
         errorMessage: 'Failed to pause playback: $e',
       );
+      _syncMediaSession(forcePosition: true);
     }
   }
 
@@ -443,6 +594,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     await _engine.seek(clamped);
     final newActive = _resolveChapter(clamped, state.chapters);
     state = state.copyWith(position: clamped, activeChapter: newActive);
+    _syncMediaSession(forcePosition: true);
     await _syncProgressToServer();
   }
 
@@ -458,6 +610,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     if (state.book == null) return;
     await _engine.setSpeed(speed);
     state = state.copyWith(speed: speed);
+    _syncMediaSession(forcePosition: true);
     await _syncProgressToServer();
   }
 
@@ -574,6 +727,9 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     _syncTimer?.cancel();
     _sleepTimerTicker?.cancel();
     await _engine.stop();
+    _lastMediaMetadata = null;
+    _lastMediaPositionSyncAt = null;
+    _mediaSession.clear();
     state = const AudioPlayerState();
   }
 
@@ -606,6 +762,7 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
       isCompleted: true,
       position: state.duration,
     );
+    _syncMediaSession(forcePosition: true);
     final book = state.book;
     if (book != null) {
       await _repository.saveProgress(
