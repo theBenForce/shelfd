@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import '../../data/models/book.dart';
+import '../../data/models/cast_models.dart';
 import '../../data/repositories/audio_repository.dart';
+import 'cast_provider.dart';
 import 'media_session_bridge.dart';
 import 'providers.dart';
 
@@ -249,8 +251,10 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
   bool _isDisposed = false;
   AudioMediaMetadata? _lastMediaMetadata;
   DateTime? _lastMediaPositionSyncAt;
+  AudioPlayerEngine? _overrideEngine;
 
-  AudioPlayerEngine get _engine => ref.read(audioPlayerEngineProvider);
+  AudioPlayerEngine get _localEngine => ref.read(audioPlayerEngineProvider);
+  AudioPlayerEngine get _engine => _overrideEngine ?? _localEngine;
   AudioRepository get _repository => ref.read(audioRepositoryProvider);
   MediaSessionBridge get _mediaSession => ref.read(mediaSessionBridgeProvider);
 
@@ -723,10 +727,117 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     setSleepTimer(SleepTimerOption.none);
   }
 
+  Future<void> handoffToCast(
+    CastDevice device, {
+    CastSessionSnapshot? snapshot,
+  }) async {
+    if (_isDisposed) return;
+    _syncTimer?.cancel();
+    if (_overrideEngine == null) {
+      try {
+        await _localEngine.pause();
+      } catch (_) {}
+    }
+    _overrideEngine = ref.read(castAudioEngineProvider);
+    _initSubscriptions();
+
+    final pos = snapshot != null
+        ? Duration(milliseconds: (snapshot.positionSeconds * 1000).round())
+        : state.position;
+    final dur = snapshot != null && snapshot.durationSeconds > 0
+        ? Duration(milliseconds: (snapshot.durationSeconds * 1000).round())
+        : state.duration;
+    final spd = snapshot != null && snapshot.speed > 0
+        ? snapshot.speed
+        : state.speed;
+    final st = snapshot?.toAudioPlaybackStatus() ?? AudioPlaybackStatus.loading;
+    final activeCh = _resolveChapter(pos, state.chapters);
+
+    state = state.copyWith(
+      activeCastDevice: device,
+      status: st,
+      position: pos,
+      duration: dur,
+      speed: spd,
+      activeChapter: activeCh,
+      clearError: true,
+    );
+    _syncMediaSession(forcePosition: true);
+  }
+
+  Future<void> adoptCastSession(CastSessionSnapshot snapshot) async {
+    if (_isDisposed || !snapshot.isActive) return;
+
+    if (state.book?.id != snapshot.bookId) {
+      try {
+        final book = await ref.read(bookRepositoryProvider).getBookDetail(snapshot.bookId);
+        if (_isDisposed) return;
+        final chapters = await _repository.getChapters(book.id);
+        if (_isDisposed) return;
+        final pos =
+            Duration(milliseconds: (snapshot.positionSeconds * 1000).round());
+        final dur = snapshot.durationSeconds > 0
+            ? Duration(milliseconds: (snapshot.durationSeconds * 1000).round())
+            : (book.durationSeconds != null
+                ? Duration(milliseconds: (book.durationSeconds! * 1000).round())
+                : Duration.zero);
+        state = state.copyWith(
+          book: book,
+          chapters: chapters,
+          activeChapter: _resolveChapter(pos, chapters),
+          position: pos,
+          duration: dur,
+          speed: snapshot.speed > 0 ? snapshot.speed : 1.0,
+          playbackMode: book.hasReadalong
+              ? AudioPlaybackMode.readalong
+              : AudioPlaybackMode.audiobook,
+        );
+      } catch (_) {
+        return;
+      }
+    }
+
+    if (_overrideEngine == null || state.activeCastDevice?.id != snapshot.device.id) {
+      await handoffToCast(snapshot.device, snapshot: snapshot);
+    }
+  }
+
+  Future<void> handoffToLocal() async {
+    if (_isDisposed) return;
+    if (_overrideEngine == null && !state.isCasting) return;
+
+    final preservedPosition = state.position;
+    final preservedSpeed = state.speed;
+    final preservedBook = state.book;
+
+    _overrideEngine = null;
+    _initSubscriptions();
+
+    state = state.copyWith(
+      clearActiveCastDevice: true,
+      status: preservedBook != null
+          ? AudioPlaybackStatus.paused
+          : AudioPlaybackStatus.idle,
+      position: preservedPosition,
+      speed: preservedSpeed,
+    );
+
+    if (preservedBook != null) {
+      try {
+        final url = _repository.getStreamUrl(preservedBook.id);
+        await _localEngine.setUrl(url, initialPosition: preservedPosition);
+        await _localEngine.setSpeed(preservedSpeed);
+      } catch (_) {}
+      _startPeriodicSync();
+    }
+    _syncMediaSession(forcePosition: true);
+  }
+
   Future<void> stop() async {
     _syncTimer?.cancel();
     _sleepTimerTicker?.cancel();
     await _engine.stop();
+    _overrideEngine = null;
     _lastMediaMetadata = null;
     _lastMediaPositionSyncAt = null;
     _mediaSession.clear();
@@ -736,13 +847,14 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
   void _startPeriodicSync() {
     _syncTimer?.cancel();
     _syncTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      if (state.isPlaying) {
+      if (state.isPlaying && !state.isCasting) {
         _syncProgressToServer();
       }
     });
   }
 
   Future<void> _syncProgressToServer() async {
+    if (state.isCasting) return;
     final book = state.book;
     if (book == null) return;
     final posSec = state.position.inMilliseconds / 1000.0;

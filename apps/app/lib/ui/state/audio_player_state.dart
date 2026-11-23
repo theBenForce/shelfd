@@ -1,4 +1,5 @@
 import '../../data/models/book.dart';
+import '../../data/models/cast_models.dart';
 
 enum AudioPlaybackStatus {
   idle,
@@ -81,6 +82,7 @@ class AudioPlayerState {
   final Duration? sleepTimerRemaining;
   final SleepTimerOption sleepTimerOption;
   final String? errorMessage;
+  final CastDevice? activeCastDevice;
 
   const AudioPlayerState({
     this.book,
@@ -96,11 +98,13 @@ class AudioPlayerState {
     this.sleepTimerRemaining,
     this.sleepTimerOption = SleepTimerOption.none,
     this.errorMessage,
+    this.activeCastDevice,
   });
 
   bool get isPlaying => status == AudioPlaybackStatus.playing;
   bool get isLoading => status == AudioPlaybackStatus.loading;
   bool get hasTrack => book != null;
+  bool get isCasting => activeCastDevice != null;
 
   double get progressFraction {
     if (duration.inMilliseconds <= 0) return 0.0;
@@ -147,6 +151,8 @@ class AudioPlayerState {
     SleepTimerOption? sleepTimerOption,
     String? errorMessage,
     bool clearError = false,
+    CastDevice? activeCastDevice,
+    bool clearActiveCastDevice = false,
   }) {
     return AudioPlayerState(
       book: book ?? this.book,
@@ -162,6 +168,9 @@ class AudioPlayerState {
       sleepTimerRemaining: clearSleepTimer ? null : (sleepTimerRemaining ?? this.sleepTimerRemaining),
       sleepTimerOption: sleepTimerOption ?? this.sleepTimerOption,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      activeCastDevice: clearActiveCastDevice
+          ? null
+          : (activeCastDevice ?? this.activeCastDevice),
     );
   }
 }

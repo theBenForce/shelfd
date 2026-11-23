@@ -5,6 +5,7 @@ import '../models/background_job.dart';
 import '../models/book.dart';
 import '../models/book_chat.dart';
 import '../models/bookmark.dart';
+import '../models/cast_models.dart';
 import '../models/chapter.dart';
 import '../models/connect_info.dart';
 import '../models/duplicate_group.dart';
@@ -67,6 +68,16 @@ class JobUpdatedEvent extends ShelfdEvent {
 class JobRemovedEvent extends ShelfdEvent {
   final String jobId;
   const JobRemovedEvent(this.jobId);
+}
+
+class CastStatusEvent extends ShelfdEvent {
+  final CastSessionSnapshot session;
+  const CastStatusEvent(this.session);
+}
+
+class CastDevicesEvent extends ShelfdEvent {
+  final List<CastDevice> devices;
+  const CastDevicesEvent(this.devices);
 }
 
 class ApiService {
@@ -581,6 +592,17 @@ class ApiService {
                 if (jobId.isNotEmpty) {
                   yield JobRemovedEvent(jobId);
                 }
+                break;
+              case 'cast_status':
+                yield CastStatusEvent(CastSessionSnapshot.fromJson(data));
+                break;
+              case 'cast_devices':
+                final rawList = (data['devices'] as List?) ?? const [];
+                final devices = rawList
+                    .whereType<Map>()
+                    .map((e) => CastDevice.fromJson(Map<String, dynamic>.from(e)))
+                    .toList();
+                yield CastDevicesEvent(devices);
                 break;
             }
           } catch (_) {
@@ -1440,6 +1462,101 @@ class ApiService {
       headers: _headers(),
     );
     if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+  }
+
+  Future<List<CastDevice>> getCastDevices({bool refresh = false}) async {
+    final path = refresh ? '/api/v1/cast/devices?refresh=true' : '/api/v1/cast/devices';
+    final response = await client.get(_uri(path), headers: _headers());
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>;
+    final list = (map['devices'] as List?) ?? const [];
+    return list
+        .whereType<Map>()
+        .map((e) => CastDevice.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  Future<CastSessionSnapshot?> getCastSession() async {
+    final response = await client.get(_uri('/api/v1/cast/session'), headers: _headers());
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>;
+    final raw = map['session'];
+    if (raw is! Map) return null;
+    return CastSessionSnapshot.fromJson(Map<String, dynamic>.from(raw));
+  }
+
+  Future<CastSessionSnapshot> startCastSession({
+    required String deviceId,
+    required String bookId,
+    String? fileId,
+    double positionSeconds = 0.0,
+    double speed = 1.0,
+    bool captionsEnabled = false,
+  }) async {
+    final payload = <String, dynamic>{
+      'device_id': deviceId,
+      'book_id': bookId,
+      if (fileId != null && fileId.isNotEmpty) 'file_id': fileId,
+      'position_seconds': positionSeconds,
+      'speed': speed,
+      'captions_enabled': captionsEnabled,
+    };
+    final response = await client.post(
+      _uri('/api/v1/cast/session'),
+      headers: _headers(),
+      body: jsonEncode(payload),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>;
+    return CastSessionSnapshot.fromJson(
+      Map<String, dynamic>.from(map['session'] as Map),
+    );
+  }
+
+  Future<CastSessionSnapshot?> controlCastSession({
+    required String action,
+    double? positionSeconds,
+    double? speed,
+    double? volume,
+    bool? muted,
+    bool? captionsEnabled,
+  }) async {
+    final payload = <String, dynamic>{
+      'action': action,
+      if (positionSeconds != null) 'position_seconds': positionSeconds,
+      if (speed != null) 'speed': speed,
+      if (volume != null) 'volume': volume,
+      if (muted != null) 'muted': muted,
+      if (captionsEnabled != null) 'captions_enabled': captionsEnabled,
+    };
+    final response = await client.post(
+      _uri('/api/v1/cast/session/control'),
+      headers: _headers(),
+      body: jsonEncode(payload),
+    );
+    if (response.statusCode >= 400) {
+      throw ApiException(response.statusCode, response.body);
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>;
+    final raw = map['session'];
+    if (raw is! Map) return null;
+    return CastSessionSnapshot.fromJson(Map<String, dynamic>.from(raw));
+  }
+
+  Future<void> stopCastSession() async {
+    final response = await client.delete(
+      _uri('/api/v1/cast/session'),
+      headers: _headers(),
+    );
+    if (response.statusCode >= 400 && response.statusCode != 404) {
       throw ApiException(response.statusCode, response.body);
     }
   }
