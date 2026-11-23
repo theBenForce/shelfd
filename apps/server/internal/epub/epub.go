@@ -210,15 +210,23 @@ func (r *Reader) findFile(name string) *zip.File {
 	return nil
 }
 
+const (
+	maxTextZipEntryBytes  = 15 * 1024 * 1024
+	maxMediaZipEntryBytes = 512 * 1024 * 1024
+)
+
 func readZipFile(f *zip.File) ([]byte, error) {
+	return readZipFileWithLimit(f, maxTextZipEntryBytes)
+}
+
+func readZipFileWithLimit(f *zip.File, maxBytes int64) ([]byte, error) {
 	rc, err := f.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer rc.Close()
 
-	// 15MB limit per individual xml/text entry to protect against compression bombs
-	limited := io.LimitReader(rc, 15*1024*1024)
+	limited := io.LimitReader(rc, maxBytes)
 	return io.ReadAll(limited)
 }
 

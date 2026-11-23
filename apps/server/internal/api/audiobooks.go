@@ -132,7 +132,7 @@ func (h *AudiobookHandler) StreamAudio(w http.ResponseWriter, r *http.Request) {
 			if manifest, mErr := reader.ExtractMediaOverlays(); mErr == nil && manifest != nil {
 				for _, seg := range manifest.Segments {
 					if seg.AudioSrc != "" {
-						if data, mime, aErr := reader.ExtractAsset(seg.AudioSrc); aErr == nil && len(data) > 0 {
+						if data, mime, aErr := reader.ExtractMediaAsset(seg.AudioSrc); aErr == nil && len(data) > 0 {
 							w.Header().Set("Content-Type", mime)
 							w.Header().Set("Accept-Ranges", "bytes")
 							http.ServeContent(w, r, filepath.Base(seg.AudioSrc), time.Now(), bytes.NewReader(data))
