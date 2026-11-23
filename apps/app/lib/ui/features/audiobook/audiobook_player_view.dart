@@ -5,6 +5,7 @@ import '../../../data/models/book.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
+import 'widgets/cast_device_sheet.dart';
 import 'widgets/chapter_drawer.dart';
 import 'widgets/scrubber_bar.dart';
 
@@ -243,6 +244,19 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
         centerTitle: true,
         actions: [
           IconButton(
+            key: const Key('audio_player_cast_button'),
+            icon: Icon(
+              playerState.isCasting ? Icons.cast_connected : Icons.cast,
+              color: playerState.isCasting ? AppTokens.amberAccent : Colors.white,
+            ),
+            tooltip: 'Cast audio',
+            onPressed: () => showCastDeviceSheet(
+              context,
+              book: book,
+              hasReadalong: book.hasReadalong,
+            ),
+          ),
+          IconButton(
             key: const Key('audio_player_chapters_menu_button'),
             icon: const Icon(Icons.format_list_bulleted, color: Colors.white),
             tooltip: 'Chapters & Bookmarks',
@@ -452,6 +466,54 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                     const SizedBox(height: AppTokens.space16),
 
                     // Tactile Scrubber Bar
+                    if (playerState.isCasting) ...[
+                      InkWell(
+                        key: const Key('audio_player_cast_banner'),
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: () => showCastDeviceSheet(
+                          context,
+                          book: book,
+                          hasReadalong: book.hasReadalong,
+                        ),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTokens.amberAccent.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: AppTokens.amberAccent.withValues(alpha: 0.4),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.cast_connected,
+                                size: 15,
+                                color: AppTokens.amberAccent,
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  'Casting to ${playerState.activeCastDevice!.name}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTypography.bodySans(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppTokens.amberAccent,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: AppTokens.space12),
+                    ],
                     ScrubberBar(
                       position: playerState.position,
                       duration: playerState.duration,

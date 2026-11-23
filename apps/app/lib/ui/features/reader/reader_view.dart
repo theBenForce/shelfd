@@ -11,6 +11,7 @@ import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
+import '../audiobook/widgets/cast_device_sheet.dart';
 import 'fixed_layout_reader.dart';
 import 'reader_markdown.dart';
 
@@ -520,6 +521,28 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                         );
                   },
                 ),
+              IconButton(
+                key: const Key('readalong-cast-button'),
+                icon: Icon(
+                  audioState.isCasting ? Icons.cast_connected : Icons.cast,
+                  color: audioState.isCasting ? colors.accentPrimary : colors.ink,
+                ),
+                tooltip: 'Cast audio',
+                onPressed: () {
+                  final targetBook = book ??
+                      Book(
+                        id: widget.bookId,
+                        title: displayTitle,
+                        hasReadalong: true,
+                        spine: effectiveSpine,
+                      );
+                  showCastDeviceSheet(
+                    context,
+                    book: targetBook,
+                    hasReadalong: true,
+                  );
+                },
+              ),
               IconButton(
                 key: const Key('switch_to_audiobook_button'),
                 icon: const Icon(Icons.headphones_rounded),

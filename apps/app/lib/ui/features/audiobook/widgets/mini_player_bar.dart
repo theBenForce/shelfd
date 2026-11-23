@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/tokens.dart';
 import '../../../core/typography.dart';
 import '../../../state/providers.dart';
+import 'cast_device_sheet.dart';
 
 /// Floating mini-player bar docked directly above the navigation bar
 class MiniPlayerBar extends ConsumerWidget {
@@ -129,15 +130,38 @@ class MiniPlayerBar extends ConsumerWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          currentChapter?.title ?? book.authorDisplay,
+                          playerState.isCasting
+                              ? 'Casting to ${playerState.activeCastDevice!.name}'
+                              : (currentChapter?.title ?? book.authorDisplay),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: AppTypography.bodySans(
                             fontSize: 11,
-                            color: AppTokens.antiqueCream.withValues(alpha: 0.7),
+                            color: playerState.isCasting
+                                ? AppTokens.amberAccent
+                                : AppTokens.antiqueCream.withValues(alpha: 0.7),
                           ),
                         ),
                       ],
+                    ),
+                  ),
+
+                  IconButton(
+                    key: const Key('mini_player_cast_button'),
+                    iconSize: 20,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    icon: Icon(
+                      playerState.isCasting ? Icons.cast_connected : Icons.cast,
+                      color: playerState.isCasting
+                          ? AppTokens.amberAccent
+                          : Colors.white70,
+                    ),
+                    tooltip: 'Cast audio',
+                    onPressed: () => showCastDeviceSheet(
+                      context,
+                      book: book,
+                      hasReadalong: book.hasReadalong,
                     ),
                   ),
 
