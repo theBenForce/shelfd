@@ -34,6 +34,11 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
   final Set<String> _clearedSecrets = {};
   Set<String> _secretFieldsSet = {};
 
+  // Repeatable object-array support.
+  final Map<String, List<Map<String, dynamic>>> _arrayItems = {};
+  final Map<String, TextEditingController> _itemControllers = {};
+  final Set<String> _setItemSecretsLoaded = {};
+
   PluginAuthStatus? _authStatus;
   bool _isAuthBusy = false;
   bool _showTokenAuthFields = false;
@@ -71,6 +76,119 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
 
   bool _supportsCurlPaste(Map<String, dynamic> prop) {
     return prop['x-shelfd-curl-paste'] == true;
+  }
+
+  /// Returns true when [prop] declares an array whose items are objects.
+  bool _isArrayObjectCard(Map<String, dynamic> prop) {
+    return (prop['type']?.toString() ?? '') == 'array' &&
+        (prop['items'] as Map?)?['type']?.toString() == 'object';
+  }
+
+  /// Extracts the nested properties from an array-item object schema.
+  Map<String, dynamic> _itemProperties(Map<String, dynamic> prop) {
+    final items = prop['items'];
+    if (items is Map && items['properties'] is Map) {
+      return Map<String, dynamic>.from(items['properties'] as Map);
+    }
+    return {};
+  }
+
+  /// Adds a new blank item to [key]'s array and registers its field controllers.
+  void _addArrayItem(String key) {
+    setState(() {
+      final items = _arrayItems.putIfAbsent(key, () => []);
+      final idx = items.length;
+      items.add({});
+      final itemProps = _itemProperties(_visibleProperties[key]!);
+      for (final entry in itemProps.entries) {
+        final iKey = '$key.$idx.${entry.key}';
+        if (_itemControllers[iKey] == null) {
+          final val = entry.value['default']?.toString();
+          _itemControllers[iKey] = TextEditingController(text: val ?? '');
+        }
+      }
+    });
+  }
+
+  /// Removes the item at [index] from [key]'s array and cleans up controllers.
+  void _removeArrayItem(String key, int index) {
+    setState(() {
+      final items = _arrayItems[key];
+      if (items == null || index >= items.length) return;
+      items.removeAt(index);
+      // Clean up controllers for the removed item.
+      _itemControllers.removeWhere((k, _) => k.startsWith('$key.$index.'));
+      // Re-index remaining controllers to fill the gap.
+      final remaining = _arrayItems[key] ?? [];
+      for (var rIdx = 0; rIdx < remaining.length; rIdx++) {
+        final oldPrefix = '$key.${rIdx + 1}.';
+        final newPrefix = '$key.$rIdx.';
+        for (final oldKey in _itemControllers.keys.toList()) {
+          if (oldKey.startsWith(oldPrefix)) {
+            final newKey = newPrefix + oldKey.substring(oldPrefix.length);
+            _itemControllers[newKey] = _itemControllers.remove(oldKey)!;
+          }
+        }
+      }
+    });
+  }
+
+  /// Serializes each array's items into a flat map keyed by the array name.
+  Map<String, dynamic> _serializeArrayItems(String key) {
+    final itemProps = _itemProperties(_visibleProperties[key]!);
+    final items = _arrayItems[key] ?? [];
+    final result = <String, dynamic>{};
+    for (var idx = 0; idx < items.length; idx++) {
+      final item = items[idx];
+      final itemMap = <String, dynamic>{};
+      for (final propEntry in itemProps.entries) {
+        final fieldKey = propEntry.key;
+        final controllerKey = '$key.$idx.$fieldKey';
+        final ctrl = _itemControllers[controllerKey];
+        final rawText = ctrl?.text.trim() ?? '';
+        if (rawText.isNotEmpty || item.containsKey(fieldKey)) {
+          // Check if this is a secret field for this specific item.
+          final isItemSecret = _isSecretProp((propEntry.value as Map?)?.cast<String, dynamic>() ?? {});
+          final secretTracker = '$key.items[$idx].$fieldKey';
+          if (isItemSecret && !_setItemSecretsLoaded.contains(secretTracker)) {
+            // New or unset secret: use sentinel to preserve existing value on server.
+            itemMap[fieldKey] = kPluginSecretRedactedSentinel;
+          } else {
+            itemMap[fieldKey] = rawText;
+          }
+        }
+      }
+      result[key] ??= <List<dynamic>>[];
+      if (result[key] is! List) result[key] = [];
+      (result[key] as List).add(itemMap);
+    }
+    return result;
+  }
+
+  /// Loads array item initial values from saved config.
+  void _loadArrayConfig(String key, Map<String, dynamic>? configData) {
+    if (configData == null || configData[key] == null) return;
+    final arr = configData[key];
+    if (arr is! List) return;
+    setState(() {
+      final items = arr.map((e) => e as Map<String, dynamic>).toList();
+      _arrayItems[key] = items;
+      final itemProps = _itemProperties(_visibleProperties[key]!);
+      for (var idx = 0; idx < items.length; idx++) {
+        for (final propEntry in itemProps.entries) {
+          final fieldKey = propEntry.key;
+          final ctrlKey = '$key.$idx.$fieldKey';
+          _itemControllers[ctrlKey] = TextEditingController(
+            text: items[idx][fieldKey]?.toString() ?? '',
+          );
+          // Track which item secrets are already loaded.
+          final isItemSecret = _isSecretProp((propEntry.value as Map?)?.cast<String, dynamic>() ?? {});
+          if (isItemSecret && items[idx].containsKey(fieldKey)) {
+            _setItemSecretsLoaded.add('$key.items[$idx].$fieldKey');
+          }
+        }
+      }
+    });
   }
 
   Map<String, dynamic> get _visibleProperties {
@@ -208,6 +326,16 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
                 cfgVal.toString() != kPluginSecretRedactedSentinel &&
                 entry.value.text.isEmpty) {
               entry.value.text = cfgVal.toString();
+            }
+          }
+          // Load array-item state from saved config.
+          for (final entry in _visibleProperties.entries) {
+            final key = entry.key;
+            final prop = entry.value is Map
+                ? Map<String, dynamic>.from(entry.value as Map)
+                : const <String, dynamic>{};
+            if (_isArrayObjectCard(prop)) {
+              _loadArrayConfig(key, res.config);
             }
           }
         }
@@ -463,6 +591,8 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
           }
           payload[key] = parsed;
         }
+      } else if (_isArrayObjectCard(prop)) {
+        payload[key] = _serializeArrayItems(key);
       } else {
         payload[key] = _controllers[key]?.text.trim() ?? '';
       }
@@ -967,6 +1097,9 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
                         final prop = entry.value is Map
                             ? Map<String, dynamic>.from(entry.value as Map)
                             : const <String, dynamic>{};
+                        if (_isArrayObjectCard(prop)) {
+                          return _buildArraySection(context, colors, key, prop);
+                        }
                         return Padding(
                           padding:
                               const EdgeInsets.only(bottom: AppTokens.space16),
@@ -1040,6 +1173,255 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
             child: Text(_isSaving ? 'Saving...' : 'Save Settings'),
           ),
       ],
+    );
+  }
+
+  /// Builds a repeatable object-array section with Add/Remove controls.
+  Widget _buildArraySection(
+    BuildContext context,
+    ShelfdColors colors,
+    String key,
+    Map<String, dynamic> prop,
+  ) {
+    final title = prop['title']?.toString() ?? key;
+    final description = prop['description']?.toString();
+    final itemProps = _itemProperties(prop);
+    final items = _arrayItems[key] ?? [];
+    final isRequired = _requiredFields.contains(key);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppTokens.space16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppTokens.space8),
+            decoration: BoxDecoration(
+              color: colors.containerLow,
+              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+              border: Border.all(color: colors.subtleBorder),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.bodySans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: colors.ink,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppTokens.space8),
+                    if (isRequired)
+                      Text(
+                        '*',
+                        style: AppTypography.bodySans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: colors.errorText,
+                        ),
+                      ),
+                  ],
+                ),
+                if (description != null && description.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4.0),
+                    child: Text(
+                      description,
+                      style:
+                          AppTypography.captionSans(color: colors.mutedInk),
+                    ),
+                  ),
+                const SizedBox(height: AppTokens.space4),
+                // Render each array item card.
+                ...items.map((item) {
+                  final idx = items.indexOf(item);
+                  return _buildArrayItemCard(
+                    context,
+                    colors,
+                    key,
+                    itemProps,
+                    idx,
+                  );
+                }),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppTokens.space4),
+          // Add button.
+          OutlinedButton.icon(
+            key: Key('array_add_$key'),
+            onPressed: () => _addArrayItem(key),
+            icon: const Icon(Icons.add_rounded, size: 18),
+            label: Text('Add $title'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Renders a single array-item card with nested field widgets and a remove button.
+  Widget _buildArrayItemCard(
+    BuildContext context,
+    ShelfdColors colors,
+    String key,
+    Map<String, dynamic> itemProps,
+    int idx,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(top: AppTokens.space8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppTokens.space8),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+          border: Border.all(color: colors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Item ${idx + 1}',
+                  style: AppTypography.titleSerif(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  key: Key('array_remove_$key.$idx'),
+                  icon: Icon(Icons.delete_outline, size: 20, color: colors.errorText),
+                  onPressed: () => _removeArrayItem(key, idx),
+                  tooltip: 'Remove item',
+                ),
+              ],
+            ),
+            // Render each field within the array item.
+            ...itemProps.entries.map((propEntry) {
+              final fieldKey = propEntry.key;
+              final fieldProp = propEntry.value is Map
+                  ? Map<String, dynamic>.from(propEntry.value as Map)
+                  : <String, dynamic>{};
+              return _buildArrayItemField(
+                context,
+                colors,
+                key,
+                idx,
+                fieldKey,
+                fieldProp,
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Renders a single nested field inside an array item card.
+  Widget _buildArrayItemField(
+    BuildContext context,
+    ShelfdColors colors,
+    String key,
+    int idx,
+    String fieldKey,
+    Map<String, dynamic> fieldProp,
+  ) {
+    final title = fieldProp['title']?.toString() ?? fieldKey;
+    final description = fieldProp['description']?.toString();
+    final type = fieldProp['type']?.toString() ?? 'string';
+    final ctrlKey = '$key.$idx.$fieldKey';
+    final controller = _itemControllers[ctrlKey];
+    final isSecret = _isSecretProp(fieldProp);
+    final isObscured = controller != null &&
+        (controller.text.isEmpty || !_setItemSecretsLoaded.contains('$key.items[$idx].$fieldKey'));
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: AppTypography.bodySans(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: colors.ink,
+            ),
+          ),
+          if (description != null && description.isNotEmpty)
+            Text(
+              description,
+              style: AppTypography.captionSans(color: colors.secondaryInk),
+            ),
+          const SizedBox(height: 4.0),
+          if (type == 'boolean') ...[
+            Switch(
+              value: _itemControllers['$key.$idx.$fieldKey']?.text == 'true',
+              onChanged: (val) => setState(() {
+                _itemControllers['$key.$idx.$fieldKey']?.text = val.toString();
+              }),
+            ),
+          ] else if (fieldProp['enum'] is List &&
+              (fieldProp['enum'] as List).isNotEmpty) ...[
+            DropdownButtonHideUnderline(
+              child: ButtonTheme(
+                alignedDropdown: true,
+                child: DropdownButton<String>(
+                  value: _itemControllers['$key.$idx.$fieldKey']?.text,
+                  isExpanded: true,
+                  items: ((fieldProp['enum'] as List)
+                              .map((e) => e.toString())
+                              .toList())
+                          .map((v) => DropdownMenuItem(
+                                value: v,
+                                child: Text(v),
+                              ))
+                          .toList(),
+                  onChanged: (val) {
+                    if (val != null) setState(() => controller!.text = val);
+                  },
+                ),
+              ),
+            ),
+          ] else ...[
+            TextField(
+              controller: controller ?? TextEditingController(),
+              obscureText: isObscured && isSecret,
+              decoration: InputDecoration(
+                hintText: 'Enter $title',
+                filled: true,
+                fillColor: colors.surface,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                  borderSide: BorderSide(color: colors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                  borderSide: BorderSide(color: colors.border),
+                ),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: AppTokens.space8,
+                  vertical: 6.0,
+                ),
+              ),
+              style: AppTypography.bodySans(fontSize: 13, color: colors.ink),
+              onChanged: (val) => setState(() => controller!.text = val),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
