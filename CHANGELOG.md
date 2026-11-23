@@ -1,3 +1,18 @@
+# [1.28.0](https://github.com/theBenForce/shelfd/compare/v1.27.0...v1.28.0) (2026-11-23)
+
+
+### Bug Fixes
+
+* **shelfd:** cancel AudioPlayerNotifier sync timer in readalong reader test ([14bedb5](https://github.com/theBenForce/shelfd/commit/14bedb5cfbc0a50136d5a6f1f84e07f3319a7ede))
+
+
+### Features
+
+* **cast:** add CastDeviceSheet and Cast controls in player, mini-player, and readers ([#102](https://github.com/theBenForce/shelfd/issues/102)) ([f7be780](https://github.com/theBenForce/shelfd/commit/f7be780abf680157c9b02b20be93c9717a6d75ee))
+* **cast:** add Flutter CastAudioPlayerEngine, clock interpolation, and output handoff ([#101](https://github.com/theBenForce/shelfd/issues/101)) ([debb9af](https://github.com/theBenForce/shelfd/commit/debb9af5f9ac2b6ef2ae70661eabf81f0aa6983a))
+* **cast:** add Go CastV2 sender, discovery, session manager, and REST/SSE APIs ([#100](https://github.com/theBenForce/shelfd/issues/100)) ([238f201](https://github.com/theBenForce/shelfd/commit/238f20115ee3c71648d8c6b528018fcd1194ae08))
+* **cast:** add scoped media JWTs, HEAD byte-range media, and WebVTT read-along endpoint ([#99](https://github.com/theBenForce/shelfd/issues/99)) ([e51854c](https://github.com/theBenForce/shelfd/commit/e51854cb8575fcf11333d231b1e4467c6b9590e7))
+
 # [1.27.0](https://github.com/theBenForce/shelfd/compare/v1.26.0...v1.27.0) (2026-11-23)
 
 
