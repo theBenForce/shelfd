@@ -1,3 +1,10 @@
+# [1.26.0](https://github.com/theBenForce/shelfd/compare/v1.25.0...v1.26.0) (2026-11-23)
+
+
+### Features
+
+* **plugins:** multi-library config via secret array-item annotations ([4a8e02b](https://github.com/theBenForce/shelfd/commit/4a8e02b3b9543ae525e27e1a23efdd7a5f24c2d6))
+
 # [1.25.0](https://github.com/theBenForce/shelfd/compare/v1.24.0...v1.25.0) (2026-11-22)
 
 
