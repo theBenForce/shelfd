@@ -579,6 +579,9 @@ void main() {
         expect(container.read(audioPlayerProvider).position.inSeconds, greaterThanOrEqualTo(5));
 
         await engine.stop();
+        // Stop AudioPlayerNotifier to cancel its _syncTimer (periodic 10s progress sync)
+        // which is started by play() but never cancelled when toggling away from player view.
+        await container.read(audioPlayerProvider.notifier).stop();
         await tester.pump();
       },
     );
