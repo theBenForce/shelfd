@@ -100,10 +100,16 @@ func AuthMiddleware(repo repository.StorageEngine, jwtSecret string) func(http.H
 				return
 			}
 
-			// Enforce scope restrictions for plugin-scoped invocation JWTs
-			if jwtClaims != nil && jwtClaims.PluginName != "" {
-				if !PluginScopeAllowsRequest(jwtClaims.Scopes, r.Method, r.URL.Path) {
-					writeJSONError(w, http.StatusForbidden, "Insufficient plugin token scope for requested endpoint")
+			// Enforce scope restrictions for plugin-scoped and cast-scoped JWTs
+			if jwtClaims != nil && (jwtClaims.PluginName != "" || len(jwtClaims.Scopes) > 0) {
+				allowed := false
+				if jwtClaims.PluginName != "" {
+					allowed = PluginScopeAllowsRequest(jwtClaims.Scopes, r.Method, r.URL.Path)
+				} else {
+					allowed = CastScopeAllowsRequest(jwtClaims.Scopes, r.Method, r.URL.Path)
+				}
+				if !allowed {
+					writeJSONError(w, http.StatusForbidden, "Insufficient token scope for requested endpoint")
 					return
 				}
 			}
@@ -112,6 +118,36 @@ func AuthMiddleware(repo repository.StorageEngine, jwtSecret string) func(http.H
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// CastScopeAllowsRequest checks if a book-scoped cast:media:<bookID> token permits a read-only media request.
+func CastScopeAllowsRequest(scopes []string, method, reqPath string) bool {
+	if method != http.MethodGet && method != http.MethodHead {
+		return false
+	}
+	for _, s := range scopes {
+		if !strings.HasPrefix(s, "cast:media:") {
+			continue
+		}
+		bookID := strings.TrimPrefix(s, "cast:media:")
+		if bookID == "" {
+			continue
+		}
+		switch reqPath {
+		case "/api/v1/audiobooks/" + bookID + "/stream",
+			"/api/v1/books/" + bookID + "/audio",
+			"/api/v1/books/" + bookID + "/cover",
+			"/api/v1/books/" + bookID + "/readalong.vtt":
+			return true
+		}
+		if strings.HasPrefix(reqPath, "/api/v1/books/"+bookID+"/assets/") {
+			return true
+		}
+		if strings.HasPrefix(reqPath, "/api/v1/books/"+bookID+"/files/") && strings.HasSuffix(reqPath, "/stream") {
+			return true
+		}
+	}
+	return false
 }
 
 // PluginScopeAllowsRequest checks if the declared plugin API scopes permit the HTTP method and path.

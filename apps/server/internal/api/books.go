@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -459,7 +460,7 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *BookHandler) GetBookCover(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
@@ -512,6 +513,19 @@ func (h *BookHandler) GetBookCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	f, err := os.Open(coverFile)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "Cover image not found")
+		return
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to stat cover image")
+		return
+	}
+
 	contentType := "image/jpeg"
 	switch strings.ToLower(filepath.Ext(coverFile)) {
 	case ".png":
@@ -523,8 +537,9 @@ func (h *BookHandler) GetBookCover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	http.ServeFile(w, r, coverFile)
+	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
 }
 
 func (h *BookHandler) GetChapter(w http.ResponseWriter, r *http.Request) {
@@ -876,7 +891,7 @@ func (h *BookHandler) ExportBookMarkdown(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *BookHandler) GetBookAsset(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
@@ -924,16 +939,38 @@ func (h *BookHandler) GetBookAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	defer reader.Close()
 
-	assetData, mimeType, err := reader.ExtractAsset(assetPath)
+	var (
+		assetData []byte
+		mimeType  string
+	)
+	if isAudioAssetPath(assetPath) {
+		assetData, mimeType, err = reader.ExtractMediaAsset(assetPath)
+	} else {
+		assetData, mimeType, err = reader.ExtractAsset(assetPath)
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusNotFound, fmt.Sprintf("Asset not found: %v", err))
 		return
 	}
 
+	modTime := time.Time{}
+	if fi, sErr := os.Stat(epubPath); sErr == nil {
+		modTime = fi.ModTime()
+	}
+
 	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(assetData)
+	http.ServeContent(w, r, filepath.Base(assetPath), modTime, bytes.NewReader(assetData))
+}
+
+func isAudioAssetPath(assetPath string) bool {
+	switch strings.ToLower(filepath.Ext(assetPath)) {
+	case ".mp3", ".m4a", ".m4b", ".mp4", ".ogg", ".oga", ".opus", ".flac", ".wav", ".aac":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *BookHandler) GetChapterHTML(w http.ResponseWriter, r *http.Request) {
@@ -1697,8 +1734,13 @@ func (h *BookHandler) GetBookReadalong(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	files, _ := h.repo.GetBookFilesByBookID(r.Context(), book.ID)
-	hasReadalong, durationSeconds := resolveReadalongStatus(r.Context(), h.repo, book, files)
+	resp := h.buildReadalongResponse(r.Context(), book)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *BookHandler) buildReadalongResponse(ctx context.Context, book *repository.Book) ReadalongResponse {
+	files, _ := h.repo.GetBookFilesByBookID(ctx, book.ID)
+	hasReadalong, durationSeconds := resolveReadalongStatus(ctx, h.repo, book, files)
 
 	resp := ReadalongResponse{
 		BookID:              book.ID,
@@ -1746,8 +1788,8 @@ func (h *BookHandler) GetBookReadalong(w http.ResponseWriter, r *http.Request) {
 	// synthesize timeline segments from the book's chapters and paragraphs so the reader can still
 	// highlight phrases and auto-turn pages across the audio timeline.
 	if len(resp.Segments) == 0 && resp.HasReadalong {
-		chapters, _ := h.repo.GetChaptersByBookID(r.Context(), book.ID)
-		audioChapters, _ := h.repo.GetAudioChaptersByBookID(r.Context(), book.ID)
+		chapters, _ := h.repo.GetChaptersByBookID(ctx, book.ID)
+		audioChapters, _ := h.repo.GetAudioChaptersByBookID(ctx, book.ID)
 
 		totalDur := 0.0
 		if resp.DurationSeconds != nil && *resp.DurationSeconds > 0 {
@@ -1847,7 +1889,102 @@ func (h *BookHandler) GetBookReadalong(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	return resp
+}
+
+// GetBookReadalongVTT serves synchronized read-along segments as WebVTT captions for Cast TVs.
+func (h *BookHandler) GetBookReadalongVTT(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		bookID = extractIDFromPath(r.URL.Path, "books")
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book: %v", err))
+		return
+	}
+
+	resp := h.buildReadalongResponse(r.Context(), book)
+	trackFilter := strings.TrimSpace(r.URL.Query().Get("track"))
+	vtt := RenderReadalongWebVTT(resp.Segments, trackFilter)
+
+	modTime := time.Time{}
+	if book.FileModifiedAt != nil {
+		modTime = *book.FileModifiedAt
+	}
+
+	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	http.ServeContent(w, r, book.ID+".vtt", modTime, bytes.NewReader([]byte(vtt)))
+}
+
+// RenderReadalongWebVTT formats MediaOverlaySegments into WebVTT cues.
+// When trackFilter is non-empty, only matching AudioSrc segments are included using ClipBegin/ClipEnd.
+func RenderReadalongWebVTT(segments []epub.MediaOverlaySegment, trackFilter string) string {
+	var b strings.Builder
+	b.Grow(len(segments)*64 + 16)
+	b.WriteString("WEBVTT\n\n")
+
+	cleanFilter := strings.TrimPrefix(strings.TrimSpace(trackFilter), "/")
+	cueNum := 0
+	for _, seg := range segments {
+		startSec := seg.GlobalBegin
+		endSec := seg.GlobalEnd
+		if cleanFilter != "" {
+			segSrc := strings.TrimPrefix(strings.TrimSpace(seg.AudioSrc), "/")
+			if segSrc != cleanFilter {
+				continue
+			}
+			startSec = seg.ClipBegin
+			endSec = seg.ClipEnd
+		}
+
+		cueText := strings.TrimSpace(seg.Text)
+		if cueText == "" {
+			cueText = strings.TrimSpace(seg.FragmentID)
+		}
+		if cueText == "" {
+			continue
+		}
+		cueText = strings.ReplaceAll(cueText, "-->", "->")
+		if endSec <= startSec {
+			endSec = startSec + 0.1
+		}
+
+		cueNum++
+		fmt.Fprintf(&b, "%d\n%s --> %s\n%s\n\n", cueNum, formatVTTTimestamp(startSec), formatVTTTimestamp(endSec), cueText)
+	}
+
+	return b.String()
+}
+
+func formatVTTTimestamp(seconds float64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	totalMillis := int64(seconds*1000.0 + 0.5)
+	hours := totalMillis / 3600000
+	rem := totalMillis % 3600000
+	mins := rem / 60000
+	rem %= 60000
+	secs := rem / 1000
+	millis := rem % 1000
+	return fmt.Sprintf("%02d:%02d:%02d.%03d", hours, mins, secs, millis)
 }
 
 // GetUploadJobCover returns the extracted cover image for a staged upload job.

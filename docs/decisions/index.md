@@ -29,4 +29,6 @@ This directory contains the architectural decision records (ADRs) for `shelfd`, 
 | [ADR-0021](0021-external-content-table-fts5-paragraphs.md) | External Content Table for SQLite FTS5 Paragraph Index | Accepted | 2026-10-12 |
 | [ADR-0022](0022-out-of-process-plugin-system-and-catalog-importers.md) | Out-of-Process Plugin System and Standardized Storefront Catalog Importers | Accepted | 2026-11-18 |
 | [ADR-0023](0023-multi-library-plugin-config-secrets.md) | Multi-Library Plugin Config via Secret Array-Item Annotations | Accepted | 2026-11-22 |
+| [ADR-0024](0024-server-side-castv2-sender.md) | Server-Side CastV2 Sender for Audiobooks and Read-Along Books | Accepted | 2026-11-23 |
+
 

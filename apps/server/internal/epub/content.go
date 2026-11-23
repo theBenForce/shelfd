@@ -257,6 +257,15 @@ func (r *Reader) ExtractRawDocument(href string) ([]byte, error) {
 
 // ExtractAsset returns the raw bytes and MIME type of an asset from the EPUB archive.
 func (r *Reader) ExtractAsset(assetPath string) ([]byte, string, error) {
+	return r.extractAssetWithLimit(assetPath, maxTextZipEntryBytes)
+}
+
+// ExtractMediaAsset returns the raw bytes and MIME type of a media asset with a higher size ceiling for embedded audio.
+func (r *Reader) ExtractMediaAsset(assetPath string) ([]byte, string, error) {
+	return r.extractAssetWithLimit(assetPath, maxMediaZipEntryBytes)
+}
+
+func (r *Reader) extractAssetWithLimit(assetPath string, maxBytes int64) ([]byte, string, error) {
 	cleanPath := path.Clean(strings.TrimPrefix(assetPath, "/"))
 	if strings.HasPrefix(cleanPath, "..") {
 		return nil, "", fmt.Errorf("illegal path traversal in asset: %s", assetPath)
@@ -270,7 +279,7 @@ func (r *Reader) ExtractAsset(assetPath string) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("asset not found: %s", assetPath)
 	}
 
-	data, err := readZipFile(zf)
+	data, err := readZipFileWithLimit(zf, maxBytes)
 	if err != nil {
 		return nil, "", fmt.Errorf("reading asset: %w", err)
 	}
