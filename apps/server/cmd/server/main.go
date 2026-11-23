@@ -20,6 +20,7 @@ import (
 
 	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/api"
+	"github.com/shelfd/shelfd/internal/cast"
 	"github.com/shelfd/shelfd/internal/config"
 	"github.com/shelfd/shelfd/internal/database"
 	"github.com/shelfd/shelfd/internal/events"
@@ -272,6 +273,39 @@ func main() {
 	oauthHandler.RegisterRoutes(mux)
 	logger.Info("OAuth 2.0 & RFC 7591 Dynamic Registration enabled")
 
+	// Chromecast CastV2 Manager
+	var castManager cast.Manager
+	if cfg.Cast.Enabled {
+		staticDevs := make([]cast.Device, 0, len(cfg.Cast.StaticDevices))
+		for _, sd := range cfg.Cast.StaticDevices {
+			staticDevs = append(staticDevs, cast.Device{
+				ID:       sd.ID,
+				Name:     sd.Name,
+				Model:    sd.Model,
+				Host:     sd.Host,
+				Port:     sd.Port,
+				HasVideo: sd.HasVideo,
+				HasAudio: true,
+				IsStatic: true,
+			})
+		}
+		castManager = cast.NewManager(cast.ManagerConfig{
+			Repo:       repo,
+			Hub:        eventHub,
+			LibraryDir: cfg.Storage.LibraryDir,
+			DataDir:    cfg.Storage.DataDir,
+			ServerPort: cfg.Server.Port,
+			LANBaseURL: cfg.Cast.LANBaseURL,
+			StaticDevices: staticDevs,
+			TokenMinter: func(userID, username, bookID string, ttl time.Duration) (string, error) {
+				tok, _, err := api.GenerateCastMediaJWT(userID, username, bookID, cfg.Server.JWTSecret, ttl)
+				return tok, err
+			},
+			Logger: logger,
+		})
+		logger.Info("Chromecast CastV2 manager enabled", "static_devices", len(staticDevs))
+	}
+
 	// REST API Router
 	apiRouter := api.NewRouter(api.RouterConfig{
 		Repo:            repo,
@@ -282,6 +316,7 @@ func main() {
 		AIClient:        aiClient,
 		ToolInvoker:     toolExecutor,
 		PluginHost:      pluginHost,
+		CastManager:     castManager,
 		Hub:             eventHub,
 		JobManager:      jobManager,
 		DataDir:         cfg.Storage.DataDir,
@@ -327,6 +362,9 @@ func main() {
 
 	<-stopSig
 	logger.Info("Shutting down Shelfd daemon gracefully...")
+	if castManager != nil {
+		_ = castManager.Close()
+	}
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 
