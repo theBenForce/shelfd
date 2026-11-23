@@ -13,6 +13,8 @@ const (
 	EventPlugin      EventType = "plugin_event"
 	EventJobUpdated  EventType = "job_updated"
 	EventJobRemoved  EventType = "job_removed"
+	EventCastStatus  EventType = "cast_status"
+	EventCastDevices EventType = "cast_devices"
 )
 
 // Event represents an event payload to broadcast to connected clients.
