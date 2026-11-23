@@ -122,6 +122,274 @@ func TestCrypto_EncryptRedactPreserveAndSmartPaste(t *testing.T) {
 	}
 }
 
+// TestCrypto_ArrayItemSecrets_RoundTripRedactAndCurlPaste covers secrets declared on
+// properties of array items (repeatable object cards, e.g. multi-library credentials).
+func TestCrypto_ArrayItemSecrets_RoundTripRedactAndCurlPaste(t *testing.T) {
+	masterSecret := "unit-test-jwt-master-secret-key-2026"
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"libraries": map[string]any{
+				"type":  "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":     map[string]any{"type": "string"},
+						"cookie": map[string]any{
+							"type":                 "string",
+							"x-shelfd-secret":      true,
+							"x-shelfd-curl-paste":  true,
+							"x-shelfd-cookie-name": "accountToken",
+						},
+						"format": map[string]any{"type": "string"},
+					},
+				},
+			},
+			"api_token": map[string]any{
+				"type":           "string",
+				"x-shelfd-secret": true,
+			},
+		},
+	}
+
+	pastedCurl := `curl 'https://site-a.example.org/account' -H 'cookie: accountToken=fake-token-0123456789; other=x'`
+	incoming := map[string]any{
+		"libraries": []any{
+			map[string]any{"id": "site-a", "cookie": pastedCurl, "format": "epub"},
+			map[string]any{"id": "site-b", "cookie": "raw-session-value-abc; other=y", "format": "epub"},
+		},
+		"api_token": "top-level-still-works",
+	}
+
+	stored, decrypted, err := plugins.PrepareConfigForStorage(masterSecret, "lib-test", schema, incoming, nil)
+	if err != nil {
+		t.Fatalf("PrepareConfigForStorage failed: %v", err)
+	}
+
+	lib0, ok0 := stored["libraries"].([]any)
+	if !ok0 || len(lib0) != 2 {
+		t.Fatalf("expected stored libraries array of 2, got %#v", stored["libraries"])
+	}
+	encCookie0, _ := lib0[0].(map[string]any)["cookie"].(string)
+	if !strings.HasPrefix(encCookie0, "enc:v1:") {
+		t.Fatalf("expected item[0] cookie encrypted with enc:v1: prefix, got %q", encCookie0)
+	}
+	if lib0[0].(map[string]any)["id"] != "site-a" || lib0[1].(map[string]any)["id"] != "site-b" {
+		t.Fatalf("non-secret item fields must stay plaintext, got %#v", lib0)
+	}
+	encCookie1, _ := lib0[1].(map[string]any)["cookie"].(string)
+	if !strings.HasPrefix(encCookie1, "enc:v1:") {
+		t.Fatalf("expected item[1] cookie encrypted, got %q", encCookie1)
+	}
+	if stored["api_token"] == "" || !strings.HasPrefix(stored["api_token"].(string), "enc:v1:") {
+		t.Fatalf("top-level secret should still be encrypted at rest, got %v", stored["api_token"])
+	}
+
+	// Decrypted view hands the plugin the extracted named cookie from the curl paste
+	decLibs, _ := decrypted["libraries"].([]any)
+	if decLibs[0].(map[string]any)["cookie"] != `fake-token-0123456789` {
+		t.Fatalf("expected named cookie extraction in array item, got %v", decLibs[0].(map[string]any)["cookie"])
+	}
+	if decLibs[1].(map[string]any)["cookie"] != "raw-session-value-abc; other=y" {
+		t.Fatalf("raw cookie value should pass through unchanged, got %v", decLibs[1].(map[string]any)["cookie"])
+	}
+
+	// Redaction masks every item's secret with the sentinel and reports an index-free path
+	redacted, setFields := plugins.RedactStoredConfig(schema, stored)
+	redLibs, _ := redacted["libraries"].([]any)
+	for i, item := range redLibs {
+		if item.(map[string]any)["cookie"] != plugins.SecretSentinel {
+			t.Fatalf("expected item[%d] cookie redacted, got %#v", i, item)
+		}
+	}
+	wantSet := []string{"api_token", "libraries[*].cookie"}
+	if len(setFields) != len(wantSet) || setFields[0] != wantSet[0] || setFields[1] != wantSet[1] {
+		t.Fatalf("expected secret paths %v, got %v", wantSet, setFields)
+	}
+
+	// Round trip: decrypting stored config restores both item secrets
+	redec, redecSet, err := plugins.DecryptStoredConfig(masterSecret, "lib-test", schema, stored)
+	if err != nil {
+		t.Fatalf("DecryptStoredConfig failed: %v", err)
+	}
+	rLibs, _ := redec["libraries"].([]any)
+	if rLibs[0].(map[string]any)["cookie"] != `fake-token-0123456789` || rLibs[1].(map[string]any)["cookie"] != "raw-session-value-abc; other=y" {
+		t.Fatalf("round-trip decryption mismatch: %#v", rLibs)
+	}
+	if len(redecSet) == 0 || !strings.Contains(strings.Join(redecSet, ","), "libraries[*].cookie") {
+		t.Fatalf("expected decrypted secret set to include array path, got %v", redecSet)
+	}
+
+	// Sentinel preservation per index: replace item[0], keep item[1]'s ciphertext
+	stored2, decrypted2, err := plugins.PrepareConfigForStorage(masterSecret, "lib-test", schema, map[string]any{
+		"libraries": []any{
+			map[string]any{"id": "site-a", "cookie": "brand-new-value", "format": "epub"},
+			map[string]any{"id": "site-b", "cookie": plugins.SecretSentinel, "format": "mp3"},
+		},
+	}, stored)
+	if err != nil {
+		t.Fatalf("PrepareConfigForStorage preserve failed: %v", err)
+	}
+	storedLibs, _ := stored2["libraries"].([]any)
+	if storedLibs[1].(map[string]any)["cookie"] != encCookie1 {
+		t.Fatalf("expected item[1] ciphertext preserved across sentinel update")
+	}
+	if storedLibs[0].(map[string]any)["cookie"] == encCookie0 {
+		t.Fatalf("expected item[0] cookie re-encrypted with the new value")
+	}
+	if storedLibs[1].(map[string]any)["format"] != "mp3" {
+		t.Fatalf("non-secret fields of updated items must be written through, got %#v", storedLibs[1])
+	}
+	decLibs2, _ := decrypted2["libraries"].([]any)
+	if decLibs2[1].(map[string]any)["cookie"] != "raw-session-value-abc; other=y" {
+		t.Fatalf("preserved item secret should decrypt to the original value, got %v", decLibs2[1].(map[string]any)["cookie"])
+	}
+}
+
+// TestCrypto_ArrayItemSecrets_ReorderAndDeleteMatchByIdentity verifies that when an incoming
+// array is reordered or shrunk, per-item secrets stay bound to the correct record via a stable
+// non-secret identity field (here "id") instead of naive positional matching.
+func TestCrypto_ArrayItemSecrets_ReorderAndDeleteMatchByIdentity(t *testing.T) {
+	masterSecret := "unit-test-jwt-master-secret-key-2026"
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"libraries": map[string]any{
+				"type":  "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":     map[string]any{"type": "string"},
+						"cookie": map[string]any{
+							"type":                "string",
+							"x-shelfd-secret":     true,
+							"x-shelfd-curl-paste": true,
+						},
+						"format": map[string]any{"type": "string"},
+					},
+				},
+			},
+		},
+	}
+
+	incoming := map[string]any{
+		"libraries": []any{
+			map[string]any{"id": "lib-a", "cookie": "cookie-a-plain", "format": "epub"},
+			map[string]any{"id": "lib-b", "cookie": "cookie-b-plain", "format": "mp3"},
+		},
+	}
+	stored, _, err := plugins.PrepareConfigForStorage(masterSecret, "od-identity", schema, incoming, nil)
+	if err != nil {
+		t.Fatalf("seed PrepareConfigForStorage failed: %v", err)
+	}
+	exLibs, ok := stored["libraries"].([]any)
+	if !ok || len(exLibs) != 2 {
+		t.Fatalf("expected two seeded libraries, got %#v", stored["libraries"])
+	}
+	encA := exLibs[0].(map[string]any)["cookie"].(string)
+	encB := exLibs[1].(map[string]any)["cookie"].(string)
+
+	// Reorder: [lib-b, lib-a] with sentinels must keep each record's own ciphertext.
+	reordered := map[string]any{
+		"libraries": []any{
+			map[string]any{"id": "lib-b", "cookie": plugins.SecretSentinel, "format": "mp3"},
+			map[string]any{"id": "lib-a", "cookie": plugins.SecretSentinel, "format": "epub"},
+		},
+	}
+	stored2, dec2, err := plugins.PrepareConfigForStorage(masterSecret, "od-identity", schema, reordered, stored)
+	if err != nil {
+		t.Fatalf("reordered PrepareConfigForStorage failed: %v", err)
+	}
+	lib2 := stored2["libraries"].([]any)
+	if got := lib2[0].(map[string]any)["cookie"]; got != encB {
+		t.Fatalf("reordered item[0] (lib-b) must keep lib-b's ciphertext, got %q (want %q)", got, encB)
+	}
+	if got := lib2[1].(map[string]any)["cookie"]; got != encA {
+		t.Fatalf("reordered item[1] (lib-a) must keep lib-a's ciphertext, got %q (want %q)", got, encA)
+	}
+	decLibs2 := dec2["libraries"].([]any)
+	if got := decLibs2[0].(map[string]any)["cookie"]; got != "cookie-b-plain" {
+		t.Fatalf("reordered item[0] must decrypt to cookie-b-plain, got %v", got)
+	}
+
+	// Delete: drop lib-a entirely; the survivor must be lib-b with its own ciphertext.
+	deletion := map[string]any{
+		"libraries": []any{
+			map[string]any{"id": "lib-b", "cookie": plugins.SecretSentinel, "format": "mp3"},
+		},
+	}
+	stored3, dec3, err := plugins.PrepareConfigForStorage(masterSecret, "od-identity", schema, deletion, stored)
+	if err != nil {
+		t.Fatalf("deletion PrepareConfigForStorage failed: %v", err)
+	}
+	lib3 := stored3["libraries"].([]any)
+	if len(lib3) != 1 {
+		t.Fatalf("expected one library after deletion, got %d", len(lib3))
+	}
+	survivor := lib3[0].(map[string]any)
+	if survivor["id"] != "lib-b" || survivor["cookie"] != encB {
+		t.Fatalf("surviving entry must be lib-b with its own ciphertext, got %#v", survivor)
+	}
+	if got := dec3["libraries"].([]any)[0].(map[string]any)["cookie"]; got != "cookie-b-plain" {
+		t.Fatalf("surviving entry must decrypt to cookie-b-plain, got %v", got)
+	}
+}
+
+// TestManifest_ConfigSchemaPreservesItemSecretAnnotations verifies that manifests declaring
+// secret annotations on array-item properties (repeatable object cards) parse cleanly and the
+// full nested schema survives validation untouched.
+func TestManifest_ConfigSchemaPreservesItemSecretAnnotations(t *testing.T) {
+	m, err := plugins.ParseManifest([]byte(`{
+		"name": "example",
+		"version": "0.1.0",
+		"entrypoint": {"command": "node", "args": ["index.mjs"]},
+		"config_schema": {
+			"type": "object",
+			"properties": {
+				"libraries": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"properties": {
+							"id": {"type": "string"},
+							"cookie": {
+								"type": "string",
+								"x-shelfd-secret": true,
+								"x-shelfd-curl-paste": true,
+								"x-shelfd-cookie-name": "accountToken"
+							}
+						}
+					}
+				}
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("ParseManifest rejected item annotations: %v", err)
+	}
+	if vErr := plugins.ValidateManifest(m); vErr != nil {
+		t.Fatalf("ValidateManifest rejected annotated schema: %v", vErr)
+	}
+
+	props, ok := m.ConfigSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("config schema properties lost after parse: %#v", m.ConfigSchema)
+	}
+	libProp, libOk := props["libraries"].(map[string]any)
+	items, itemsOk := libProp["items"].(map[string]any)
+	itemProps, itemPropsOk := items["properties"].(map[string]any)
+	if !libOk || !itemsOk || !itemPropsOk {
+		t.Fatalf("items.properties lost after parse: %#v", libProp)
+	}
+	cookie, ok := itemProps["cookie"].(map[string]any)
+	if !ok {
+		t.Fatalf("cookie item property lost: %#v", itemProps)
+	}
+	if cookie["x-shelfd-secret"] != true || cookie["x-shelfd-curl-paste"] != true || cookie["x-shelfd-cookie-name"] != "accountToken" {
+		t.Fatalf("item secret annotations altered after parse: %#v", cookie)
+	}
+}
+
 func buildZipBytes(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer

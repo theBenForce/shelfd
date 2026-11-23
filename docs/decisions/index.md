@@ -28,4 +28,5 @@ This directory contains the architectural decision records (ADRs) for `shelfd`, 
 | [ADR-0020](0020-structured-server-logging-with-slog.md) | Structured Server Logging with log/slog | Accepted | 2026-09-09 |
 | [ADR-0021](0021-external-content-table-fts5-paragraphs.md) | External Content Table for SQLite FTS5 Paragraph Index | Accepted | 2026-10-12 |
 | [ADR-0022](0022-out-of-process-plugin-system-and-catalog-importers.md) | Out-of-Process Plugin System and Standardized Storefront Catalog Importers | Accepted | 2026-11-18 |
+| [ADR-0023](0023-multi-library-plugin-config-secrets.md) | Multi-Library Plugin Config via Secret Array-Item Annotations | Accepted | 2026-11-22 |
 
