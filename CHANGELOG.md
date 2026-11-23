@@ -1,3 +1,10 @@
+# [1.27.0](https://github.com/theBenForce/shelfd/compare/v1.26.0...v1.27.0) (2026-11-23)
+
+
+### Features
+
+* **app:** repeatable object-array cards in plugin config dialog ([545ef66](https://github.com/theBenForce/shelfd/commit/545ef66910668e8b070622a5bac4993abecaa460))
+
 # [1.26.0](https://github.com/theBenForce/shelfd/compare/v1.25.0...v1.26.0) (2026-11-23)
 
 
