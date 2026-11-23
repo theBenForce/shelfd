@@ -8,6 +8,7 @@ import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
+import '../audiobook/widgets/cast_device_sheet.dart';
 import 'html_view.dart';
 
 enum SpreadMode {
@@ -704,6 +705,23 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                       );
                 },
               ),
+            IconButton(
+              key: const Key('readalong-cast-button'),
+              icon: Icon(
+                ref.watch(audioPlayerProvider).isCasting
+                    ? Icons.cast_connected
+                    : Icons.cast,
+                color: ref.watch(audioPlayerProvider).isCasting
+                    ? colors.accentPrimary
+                    : colors.ink,
+              ),
+              tooltip: 'Cast audio',
+              onPressed: () => showCastDeviceSheet(
+                context,
+                book: widget.book,
+                hasReadalong: true,
+              ),
+            ),
             IconButton(
               key: const Key('switch_to_audiobook_button'),
               icon: Icon(Icons.headphones_rounded, color: colors.ink),
