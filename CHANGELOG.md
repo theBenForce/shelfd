@@ -1,3 +1,11 @@
+## [1.30.1](https://github.com/theBenForce/shelfd/compare/v1.30.0...v1.30.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **app:** dispose CastAudioPlayerEngine before testWidgets timer check ([d25a4cf](https://github.com/theBenForce/shelfd/commit/d25a4cf159a57959d4885f6bfb1fe83a7ec4108a))
+* **app:** fix plugin config array serialization and per-item secret handling ([0b6c275](https://github.com/theBenForce/shelfd/commit/0b6c2751618638a261a5adcd3c1db158258dc2fe))
+
 # [1.30.0](https://github.com/theBenForce/shelfd/compare/v1.29.0...v1.30.0) (2026-11-24)
 
 
