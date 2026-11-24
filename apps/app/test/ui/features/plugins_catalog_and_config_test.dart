@@ -556,7 +556,6 @@ void main() {
     expect(find.text('Yoto Access Token'), findsNothing);
     expect(find.byKey(const Key('plugin_config_save_button')), findsNothing);
   });
-
   testWidgets(
       'CatalogBrowserView stages asynchronously as a background task, locks in-flight items, and updates badges on completion',
       (tester) async {
@@ -840,5 +839,235 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Uploads Destination'), findsOneWidget);
+  });
+
+  testWidgets('OverDrive-style array card save sends flat list with typed secrets', (tester) async {
+    setDesktopViewport(tester);
+    Map<String, dynamic>? lastSavedBody;
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/plugins/test-overdrive/config' && request.method == 'GET') {
+        return http.Response(jsonEncode({'config': {}, 'secret_fields_set': []}), 200);
+      }
+      if (request.url.path == '/api/v1/plugins/test-overdrive/config' && request.method == 'PUT') {
+        lastSavedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(jsonEncode({'config': lastSavedBody!, 'secret_fields_set': ['libraries[*].password']}), 200);
+      }
+      if (request.url.path == '/api/v1/plugins') {
+        return http.Response(jsonEncode({'plugins': []}), 200);
+      }
+      return http.Response('Not Found', 404);
+    });
+    final api = ApiService(baseUrl: 'http://localhost:8080', token: 'test-token-123', client: mockClient);
+    const summary = PluginSummary(
+      name: 'test-overdrive',
+      displayName: 'Test OverDrive',
+      version: '1.0.0',
+      enabled: true,
+      status: 'idle',
+      capabilities: ['catalog'],
+      configSchema: {
+        'type': 'object',
+        'required': ['libraries'],
+        'properties': {
+          'libraries': {
+            'type': 'array',
+            'items': {
+              'type': 'object',
+              'properties': {
+                'subdomain': {'type': 'string', 'title': 'Library subdomain'},
+                'username': {'type': 'string', 'title': 'Card number'},
+                'password': {'type': 'string', 'title': 'Password', 'x-shelfd-secret': true, 'format': 'password'},
+              },
+              'required': ['subdomain', 'username', 'password'],
+            },
+          },
+        },
+      },
+    );
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        apiServiceProvider.overrideWithValue(api),
+        queueProvider.overrideWith(_FakeQueueNotifier.new),
+      ],
+      child: MaterialApp(
+        theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+        home: const Scaffold(body: PluginConfigDialog(plugin: summary)),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('array_add_libraries')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+        find.byWidgetPredicate((w) => w is TextField && w.decoration?.hintText == 'Enter Library subdomain'),
+        'jocolibrary');
+    await tester.enterText(
+        find.byWidgetPredicate((w) => w is TextField && w.decoration?.hintText == 'Enter Card number'),
+        '025746613');
+    await tester.enterText(
+        find.byWidgetPredicate((w) => w is TextField && w.decoration?.hintText == 'Enter Password'),
+        's3cret');
+    await tester.tap(find.byKey(const Key('plugin_config_save_button')));
+    await tester.pumpAndSettle();
+
+    expect(lastSavedBody, isNotNull);
+    expect(lastSavedBody!['libraries'], isA<List>());
+    final items = lastSavedBody!['libraries'] as List;
+    expect(items.length, 1);
+    expect(items.first['subdomain'], 'jocolibrary');
+    expect(items.first['username'], '025746613');
+    expect(items.first['password'], 's3cret');
+    expect(jsonEncode(lastSavedBody).contains(kPluginSecretRedactedSentinel), isFalse);
+  });
+
+  testWidgets('Blank array cards are dropped on save', (tester) async {
+    setDesktopViewport(tester);
+    Map<String, dynamic>? lastSavedBody;
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/plugins/test-overdrive/config' && request.method == 'GET') {
+        return http.Response(jsonEncode({'config': {}, 'secret_fields_set': []}), 200);
+      }
+      if (request.url.path == '/api/v1/plugins/test-overdrive/config' && request.method == 'PUT') {
+        lastSavedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(jsonEncode({'config': lastSavedBody!, 'secret_fields_set': []}), 200);
+      }
+      if (request.url.path == '/api/v1/plugins') {
+        return http.Response(jsonEncode({'plugins': []}), 200);
+      }
+      return http.Response('Not Found', 404);
+    });
+    final api = ApiService(baseUrl: 'http://localhost:8080', token: 'test-token-123', client: mockClient);
+    const summary = PluginSummary(
+      name: 'test-overdrive',
+      displayName: 'Test OverDrive',
+      version: '1.0.0',
+      enabled: true,
+      status: 'idle',
+      capabilities: ['catalog'],
+      configSchema: {
+        'type': 'object',
+        'required': ['libraries'],
+        'properties': {
+          'libraries': {
+            'type': 'array',
+            'items': {
+              'type': 'object',
+              'properties': {
+                'subdomain': {'type': 'string', 'title': 'Library subdomain'},
+                'username': {'type': 'string', 'title': 'Card number'},
+                'password': {'type': 'string', 'title': 'Password', 'x-shelfd-secret': true, 'format': 'password'},
+              },
+              'required': ['subdomain', 'username', 'password'],
+            },
+          },
+        },
+      },
+    );
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        apiServiceProvider.overrideWithValue(api),
+        queueProvider.overrideWith(_FakeQueueNotifier.new),
+      ],
+      child: MaterialApp(
+        theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+        home: const Scaffold(body: PluginConfigDialog(plugin: summary)),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('array_add_libraries')));
+    await tester.tap(find.byKey(const Key('array_add_libraries')));
+    await tester.pumpAndSettle();
+    // Fill only the first card (finders return first match = index 0).
+    await tester.enterText(
+        find.byWidgetPredicate((w) => w is TextField && w.decoration?.hintText == 'Enter Library subdomain').first,
+        'jocolibrary');
+    await tester.enterText(
+        find.byWidgetPredicate((w) => w is TextField && w.decoration?.hintText == 'Enter Card number').first,
+        '025746613');
+    await tester.enterText(
+        find.byWidgetPredicate((w) => w is TextField && w.decoration?.hintText == 'Enter Password').first,
+        's3cret');
+    await tester.tap(find.byKey(const Key('plugin_config_save_button')));
+    await tester.pumpAndSettle();
+    expect(lastSavedBody, isNotNull);
+    final items = lastSavedBody!['libraries'] as List;
+    expect(items.length, 1);
+    for (final item in items) {
+      expect(item, isNotEmpty);
+    }
+  });
+
+  testWidgets('Reopened array card keeps stored secret via sentinel, shows empty obscured field', (tester) async {
+    setDesktopViewport(tester);
+    Map<String, dynamic>? lastSavedBody;
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/plugins/test-overdrive/config' && request.method == 'GET') {
+        return http.Response(jsonEncode({
+          'config': {'libraries': [{'subdomain': 'jocolibrary', 'username': '025746613', 'password': kPluginSecretRedactedSentinel}]},
+          'secret_fields_set': ['libraries[*].password'],
+        }), 200);
+      }
+      if (request.url.path == '/api/v1/plugins/test-overdrive/config' && request.method == 'PUT') {
+        lastSavedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(jsonEncode({'config': lastSavedBody!, 'secret_fields_set': ['libraries[*].password']}), 200);
+      }
+      if (request.url.path == '/api/v1/plugins') {
+        return http.Response(jsonEncode({'plugins': []}), 200);
+      }
+      return http.Response('Not Found', 404);
+    });
+    final api = ApiService(baseUrl: 'http://localhost:8080', token: 'test-token-123', client: mockClient);
+    const summary = PluginSummary(
+      name: 'test-overdrive',
+      displayName: 'Test OverDrive',
+      version: '1.0.0',
+      enabled: true,
+      status: 'idle',
+      capabilities: ['catalog'],
+      configSchema: {
+        'type': 'object',
+        'required': ['libraries'],
+        'properties': {
+          'libraries': {
+            'type': 'array',
+            'items': {
+              'type': 'object',
+              'properties': {
+                'subdomain': {'type': 'string', 'title': 'Library subdomain'},
+                'username': {'type': 'string', 'title': 'Card number'},
+                'password': {'type': 'string', 'title': 'Password', 'x-shelfd-secret': true, 'format': 'password'},
+              },
+              'required': ['subdomain', 'username', 'password'],
+            },
+          },
+        },
+      },
+    );
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        apiServiceProvider.overrideWithValue(api),
+        queueProvider.overrideWith(_FakeQueueNotifier.new),
+      ],
+      child: MaterialApp(
+        theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+        home: const Scaffold(body: PluginConfigDialog(plugin: summary)),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('array_remove_libraries.0')), findsOneWidget);
+    expect(find.byKey(const Key('array_remove_libraries.1')), findsNothing);
+    expect(find.text(kPluginSecretRedactedSentinel), findsNothing);
+
+    await tester.tap(find.byKey(const Key('plugin_config_save_button')));
+    await tester.pumpAndSettle();
+    expect(lastSavedBody, isNotNull);
+    final items = lastSavedBody!['libraries'] as List;
+    expect(items.length, 1);
+    expect(items.first['password'], kPluginSecretRedactedSentinel);
+    expect(items.first['subdomain'], 'jocolibrary');
+    expect(items.first['username'], '025746613');
   });
 }

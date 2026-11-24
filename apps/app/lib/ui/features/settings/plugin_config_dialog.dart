@@ -133,34 +133,31 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
     });
   }
 
-  /// Serializes each array's items into a flat map keyed by the array name.
-  Map<String, dynamic> _serializeArrayItems(String key) {
+  /// Serializes [key]'s items into a JSON-ready list; blank cards are dropped,
+  /// and per-item secrets send the entered value or the redaction sentinel only
+  /// when a stored value must be preserved.
+  List<dynamic> _serializeArrayItems(String key) {
     final itemProps = _itemProperties(_visibleProperties[key]!);
     final items = _arrayItems[key] ?? [];
-    final result = <String, dynamic>{};
+    final result = <dynamic>[];
     for (var idx = 0; idx < items.length; idx++) {
       final item = items[idx];
       final itemMap = <String, dynamic>{};
       for (final propEntry in itemProps.entries) {
         final fieldKey = propEntry.key;
-        final controllerKey = '$key.$idx.$fieldKey';
-        final ctrl = _itemControllers[controllerKey];
+        final ctrl = _itemControllers['$key.$idx.$fieldKey'];
         final rawText = ctrl?.text.trim() ?? '';
-        if (rawText.isNotEmpty || item.containsKey(fieldKey)) {
-          // Check if this is a secret field for this specific item.
-          final isItemSecret = _isSecretProp((propEntry.value as Map?)?.cast<String, dynamic>() ?? {});
-          final secretTracker = '$key.items[$idx].$fieldKey';
-          if (isItemSecret && !_setItemSecretsLoaded.contains(secretTracker)) {
-            // New or unset secret: use sentinel to preserve existing value on server.
-            itemMap[fieldKey] = kPluginSecretRedactedSentinel;
-          } else {
-            itemMap[fieldKey] = rawText;
-          }
+        final isItemSecret = _isSecretProp((propEntry.value as Map?)?.cast<String, dynamic>() ?? {});
+        if (isItemSecret && rawText.isNotEmpty) {
+          itemMap[fieldKey] = rawText;
+        } else if (isItemSecret && _setItemSecretsLoaded.contains('$key.items[$idx].$fieldKey')) {
+          itemMap[fieldKey] = kPluginSecretRedactedSentinel;
+        } else if (rawText.isNotEmpty || item.containsKey(fieldKey)) {
+          itemMap[fieldKey] = rawText;
         }
       }
-      result[key] ??= <List<dynamic>>[];
-      if (result[key] is! List) result[key] = [];
-      (result[key] as List).add(itemMap);
+      if (itemMap.isEmpty) continue; // blank fresh card: don't persist it
+      result.add(itemMap);
     }
     return result;
   }
@@ -178,11 +175,12 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
         for (final propEntry in itemProps.entries) {
           final fieldKey = propEntry.key;
           final ctrlKey = '$key.$idx.$fieldKey';
+          final val = items[idx][fieldKey]?.toString() ?? '';
+          final isItemSecret = _isSecretProp((propEntry.value as Map?)?.cast<String, dynamic>() ?? {});
           _itemControllers[ctrlKey] = TextEditingController(
-            text: items[idx][fieldKey]?.toString() ?? '',
+            text: (isItemSecret && val == kPluginSecretRedactedSentinel) ? '' : val,
           );
           // Track which item secrets are already loaded.
-          final isItemSecret = _isSecretProp((propEntry.value as Map?)?.cast<String, dynamic>() ?? {});
           if (isItemSecret && items[idx].containsKey(fieldKey)) {
             _setItemSecretsLoaded.add('$key.items[$idx].$fieldKey');
           }
