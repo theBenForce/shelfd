@@ -30,6 +30,14 @@ func GeneratePluginInvocationJWT(userID, username, pluginName string, scopes []s
 	return generateJWTWithScopes(userID, username, pluginName, scopes, secret, duration)
 }
 
+// GenerateCastMediaJWT creates a read-only, book-scoped JWT for LAN Chromecast media, cover, and WebVTT fetches.
+func GenerateCastMediaJWT(userID, username, bookID, secret string, duration time.Duration) (string, time.Time, error) {
+	if bookID == "" {
+		return "", time.Time{}, errors.New("book id cannot be empty")
+	}
+	return generateJWTWithScopes(userID, username, "", []string{"cast:media:" + bookID}, secret, duration)
+}
+
 func generateJWTWithScopes(userID, username, pluginName string, scopes []string, secret string, duration time.Duration) (string, time.Time, error) {
 	if secret == "" {
 		return "", time.Time{}, errors.New("jwt secret cannot be empty")

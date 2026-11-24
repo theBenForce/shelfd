@@ -21,10 +21,12 @@ import '../../data/services/storage_service.dart';
 import '../core/theme.dart';
 import '../features/library/library_query_parser.dart';
 import 'background_jobs_provider.dart';
+import 'cast_provider.dart';
 import 'plugins_provider.dart';
 export 'audio_player_provider.dart';
 export 'audio_player_state.dart';
 export 'background_jobs_provider.dart';
+export 'cast_provider.dart';
 export 'duplicate_books_provider.dart';
 export 'plugins_provider.dart';
 export 'readalong_pip_provider.dart';
@@ -901,6 +903,10 @@ class QueueNotifier extends Notifier<QueueState> {
               ref.read(backgroundJobsProvider.notifier).upsertJob(job);
             case JobRemovedEvent(:final jobId):
               ref.read(backgroundJobsProvider.notifier).removeJob(jobId);
+            case CastStatusEvent(:final session):
+              ref.read(castProvider.notifier).handleSessionEvent(session);
+            case CastDevicesEvent(:final devices):
+              ref.read(castProvider.notifier).handleDevicesEvent(devices);
           }
         },
         onError: (err) {

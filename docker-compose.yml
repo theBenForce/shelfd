@@ -54,6 +54,10 @@ services:
       - SHELFD_AI_EMBEDDING_DIMENSIONS=256
       - SHELFD_AI_SUMMARY_MODEL=google/gemma-4-e4b
       - SHELFD_JWT_SECRET=${SHELFD_JWT_SECRET:-shelfd-homelab-jwt-secret-key-32bytes}
+      # Optional Chromecast Casting (set LAN base URL and static devices on bridge networks, or use network_mode: host for zero-config mDNS)
+      - SHELFD_CAST_ENABLED=${SHELFD_CAST_ENABLED:-true}
+      - SHELFD_CAST_LAN_BASE_URL=${SHELFD_CAST_LAN_BASE_URL:-}
+      - SHELFD_CAST_STATIC_DEVICES=${SHELFD_CAST_STATIC_DEVICES:-}
     volumes:
       # Shelfd state: extracted covers, search cache, and temporary uploads
       - ./data:/data

@@ -104,4 +104,15 @@ plugins:
   # Seconds of inactivity before non-daemon child plugin processes are stopped (default: 120).
   idle_timeout_seconds: 120
 
+cast:
+  # Enable server-side CastV2 discovery and playback control (SHELFD_CAST_ENABLED).
+  enabled: true
+  # Optional LAN-reachable base URL for Chromecast media fetches when running behind Docker NAT or reverse proxy.
+  # Example: "http://192.168.1.50:8080" (SHELFD_CAST_LAN_BASE_URL).
+  lan_base_url: ""
+  # Optional static Cast devices for Docker bridge networks where mDNS multicast cannot cross NAT.
+  # Env override: SHELFD_CAST_STATIC_DEVICES="tv1|Living Room TV|192.168.1.40:8009|true|Chromecast"
+  static_devices: []
+
+
 

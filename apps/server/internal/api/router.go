@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/shelfd/shelfd/internal/ai"
+	"github.com/shelfd/shelfd/internal/cast"
 	"github.com/shelfd/shelfd/internal/events"
 	"github.com/shelfd/shelfd/internal/jobs"
 	"github.com/shelfd/shelfd/internal/plugins"
@@ -23,6 +24,7 @@ type RouterConfig struct {
 	AIClient        ai.Client
 	ToolInvoker     ai.ToolInvoker
 	PluginHost      *plugins.Host
+	CastManager     cast.Manager
 	Hub             *events.Hub
 	JobManager      *jobs.Manager
 	DataDir         string
@@ -63,6 +65,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	audioHandler := NewAudiobookHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, logger)
 	metadataHandler := NewMetadataHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
 	pluginHandler := NewPluginHandler(cfg.PluginHost, logger)
+	castHandler := NewCastHandler(cfg.CastManager, logger)
 
 	auth := AuthMiddleware(cfg.Repo, cfg.JWTSecret)
 
@@ -123,8 +126,12 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("GET /api/v1/books/{id}/download", auth(http.HandlerFunc(bookHandler.DownloadBook)))
 	mux.Handle("GET /api/v1/books/{id}/markdown", auth(http.HandlerFunc(bookHandler.ExportBookMarkdown)))
 	mux.Handle("GET /api/v1/books/{id}/cover", auth(http.HandlerFunc(bookHandler.GetBookCover)))
+	mux.Handle("HEAD /api/v1/books/{id}/cover", auth(http.HandlerFunc(bookHandler.GetBookCover)))
 	mux.Handle("GET /api/v1/books/{id}/readalong", auth(http.HandlerFunc(bookHandler.GetBookReadalong)))
+	mux.Handle("GET /api/v1/books/{id}/readalong.vtt", auth(http.HandlerFunc(bookHandler.GetBookReadalongVTT)))
+	mux.Handle("HEAD /api/v1/books/{id}/readalong.vtt", auth(http.HandlerFunc(bookHandler.GetBookReadalongVTT)))
 	mux.Handle("GET /api/v1/books/{id}/assets/{path...}", auth(http.HandlerFunc(bookHandler.GetBookAsset)))
+	mux.Handle("HEAD /api/v1/books/{id}/assets/{path...}", auth(http.HandlerFunc(bookHandler.GetBookAsset)))
 	mux.Handle("GET /api/v1/books/{id}/chapters/{index}/html", auth(http.HandlerFunc(bookHandler.GetChapterHTML)))
 	mux.Handle("POST /api/v1/books/{id}/reparse", auth(http.HandlerFunc(bookHandler.ReparseBook)))
 	mux.Handle("POST /api/v1/books/{id}/chat", auth(http.HandlerFunc(bookHandler.ChatBook)))
@@ -175,6 +182,13 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("POST /api/v1/utilities/merge-books", auth(http.HandlerFunc(utilHandler.MergeBooks)))
 
 	mux.Handle("POST /api/v1/library/scan", auth(http.HandlerFunc(libHandler.Scan)))
+
+	// Chromecast discovery and playback control routes
+	mux.Handle("GET /api/v1/cast/devices", auth(http.HandlerFunc(castHandler.ListDevices)))
+	mux.Handle("GET /api/v1/cast/session", auth(http.HandlerFunc(castHandler.GetSession)))
+	mux.Handle("POST /api/v1/cast/session", auth(http.HandlerFunc(castHandler.StartSession)))
+	mux.Handle("POST /api/v1/cast/session/control", auth(http.HandlerFunc(castHandler.ControlSession)))
+	mux.Handle("DELETE /api/v1/cast/session", auth(http.HandlerFunc(castHandler.StopSession)))
 
 	return CORSMiddleware(mux)
 }

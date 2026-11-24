@@ -24,6 +24,7 @@ type Config struct {
 	Plugins  PluginsConfig  `yaml:"plugins"`
 	Auth     AuthConfig     `yaml:"auth"`
 	Logging  LoggingConfig  `yaml:"logging"`
+	Cast     CastConfig     `yaml:"cast"`
 }
 
 
@@ -149,6 +150,21 @@ type LoggingConfig struct {
 	Format string `yaml:"format"` // "text", "json" (default "text")
 }
 
+type StaticCastDevice struct {
+	ID       string `yaml:"id" json:"id"`
+	Name     string `yaml:"name" json:"name"`
+	Model    string `yaml:"model,omitempty" json:"model,omitempty"`
+	Host     string `yaml:"host" json:"host"`
+	Port     int    `yaml:"port,omitempty" json:"port,omitempty"`
+	HasVideo bool   `yaml:"has_video,omitempty" json:"has_video,omitempty"`
+}
+
+type CastConfig struct {
+	Enabled       bool               `yaml:"enabled"`
+	LANBaseURL    string             `yaml:"lan_base_url,omitempty"`
+	StaticDevices []StaticCastDevice `yaml:"static_devices,omitempty"`
+}
+
 // DefaultConfig returns the production/homelab default configuration.
 func DefaultConfig() *Config {
 	return &Config{
@@ -210,6 +226,9 @@ func DefaultConfig() *Config {
 		Logging: LoggingConfig{
 			Level:  "info",
 			Format: "text",
+		},
+		Cast: CastConfig{
+			Enabled: true,
 		},
 	}
 }
@@ -788,6 +807,80 @@ func ApplyEnvOverrides(cfg *Config) {
 	} else if v := os.Getenv("LOG_FORMAT"); v != "" {
 		cfg.Logging.Format = strings.ToLower(strings.TrimSpace(v))
 	}
+
+	if v := os.Getenv("SHELFD_CAST_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
+			cfg.Cast.Enabled = b
+		}
+	}
+	if v := os.Getenv("SHELFD_CAST_LAN_BASE_URL"); v != "" {
+		cfg.Cast.LANBaseURL = strings.TrimRight(strings.TrimSpace(v), "/")
+	}
+	if v, ok := os.LookupEnv("SHELFD_CAST_STATIC_DEVICES"); ok {
+		cfg.Cast.StaticDevices = parseStaticCastDevicesEnv(v)
+	}
+}
+
+// parseStaticCastDevicesEnv parses comma-separated entries formatted as
+// "id|name|host:port|video|model" (only host or host:port is required).
+func parseStaticCastDevicesEnv(raw string) []StaticCastDevice {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	parts := strings.Split(trimmed, ",")
+	devices := make([]StaticCastDevice, 0, len(parts))
+	for i, part := range parts {
+		entry := strings.TrimSpace(part)
+		if entry == "" {
+			continue
+		}
+		fields := strings.Split(entry, "|")
+		var dev StaticCastDevice
+		switch len(fields) {
+		case 1:
+			dev.Host, dev.Port = splitHostPortDefault(fields[0], 8009)
+			dev.ID = fmt.Sprintf("static-%d", i+1)
+			dev.Name = dev.Host
+		case 2:
+			dev.Name = strings.TrimSpace(fields[0])
+			dev.Host, dev.Port = splitHostPortDefault(fields[1], 8009)
+			dev.ID = fmt.Sprintf("static-%d", i+1)
+		default:
+			dev.ID = strings.TrimSpace(fields[0])
+			dev.Name = strings.TrimSpace(fields[1])
+			dev.Host, dev.Port = splitHostPortDefault(fields[2], 8009)
+			if len(fields) >= 4 {
+				v := strings.ToLower(strings.TrimSpace(fields[3]))
+				dev.HasVideo = v == "true" || v == "1" || v == "video" || v == "tv"
+			}
+			if len(fields) >= 5 {
+				dev.Model = strings.TrimSpace(fields[4])
+			}
+		}
+		if dev.Host == "" {
+			continue
+		}
+		if dev.ID == "" {
+			dev.ID = fmt.Sprintf("%s:%d", dev.Host, dev.Port)
+		}
+		if dev.Name == "" {
+			dev.Name = dev.ID
+		}
+		devices = append(devices, dev)
+	}
+	return devices
+}
+
+func splitHostPortDefault(raw string, defaultPort int) (string, int) {
+	s := strings.TrimSpace(raw)
+	if h, pStr, err := net.SplitHostPort(s); err == nil {
+		if p, pErr := strconv.Atoi(pStr); pErr == nil && p > 0 {
+			return h, p
+		}
+		return h, defaultPort
+	}
+	return s, defaultPort
 }
 
 // ResolveConfigPath locates the active configuration file in order of priority:
