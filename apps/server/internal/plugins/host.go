@@ -1849,6 +1849,7 @@ func (h *Host) handlePluginInbound(mp *managedPlugin, pluginName string, proc *p
 			UserID string `json:"user_id"`
 		}
 		if err := json.Unmarshal(msg.Params, &params); err != nil || strings.TrimSpace(params.UserID) == "" {
+			h.logger.Warn("refresh_token rejected: missing user_id", "component", "plugin."+pluginName)
 			if len(msg.ID) > 0 {
 				_ = proc.sendJSON(RPCMessage{
 					JSONRPC: "2.0",
@@ -1858,12 +1859,14 @@ func (h *Host) handlePluginInbound(mp *managedPlugin, pluginName string, proc *p
 			}
 			return
 		}
+		h.logger.Info("refreshing invocation token", "component", "plugin."+pluginName, "user_id", strings.TrimSpace(params.UserID))
 		mp.mu.Lock()
 		scopes := mp.manifest.APIScopes
 		mp.lastActivity = time.Now().UTC()
 		mp.mu.Unlock()
 
 		if h.tokenIssuer == nil {
+			h.logger.Warn("refresh_token rejected: token issuer not configured", "component", "plugin."+pluginName, "user_id", strings.TrimSpace(params.UserID))
 			if len(msg.ID) > 0 {
 				_ = proc.sendJSON(RPCMessage{
 					JSONRPC: "2.0",
@@ -1876,12 +1879,14 @@ func (h *Host) handlePluginInbound(mp *managedPlugin, pluginName string, proc *p
 		tok, err := h.tokenIssuer(strings.TrimSpace(params.UserID), "", pluginName, scopes)
 		if len(msg.ID) > 0 {
 			if err != nil {
+				h.logger.Warn("refresh_token failed", "component", "plugin."+pluginName, "user_id", strings.TrimSpace(params.UserID), "error", err.Error())
 				_ = proc.sendJSON(RPCMessage{
 					JSONRPC: "2.0",
 					ID:      msg.ID,
 					Error:   &RPCError{Code: -32603, Message: err.Error()},
 				})
 			} else {
+				h.logger.Info("issued refreshed invocation token", "component", "plugin."+pluginName, "user_id", strings.TrimSpace(params.UserID))
 				resRaw, _ := json.Marshal(map[string]any{"invocation_token": tok})
 				_ = proc.sendJSON(RPCMessage{
 					JSONRPC: "2.0",

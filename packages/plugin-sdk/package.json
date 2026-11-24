@@ -1,6 +1,6 @@
 {
   "name": "@shelfd/plugin-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript SDK, bundler, and verification harness for out-of-process Shelfd plugins",
   "type": "module",
   "exports": {

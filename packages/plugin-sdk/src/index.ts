@@ -311,6 +311,26 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
     let currentToken = typeof rawAuth?.invocation_token === "string" ? rawAuth.invocation_token : "";
     const config = ((rawAuth?.config && typeof rawAuth.config === "object") ? rawAuth.config : {}) as TConfig;
 
+    /**
+     * React to an expired invocation token on a loopback request. Refreshes exactly
+     * once when a user_id is present; otherwise throws a deterministic error naming
+     * both the 401 and why recovery was impossible, so the Shelfd jobs UI shows an
+     * actionable reason instead of a bare "HTTP 401".
+     */
+    const recoverFromExpiredToken = async (action: string): Promise<string> => {
+      if (!userId) {
+        throw new Error(
+          `${action}: HTTP 401 (invocation token expired); no user_id in invocation context to refresh it`,
+        );
+      }
+      try {
+        return await ctx.refreshInvocationToken();
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new Error(`${action}: HTTP 401 (invocation token expired) and token refresh failed: ${reason}`);
+      }
+    };
+
     const ctx: PluginContext<TConfig> = {
       userId,
       apiBase,
@@ -350,8 +370,8 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
         };
 
         const firstRes = await doFetch(currentToken);
-        if (firstRes.status === 401 && userId) {
-          const nextToken = await ctx.refreshInvocationToken();
+        if (firstRes.status === 401) {
+          const nextToken = await recoverFromExpiredToken(`fetchLoopback ${normalizedPath}`);
           return await doFetch(nextToken);
         }
         return firstRes;
@@ -429,8 +449,8 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
           });
 
         let res = await postStage(currentToken);
-        if (res.status === 401 && userId) {
-          const nextToken = await ctx.refreshInvocationToken();
+        if (res.status === 401) {
+          const nextToken = await recoverFromExpiredToken("StageUploadBook");
           res = await postStage(nextToken);
         }
 
