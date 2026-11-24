@@ -1,3 +1,10 @@
+# [1.30.0](https://github.com/theBenForce/shelfd/compare/v1.29.0...v1.30.0) (2026-11-24)
+
+
+### Features
+
+* **plugins:** run catalog book staging as a tracked background task ([#104](https://github.com/theBenForce/shelfd/issues/104)) ([3905b7b](https://github.com/theBenForce/shelfd/commit/3905b7b59bdcfcd8fb0bd1111892116e74131bda))
+
 # [1.29.0](https://github.com/theBenForce/shelfd/compare/v1.28.0...v1.29.0) (2026-11-24)
 
 
