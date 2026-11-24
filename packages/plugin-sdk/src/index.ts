@@ -14,6 +14,8 @@ import type {
   CatalogSearchRequest,
   CatalogStageRequest,
   CommandDef,
+  DownloadProgressInfo,
+  DownloadProgressOptions,
   PluginContext,
   PluginDefinition,
   PoliteFetcherOptions,
@@ -122,6 +124,90 @@ export function createPoliteFetcher(options: PoliteFetcherOptions = {}): typeof 
   };
 }
 
+/**
+ * Reads a fetch Response body into a Uint8Array while invoking throttled progress callbacks.
+ * Emits fraction updates when Content-Length is present and periodic byte keepalives when chunked,
+ * keeping Shelfd's background job watchdog alive during large downloads.
+ */
+export async function readResponseBytesWithProgress(
+  response: Response,
+  onProgress?: (info: DownloadProgressInfo) => void,
+  options: DownloadProgressOptions = {}
+): Promise<Uint8Array> {
+  const rawLen = response.headers.get("content-length");
+  const parsedLen = rawLen ? Number(rawLen) : undefined;
+  const totalBytes =
+    parsedLen !== undefined && !Number.isNaN(parsedLen) && parsedLen > 0
+      ? parsedLen
+      : undefined;
+
+  if (!response.body) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (onProgress) {
+      onProgress({
+        loadedBytes: bytes.byteLength,
+        totalBytes: totalBytes ?? bytes.byteLength,
+        fraction: 1,
+      });
+    }
+    return bytes;
+  }
+
+  const minPercentDelta = options.minPercentDelta ?? 5;
+  const minIntervalMs = options.minIntervalMs ?? 250;
+  const keepaliveIntervalMs = options.keepaliveIntervalMs ?? 2000;
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let loadedBytes = 0;
+  let lastReportedPct = -100;
+  let lastReportedAt = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value || value.byteLength === 0) continue;
+
+    chunks.push(value);
+    loadedBytes += value.byteLength;
+
+    if (onProgress) {
+      const now = Date.now();
+      if (totalBytes !== undefined && totalBytes > 0) {
+        const fraction = Math.min(1, Math.max(0, loadedBytes / totalBytes));
+        const pct = fraction * 100;
+        if (
+          pct - lastReportedPct >= minPercentDelta ||
+          now - lastReportedAt >= minIntervalMs
+        ) {
+          lastReportedPct = pct;
+          lastReportedAt = now;
+          onProgress({ loadedBytes, totalBytes, fraction });
+        }
+      } else if (now - lastReportedAt >= keepaliveIntervalMs) {
+        lastReportedAt = now;
+        onProgress({ loadedBytes });
+      }
+    }
+  }
+
+  const out = new Uint8Array(loadedBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  if (onProgress) {
+    onProgress({
+      loadedBytes,
+      totalBytes: totalBytes ?? loadedBytes,
+      fraction: 1,
+    });
+  }
+  return out;
+}
+
 interface WireMessage {
   jsonrpc: "2.0";
   id?: string | number;
@@ -219,7 +305,7 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
     });
   };
 
-  const buildContext = (rawAuth?: InvocationAuthWire): PluginContext<TConfig> => {
+  const buildContext = (rawAuth?: InvocationAuthWire, defaultJobId?: string): PluginContext<TConfig> => {
     const userId = typeof rawAuth?.user_id === "string" ? rawAuth.user_id : "";
     const apiBase = (typeof rawAuth?.api_base === "string" && rawAuth.api_base ? rawAuth.api_base : hostApiBase).replace(/\/+$/, "");
     let currentToken = typeof rawAuth?.invocation_token === "string" ? rawAuth.invocation_token : "";
@@ -314,28 +400,39 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
           throw new Error("Missing scoped invocation_token; ensure \"uploads:stage\" is listed in plugin.json api_scopes");
         }
 
-        const form = new FormData();
-        const fileMime = input.mimeType ?? "application/epub+zip";
-        form.append("file", toBlob(input.data, fileMime), input.filename);
+        const buildForm = (): FormData => {
+          const form = new FormData();
+          const fileMime = input.mimeType ?? "application/epub+zip";
+          form.append("file", toBlob(input.data, fileMime), input.filename);
 
-        if (input.cover) {
-          const coverMime = input.cover.mimeType ?? "image/jpeg";
-          const coverName = input.cover.filename ?? "cover.jpg";
-          form.append("cover", toBlob(input.cover.data, coverMime), coverName);
-        }
+          if (input.cover) {
+            const coverMime = input.cover.mimeType ?? "image/jpeg";
+            const coverName = input.cover.filename ?? "cover.jpg";
+            form.append("cover", toBlob(input.cover.data, coverMime), coverName);
+          }
 
-        form.append("source_plugin", definition.name);
-        if (input.externalId) {
-          form.append("source_external_id", input.externalId);
-        }
-        if (input.metadataDefaults) {
-          form.append("metadata_defaults", JSON.stringify(input.metadataDefaults));
-        }
+          form.append("source_plugin", definition.name);
+          if (input.externalId) {
+            form.append("source_external_id", input.externalId);
+          }
+          if (input.metadataDefaults) {
+            form.append("metadata_defaults", JSON.stringify(input.metadataDefaults));
+          }
+          return form;
+        };
 
-        const res = await ctx.fetchLoopback("/api/v1/books/upload/stage", {
-          method: "POST",
-          body: form,
-        });
+        const postStage = (token: string): Promise<Response> =>
+          fetch(`${apiBase}/api/v1/books/upload/stage`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: buildForm(),
+          });
+
+        let res = await postStage(currentToken);
+        if (res.status === 401 && userId) {
+          const nextToken = await ctx.refreshInvocationToken();
+          res = await postStage(nextToken);
+        }
 
         const bodyText = await res.text();
         let parsed: Record<string, unknown> = {};
@@ -369,7 +466,7 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
 
       reportProgress(progress: ProgressNotification): void {
         sendNotification("progress", {
-          job_id: progress.jobId,
+          job_id: progress.jobId ?? defaultJobId,
           batch_id: progress.batchId,
           current: progress.current,
           total: progress.total,
@@ -598,14 +695,15 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
         if (!spec?.invoke) {
           throw new PluginRPCError(-32601, `Unknown action: ${actionName}`);
         }
-        const ctx = buildContext(params.auth as InvocationAuthWire | undefined);
+        const jobId = typeof params.job_id === "string" ? params.job_id : undefined;
+        const ctx = buildContext(params.auth as InvocationAuthWire | undefined, jobId);
         const rawOverrides = params.overrides && typeof params.overrides === "object" ? (params.overrides as Record<string, unknown>) : undefined;
         const overrides: Record<string, string> | undefined = rawOverrides
           ? Object.fromEntries(Object.entries(rawOverrides).map(([k, v]) => [k, String(v ?? "")]))
           : undefined;
         const req: ActionInvokeRequest = {
           action: actionName,
-          job_id: typeof params.job_id === "string" ? params.job_id : undefined,
+          job_id: jobId,
           target: parseActionTarget(params.target),
           values: (params.values && typeof params.values === "object" ? params.values : undefined) as Record<string, unknown> | undefined,
           overrides,
@@ -643,11 +741,14 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
         if (!definition.catalog?.stage) {
           throw new PluginRPCError(-32601, `Plugin ${definition.name} does not implement catalog/stage`);
         }
-        const ctx = buildContext(params.auth as InvocationAuthWire | undefined);
+        const jobId = typeof params.job_id === "string" ? params.job_id : undefined;
+        const ctx = buildContext(params.auth as InvocationAuthWire | undefined, jobId);
         const items = Array.isArray(params.items) ? params.items : [];
         const req: CatalogStageRequest = {
+          job_id: jobId,
           items: items.map((item: Record<string, unknown>) => ({
             external_id: String(item.external_id ?? ""),
+            title: typeof item.title === "string" ? item.title : undefined,
             preferred_format: typeof item.preferred_format === "string" ? item.preferred_format : undefined,
           })),
         };

@@ -357,11 +357,13 @@ type CatalogPage struct {
 // CatalogStageItem identifies a remote item and optional format preference to stage for review.
 type CatalogStageItem struct {
 	ExternalID      string `json:"external_id"`
+	Title           string `json:"title,omitempty"`
 	PreferredFormat string `json:"preferred_format,omitempty"`
 }
 
 // CatalogStageParams requests staging one or more remote catalog items into Shelfd's upload review queue.
 type CatalogStageParams struct {
+	JobID string             `json:"job_id,omitempty"`
 	Items []CatalogStageItem `json:"items"`
 	Auth  InvocationAuth     `json:"auth"`
 }
@@ -379,6 +381,8 @@ type CatalogStagedEntry struct {
 type CatalogStageResult struct {
 	BatchID string               `json:"batch_id,omitempty"`
 	Async   bool                 `json:"async,omitempty"`
+	JobID   string               `json:"job_id,omitempty"`
+	Job     *PluginJob           `json:"job,omitempty"`
 	Results []CatalogStagedEntry `json:"results,omitempty"`
 	Message string               `json:"message,omitempty"`
 }

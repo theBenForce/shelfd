@@ -20,6 +20,7 @@ type PluginJob struct {
 	Title           string        `json:"title"`
 	TargetType      string        `json:"target_type"`
 	TargetID        string        `json:"target_id"`
+	ExternalIDs     []string      `json:"external_ids,omitempty"`
 	Status          string        `json:"status"` // "queued" | "running" | "completed" | "failed"
 	Current         int           `json:"current"`
 	Total           int           `json:"total"`
@@ -40,6 +41,11 @@ func (j *PluginJob) clone() *PluginJob {
 	}
 	cp := *j
 	cp.touchCh = nil
+	if len(j.ExternalIDs) > 0 {
+		extCp := make([]string, len(j.ExternalIDs))
+		copy(extCp, j.ExternalIDs)
+		cp.ExternalIDs = extCp
+	}
 	if j.Result != nil {
 		resCp := *j.Result
 		cp.Result = &resCp
@@ -73,6 +79,11 @@ func (m *PluginJobManager) SetJobManager(jm *jobs.Manager) {
 
 // CreateJob creates and registers a new running PluginJob.
 func (m *PluginJobManager) CreateJob(userID, pluginName, actionName, title string, target ActionTarget) (*PluginJob, <-chan struct{}) {
+	return m.CreateJobWithTotal(userID, pluginName, actionName, title, target, 1, nil)
+}
+
+// CreateJobWithTotal creates and registers a new running PluginJob with explicit batch total and optional catalog external IDs.
+func (m *PluginJobManager) CreateJobWithTotal(userID, pluginName, actionName, title string, target ActionTarget, total int, externalIDs []string) (*PluginJob, <-chan struct{}) {
 	now := time.Now().UTC()
 	id := fmt.Sprintf("pjob-%d-%d", now.UnixNano(), m.seq.Add(1))
 	if title == "" {
@@ -82,22 +93,31 @@ func (m *PluginJobManager) CreateJob(userID, pluginName, actionName, title strin
 			title = actionName
 		}
 	}
+	if total <= 0 {
+		total = 1
+	}
+	var extCopy []string
+	if len(externalIDs) > 0 {
+		extCopy = make([]string, len(externalIDs))
+		copy(extCopy, externalIDs)
+	}
 	touchCh := make(chan struct{}, 1)
 	job := &PluginJob{
-		ID:         id,
-		UserID:     userID,
-		Plugin:     pluginName,
-		Action:     actionName,
-		Title:      title,
-		TargetType: target.Type,
-		TargetID:   target.ID,
-		Status:     "running",
-		Current:    0,
-		Total:      1,
-		Message:    "Starting...",
-		StartedAt:  now,
-		UpdatedAt:  now,
-		touchCh:    touchCh,
+		ID:          id,
+		UserID:      userID,
+		Plugin:      pluginName,
+		Action:      actionName,
+		Title:       title,
+		TargetType:  target.Type,
+		TargetID:    target.ID,
+		ExternalIDs: extCopy,
+		Status:      "running",
+		Current:     0,
+		Total:       total,
+		Message:     "Starting...",
+		StartedAt:   now,
+		UpdatedAt:   now,
+		touchCh:     touchCh,
 	}
 
 	m.mu.Lock()
@@ -132,6 +152,7 @@ func (m *PluginJobManager) UpdateProgress(pluginName, jobOrBatchID string, curre
 		return nil
 	}
 
+	itemChanged := current >= 0 && current != targetJob.Current
 	if current >= 0 {
 		targetJob.Current = current
 	}
@@ -146,6 +167,8 @@ func (m *PluginJobManager) UpdateProgress(pluginName, jobOrBatchID string, curre
 	}
 	if percent >= 0 {
 		targetJob.ItemProgressPct = percent
+	} else if itemChanged {
+		targetJob.ItemProgressPct = 0
 	}
 	targetJob.UpdatedAt = time.Now().UTC()
 	if targetJob.touchCh != nil {
@@ -289,6 +312,9 @@ func (m *PluginJobManager) broadcast(job *PluginJob) {
 			"action":      job.Action,
 			"target_type": job.TargetType,
 			"target_id":   job.TargetID,
+		}
+		if len(job.ExternalIDs) > 0 {
+			meta["external_ids"] = job.ExternalIDs
 		}
 		if job.Result != nil {
 			meta["result"] = job.Result

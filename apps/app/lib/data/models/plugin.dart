@@ -894,6 +894,20 @@ class PluginActionResult {
           : null,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'status': status,
+      if (message != null) 'message': message,
+      if (externalUrl != null) 'external_url': externalUrl,
+      if (openUrl != null) 'open_url': openUrl,
+      if (downloadApiPath != null) 'download_api_path': downloadApiPath,
+      if (fileName != null) 'file_name': fileName,
+      if (mimeType != null) 'mime_type': mimeType,
+      if (jobId != null) 'job_id': jobId,
+      if (data != null) 'data': data,
+    };
+  }
 }
 
 class PluginJob {
@@ -904,6 +918,7 @@ class PluginJob {
   final String title;
   final String targetType;
   final String targetId;
+  final List<String> externalIds;
   final String status;
   final int current;
   final int total;
@@ -923,6 +938,7 @@ class PluginJob {
     required this.title,
     this.targetType = 'book',
     this.targetId = '',
+    this.externalIds = const [],
     this.status = 'running',
     this.current = 0,
     this.total = 1,
@@ -959,6 +975,10 @@ class PluginJob {
       title: json['title'] as String? ?? '',
       targetType: json['target_type'] as String? ?? 'book',
       targetId: json['target_id'] as String? ?? '',
+      externalIds: (json['external_ids'] as List<dynamic>? ?? const [])
+          .map((e) => e.toString())
+          .where((e) => e.isNotEmpty)
+          .toList(),
       status: json['status'] as String? ?? 'running',
       current: (json['current'] as num?)?.toInt() ?? 0,
       total: (json['total'] as num?)?.toInt() ?? 1,
@@ -1347,16 +1367,19 @@ class CatalogPage {
 
 class CatalogStageItemRequest {
   final String externalId;
+  final String? title;
   final String? preferredFormat;
 
   const CatalogStageItemRequest({
     required this.externalId,
+    this.title,
     this.preferredFormat,
   });
 
   Map<String, dynamic> toJson() {
     return {
       'external_id': externalId,
+      if (title != null && title!.isNotEmpty) 'title': title,
       if (preferredFormat != null && preferredFormat!.isNotEmpty)
         'preferred_format': preferredFormat,
     };
@@ -1394,12 +1417,16 @@ class CatalogStagedEntry {
 class CatalogStageResult {
   final String? batchId;
   final bool isAsync;
+  final String? jobId;
+  final PluginJob? job;
   final List<CatalogStagedEntry> results;
   final String? message;
 
   const CatalogStageResult({
     this.batchId,
     this.isAsync = false,
+    this.jobId,
+    this.job,
     this.results = const [],
     this.message,
   });
@@ -1408,6 +1435,10 @@ class CatalogStageResult {
     return CatalogStageResult(
       batchId: json['batch_id'] as String?,
       isAsync: json['async'] as bool? ?? false,
+      jobId: json['job_id'] as String?,
+      job: json['job'] is Map
+          ? PluginJob.fromJson(Map<String, dynamic>.from(json['job'] as Map))
+          : null,
       results: (json['results'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(CatalogStagedEntry.fromJson)

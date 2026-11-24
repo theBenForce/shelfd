@@ -298,10 +298,12 @@ export interface CatalogSearchRequest {
 
 export interface CatalogStageItem {
   external_id: string;
+  title?: string;
   preferred_format?: string;
 }
 
 export interface CatalogStageRequest {
+  job_id?: string;
   items: CatalogStageItem[];
 }
 
@@ -316,8 +318,21 @@ export interface CatalogStagedEntry {
 export interface CatalogStageResult {
   batch_id?: string;
   async?: boolean;
+  job_id?: string;
   results?: CatalogStagedEntry[];
   message?: string;
+}
+
+export interface DownloadProgressInfo {
+  loadedBytes: number;
+  totalBytes?: number;
+  fraction?: number;
+}
+
+export interface DownloadProgressOptions {
+  minPercentDelta?: number;
+  minIntervalMs?: number;
+  keepaliveIntervalMs?: number;
 }
 
 export interface MetadataDefaults {

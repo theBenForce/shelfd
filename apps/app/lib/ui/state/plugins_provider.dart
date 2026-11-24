@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../data/models/background_job.dart';
 import '../../data/models/plugin.dart';
 import '../../data/services/api_service.dart';
 import 'providers.dart';
@@ -398,6 +399,7 @@ class CatalogBrowserState {
   final String? nextCursor;
   final int? totalCount;
   final Set<String> selectedExternalIds;
+  final Set<String> stagingExternalIds;
   final Map<String, String> preferredFormats;
   final bool isLoading;
   final bool isLoadingMore;
@@ -416,6 +418,7 @@ class CatalogBrowserState {
     this.nextCursor,
     this.totalCount,
     this.selectedExternalIds = const {},
+    this.stagingExternalIds = const {},
     this.preferredFormats = const {},
     this.isLoading = false,
     this.isLoadingMore = false,
@@ -426,6 +429,9 @@ class CatalogBrowserState {
   });
 
   bool get hasMore => nextCursor != null && nextCursor!.isNotEmpty;
+
+  bool isItemStaging(String externalId) =>
+      stagingExternalIds.contains(externalId);
 
   CatalogBrowserState copyWith({
     String? selectedPluginName,
@@ -440,6 +446,7 @@ class CatalogBrowserState {
     int? totalCount,
     bool clearTotalCount = false,
     Set<String>? selectedExternalIds,
+    Set<String>? stagingExternalIds,
     Map<String, String>? preferredFormats,
     bool? isLoading,
     bool? isLoadingMore,
@@ -462,6 +469,7 @@ class CatalogBrowserState {
       nextCursor: clearNextCursor ? null : (nextCursor ?? this.nextCursor),
       totalCount: clearTotalCount ? null : (totalCount ?? this.totalCount),
       selectedExternalIds: selectedExternalIds ?? this.selectedExternalIds,
+      stagingExternalIds: stagingExternalIds ?? this.stagingExternalIds,
       preferredFormats: preferredFormats ?? this.preferredFormats,
       isLoading: isLoading ?? this.isLoading,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
@@ -477,14 +485,167 @@ class CatalogBrowserState {
 
 class CatalogBrowserNotifier extends Notifier<CatalogBrowserState> {
   bool _isDisposed = false;
+  final Map<String, Set<String>> _trackedStageJobItems = {};
+  final Map<String, String> _trackedStageJobPlugin = {};
+  final Set<String> _handledFinishedStageJobIds = {};
 
   @override
   CatalogBrowserState build() {
     _isDisposed = false;
+    _trackedStageJobItems.clear();
+    _trackedStageJobPlugin.clear();
+    _handledFinishedStageJobIds.clear();
     ref.onDispose(() {
       _isDisposed = true;
     });
+    ref.listen<BackgroundJobsState>(backgroundJobsProvider, (previous, next) {
+      _syncBackgroundJobs(next.jobs);
+    });
     return const CatalogBrowserState();
+  }
+
+  static Set<String> _extractExternalIds(BackgroundJob job) {
+    final raw = job.metadata?['external_ids'];
+    if (raw is Iterable) {
+      return raw
+          .map((e) => e?.toString() ?? '')
+          .where((e) => e.isNotEmpty)
+          .toSet();
+    }
+    return const {};
+  }
+
+  Set<String> _computeStagingIdsForPlugin(String? pluginName) {
+    if (pluginName == null || pluginName.isEmpty) return const {};
+    final ids = <String>{};
+    for (final entry in _trackedStageJobItems.entries) {
+      if (_trackedStageJobPlugin[entry.key] == pluginName) {
+        ids.addAll(entry.value);
+      }
+    }
+    final bgJobs = ref.read(backgroundJobsProvider).jobs;
+    for (final job in bgJobs) {
+      if (job.isActive &&
+          job.kind == BackgroundJobKind.plugin &&
+          job.metadata?['action'] == 'catalog_stage' &&
+          job.metadata?['plugin'] == pluginName) {
+        ids.addAll(_extractExternalIds(job));
+      }
+    }
+    return ids;
+  }
+
+  void _syncBackgroundJobs(List<BackgroundJob> jobs) {
+    if (_isDisposed) return;
+
+    bool shouldReloadUploads = false;
+    final stagedByPluginAndExtId = <String, Map<String, CatalogStagedEntry>>{};
+
+    for (final job in jobs) {
+      if (job.kind != BackgroundJobKind.plugin ||
+          job.metadata?['action'] != 'catalog_stage') {
+        continue;
+      }
+      final pluginName = job.metadata?['plugin']?.toString() ?? '';
+      final extIds = _extractExternalIds(job);
+
+      if (job.isActive) {
+        if (extIds.isNotEmpty) {
+          _trackedStageJobItems[job.id] = extIds;
+        }
+        if (pluginName.isNotEmpty) {
+          _trackedStageJobPlugin[job.id] = pluginName;
+        }
+        continue;
+      }
+
+      if (!job.isFinished) continue;
+
+      final wasTracked = _trackedStageJobItems.containsKey(job.id);
+      _trackedStageJobItems.remove(job.id);
+      _trackedStageJobPlugin.remove(job.id);
+
+      if (_handledFinishedStageJobIds.contains(job.id)) {
+        continue;
+      }
+      // Only trigger reload/reconciliation once per finished job that either
+      // transitioned while we watched it or matches the currently open catalog plugin.
+      if (!wasTracked && pluginName != state.selectedPluginName) {
+        _handledFinishedStageJobIds.add(job.id);
+        continue;
+      }
+      _handledFinishedStageJobIds.add(job.id);
+      shouldReloadUploads = true;
+
+      final rawResult = job.metadata?['result'];
+      if (rawResult is Map) {
+        final rawData = rawResult['data'];
+        if (rawData is Map) {
+          final rawResults = rawData['results'];
+          if (rawResults is Iterable && pluginName.isNotEmpty) {
+            final mapForPlugin =
+                stagedByPluginAndExtId.putIfAbsent(pluginName, () => {});
+            for (final item in rawResults) {
+              if (item is Map) {
+                final parsed = CatalogStagedEntry.fromJson(
+                  Map<String, dynamic>.from(item),
+                );
+                if (!parsed.isFailed && parsed.externalId.isNotEmpty) {
+                  mapForPlugin[parsed.externalId] = parsed;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    final currentPlugin = state.selectedPluginName;
+    final nextStagingIds = _computeStagingIdsForPlugin(currentPlugin);
+    List<CatalogItem>? updatedItems;
+
+    if (currentPlugin != null &&
+        stagedByPluginAndExtId.containsKey(currentPlugin)) {
+      final stagedMap = stagedByPluginAndExtId[currentPlugin]!;
+      if (stagedMap.isNotEmpty) {
+        updatedItems = state.items.map((item) {
+          final staged = stagedMap[item.externalId];
+          if (staged != null) {
+            return item.copyWith(
+              status: 'staged',
+              uploadJobId: staged.uploadJobId,
+            );
+          }
+          return item;
+        }).toList();
+      }
+    }
+
+    final stagingChanged =
+        nextStagingIds.length != state.stagingExternalIds.length ||
+        !nextStagingIds.containsAll(state.stagingExternalIds);
+
+    if (updatedItems != null || stagingChanged) {
+      final cleanedSelection = Set<String>.from(state.selectedExternalIds)
+        ..removeAll(nextStagingIds);
+      if (updatedItems != null) {
+        for (final item in updatedItems) {
+          if (!item.isAvailable) {
+            cleanedSelection.remove(item.externalId);
+          }
+        }
+      }
+      state = state.copyWith(
+        items: updatedItems,
+        stagingExternalIds: nextStagingIds,
+        selectedExternalIds: cleanedSelection,
+      );
+    }
+
+    if (shouldReloadUploads) {
+      unawaited(ref.read(uploadProvider.notifier).loadStagedJobs());
+      ref.read(queueProvider.notifier).refresh();
+    }
   }
 
   Future<void> initialize({String? preferredPlugin}) async {
@@ -503,6 +664,7 @@ class CatalogBrowserNotifier extends Notifier<CatalogBrowserState> {
         items: const [],
         groups: const [],
         selectedExternalIds: const {},
+        stagingExternalIds: const {},
         clearNextCursor: true,
         clearError: true,
         isAuthExpired: false,
@@ -527,10 +689,12 @@ class CatalogBrowserNotifier extends Notifier<CatalogBrowserState> {
     final summary = ref.read(pluginsProvider).findByName(pluginName);
     final modes = summary?.resolvedCatalogModes ?? const ['browse'];
     final defaultMode = modes.contains('browse') ? 'browse' : modes.first;
+    final inFlight = _computeStagingIdsForPlugin(pluginName);
 
     state = CatalogBrowserState(
       selectedPluginName: pluginName,
       mode: defaultMode,
+      stagingExternalIds: inFlight,
     );
 
     if (summary != null &&
@@ -626,6 +790,7 @@ class CatalogBrowserNotifier extends Notifier<CatalogBrowserState> {
       state = state.copyWith(
         items: mergedItems,
         groups: reset ? page.groups : nextGroups,
+        stagingExternalIds: _computeStagingIdsForPlugin(pluginName),
         nextCursor: page.nextCursor,
         clearNextCursor: page.nextCursor == null || page.nextCursor!.isEmpty,
         totalCount: page.totalCount,
@@ -650,6 +815,7 @@ class CatalogBrowserNotifier extends Notifier<CatalogBrowserState> {
   Future<void> loadMore() => loadCatalog(reset: false);
 
   void toggleItemSelection(String externalId) {
+    if (state.stagingExternalIds.contains(externalId)) return;
     final next = Set<String>.from(state.selectedExternalIds);
     if (next.contains(externalId)) {
       next.remove(externalId);
@@ -661,7 +827,10 @@ class CatalogBrowserNotifier extends Notifier<CatalogBrowserState> {
 
   void selectAllAvailable() {
     final ids = state.items
-        .where((i) => i.isAvailable)
+        .where(
+          (i) =>
+              i.isAvailable && !state.stagingExternalIds.contains(i.externalId),
+        )
         .map((i) => i.externalId)
         .toSet();
     state = state.copyWith(selectedExternalIds: ids);
@@ -696,10 +865,20 @@ class CatalogBrowserNotifier extends Notifier<CatalogBrowserState> {
     final pluginName = state.selectedPluginName;
     if (pluginName == null || pluginName.isEmpty) return null;
 
-    final reqItems = state.selectedExternalIds
+    final titleByExtId = <String, String>{
+      for (final item in state.items) item.externalId: item.title,
+    };
+
+    final requestedIds = state.selectedExternalIds
+        .where((id) => !state.stagingExternalIds.contains(id))
+        .toSet();
+    if (requestedIds.isEmpty) return null;
+
+    final reqItems = requestedIds
         .map(
           (id) => CatalogStageItemRequest(
             externalId: id,
+            title: titleByExtId[id],
             preferredFormat: state.preferredFormats[id],
           ),
         )
@@ -715,9 +894,67 @@ class CatalogBrowserNotifier extends Notifier<CatalogBrowserState> {
 
     try {
       final api = ref.read(apiServiceProvider);
-      final result = await api.stagePluginCatalogItems(pluginName, reqItems);
+      final result = await api.stagePluginCatalogItems(
+        pluginName,
+        reqItems,
+        async: true,
+      );
       if (_isDisposed) return result;
 
+      if (result.isAsync) {
+        final resolvedJobId =
+            result.job?.id ?? result.jobId ?? result.batchId ?? '';
+        final defaultTitle = reqItems.length == 1
+            ? (reqItems.first.title != null &&
+                      reqItems.first.title!.trim().isNotEmpty
+                  ? 'Staging "${reqItems.first.title!.trim()}"'
+                  : 'Staging 1 book')
+            : 'Staging ${reqItems.length} books';
+        final pluginJob = result.job ??
+            PluginJob(
+              id: resolvedJobId.isNotEmpty
+                  ? resolvedJobId
+                  : 'stage-${DateTime.now().millisecondsSinceEpoch}',
+              userId: ref.read(authProvider).user?.id ?? '',
+              plugin: pluginName,
+              action: 'catalog_stage',
+              title: defaultTitle,
+              targetType: 'catalog',
+              targetId: reqItems.first.externalId,
+              externalIds: requestedIds.toList(),
+              status: 'running',
+              current: 0,
+              total: reqItems.length,
+              message: result.message ?? 'Staging started in background',
+              startedAt: DateTime.now().toUtc(),
+              updatedAt: DateTime.now().toUtc(),
+            );
+
+        _trackedStageJobItems[pluginJob.id] = requestedIds;
+        _trackedStageJobPlugin[pluginJob.id] = pluginName;
+
+        final nextStagingIds = {
+          ...state.stagingExternalIds,
+          ...requestedIds,
+        };
+        final remainingSelected = Set<String>.from(state.selectedExternalIds)
+          ..removeAll(requestedIds);
+
+        state = state.copyWith(
+          selectedExternalIds: remainingSelected,
+          stagingExternalIds: nextStagingIds,
+          isStaging: false,
+          clearStagingMessage: true,
+        );
+
+        ref.read(pluginJobsProvider.notifier).enqueueOrTrackJob(pluginJob);
+        ref
+            .read(backgroundJobsProvider.notifier)
+            .upsertJob(BackgroundJob.fromPluginJob(pluginJob));
+        return result;
+      }
+
+      // Synchronous fallback (backwards compatibility / sync mock servers)
       final stagedByExtId = <String, CatalogStagedEntry>{
         for (final r in result.results)
           if (!r.isFailed) r.externalId: r,

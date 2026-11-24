@@ -1194,14 +1194,16 @@ class ApiService {
 
   Future<CatalogStageResult> stagePluginCatalogItems(
     String name,
-    List<CatalogStageItemRequest> items,
-  ) async {
+    List<CatalogStageItemRequest> items, {
+    bool async = false,
+  }) async {
     final encoded = Uri.encodeComponent(name);
     final response = await client.post(
       _uri('/api/v1/plugins/$encoded/catalog/stage'),
       headers: _headers(),
       body: jsonEncode({
         'items': items.map((e) => e.toJson()).toList(),
+        if (async) 'async': true,
       }),
     );
     if (response.statusCode >= 400) {

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { buildPlugin, packPlugin, validateManifest, verifyPlugin } from "../dist/cli.mjs";
-import { AuthExpiredError, createPoliteFetcher, truncateForMCP } from "../dist/index.mjs";
+import { AuthExpiredError, createPoliteFetcher, readResponseBytesWithProgress, truncateForMCP } from "../dist/index.mjs";
 
 test("SDK utilities: AuthExpiredError, truncateForMCP, and createPoliteFetcher", async () => {
   const authErr = new AuthExpiredError("Cookie expired");
@@ -556,4 +556,214 @@ definePlugin<ActionConfig>({
     fs.rmSync(tmpPluginDir, { recursive: true, force: true });
   }
 });
+
+test("readResponseBytesWithProgress reports percentage with Content-Length and byte keepalives without Content-Length", async () => {
+  // 1. Known Content-Length
+  const chunksKnown = [
+    new Uint8Array([1, 2, 3, 4]),
+    new Uint8Array([5, 6, 7, 8]),
+    new Uint8Array([9, 10]),
+  ];
+  const streamKnown = new ReadableStream({
+    start(controller) {
+      for (const ch of chunksKnown) controller.enqueue(ch);
+      controller.close();
+    },
+  });
+  const resKnown = new Response(streamKnown, {
+    headers: { "content-length": "10" },
+  });
+  const eventsKnown = [];
+  const outKnown = await readResponseBytesWithProgress(
+    resKnown,
+    (info) => eventsKnown.push(info),
+    { minPercentDelta: 20, minIntervalMs: 0 }
+  );
+  assert.deepEqual(Array.from(outKnown), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.ok(eventsKnown.length >= 2);
+  assert.equal(eventsKnown[0].fraction, 0.4);
+  assert.equal(eventsKnown[eventsKnown.length - 1].fraction, 1);
+
+  // 2. Chunked (no Content-Length) emits keepalive with loadedBytes and final fraction=1
+  const streamChunked = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(new Uint8Array([11, 12, 13]));
+      await new Promise((r) => setTimeout(r, 15));
+      controller.enqueue(new Uint8Array([14, 15]));
+      controller.close();
+    },
+  });
+  const resChunked = new Response(streamChunked);
+  const eventsChunked = [];
+  const outChunked = await readResponseBytesWithProgress(
+    resChunked,
+    (info) => eventsChunked.push(info),
+    { keepaliveIntervalMs: 5 }
+  );
+  assert.deepEqual(Array.from(outChunked), [11, 12, 13, 14, 15]);
+  assert.ok(eventsChunked.some((e) => e.fraction === undefined && e.loadedBytes >= 3));
+  assert.equal(eventsChunked[eventsChunked.length - 1].fraction, 1);
+  assert.equal(eventsChunked[eventsChunked.length - 1].loadedBytes, 5);
+});
+
+test("catalog/stage auto-injects job_id into reportProgress and rebuilds fresh FormData on 401 token refresh", async () => {
+  const { spawn } = await import("node:child_process");
+  const http = await import("node:http");
+  const readline = await import("node:readline");
+
+  const tmpPluginDir = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-stage-refresh-"));
+  const stageBodies = [];
+
+  const mockStageServer = http.createServer((req, res) => {
+    const auth = req.headers.authorization ?? "";
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      const rawBody = Buffer.concat(chunks).toString("utf8");
+      stageBodies.push({ auth, bodyLen: rawBody.length, hasEpubBytes: rawBody.includes("PK-fresh-epub-payload") });
+      if (auth === "Bearer expired-stage-tok") {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "expired token" }));
+        return;
+      }
+      res.writeHead(201, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          job_id: "upload-job-999",
+          status: "staged",
+          filename: "test.epub",
+          has_cover: false,
+          metadata: { title: "Test Book", authors: ["Author"] },
+        })
+      );
+    });
+  });
+
+  await new Promise((resolve) => mockStageServer.listen(0, "127.0.0.1", resolve));
+  const addr = mockStageServer.address();
+  const apiBase = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+
+  try {
+    fs.mkdirSync(path.join(tmpPluginDir, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpPluginDir, "plugin.json"),
+      JSON.stringify({
+        name: "stage-refresh-fixture",
+        version: "1.0.0",
+        entrypoint: { command: "node", args: ["dist/index.mjs"] },
+        capabilities: ["catalog"],
+        catalog_modes: ["browse"],
+        api_scopes: ["uploads:stage"],
+      })
+    );
+    fs.writeFileSync(
+      path.join(tmpPluginDir, "src", "index.ts"),
+      `import { definePlugin } from "@shelfd/plugin-sdk";
+definePlugin({
+  name: "stage-refresh-fixture",
+  version: "1.0.0",
+  catalog: {
+    async browse() {
+      return { items: [] };
+    },
+    async stage(req, ctx) {
+      // Intentionally omit jobId in reportProgress to verify SDK auto-injection from req.job_id
+      ctx.reportProgress({
+        current: 1,
+        total: req.items.length,
+        percent: 50,
+        title: req.items[0].title,
+        message: "Downloading...",
+      });
+      const staged = await ctx.stageBook({
+        data: new TextEncoder().encode("PK-fresh-epub-payload"),
+        filename: "book.epub",
+        externalId: req.items[0].external_id,
+      });
+      return {
+        results: [{ external_id: req.items[0].external_id, title: req.items[0].title, upload_job_id: staged.job_id, status: "staged" }],
+      };
+    },
+  },
+});
+`
+    );
+
+    const built = await buildPlugin(tmpPluginDir);
+    const child = spawn(process.execPath, [built.outFile], {
+      cwd: tmpPluginDir,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const pending = new Map();
+    const progressFrames = [];
+    let refreshCount = 0;
+
+    const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+    rl.on("line", (line) => {
+      if (!line.trim()) return;
+      const msg = JSON.parse(line);
+      if (msg.method === "host/refresh_token" && msg.id !== undefined) {
+        refreshCount += 1;
+        child.stdin.write(
+          `${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { invocation_token: "fresh-stage-tok" } })}\n`
+        );
+        return;
+      }
+      if (msg.method === "progress") {
+        progressFrames.push(msg.params);
+        return;
+      }
+      if (msg.id !== undefined && pending.has(String(msg.id))) {
+        const resolve = pending.get(String(msg.id));
+        pending.delete(String(msg.id));
+        resolve(msg);
+      }
+    });
+
+    let seq = 0;
+    const callRpc = (method, params) => {
+      seq += 1;
+      const id = String(seq);
+      return new Promise((resolve) => {
+        pending.set(id, resolve);
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+      });
+    };
+
+    await callRpc("initialize", {
+      protocol_version: "2026-11-01",
+      shelfd_version: "0.1.0",
+      api_base: apiBase,
+      data_dir: tmpPluginDir,
+    });
+
+    const stageRes = await callRpc("catalog/stage", {
+      job_id: "pjob-stage-42",
+      items: [{ external_id: "ext-1", title: "Twenty Thousand Leagues" }],
+      auth: {
+        user_id: "u-stage",
+        invocation_token: "expired-stage-tok",
+        api_base: apiBase,
+        config: {},
+      },
+    });
+
+    assert.equal(stageRes.result.results[0].upload_job_id, "upload-job-999");
+    assert.equal(refreshCount, 1);
+    assert.equal(stageBodies.length, 2);
+    assert.equal(stageBodies[0].hasEpubBytes, true);
+    assert.equal(stageBodies[1].hasEpubBytes, true);
+    assert.equal(stageBodies[1].auth, "Bearer fresh-stage-tok");
+    assert.equal(progressFrames.length, 1);
+    assert.equal(progressFrames[0].job_id, "pjob-stage-42");
+    assert.equal(progressFrames[0].title, "Twenty Thousand Leagues");
+
+    await callRpc("shutdown", {});
+  } finally {
+    mockStageServer.close();
+    fs.rmSync(tmpPluginDir, { recursive: true, force: true });
+  }
+});
+
 

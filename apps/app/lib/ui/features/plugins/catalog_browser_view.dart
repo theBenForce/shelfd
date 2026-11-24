@@ -56,11 +56,27 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
     final result =
         await ref.read(catalogBrowserProvider.notifier).stageSelected();
     if (!mounted || result == null) return;
+    if (result.isAsync) {
+      final msg = result.message ?? 'Staging started in background.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          action: SnackBarAction(
+            label: 'View Tasks',
+            onPressed: () {
+              if (mounted) {
+                showBackgroundTasksPanel(context);
+              }
+            },
+          ),
+        ),
+      );
+      return;
+    }
+
     final okCount = result.results.where((r) => !r.isFailed).length;
     final msg = result.message ??
-        (result.isAsync
-            ? 'Queued background import batch.'
-            : 'Staged $okCount ${okCount == 1 ? 'book' : 'books'} for review.');
+        'Staged $okCount ${okCount == 1 ? 'book' : 'books'} for review.';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
@@ -168,10 +184,6 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
                         selectedPlugin,
                         catalogState,
                       ),
-                      const SizedBox(height: AppTokens.space16),
-                    ],
-                    if (catalogState.isStaging) ...[
-                      _buildStagingBanner(colors, catalogState),
                       const SizedBox(height: AppTokens.space16),
                     ],
                     if (catalogState.isAuthExpired && selectedPlugin != null) ...[
@@ -434,43 +446,6 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
     );
   }
 
-  Widget _buildStagingBanner(ShelfdColors colors, CatalogBrowserState state) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppTokens.space12),
-      decoration: BoxDecoration(
-        color: colors.accentContainer,
-        borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-        border: Border.all(color: colors.accentPrimary),
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: colors.accentPrimary,
-            ),
-          ),
-          const SizedBox(width: AppTokens.space12),
-          Expanded(
-            child: Text(
-              state.stagingMessage ?? 'Staging selected books...',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTypography.bodySans(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: colors.ink,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildAuthExpiredCard(
     ShelfdColors colors,
     PluginSummary plugin,
@@ -569,7 +544,12 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
     ShelfdColors colors,
     CatalogBrowserState state,
   ) {
-    final availableCount = state.items.where((i) => i.isAvailable).length;
+    final availableCount = state.items
+        .where(
+          (i) =>
+              i.isAvailable && !state.stagingExternalIds.contains(i.externalId),
+        )
+        .length;
     final selectedCount = state.selectedExternalIds.length;
     final countLabel = state.totalCount != null
         ? 'Showing ${state.items.length} of ${state.totalCount}'
@@ -664,9 +644,16 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
           children: state.items.map((item) {
             final isSelected =
                 state.selectedExternalIds.contains(item.externalId);
+            final isItemStaging = state.isItemStaging(item.externalId);
             return SizedBox(
               width: cardWidth,
-              child: _buildCatalogCard(context, colors, item, isSelected),
+              child: _buildCatalogCard(
+                context,
+                colors,
+                item,
+                isSelected,
+                isItemStaging,
+              ),
             );
           }).toList(),
         );
@@ -679,8 +666,9 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
     ShelfdColors colors,
     CatalogItem item,
     bool isSelected,
+    bool isItemStaging,
   ) {
-    final canSelect = item.isAvailable;
+    final canSelect = item.isAvailable && !isItemStaging;
     final authorText =
         item.authors.isNotEmpty ? item.authors.join(', ') : 'Unknown Author';
 
@@ -691,9 +679,11 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
           ? () => ref
               .read(catalogBrowserProvider.notifier)
               .toggleItemSelection(item.externalId)
-          : (item.isInLibrary && item.bookId != null
-              ? () => context.go('/books/${item.bookId}')
-              : (item.isStaged ? () => context.go('/uploads') : null)),
+          : (isItemStaging
+              ? () => showBackgroundTasksPanel(context)
+              : (item.isInLibrary && item.bookId != null
+                  ? () => context.go('/books/${item.bookId}')
+                  : (item.isStaged ? () => context.go('/uploads') : null))),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -741,7 +731,12 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
                       ),
                     ),
                     const SizedBox(width: AppTokens.space8),
-                    _buildProvenanceControl(colors, item, isSelected),
+                    _buildProvenanceControl(
+                      colors,
+                      item,
+                      isSelected,
+                      isItemStaging,
+                    ),
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -804,6 +799,7 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
     ShelfdColors colors,
     CatalogItem item,
     bool isSelected,
+    bool isItemStaging,
   ) {
     if (item.isInLibrary) {
       return StatusBadge(
@@ -815,6 +811,13 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
     if (item.isStaged) {
       return StatusBadge(
         label: 'Staged',
+        backgroundColor: colors.accentContainer,
+        textColor: colors.accentPrimary,
+      );
+    }
+    if (isItemStaging) {
+      return StatusBadge(
+        label: 'Staging...',
         backgroundColor: colors.accentContainer,
         textColor: colors.accentPrimary,
       );

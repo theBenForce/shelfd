@@ -884,7 +884,7 @@ func (h *Host) SearchCatalog(ctx context.Context, pluginName, query, cursor stri
 }
 
 // StageCatalogItems invokes catalog/stage so the plugin downloads and stages selected items via loopback StageUploadBook.
-func (h *Host) StageCatalogItems(ctx context.Context, pluginName string, items []CatalogStageItem, userID, username string) (*CatalogStageResult, error) {
+func (h *Host) StageCatalogItems(ctx context.Context, pluginName string, items []CatalogStageItem, forceAsync bool, userID, username string) (*CatalogStageResult, error) {
 	mp := h.getManaged(pluginName)
 	if mp == nil {
 		return nil, ErrPluginNotFound
@@ -893,18 +893,211 @@ func (h *Host) StageCatalogItems(ctx context.Context, pluginName string, items [
 	if err != nil {
 		return nil, err
 	}
-	raw, err := h.invokeRPC(ctx, mp, stageCallTimeout, "catalog/stage", CatalogStageParams{
-		Items: items,
-		Auth:  auth,
-	})
+
+	if !forceAsync {
+		raw, err := h.invokeRPC(ctx, mp, stageCallTimeout, "catalog/stage", CatalogStageParams{
+			Items: items,
+			Auth:  auth,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var res CatalogStageResult
+		if err := json.Unmarshal(raw, &res); err != nil {
+			return nil, fmt.Errorf("decoding catalog/stage response: %w", err)
+		}
+		return &res, nil
+	}
+
+	// Ensure process is running and acquire a scale-to-zero lease before returning 202 Accepted
+	mp.mu.Lock()
+	if !mp.enabled {
+		mp.mu.Unlock()
+		return nil, ErrPluginDisabled
+	}
+	mp.activeCalls++
+	mp.lastActivity = time.Now()
+	mp.mu.Unlock()
+
+	proc, err := h.ensureProcess(ctx, mp)
 	if err != nil {
+		mp.mu.Lock()
+		mp.activeCalls--
+		mp.lastActivity = time.Now()
+		mp.mu.Unlock()
 		return nil, err
 	}
-	var res CatalogStageResult
-	if err := json.Unmarshal(raw, &res); err != nil {
-		return nil, fmt.Errorf("decoding catalog/stage response: %w", err)
+
+	externalIDs := make([]string, 0, len(items))
+	for _, it := range items {
+		ext := strings.TrimSpace(it.ExternalID)
+		if ext != "" {
+			externalIDs = append(externalIDs, ext)
+		}
 	}
-	return &res, nil
+	firstExtID := ""
+	if len(externalIDs) > 0 {
+		firstExtID = externalIDs[0]
+	}
+
+	var jobTitle string
+	if len(items) == 1 {
+		trimmedTitle := strings.TrimSpace(items[0].Title)
+		if trimmedTitle != "" {
+			jobTitle = fmt.Sprintf("Staging %q", trimmedTitle)
+		} else {
+			jobTitle = "Staging 1 book"
+		}
+	} else {
+		jobTitle = fmt.Sprintf("Staging %d books", len(items))
+	}
+
+	target := ActionTarget{
+		Type:  "catalog",
+		ID:    firstExtID,
+		Title: jobTitle,
+	}
+	job, touchCh := h.jobs.CreateJobWithTotal(userID, pluginName, "catalog_stage", jobTitle, target, len(items), externalIDs)
+
+	h.mu.RLock()
+	watchdogDur := h.jobWatchdogTimeout
+	h.mu.RUnlock()
+
+	itemsCopy := make([]CatalogStageItem, len(items))
+	copy(itemsCopy, items)
+
+	go func() {
+		defer func() {
+			mp.mu.Lock()
+			mp.activeCalls--
+			mp.lastActivity = time.Now()
+			mp.mu.Unlock()
+		}()
+
+		jobCtx, cancelJob := context.WithCancel(h.ctx)
+		defer cancelJob()
+
+		doneRPC := make(chan struct{})
+		go func() {
+			timer := time.NewTimer(watchdogDur)
+			defer timer.Stop()
+			for {
+				select {
+				case <-doneRPC:
+					return
+				case <-jobCtx.Done():
+					return
+				case <-touchCh:
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					timer.Reset(watchdogDur)
+				case <-timer.C:
+					cancelJob()
+					return
+				}
+			}
+		}()
+
+		raw, callErr := proc.call(jobCtx, "catalog/stage", CatalogStageParams{
+			JobID: job.ID,
+			Items: itemsCopy,
+			Auth:  auth,
+		})
+		close(doneRPC)
+
+		if callErr != nil {
+			errMsg := callErr.Error()
+			if errors.Is(callErr, context.Canceled) && h.ctx.Err() == nil {
+				errMsg = fmt.Sprintf("plugin job timed out after %s without progress activity", watchdogDur)
+			}
+			h.jobs.FailJob(job.ID, errMsg)
+			return
+		}
+
+		var res CatalogStageResult
+		if err := json.Unmarshal(raw, &res); err != nil {
+			h.jobs.FailJob(job.ID, fmt.Sprintf("invalid catalog/stage response: %v", err))
+			return
+		}
+
+		stagedCount := 0
+		failedCount := 0
+		var failedMsgs []string
+		for _, entry := range res.Results {
+			if strings.EqualFold(entry.Status, "failed") {
+				failedCount++
+				label := strings.TrimSpace(entry.Title)
+				if label == "" {
+					label = entry.ExternalID
+				}
+				errDetail := "Failed"
+				if entry.Error != nil && strings.TrimSpace(*entry.Error) != "" {
+					errDetail = strings.TrimSpace(*entry.Error)
+				}
+				if label != "" {
+					failedMsgs = append(failedMsgs, fmt.Sprintf("%s: %s", label, errDetail))
+				} else {
+					failedMsgs = append(failedMsgs, errDetail)
+				}
+			} else {
+				stagedCount++
+			}
+		}
+
+		if len(res.Results) > 0 && stagedCount == 0 {
+			errSummary := strings.Join(failedMsgs, "; ")
+			if errSummary == "" {
+				errSummary = "Failed to stage selected catalog items"
+			}
+			h.jobs.FailJob(job.ID, errSummary)
+			return
+		}
+
+		summaryMsg := strings.TrimSpace(res.Message)
+		if summaryMsg == "" {
+			if failedCount > 0 {
+				totalReported := stagedCount + failedCount
+				bookWord := "books"
+				if totalReported == 1 {
+					bookWord = "book"
+				}
+				summaryMsg = fmt.Sprintf("Staged %d of %d %s (%d failed)", stagedCount, totalReported, bookWord, failedCount)
+			} else if stagedCount == 1 {
+				summaryMsg = "Staged 1 book for review"
+			} else if stagedCount > 1 {
+				summaryMsg = fmt.Sprintf("Staged %d books for review", stagedCount)
+			} else {
+				summaryMsg = "Completed staging"
+			}
+		}
+
+		batchID := res.BatchID
+		if batchID == "" {
+			batchID = job.ID
+		}
+		h.jobs.CompleteJob(job.ID, &ActionResult{
+			Status:  "completed",
+			Message: summaryMsg,
+			Data: map[string]any{
+				"batch_id":     batchID,
+				"results":      res.Results,
+				"staged_count": stagedCount,
+				"failed_count": failedCount,
+			},
+		})
+	}()
+
+	return &CatalogStageResult{
+		BatchID: job.ID,
+		Async:   true,
+		JobID:   job.ID,
+		Job:     job,
+		Message: "Staging started in background",
+	}, nil
 }
 
 // GetAuthStatus invokes auth/status on a plugin to check whether the user's account is linked.

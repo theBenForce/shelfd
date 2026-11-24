@@ -159,9 +159,10 @@ Every `catalog/*`, `auth/*`, `actions/*`, `commands/invoke`, and `tools/call` ha
 - `await ctx.openLoopbackStream(path)`: Opens a streaming response (`{ stream: ReadableStream<Uint8Array>, contentLength?: number, contentType?: string }`) from a loopback endpoint such as `/api/v1/books/{id}/files/{fileId}/stream` without buffering the file in memory.
 - `await ctx.getBookMarkdown(bookId)`: Fetches compiled book Markdown (metadata, synopsis, highlights, notes, and chapters) and filename from `GET /api/v1/books/{id}/markdown` (requires `"books:read"` scope).
 - `await ctx.refreshInvocationToken()`: Explicitly requests a fresh 5-minute scoped loopback JWT from the host via `host/refresh_token`.
-- `await ctx.stageBook(input)`: Uploads book bytes (and optional cover bytes + `metadataDefaults` + `externalId`) via `POST /api/v1/books/upload/stage` into `status = 'staged'` (requires `"uploads:stage"` scope).
+- `await ctx.stageBook(input)`: Uploads book bytes (and optional cover bytes + `metadataDefaults` + `externalId`) via `POST /api/v1/books/upload/stage` into `status = 'staged'` (requires `"uploads:stage"` scope; automatically refreshes expired 5-minute loopback JWTs with a fresh `FormData` payload on HTTP `401`).
+- `await readResponseBytesWithProgress(response, onProgress, options)`: SDK helper that streams binary download responses, reporting `fraction` when `Content-Length` is known and periodic `loadedBytes` keepalives when chunked so background staging jobs keep the host watchdog alive.
 - `await ctx.patchConfig(partialValues)`: Sends `config/patch` to the Go host to merge and encrypt rotated tokens for `ctx.userId`.
-- `ctx.reportProgress({ jobId, batchId, current, total, percent, externalId, title, message })`: Sends a live progress frame to the host (resetting the 5-minute job watchdog and broadcasting `job_progress` over SSE).
+- `ctx.reportProgress({ jobId, batchId, current, total, percent, externalId, title, message })`: Sends a live progress frame to the host (resetting the 5-minute job watchdog and updating Shelfd's Background Tasks UI over SSE; `jobId` defaults automatically to `req.job_id` during background `actions/invoke` and `catalog/stage` runs).
 - `ctx.emitEvent(event, data)`: Broadcasts a custom `plugin_event` payload (< 64 KB).
 - `ctx.log(level, message)`: Sends structured diagnostic logs to the plugin log ring buffer (`Settings -> Plugins -> Logs`).
 
@@ -181,7 +182,7 @@ Every `catalog/*`, `auth/*`, `actions/*`, `commands/invoke`, and `tools/call` ha
 | Host -> Plugin | `actions/invoke` | Executes an action synchronously or inside a background `PluginJob`. |
 | Host -> Plugin | `catalog/browse` | Lists owned items or topic shelves (`items`, `groups`, `next_cursor`, `total_count`). |
 | Host -> Plugin | `catalog/search` | Searches remote catalog by `query`, `cursor`, and `filters`. |
-| Host -> Plugin | `catalog/stage` | Downloads requested `items` (`external_id`, `preferred_format`) and stages them via `ctx.stageBook()`. |
+| Host -> Plugin | `catalog/stage` | Downloads requested `items` (`external_id`, `title`, `preferred_format`) synchronously or inside a background `PluginJob` (`job_id`) and stages them via `ctx.stageBook()`. |
 | Host -> Plugin | `commands/invoke` | Runs a named UI/REST command (`commands[name].execute`). |
 | Host -> Plugin | `tools/call` | Runs an MCP tool (`tools[name].execute`). |
 | Host -> Plugin | `shutdown` | Graceful teardown request before process exit. |
