@@ -100,43 +100,45 @@ void main() {
     );
 
     final castEngine = CastAudioPlayerEngine(api);
-    addTearDown(castEngine.dispose);
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          storageServiceProvider.overrideWithValue(storage),
-          apiServiceProvider.overrideWithValue(api),
-          audioPlayerEngineProvider.overrideWithValue(SimulatedAudioPlayerEngine()),
-          castAudioEngineProvider.overrideWithValue(castEngine),
-          castProvider.overrideWith(() => fakeNotifier),
-        ],
-        child: const MaterialApp(
-          home: Scaffold(
-            body: CastDeviceSheet(
-              book: Book(id: 'b1', title: 'Peter Rabbit', hasReadalong: true),
-              hasReadalong: true,
+    try {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            storageServiceProvider.overrideWithValue(storage),
+            apiServiceProvider.overrideWithValue(api),
+            audioPlayerEngineProvider.overrideWithValue(SimulatedAudioPlayerEngine()),
+            castAudioEngineProvider.overrideWithValue(castEngine),
+            castProvider.overrideWith(() => fakeNotifier),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(
+              body: CastDeviceSheet(
+                book: Book(id: 'b1', title: 'Peter Rabbit', hasReadalong: true),
+                hasReadalong: true,
+              ),
             ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('cast_sheet_this_device_tile')), findsOneWidget);
-    expect(find.byKey(const Key('cast_device_tile_tv-1')), findsOneWidget);
-    expect(find.byKey(const Key('cast_device_tile_spk-1')), findsOneWidget);
-    expect(find.byKey(const Key('cast_sheet_captions_toggle')), findsOneWidget);
-    expect(find.byKey(const Key('cast_sheet_volume_slider')), findsOneWidget);
-    expect(find.byKey(const Key('cast_sheet_stop_button')), findsOneWidget);
+      expect(find.byKey(const Key('cast_sheet_this_device_tile')), findsOneWidget);
+      expect(find.byKey(const Key('cast_device_tile_tv-1')), findsOneWidget);
+      expect(find.byKey(const Key('cast_device_tile_spk-1')), findsOneWidget);
+      expect(find.byKey(const Key('cast_sheet_captions_toggle')), findsOneWidget);
+      expect(find.byKey(const Key('cast_sheet_volume_slider')), findsOneWidget);
+      expect(find.byKey(const Key('cast_sheet_stop_button')), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('cast_sheet_captions_toggle')));
-    await tester.pumpAndSettle();
-    expect(fakeNotifier.lastCaptions, isFalse);
+      await tester.tap(find.byKey(const Key('cast_sheet_captions_toggle')));
+      await tester.pumpAndSettle();
+      expect(fakeNotifier.lastCaptions, isFalse);
 
-    await tester.tap(find.byKey(const Key('cast_sheet_stop_button')));
-    await tester.pumpAndSettle();
-    expect(fakeNotifier.disconnected, isTrue);
+      await tester.tap(find.byKey(const Key('cast_sheet_stop_button')));
+      await tester.pumpAndSettle();
+      expect(fakeNotifier.disconnected, isTrue);
+    } finally {
+      await castEngine.dispose();
+    }
   });
 
   testWidgets('CastDeviceSheet hides TV captions toggle for audio-only speakers', (tester) async {
@@ -175,30 +177,32 @@ void main() {
     );
 
     final castEngine = CastAudioPlayerEngine(api);
-    addTearDown(castEngine.dispose);
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          storageServiceProvider.overrideWithValue(storage),
-          apiServiceProvider.overrideWithValue(api),
-          audioPlayerEngineProvider.overrideWithValue(SimulatedAudioPlayerEngine()),
-          castAudioEngineProvider.overrideWithValue(castEngine),
-          castProvider.overrideWith(() => fakeNotifier),
-        ],
-        child: const MaterialApp(
-          home: Scaffold(
-            body: CastDeviceSheet(
-              book: Book(id: 'b1', title: 'Peter Rabbit', hasReadalong: true),
-              hasReadalong: true,
+    try {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            storageServiceProvider.overrideWithValue(storage),
+            apiServiceProvider.overrideWithValue(api),
+            audioPlayerEngineProvider.overrideWithValue(SimulatedAudioPlayerEngine()),
+            castAudioEngineProvider.overrideWithValue(castEngine),
+            castProvider.overrideWith(() => fakeNotifier),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(
+              body: CastDeviceSheet(
+                book: Book(id: 'b1', title: 'Peter Rabbit', hasReadalong: true),
+                hasReadalong: true,
+              ),
             ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('cast_sheet_captions_toggle')), findsNothing);
-    expect(find.byKey(const Key('cast_sheet_volume_slider')), findsOneWidget);
+      expect(find.byKey(const Key('cast_sheet_captions_toggle')), findsNothing);
+      expect(find.byKey(const Key('cast_sheet_volume_slider')), findsOneWidget);
+    } finally {
+      await castEngine.dispose();
+    }
   });
 }
