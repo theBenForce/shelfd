@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/shelfd/shelfd/internal/database"
 	"github.com/shelfd/shelfd/internal/events"
+	"github.com/shelfd/shelfd/internal/jobs"
 	"github.com/shelfd/shelfd/internal/plugins"
 	"github.com/shelfd/shelfd/internal/repository"
 )
@@ -1390,4 +1392,215 @@ rl.on('line', (line) => {
 		t.Fatalf("expected disabled plugin to stay disabled after update, got enabled=%v status=%s", res3.Enabled, res3.Status)
 	}
 }
+
+func TestStageCatalogItems_AsyncBackgroundJobProgressAndFailures(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not installed; skipping")
+	}
+
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	pluginsDir := t.TempDir()
+	hub := events.NewHub()
+	jm := jobs.NewManager(hub)
+
+	script := `
+import readline from 'node:readline';
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+const send = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
+
+rl.on('line', async (line) => {
+  if (!line.trim()) return;
+  const msg = JSON.parse(line);
+  if (msg.method === 'initialize') {
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        name: 'mock-stage-bg',
+        version: '0.1.0',
+        catalog: { modes: ['browse'] }
+      }
+    });
+    return;
+  }
+  if (msg.method === 'catalog/stage') {
+    const jobId = msg.params?.job_id;
+    const items = msg.params?.items || [];
+    const results = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (i === 0) {
+        send({
+          jsonrpc: '2.0',
+          method: 'progress',
+          params: {
+            job_id: jobId,
+            current: 1,
+            total: items.length,
+            percent: 100,
+            title: it.title || it.external_id,
+            message: 'Finished item 1'
+          }
+        });
+      } else {
+        // Deliberately omit percent on item 2 start to verify ItemProgressPct resets to 0
+        send({
+          jsonrpc: '2.0',
+          method: 'progress',
+          params: {
+            job_id: jobId,
+            current: i + 1,
+            total: items.length,
+            title: it.title || it.external_id,
+            message: 'Starting next item without percent'
+          }
+        });
+      }
+      await new Promise((r) => setTimeout(r, 40));
+      if (String(it.external_id).startsWith('fail-')) {
+        results.push({ external_id: it.external_id, title: it.title, status: 'failed', error: 'HTTP 503 upstream' });
+      } else {
+        results.push({ external_id: it.external_id, title: it.title, upload_job_id: 'up-' + it.external_id, status: 'staged' });
+      }
+    }
+    send({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: { batch_id: 'batch-1', results }
+    });
+    return;
+  }
+  if (msg.method === 'shutdown') {
+    send({ jsonrpc: '2.0', id: msg.id, result: { ok: true } });
+    process.exit(0);
+  }
+});
+`
+	pDir := filepath.Join(pluginsDir, "mock-stage-bg")
+	if err := os.MkdirAll(pDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pDir, "index.mjs"), []byte(script), 0644); err != nil {
+		t.Fatal(err)
+	}
+	manifestJSON := `{
+  "name": "mock-stage-bg",
+  "version": "0.1.0",
+  "entrypoint": { "command": "node", "args": ["index.mjs"] },
+  "capabilities": ["catalog"],
+  "catalog_modes": ["browse"],
+  "api_scopes": ["uploads:stage"]
+}`
+	if err := os.WriteFile(filepath.Join(pDir, "plugin.json"), []byte(manifestJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	host := plugins.NewHost(repo, plugins.HostConfig{
+		PluginsDir:    pluginsDir,
+		APIBase:       "http://127.0.0.1:18080",
+		ShelfdVersion: "0.1.0-test",
+		MasterSecret:  "test-master-secret",
+		IdleTimeout:   500 * time.Millisecond,
+		Hub:           hub,
+		JobManager:    jm,
+		TokenIssuer: func(userID, username, pluginName string, scopes []string) (string, error) {
+			return "tok-" + pluginName, nil
+		},
+	})
+	defer host.Stop()
+
+	if err := host.Discover(ctx); err != nil {
+		t.Fatalf("Discover failed: %v", err)
+	}
+
+	evCh, unsub := hub.Subscribe()
+	defer unsub()
+
+	// 1. Partial failure batch (1 succeeds, 1 fails) -> status="completed" with summary & percentage reset on item transition
+	stageRes, err := host.StageCatalogItems(ctx, "mock-stage-bg", []plugins.CatalogStageItem{
+		{ExternalID: "ok-1", Title: "Dune"},
+		{ExternalID: "fail-2", Title: "Broken Book"},
+	}, true, "user-1", "admin")
+	if err != nil {
+		t.Fatalf("StageCatalogItems async failed: %v", err)
+	}
+	if !stageRes.Async || stageRes.JobID == "" || stageRes.Job == nil {
+		t.Fatalf("expected async job result, got %+v", stageRes)
+	}
+	if stageRes.Job.Total != 2 || len(stageRes.Job.ExternalIDs) != 2 {
+		t.Fatalf("expected Total=2 and 2 ExternalIDs on created job, got %+v", stageRes.Job)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		j := host.GetJob(stageRes.JobID)
+		if j != nil && j.Status == "completed" {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	var sawResetToZeroOnItem2 bool
+	for {
+		select {
+		case ev := <-evCh:
+			if ev.Type == events.EventJobUpdated {
+				if jb, ok := ev.Data.(*jobs.Job); ok && jb != nil && jb.ID == stageRes.JobID {
+					if jb.Status == "running" && jb.Current == 2 && jb.ItemProgressPct == 0 {
+						sawResetToZeroOnItem2 = true
+					}
+				}
+			}
+			continue
+		default:
+		}
+		break
+	}
+	if !sawResetToZeroOnItem2 {
+		t.Fatalf("expected ItemProgressPct to reset to 0 when advancing from item 1 to item 2 without percent")
+	}
+
+	completedJob := host.GetJob(stageRes.JobID)
+	if completedJob == nil || completedJob.Status != "completed" {
+		t.Fatalf("expected partial-failure batch to complete, got %+v", completedJob)
+	}
+	if !strings.Contains(completedJob.Message, "Staged 1 of 2 books (1 failed)") {
+		t.Fatalf("unexpected partial failure summary message: %q", completedJob.Message)
+	}
+
+	// Verify mirrored unified job includes external_ids and results metadata
+	unifiedJobs := jm.ListForUser("user-1")
+	var foundUnified *jobs.Job
+	for i := range unifiedJobs {
+		if unifiedJobs[i].ID == stageRes.JobID {
+			foundUnified = &unifiedJobs[i]
+			break
+		}
+	}
+	if foundUnified == nil || foundUnified.Metadata["action"] != "catalog_stage" {
+		t.Fatalf("expected unified job with action=catalog_stage, got %+v", foundUnified)
+	}
+
+	// 2. Total failure batch (all items fail) -> status="failed"
+	failRes, err := host.StageCatalogItems(ctx, "mock-stage-bg", []plugins.CatalogStageItem{
+		{ExternalID: "fail-only", Title: "Missing EPUB"},
+	}, true, "user-1", "admin")
+	if err != nil {
+		t.Fatalf("StageCatalogItems total-fail async call failed: %v", err)
+	}
+	deadline2 := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline2) {
+		j := host.GetJob(failRes.JobID)
+		if j != nil && j.Status == "failed" {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	failedJob := host.GetJob(failRes.JobID)
+	if failedJob == nil || failedJob.Status != "failed" || !strings.Contains(failedJob.Error, "HTTP 503 upstream") {
+		t.Fatalf("expected all-failed batch to end in status=failed, got %+v", failedJob)
+	}
+}
+
 

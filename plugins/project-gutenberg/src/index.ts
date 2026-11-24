@@ -1,6 +1,7 @@
 import {
   createPoliteFetcher,
   definePlugin,
+  readResponseBytesWithProgress,
   truncateForMCP,
   type CatalogGroup,
   type CatalogItem,
@@ -289,20 +290,33 @@ definePlugin<GutenbergConfig>({
     async stage(req, ctx) {
       const baseUrl = resolveBaseUrl(ctx.config);
       const preferImages = ctx.config.prefer_images !== false;
-      const batchId = `pg-${Date.now()}`;
+      const batchId = req.job_id || `pg-${Date.now()}`;
       const results: CatalogStagedEntry[] = [];
       const total = req.items.length;
+
+      const formatBytes = (bytes: number): string => {
+        if (bytes >= 1024 * 1024) {
+          return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+        }
+        return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+      };
 
       for (let i = 0; i < total; i += 1) {
         const item = req.items[i];
         const extId = item.external_id.trim();
+        const hintTitle = item.title?.trim();
         ctx.reportProgress({
+          jobId: req.job_id,
           batchId,
           current: i + 1,
           total,
+          percent: 5,
           externalId: extId,
+          title: hintTitle,
           status: "downloading",
-          message: `Fetching Project Gutenberg #${extId}`,
+          message: hintTitle
+            ? `Fetching metadata for "${hintTitle}"`
+            : `Fetching Project Gutenberg #${extId}`,
         });
 
         try {
@@ -318,11 +332,49 @@ definePlugin<GutenbergConfig>({
             throw new Error(`No downloadable EPUB format available for #${extId}`);
           }
 
+          ctx.reportProgress({
+            jobId: req.job_id,
+            batchId,
+            current: i + 1,
+            total,
+            percent: 12,
+            externalId: extId,
+            title: book.title,
+            status: "downloading",
+            message: `Downloading "${book.title}"...`,
+          });
+
           const epubRes = await politeFetch(epubUrl);
           if (!epubRes.ok) {
             throw new Error(`EPUB download failed (HTTP ${epubRes.status})`);
           }
-          const epubBytes = new Uint8Array(await epubRes.arrayBuffer());
+          const epubBytes = await readResponseBytesWithProgress(epubRes, (info) => {
+            if (info.fraction !== undefined) {
+              const mappedPct = Math.round(12 + info.fraction * 68);
+              ctx.reportProgress({
+                jobId: req.job_id,
+                batchId,
+                current: i + 1,
+                total,
+                percent: mappedPct,
+                externalId: extId,
+                title: book.title,
+                status: "downloading",
+                message: `Downloading "${book.title}" (${formatBytes(info.loadedBytes)})`,
+              });
+            } else {
+              ctx.reportProgress({
+                jobId: req.job_id,
+                batchId,
+                current: i + 1,
+                total,
+                externalId: extId,
+                title: book.title,
+                status: "downloading",
+                message: `Downloading "${book.title}" (${formatBytes(info.loadedBytes)})...`,
+              });
+            }
+          });
 
           let coverPayload: { data: Uint8Array; filename: string; mimeType: string } | undefined;
           const coverUrl = selectCoverUrl(book.formats);
@@ -341,6 +393,18 @@ definePlugin<GutenbergConfig>({
               // Cover is optional; proceed with EPUB staging even if external cover fetch fails
             }
           }
+
+          ctx.reportProgress({
+            jobId: req.job_id,
+            batchId,
+            current: i + 1,
+            total,
+            percent: 88,
+            externalId: extId,
+            title: book.title,
+            status: "staging",
+            message: `Staging "${book.title}" in Shelfd...`,
+          });
 
           const authors = (book.authors ?? []).map((a) => normalizeGutenbergAuthor(a.name)).filter(Boolean);
           const summary = book.summaries?.[0]?.trim();
@@ -370,9 +434,11 @@ definePlugin<GutenbergConfig>({
           });
 
           ctx.reportProgress({
+            jobId: req.job_id,
             batchId,
             current: i + 1,
             total,
+            percent: 100,
             externalId: extId,
             title: book.title,
             status: "staged",
@@ -382,14 +448,17 @@ definePlugin<GutenbergConfig>({
           const errMsg = err instanceof Error ? err.message : String(err);
           results.push({
             external_id: extId,
+            title: hintTitle,
             status: "failed",
             error: errMsg,
           });
           ctx.reportProgress({
+            jobId: req.job_id,
             batchId,
             current: i + 1,
             total,
             externalId: extId,
+            title: hintTitle,
             status: "failed",
             message: errMsg,
           });
@@ -398,6 +467,7 @@ definePlugin<GutenbergConfig>({
 
       return {
         batch_id: batchId,
+        job_id: req.job_id,
         async: false,
         results,
       };

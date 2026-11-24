@@ -51,8 +51,13 @@ class BackgroundJob {
   bool get isFailed => status == 'failed';
   bool get isFinished => isCompleted || isFailed;
 
-  bool get isIndeterminate =>
-      isActive && total <= 0 && itemProgressPct <= 0;
+  bool get isIndeterminate {
+    if (!isActive) return false;
+    if (kind == BackgroundJobKind.plugin && total <= 1 && itemProgressPct <= 0) {
+      return true;
+    }
+    return total <= 0 && itemProgressPct <= 0;
+  }
 
   double get progressFraction {
     if (isCompleted) return 1.0;
@@ -66,6 +71,9 @@ class BackgroundJob {
     }
     if (itemProgressPct > 0) {
       return (itemProgressPct / 100.0).clamp(0.0, 1.0);
+    }
+    if (kind == BackgroundJobKind.plugin) {
+      return 0.0;
     }
     if (total == 1 && current >= 1) return 1.0;
     return 0.0;
@@ -160,6 +168,8 @@ class BackgroundJob {
         'action': job.action,
         'target_type': job.targetType,
         'target_id': job.targetId,
+        if (job.externalIds.isNotEmpty) 'external_ids': job.externalIds,
+        if (job.result != null) 'result': job.result!.toJson(),
       },
       startedAt: job.startedAt,
       updatedAt: job.updatedAt,

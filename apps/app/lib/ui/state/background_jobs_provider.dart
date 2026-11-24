@@ -124,6 +124,13 @@ class BackgroundJobsNotifier extends Notifier<BackgroundJobsState> {
 
   void upsertJob(BackgroundJob job) {
     if (_isDisposed) return;
+    final currentUserId = ref.read(authProvider).user?.id;
+    if (currentUserId != null &&
+        currentUserId.isNotEmpty &&
+        job.userId.isNotEmpty &&
+        job.userId != currentUserId) {
+      return;
+    }
     final next = List<BackgroundJob>.from(state.jobs);
     final idx = next.indexWhere((j) => j.id == job.id);
     if (idx >= 0) {

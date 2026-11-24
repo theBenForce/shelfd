@@ -330,6 +330,7 @@ func (h *PluginHandler) StageCatalogItems(w http.ResponseWriter, r *http.Request
 
 	var req struct {
 		Items []plugins.CatalogStageItem `json:"items"`
+		Async bool                       `json:"async,omitempty"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON request: %v", err))
@@ -340,7 +341,7 @@ func (h *PluginHandler) StageCatalogItems(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	res, err := h.host.StageCatalogItems(r.Context(), name, req.Items, user.ID, user.Username)
+	res, err := h.host.StageCatalogItems(r.Context(), name, req.Items, req.Async, user.ID, user.Username)
 	if err != nil {
 		h.writePluginError(w, err)
 		return

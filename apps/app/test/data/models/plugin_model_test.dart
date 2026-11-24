@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shelf/data/models/background_job.dart';
 import 'package:shelf/data/models/plugin.dart';
 import 'package:shelf/data/services/api_service.dart';
 import 'package:shelf/ui/state/plugins_provider.dart';
@@ -266,6 +267,70 @@ void main() {
       expect(stageRes.isAsync, isFalse);
       expect(stageRes.results.single.uploadJobId, 'job-1342');
       expect(stageRes.results.single.isFailed, isFalse);
+
+      final asyncStageRes = CatalogStageResult.fromJson({
+        'batch_id': 'pjob-stage-1',
+        'async': true,
+        'job_id': 'pjob-stage-1',
+        'message': 'Staging started in background',
+        'job': {
+          'id': 'pjob-stage-1',
+          'user_id': 'u-1',
+          'plugin': 'project-gutenberg',
+          'action': 'catalog_stage',
+          'title': 'Staging "Frankenstein"',
+          'target_type': 'catalog',
+          'target_id': '84',
+          'external_ids': ['84'],
+          'status': 'running',
+          'current': 1,
+          'total': 1,
+          'item_progress_pct': 0,
+          'message': 'Downloading...',
+        },
+      });
+      expect(asyncStageRes.isAsync, isTrue);
+      expect(asyncStageRes.jobId, 'pjob-stage-1');
+      expect(asyncStageRes.job, isNotNull);
+      expect(asyncStageRes.job!.externalIds, ['84']);
+
+      // Verify 1-book active plugin job without percent does not prematurely jump to 100%
+      final bgSingle = BackgroundJob.fromPluginJob(asyncStageRes.job!);
+      expect(bgSingle.isIndeterminate, isTrue);
+      expect(bgSingle.progressFraction, 0.0);
+      expect(bgSingle.metadata?['external_ids'], ['84']);
+
+      // Once percent is reported on 1-book plugin job, it becomes determinate
+      final bgSingleWithPct = BackgroundJob.fromPluginJob(
+        PluginJob.fromJson({
+          'id': 'pjob-stage-1',
+          'plugin': 'project-gutenberg',
+          'action': 'catalog_stage',
+          'title': 'Staging "Frankenstein"',
+          'status': 'running',
+          'current': 1,
+          'total': 1,
+          'item_progress_pct': 65.0,
+        }),
+      );
+      expect(bgSingleWithPct.isIndeterminate, isFalse);
+      expect(bgSingleWithPct.progressFraction, closeTo(0.65, 0.01));
+
+      // Multi-book batch uses (completedItems + itemProgressPct/100) / total
+      final bgBatch = BackgroundJob.fromPluginJob(
+        PluginJob.fromJson({
+          'id': 'pjob-stage-2',
+          'plugin': 'project-gutenberg',
+          'action': 'catalog_stage',
+          'title': 'Staging 2 books',
+          'status': 'running',
+          'current': 2,
+          'total': 2,
+          'item_progress_pct': 50.0,
+        }),
+      );
+      expect(bgBatch.isIndeterminate, isFalse);
+      expect(bgBatch.progressFraction, closeTo(0.75, 0.01));
     });
   });
 
@@ -392,10 +457,20 @@ void main() {
       expect(savedConfigPayload?['session_cookie'], kPluginSecretRedactedSentinel);
       expect(cfg.secretFieldsSet, contains('session_cookie'));
 
-      final stageRes = await api.stagePluginCatalogItems('project-gutenberg', const [
-        CatalogStageItemRequest(externalId: '1342', preferredFormat: 'epub'),
-      ]);
+      final stageRes = await api.stagePluginCatalogItems(
+        'project-gutenberg',
+        const [
+          CatalogStageItemRequest(
+            externalId: '1342',
+            title: 'Pride and Prejudice',
+            preferredFormat: 'epub',
+          ),
+        ],
+        async: true,
+      );
+      expect(stagePayload?['async'], isTrue);
       expect((stagePayload?['items'] as List).first['external_id'], '1342');
+      expect((stagePayload?['items'] as List).first['title'], 'Pride and Prejudice');
       expect(stageRes.results.single.uploadJobId, 'job-1');
 
       final authStatus = await api.getPluginAuthStatus('yoto');

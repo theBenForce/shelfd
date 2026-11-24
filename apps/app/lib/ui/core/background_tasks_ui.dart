@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../data/models/background_job.dart';
 import '../state/providers.dart';
 import 'responsive.dart';
@@ -35,6 +36,7 @@ String _formatRelativeTime(DateTime? dt) {
 Future<void> showBackgroundTasksPanel(BuildContext context) {
   final isDesktop = Responsive.isDesktop(context);
   final colors = ShelfdColors.of(context);
+  final router = GoRouter.maybeOf(context);
 
   if (isDesktop) {
     return showDialog<void>(
@@ -50,7 +52,12 @@ Future<void> showBackgroundTasksPanel(BuildContext context) {
           insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520, maxHeight: 620),
-            child: const BackgroundTasksPanelContent(),
+            child: BackgroundTasksPanelContent(
+              onNavigate: (route) {
+                Navigator.of(dialogContext).pop();
+                router?.go(route);
+              },
+            ),
           ),
         );
       },
@@ -75,6 +82,10 @@ Future<void> showBackgroundTasksPanel(BuildContext context) {
         builder: (_, scrollController) {
           return BackgroundTasksPanelContent(
             scrollController: scrollController,
+            onNavigate: (route) {
+              Navigator.of(sheetContext).pop();
+              router?.go(route);
+            },
           );
         },
       );
@@ -369,8 +380,25 @@ class BackgroundTasksErrorListener extends ConsumerWidget {
 /// Standardized scrollable list of active and recent background tasks.
 class BackgroundTasksPanelContent extends ConsumerWidget {
   final ScrollController? scrollController;
+  final ValueChanged<String>? onNavigate;
 
-  const BackgroundTasksPanelContent({super.key, this.scrollController});
+  const BackgroundTasksPanelContent({
+    super.key,
+    this.scrollController,
+    this.onNavigate,
+  });
+
+  void _navigateToRoute(BuildContext context, String route) {
+    if (onNavigate != null) {
+      onNavigate!(route);
+      return;
+    }
+    final router = GoRouter.maybeOf(context);
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+    router?.go(route);
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -429,7 +457,7 @@ class BackgroundTasksPanelContent extends ConsumerWidget {
               IconButton(
                 tooltip: 'Close',
                 icon: Icon(Icons.close_rounded, size: 20, color: colors.mutedInk),
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: () => Navigator.of(context).maybePop(),
               ),
             ],
           ),
@@ -518,6 +546,11 @@ class BackgroundTasksPanelContent extends ConsumerWidget {
                       for (final job in finished) ...[
                         _BackgroundTaskCard(
                           job: job,
+                          onReviewQueue: job.kind == BackgroundJobKind.plugin &&
+                                  job.metadata?['action'] == 'catalog_stage' &&
+                                  job.isCompleted
+                              ? () => _navigateToRoute(context, '/uploads')
+                              : null,
                           onDismiss: () => ref
                               .read(backgroundJobsProvider.notifier)
                               .dismissJob(job.id),
@@ -535,9 +568,14 @@ class BackgroundTasksPanelContent extends ConsumerWidget {
 
 class _BackgroundTaskCard extends StatelessWidget {
   final BackgroundJob job;
+  final VoidCallback? onReviewQueue;
   final VoidCallback? onDismiss;
 
-  const _BackgroundTaskCard({required this.job, this.onDismiss});
+  const _BackgroundTaskCard({
+    required this.job,
+    this.onReviewQueue,
+    this.onDismiss,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -693,6 +731,31 @@ class _BackgroundTaskCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (onReviewQueue != null) ...[
+                const SizedBox(width: AppTokens.space8),
+                TextButton.icon(
+                  key: Key('background_task_review_queue_${job.id}'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: colors.accentPrimary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppTokens.space8,
+                      vertical: 4,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: onReviewQueue,
+                  icon: const Icon(Icons.fact_check_outlined, size: 13),
+                  label: Text(
+                    'Review Queue',
+                    style: AppTypography.bodySans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: colors.accentPrimary,
+                    ),
+                  ),
+                ),
+              ],
               if (counterText != null) ...[
                 const SizedBox(width: AppTokens.space8),
                 Text(

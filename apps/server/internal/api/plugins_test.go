@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/shelfd/shelfd/internal/api"
+	"github.com/shelfd/shelfd/internal/jobs"
 	"github.com/shelfd/shelfd/internal/mcp"
 	"github.com/shelfd/shelfd/internal/plugins"
 	"github.com/shelfd/shelfd/internal/repository"
@@ -1415,5 +1417,255 @@ rl.on('line', (line) => {
 		t.Fatalf("expected disabled plugin updated to v1.3.0 staying disabled, got %+v", res4)
 	}
 }
+
+func TestAPI_CatalogStageAsyncAndSSEUserIsolation(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node runtime not found on PATH; skipping")
+	}
+
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	ctx := context.Background()
+	pluginsDir := filepath.Join(f.dataDir, "plugins-async-stage")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a second user to verify user-scoped SSE isolation
+	userB := &repository.User{
+		ID:           "user-b-id",
+		Username:     "user_b",
+		PasswordHash: f.user.PasswordHash,
+		CreatedAt:    time.Now().UTC(),
+	}
+	if err := f.repo.CreateUser(ctx, userB); err != nil {
+		t.Fatalf("CreateUser userB: %v", err)
+	}
+	userAToken := f.loginAndGetToken(t)
+	userBToken, _, err := api.GenerateJWT(userB.ID, userB.Username, f.jwtSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateJWT userB: %v", err)
+	}
+
+	var ts *httptest.Server
+	var activeHandler http.Handler
+	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		activeHandler.ServeHTTP(w, r)
+	}))
+	defer ts.Close()
+
+	jm := jobs.NewManager(f.hub)
+	pluginHost := plugins.NewHost(f.repo, plugins.HostConfig{
+		PluginsDir:    pluginsDir,
+		APIBase:       ts.URL,
+		ShelfdVersion: "0.1.0-test",
+		MasterSecret:  f.jwtSecret,
+		IdleTimeout:   30 * time.Second,
+		Hub:           f.hub,
+		JobManager:    jm,
+		TokenIssuer: func(userID, username, pluginName string, scopes []string) (string, error) {
+			tok, _, tErr := api.GeneratePluginInvocationJWT(userID, username, pluginName, scopes, f.jwtSecret, 5*time.Minute)
+			return tok, tErr
+		},
+	})
+	defer pluginHost.Stop()
+
+	activeHandler = api.NewRouter(api.RouterConfig{
+		Repo:            f.repo,
+		Ingester:        f.ingester,
+		Scanner:         f.scanner,
+		UploadWorker:    f.uploadWorker,
+		AIClient:        f.aiClient,
+		PluginHost:      pluginHost,
+		Hub:             f.hub,
+		JobManager:      jm,
+		DataDir:         f.dataDir,
+		LibraryDir:      f.libDir,
+		JWTSecret:       f.jwtSecret,
+		Host:            "127.0.0.1",
+		Port:            8080,
+		Version:         "0.1.0-test",
+		DefaultUsername: "admin",
+	})
+
+	epubBytes := buildMinimalEPUBWithoutAuthors(t, "Async Staged Book")
+	var zipBuf bytes.Buffer
+	zw := zip.NewWriter(&zipBuf)
+	mf, _ := zw.Create("plugin.json")
+	_, _ = mf.Write([]byte(`{
+  "name": "async-cat",
+  "version": "1.0.0",
+  "entrypoint": { "command": "node", "args": ["index.mjs"] },
+  "capabilities": ["catalog"],
+  "catalog_modes": ["browse"],
+  "api_scopes": ["uploads:stage"]
+}`))
+	epf, _ := zw.Create("book.epub")
+	_, _ = epf.Write(epubBytes)
+	js, _ := zw.Create("index.mjs")
+	_, _ = js.Write([]byte(`
+import fs from 'node:fs';
+import readline from 'node:readline';
+
+const epubBuf = fs.readFileSync(new URL('./book.epub', import.meta.url));
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+
+rl.on('line', async (line) => {
+  if (!line.trim()) return;
+  const msg = JSON.parse(line);
+  if (msg.method === 'initialize') {
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: { name: 'async-cat', version: '1.0.0', catalog: { modes: ['browse'] } }
+    }) + '\n');
+  } else if (msg.method === 'catalog/stage') {
+    const auth = msg.params.auth;
+    const jobId = msg.params.job_id;
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'progress',
+      params: { job_id: jobId, current: 1, total: 1, percent: 45, title: 'Async Staged Book', message: 'Downloading EPUB...' }
+    }) + '\n');
+    const form = new FormData();
+    form.append('file', new Blob([epubBuf], { type: 'application/epub+zip' }), 'async.epub');
+    form.append('source_plugin', 'async-cat');
+    form.append('source_external_id', 'ext-async-1');
+    form.append('metadata_defaults', JSON.stringify({ title: 'Async Staged Book', authors: ['Test Author'] }));
+    const res = await fetch(auth.api_base + '/api/v1/books/upload/stage', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + auth.invocation_token },
+      body: form
+    });
+    const body = await res.json();
+    process.stdout.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: msg.id,
+      result: {
+        batch_id: jobId,
+        results: [{ external_id: 'ext-async-1', title: 'Async Staged Book', upload_job_id: body.job_id, status: 'staged' }]
+      }
+    }) + '\n');
+  } else if (msg.method === 'shutdown') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { ok: true } }) + '\n');
+    process.exit(0);
+  }
+});
+`))
+	_ = zw.Close()
+
+	// Install plugin
+	var bodyBuf bytes.Buffer
+	mw := multipart.NewWriter(&bodyBuf)
+	fw, _ := mw.CreateFormFile("file", "async-cat.zip")
+	_, _ = fw.Write(zipBuf.Bytes())
+	_ = mw.Close()
+
+	instReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/plugins/install", &bodyBuf)
+	instReq.Header.Set("Authorization", "Bearer "+userAToken)
+	instReq.Header.Set("Content-Type", mw.FormDataContentType())
+	instResp, err := http.DefaultClient.Do(instReq)
+	if err != nil || instResp.StatusCode != http.StatusCreated {
+		t.Fatalf("install async-cat failed: status=%v err=%v", instResp.StatusCode, err)
+	}
+	instResp.Body.Close()
+
+	// Open SSE streams for both User A and User B
+	sseCtx, cancelSSE := context.WithCancel(ctx)
+	defer cancelSSE()
+
+	openSSE := func(token string) <-chan string {
+		req, _ := http.NewRequestWithContext(sseCtx, http.MethodGet, ts.URL+"/api/v1/queue/events", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, sErr := http.DefaultClient.Do(req)
+		if sErr != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("open SSE failed: status=%v err=%v", resp.StatusCode, sErr)
+		}
+		lines := make(chan string, 64)
+		go func() {
+			defer resp.Body.Close()
+			sc := bufio.NewScanner(resp.Body)
+			for sc.Scan() {
+				lines <- sc.Text()
+			}
+			close(lines)
+		}()
+		return lines
+	}
+
+	sseA := openSSE(userAToken)
+	sseB := openSSE(userBToken)
+
+	// Wait for initial queue_status event on both streams
+	waitInitial := func(ch <-chan string) {
+		timeout := time.After(2 * time.Second)
+		for {
+			select {
+			case l := <-ch:
+				if strings.HasPrefix(l, "data: ") {
+					return
+				}
+			case <-timeout:
+				t.Fatal("timed out waiting for initial SSE queue_status")
+			}
+		}
+	}
+	waitInitial(sseA)
+	waitInitial(sseB)
+
+	// Trigger POST /api/v1/plugins/async-cat/catalog/stage with async: true as User A
+	stageReq, _ := http.NewRequest(
+		http.MethodPost,
+		ts.URL+"/api/v1/plugins/async-cat/catalog/stage",
+		strings.NewReader(`{"async":true,"items":[{"external_id":"ext-async-1","title":"Async Staged Book"}]}`),
+	)
+	stageReq.Header.Set("Authorization", "Bearer "+userAToken)
+	stageResp, err := http.DefaultClient.Do(stageReq)
+	if err != nil {
+		t.Fatalf("POST catalog/stage async failed: %v", err)
+	}
+	if stageResp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted for async catalog/stage, got %d", stageResp.StatusCode)
+	}
+	var stageOut plugins.CatalogStageResult
+	_ = json.NewDecoder(stageResp.Body).Decode(&stageOut)
+	stageResp.Body.Close()
+
+	if !stageOut.Async || stageOut.JobID == "" || stageOut.Job == nil {
+		t.Fatalf("expected async=true with job_id and job, got %+v", stageOut)
+	}
+
+	// Wait for User A's SSE stream to receive completed job_updated for stageOut.JobID
+	var userASawCompleted bool
+	deadline := time.After(4 * time.Second)
+	for !userASawCompleted {
+		select {
+		case line := <-sseA:
+			if strings.HasPrefix(line, "data: ") && strings.Contains(line, stageOut.JobID) && strings.Contains(line, `"status":"completed"`) {
+				userASawCompleted = true
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for User A SSE completed job_updated for %s", stageOut.JobID)
+		}
+	}
+
+	// Ensure User B's SSE stream did NOT receive any frame referencing User A's job ID
+	drainTimer := time.NewTimer(150 * time.Millisecond)
+	defer drainTimer.Stop()
+	for {
+		select {
+		case line := <-sseB:
+			if strings.Contains(line, stageOut.JobID) {
+				t.Fatalf("cross-user SSE leak: User B received User A's job event: %s", line)
+			}
+			continue
+		case <-drainTimer.C:
+		}
+		break
+	}
+}
+
 
 

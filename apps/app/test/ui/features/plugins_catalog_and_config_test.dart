@@ -2,11 +2,14 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shelf/data/models/background_job.dart';
 import 'package:shelf/data/models/plugin.dart';
 import 'package:shelf/data/services/api_service.dart';
+import 'package:shelf/ui/core/background_tasks_ui.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/plugins/catalog_browser_view.dart';
 import 'package:shelf/ui/features/settings/plugin_config_dialog.dart';
@@ -552,5 +555,290 @@ void main() {
     expect(find.text('Yoto API Base URL'), findsNothing);
     expect(find.text('Yoto Access Token'), findsNothing);
     expect(find.byKey(const Key('plugin_config_save_button')), findsNothing);
+  });
+
+  testWidgets(
+      'CatalogBrowserView stages asynchronously as a background task, locks in-flight items, and updates badges on completion',
+      (tester) async {
+    setDesktopViewport(tester);
+
+    Map<String, dynamic>? stageRequestBody;
+    final fakeUpload = _FakeUploadNotifier();
+
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/plugins') {
+        return http.Response(
+          jsonEncode({
+            'plugins': [
+              {
+                'name': 'project-gutenberg',
+                'display_name': 'Project Gutenberg',
+                'version': '0.1.0',
+                'enabled': true,
+                'status': 'idle',
+                'capabilities': ['catalog'],
+                'catalog_modes': ['browse', 'search'],
+                'configured': true,
+              },
+            ],
+          }),
+          200,
+        );
+      }
+
+      if (request.url.path == '/api/v1/plugins/project-gutenberg/catalog') {
+        return http.Response(
+          jsonEncode({
+            'items': [
+              {
+                'external_id': '1342',
+                'title': 'Pride and Prejudice',
+                'authors': ['Jane Austen'],
+                'formats': [
+                  {'format': 'epub', 'label': 'EPUB'},
+                ],
+                'status': 'available',
+              },
+              {
+                'external_id': '84',
+                'title': 'Frankenstein',
+                'authors': ['Mary Shelley'],
+                'formats': [
+                  {'format': 'epub', 'label': 'EPUB'},
+                ],
+                'status': 'available',
+              },
+            ],
+            'total_count': 2,
+          }),
+          200,
+        );
+      }
+
+      if (request.url.path ==
+              '/api/v1/plugins/project-gutenberg/catalog/stage' &&
+          request.method == 'POST') {
+        stageRequestBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({
+            'batch_id': 'pjob-stage-99',
+            'async': true,
+            'job_id': 'pjob-stage-99',
+            'message': 'Staging started in background',
+            'job': {
+              'id': 'pjob-stage-99',
+              'user_id': 'u-1',
+              'plugin': 'project-gutenberg',
+              'action': 'catalog_stage',
+              'title': 'Staging 2 books',
+              'target_type': 'catalog',
+              'target_id': '1342',
+              'external_ids': ['1342', '84'],
+              'status': 'running',
+              'current': 0,
+              'total': 2,
+              'message': 'Starting...',
+            },
+          }),
+          202,
+        );
+      }
+
+      if (request.url.path == '/api/v1/jobs') {
+        return http.Response(jsonEncode({'jobs': []}), 200);
+      }
+      if (request.url.path == '/api/v1/plugins/jobs') {
+        return http.Response(jsonEncode({'jobs': []}), 200);
+      }
+
+      return http.Response('Not Found', 404);
+    });
+
+    final api = ApiService(
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token-123',
+      client: mockClient,
+    );
+
+    final container = ProviderContainer(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        apiServiceProvider.overrideWithValue(api),
+        queueProvider.overrideWith(_FakeQueueNotifier.new),
+        uploadProvider.overrideWith(() => fakeUpload),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const CatalogBrowserView(initialPlugin: 'project-gutenberg'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Select both items
+    await tester.tap(find.byKey(const Key('catalog_checkbox_1342')));
+    await tester.tap(find.byKey(const Key('catalog_checkbox_84')));
+    await tester.pumpAndSettle();
+    expect(find.text('Stage Selected (2)'), findsOneWidget);
+
+    // Click Stage Selected -> returns 202 Accepted immediately
+    await tester.tap(find.byKey(const Key('stage_selected_catalog_button')));
+    await tester.pumpAndSettle();
+
+    expect(stageRequestBody?['async'], isTrue);
+    // Selection cleared immediately and both cards locked with "Staging..." badge
+    expect(find.text('Stage Selected (0)'), findsOneWidget);
+    expect(find.text('Staging...'), findsNWidgets(2));
+    expect(find.byKey(const Key('catalog_checkbox_1342')), findsNothing);
+    expect(find.text('View Tasks'), findsOneWidget);
+
+    // Job is immediately tracked in backgroundJobsProvider
+    expect(container.read(backgroundJobsProvider).activeJobs.length, 1);
+
+    // Simulate SSE job_updated completion (1342 staged, 84 failed)
+    container.read(backgroundJobsProvider.notifier).upsertJob(
+      const BackgroundJob(
+        id: 'pjob-stage-99',
+        kind: BackgroundJobKind.plugin,
+        userId: 'u-1',
+        title: 'Staging 2 books',
+        status: 'completed',
+        current: 2,
+        total: 2,
+        itemProgressPct: 100,
+        message: 'Staged 1 of 2 books (1 failed)',
+        metadata: {
+          'plugin': 'project-gutenberg',
+          'action': 'catalog_stage',
+          'external_ids': ['1342', '84'],
+          'result': {
+            'status': 'completed',
+            'message': 'Staged 1 of 2 books (1 failed)',
+            'data': {
+              'results': [
+                {
+                  'external_id': '1342',
+                  'title': 'Pride and Prejudice',
+                  'upload_job_id': 'up-1342',
+                  'status': 'staged',
+                },
+                {
+                  'external_id': '84',
+                  'title': 'Frankenstein',
+                  'status': 'failed',
+                  'error': 'Upstream 503',
+                },
+              ],
+            },
+          },
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Succeeded item flips to Staged, failed item reverts to selectable checkbox
+    expect(find.text('Staging...'), findsNothing);
+    expect(find.text('Staged'), findsOneWidget);
+    expect(find.byKey(const Key('catalog_checkbox_84')), findsOneWidget);
+    expect(fakeUpload.reloadCalls, greaterThanOrEqualTo(1));
+  });
+
+  testWidgets(
+      'BackgroundTasksPanel renders Review Queue action for completed catalog_stage job and navigates cleanly',
+      (tester) async {
+    setDesktopViewport(tester);
+
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/jobs') {
+        return http.Response(jsonEncode({'jobs': []}), 200);
+      }
+      return http.Response('Not Found', 404);
+    });
+    final api = ApiService(
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token-123',
+      client: mockClient,
+    );
+
+    final container = ProviderContainer(
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(prefs),
+        apiServiceProvider.overrideWithValue(api),
+        queueProvider.overrideWith(_FakeQueueNotifier.new),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final router = GoRouter(
+      initialLocation: '/',
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                key: const Key('open_tasks_btn'),
+                onPressed: () => showBackgroundTasksPanel(context),
+                child: const Text('Open Tasks'),
+              ),
+            ),
+          ),
+        ),
+        GoRoute(
+          path: '/uploads',
+          builder: (context, state) => const Scaffold(
+            body: Center(child: Text('Uploads Destination')),
+          ),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          routerConfig: router,
+        ),
+      ),
+    );
+    container.read(backgroundJobsProvider);
+    await tester.pumpAndSettle();
+
+    container.read(backgroundJobsProvider.notifier).upsertJob(
+      const BackgroundJob(
+        id: 'pjob-done-1',
+        kind: BackgroundJobKind.plugin,
+        title: 'Staging "Frankenstein"',
+        status: 'completed',
+        current: 1,
+        total: 1,
+        itemProgressPct: 100,
+        message: 'Staged 1 book for review',
+        metadata: {
+          'plugin': 'project-gutenberg',
+          'action': 'catalog_stage',
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('open_tasks_btn')));
+    await tester.pumpAndSettle();
+
+    final reviewBtn =
+        find.byKey(const Key('background_task_review_queue_pjob-done-1'));
+    expect(reviewBtn, findsOneWidget);
+
+    await tester.tap(reviewBtn);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Uploads Destination'), findsOneWidget);
   });
 }

@@ -4,12 +4,38 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/shelfd/shelfd/internal/events"
+	"github.com/shelfd/shelfd/internal/jobs"
 	"github.com/shelfd/shelfd/internal/repository"
 	"github.com/shelfd/shelfd/internal/worker"
 )
+
+func eventTargetUserID(evt events.Event) string {
+	switch evt.Type {
+	case events.EventJobUpdated:
+		if jb, ok := evt.Data.(*jobs.Job); ok && jb != nil {
+			return strings.TrimSpace(jb.UserID)
+		}
+		if jbVal, ok := evt.Data.(jobs.Job); ok {
+			return strings.TrimSpace(jbVal.UserID)
+		}
+		if m, ok := evt.Data.(map[string]any); ok {
+			if uid, ok := m["user_id"].(string); ok {
+				return strings.TrimSpace(uid)
+			}
+		}
+	case events.EventJobRemoved, events.EventPlugin:
+		if m, ok := evt.Data.(map[string]any); ok {
+			if uid, ok := m["user_id"].(string); ok {
+				return strings.TrimSpace(uid)
+			}
+		}
+	}
+	return ""
+}
 
 // QueueHandler handles inspection and streaming of background queue status.
 type QueueHandler struct {
@@ -55,6 +81,12 @@ func (h *QueueHandler) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeJSONError(w, http.StatusBadRequest, "Streaming unsupported by client")
 		return
+	}
+
+	currentUser := CurrentUser(r.Context())
+	currentUserID := ""
+	if currentUser != nil {
+		currentUserID = strings.TrimSpace(currentUser.ID)
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -130,6 +162,9 @@ func (h *QueueHandler) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		case evt, ok := <-hubCh:
 			if !ok {
 				return
+			}
+			if targetUID := eventTargetUserID(evt); targetUID != "" && currentUserID != "" && targetUID != currentUserID {
+				continue
 			}
 			data, err := json.Marshal(evt.Data)
 			if err != nil {

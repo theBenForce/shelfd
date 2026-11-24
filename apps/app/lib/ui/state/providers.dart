@@ -916,9 +916,11 @@ class QueueNotifier extends Notifier<QueueState> {
             return;
           }
           refresh();
+          ref.read(backgroundJobsProvider.notifier).loadJobs();
           _scheduleReconnect(const Duration(seconds: 5));
         },
         onDone: () {
+          ref.read(backgroundJobsProvider.notifier).loadJobs();
           _scheduleReconnect(const Duration(seconds: 3));
         },
         cancelOnError: true,
@@ -930,6 +932,7 @@ class QueueNotifier extends Notifier<QueueState> {
         return;
       }
       refresh();
+      ref.read(backgroundJobsProvider.notifier).loadJobs();
       _scheduleReconnect(const Duration(seconds: 5));
     }
   }
