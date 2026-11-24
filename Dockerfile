@@ -113,6 +113,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libsqlite3-0 \
     libstdc++6 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /data /data/plugins /library /config /usr/share/shelfd/web /usr/share/shelfd/builtin-plugins
