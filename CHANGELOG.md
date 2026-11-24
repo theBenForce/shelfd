@@ -1,3 +1,10 @@
+# [1.29.0](https://github.com/theBenForce/shelfd/compare/v1.28.0...v1.29.0) (2026-11-24)
+
+
+### Features
+
+* update dockerfile ([80e9137](https://github.com/theBenForce/shelfd/commit/80e91376ab48541c3d8a82c620f2f45e798e59a8))
+
 # [1.28.0](https://github.com/theBenForce/shelfd/compare/v1.27.0...v1.28.0) (2026-11-23)
 
 
