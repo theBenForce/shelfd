@@ -1,3 +1,10 @@
+# [1.31.0](https://github.com/theBenForce/shelfd/compare/v1.30.2...v1.31.0) (2026-11-25)
+
+
+### Features
+
+* **plugins:** cache storefront catalog results with force refresh and hide existing items by default ([#105](https://github.com/theBenForce/shelfd/issues/105)) ([a78694f](https://github.com/theBenForce/shelfd/commit/a78694fb7b72c8647280abf1b0c358e3d2f7495b))
+
 ## [1.30.2](https://github.com/theBenForce/shelfd/compare/v1.30.1...v1.30.2) (2026-11-25)
 
 
