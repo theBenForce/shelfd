@@ -1,13 +1,57 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+}
+
+val releaseStoreFilePath: String? =
+    keystoreProperties.getProperty("storeFile")
+        ?: System.getenv("ANDROID_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+val releaseStorePassword: String? =
+    keystoreProperties.getProperty("storePassword")
+        ?: System.getenv("ANDROID_KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() }
+val releaseKeyAlias: String? =
+    keystoreProperties.getProperty("keyAlias")
+        ?: System.getenv("ANDROID_KEY_ALIAS")?.takeIf { it.isNotBlank() }
+val releaseKeyPassword: String? =
+    keystoreProperties.getProperty("keyPassword")
+        ?: System.getenv("ANDROID_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+
+val hasReleaseKeystore =
+    !releaseStoreFilePath.isNullOrBlank() &&
+        !releaseStorePassword.isNullOrBlank() &&
+        !releaseKeyAlias.isNullOrBlank() &&
+        !releaseKeyPassword.isNullOrBlank()
+
+val isCiBuild = System.getenv("CI")?.equals("true", ignoreCase = true) == true
+val isReleaseTaskRequested =
+    gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+
+if (isCiBuild && isReleaseTaskRequested && !hasReleaseKeystore) {
+    throw GradleException(
+        "CI release build requested without Android signing credentials. " +
+            "Provide key.properties or ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, " +
+            "ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD."
+    )
+}
+
 android {
-    namespace = "com.shelfd.shelf"
+    namespace = "com.justwriteapps.shelfd"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+
+    buildFeatures {
+        resValues = true
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -15,21 +59,36 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.shelfd.shelf"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        applicationId = "com.justwriteapps.shelfd"
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(releaseStoreFilePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            resValue("string", "app_name", "Shelfd (Dev)")
+        }
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig =
+                if (hasReleaseKeystore) {
+                    signingConfigs.getByName("release")
+                } else {
+                    signingConfigs.getByName("debug")
+                }
         }
     }
 }
@@ -38,6 +97,10 @@ kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
+}
+
+dependencies {
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 }
 
 flutter {

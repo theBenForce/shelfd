@@ -960,7 +960,7 @@ func (h *BookHandler) GetBookAsset(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
 	http.ServeContent(w, r, filepath.Base(assetPath), modTime, bytes.NewReader(assetData))
 }
 
@@ -974,7 +974,7 @@ func isAudioAssetPath(assetPath string) bool {
 }
 
 func (h *BookHandler) GetChapterHTML(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
@@ -1078,8 +1078,11 @@ func (h *BookHandler) GetChapterHTML(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+	w.Header().Set("Content-Length", strconv.Itoa(len(rewrittenHTML)))
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(rewrittenHTML))
+	if r.Method != http.MethodHead {
+		_, _ = w.Write([]byte(rewrittenHTML))
+	}
 }
 
 func (h *BookHandler) UploadBook(w http.ResponseWriter, r *http.Request) {
@@ -1989,7 +1992,7 @@ func formatVTTTimestamp(seconds float64) string {
 
 // GetUploadJobCover returns the extracted cover image for a staged upload job.
 func (h *BookHandler) GetUploadJobCover(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
@@ -2003,12 +2006,19 @@ func (h *BookHandler) GetUploadJobCover(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	coverPath := filepath.Join(h.dataDir, "uploads", jobID+".cover")
-	if data, err := os.ReadFile(coverPath); err == nil && len(data) > 0 {
+	writeCoverBytes := func(data []byte) {
 		w.Header().Set("Content-Type", http.DetectContentType(data))
 		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data)
+		if r.Method != http.MethodHead {
+			_, _ = w.Write(data)
+		}
+	}
+
+	coverPath := filepath.Join(h.dataDir, "uploads", jobID+".cover")
+	if data, err := os.ReadFile(coverPath); err == nil && len(data) > 0 {
+		writeCoverBytes(data)
 		return
 	}
 
@@ -2021,20 +2031,14 @@ func (h *BookHandler) GetUploadJobCover(w http.ResponseWriter, r *http.Request) 
 				defer reader.Close()
 				if data, _, err := reader.ExtractCoverImage(); err == nil && len(data) > 0 {
 					_ = os.WriteFile(coverPath, data, 0644)
-					w.Header().Set("Content-Type", http.DetectContentType(data))
-					w.Header().Set("Cache-Control", "no-cache")
-					w.WriteHeader(http.StatusOK)
-					_, _ = w.Write(data)
+					writeCoverBytes(data)
 					return
 				}
 			}
 		} else {
 			if meta, err := audio.ExtractMetadata(job.StagedPath); err == nil && len(meta.CoverData) > 0 {
 				_ = os.WriteFile(coverPath, meta.CoverData, 0644)
-				w.Header().Set("Content-Type", http.DetectContentType(meta.CoverData))
-				w.Header().Set("Cache-Control", "no-cache")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write(meta.CoverData)
+				writeCoverBytes(meta.CoverData)
 				return
 			}
 		}

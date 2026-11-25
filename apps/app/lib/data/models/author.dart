@@ -15,8 +15,11 @@ class Author {
 
   factory Author.fromJson(Map<String, dynamic> json, {String? baseUrl}) {
     String? photo = json['photo_url'] as String?;
-    if (photo != null && baseUrl != null && photo.startsWith('/')) {
-      photo = '$baseUrl$photo';
+    if (photo != null && baseUrl != null && baseUrl.isNotEmpty && photo.startsWith('/')) {
+      final cleanBase = baseUrl.endsWith('/')
+          ? baseUrl.substring(0, baseUrl.length - 1)
+          : baseUrl;
+      photo = '$cleanBase$photo';
     }
 
     return Author(

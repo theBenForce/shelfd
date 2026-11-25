@@ -1,8 +1,14 @@
+import 'dart:async';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../../../data/models/plugin.dart';
+import '../../../data/services/api_service.dart';
+import '../../../data/utils/url_normalizer.dart';
 import '../../core/app_shell.dart';
 import '../../core/primitives.dart';
 import '../../core/responsive.dart';
@@ -14,7 +20,14 @@ import '../../state/providers.dart';
 import 'plugin_config_dialog.dart';
 
 class SettingsView extends ConsumerStatefulWidget {
-  const SettingsView({super.key});
+  final String? initialPluginName;
+  final bool? isWebOverride;
+
+  const SettingsView({
+    super.key,
+    this.initialPluginName,
+    this.isWebOverride,
+  });
 
   @override
   ConsumerState<SettingsView> createState() => _SettingsViewState();
@@ -37,6 +50,25 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   String? _passwordSuccess;
   String? _usernameSavedMessage;
 
+  List<ApiTokenInfo> _apiTokens = const [];
+  bool _isLoadingTokens = false;
+  String? _revokingTokenId;
+  bool _didAutoOpenRequestedPlugin = false;
+
+  bool get _effectiveIsWeb => widget.isWebOverride ?? kIsWeb;
+
+  String? get _requestedPluginToOpen {
+    final explicit = widget.initialPluginName?.trim();
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit;
+    }
+    final queryPlugin = Uri.base.queryParameters['plugin']?.trim();
+    if (queryPlugin != null && queryPlugin.isNotEmpty) {
+      return queryPlugin;
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -46,6 +78,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
     final callbackCode = Uri.base.queryParameters['code'];
     if (callbackCode != null && callbackCode.trim().isNotEmpty) {
+      _didAutoOpenRequestedPlugin = true;
       final callbackPlugin =
           Uri.base.queryParameters['plugin']?.trim() ??
           Uri.base.queryParameters['state']?.trim() ??
@@ -55,6 +88,8 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
         _handlePluginOAuthCallback(callbackPlugin, callbackCode.trim());
       });
     }
+
+    Future.microtask(_loadApiTokens);
   }
 
   @override
@@ -66,11 +101,106 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     super.dispose();
   }
 
+  Future<void> _loadApiTokens() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingTokens = true;
+    });
+    try {
+      final tokens = await ref.read(apiServiceProvider).listApiTokens();
+      if (!mounted) return;
+      setState(() {
+        _apiTokens = tokens;
+        _isLoadingTokens = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingTokens = false;
+      });
+    }
+  }
+
+  Future<void> _handleRevokeToken(ApiTokenInfo tokenInfo) async {
+    final currentTokenId = ref.read(storageServiceProvider).getAuthTokenId();
+    if (currentTokenId != null && currentTokenId == tokenInfo.id) {
+      await _handleLogout();
+      return;
+    }
+    setState(() {
+      _revokingTokenId = tokenInfo.id;
+    });
+    try {
+      await ref.read(apiServiceProvider).deleteApiToken(tokenInfo.id);
+      await _loadApiTokens();
+      if (mounted) {
+        final revokedName = tokenInfo.name;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Revoked token "$revokedName".')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to revoke token: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _revokingTokenId = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleSwitchServer() async {
+    await ref.read(authProvider.notifier).logout(clearServerUrl: true);
+    if (mounted) {
+      GoRouter.maybeOf(context)?.go('/connect');
+    }
+  }
+
+  void _showPairMobileDeviceDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (_) => const _PairMobileDeviceDialog(),
+    );
+  }
+
+  void _maybeAutoOpenPluginDialog(PluginsState pluginsState) {
+    if (_didAutoOpenRequestedPlugin) return;
+    final targetName = _requestedPluginToOpen;
+    if (targetName == null || targetName.isEmpty) return;
+    final plugin = pluginsState.findByName(targetName);
+    if (plugin == null) return;
+    _didAutoOpenRequestedPlugin = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showDialog<bool>(
+        context: context,
+        builder: (_) => PluginConfigDialog(plugin: plugin),
+      );
+    });
+  }
+
   String _resolvePluginRedirectUri(String pluginName) {
     final base = Uri.base;
     final encoded = Uri.encodeComponent(pluginName);
+    if (_effectiveIsWeb && (base.scheme == 'http' || base.scheme == 'https')) {
+      final webOrigin = base.origin;
+      return '$webOrigin/settings?plugin=$encoded';
+    }
+    final rawServer = ref.read(apiServiceProvider).baseUrl.trim();
+    if (rawServer.isNotEmpty) {
+      final cleanServer = rawServer.endsWith('/')
+          ? rawServer.substring(0, rawServer.length - 1)
+          : rawServer;
+      return '$cleanServer/settings?plugin=$encoded';
+    }
     if (base.scheme == 'http' || base.scheme == 'https') {
-      return '${base.origin}/settings?plugin=$encoded';
+      final fallbackOrigin = base.origin;
+      return '$fallbackOrigin/settings?plugin=$encoded';
     }
     return 'http://localhost:8080/settings?plugin=$encoded';
   }
@@ -186,7 +316,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   Future<void> _handleLogout() async {
     await ref.read(authProvider.notifier).logout();
     if (mounted) {
-      context.go('/connect');
+      GoRouter.maybeOf(context)?.go('/connect');
     }
   }
 
@@ -274,25 +404,22 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               ),
               const SizedBox(height: AppTokens.space24),
             ],
-
-            // 1. Appearance & Theme
             _buildAppearanceCard(),
             const SizedBox(height: AppTokens.space20),
-
-            // 2. Plugins & Storefronts
             Consumer(
               builder: (context, ref, _) {
                 final pluginsState = ref.watch(pluginsProvider);
-                return _buildPluginsCard(context, context.shelfdColors, pluginsState);
+                _maybeAutoOpenPluginDialog(pluginsState);
+                return _buildPluginsCard(
+                  context,
+                  context.shelfdColors,
+                  pluginsState,
+                );
               },
             ),
             const SizedBox(height: AppTokens.space20),
-
-            // 3. Server Connection & AI Indexing
             _buildServerCard(authState.serverUrl),
             const SizedBox(height: AppTokens.space20),
-
-            // 4. Account & Security (with progressive disclosure for password)
             _buildAccountCard(colors, currentUsername),
             const SizedBox(height: AppTokens.space32),
           ],
@@ -647,6 +774,11 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
             ? (status.progressPercent / 100.0).clamp(0.0, 1.0)
             : 0.0;
         final c = context.shelfdColors;
+        final isOffline = queueState.error != null && status == null;
+        final statusColor = isOffline ? c.errorText : c.accentSecondary;
+        final statusLabel = isOffline ? 'Offline / Reconnecting' : 'Connected';
+        final hostDisplay =
+            (serverUrl != null && serverUrl.isNotEmpty) ? serverUrl : 'Self-hosted API';
 
         return ShelfdSectionCard(
           icon: Icons.dns_outlined,
@@ -658,15 +790,15 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 width: 8,
                 height: 8,
                 decoration: BoxDecoration(
-                  color: c.accentSecondary,
+                  color: statusColor,
                   shape: BoxShape.circle,
                 ),
               ),
               const SizedBox(width: AppTokens.space8),
               Text(
-                'Connected',
+                statusLabel,
                 style: AppTypography.captionSans(
-                  color: c.accentSecondary,
+                  color: statusColor,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -679,7 +811,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Host: ${serverUrl ?? 'Self-hosted API'}',
+                      'Host: $hostDisplay',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: AppTypography.mono(
@@ -710,6 +842,29 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                                 .triggerScan();
                           },
                   ),
+                ],
+              ),
+              const SizedBox(height: AppTokens.space12),
+              Wrap(
+                spacing: AppTokens.space8,
+                runSpacing: AppTokens.space8,
+                children: [
+                  if (_effectiveIsWeb)
+                    ShelfdSecondaryButton(
+                      key: const Key('pair_mobile_device_button'),
+                      label: 'Pair Mobile Device',
+                      icon: Icons.qr_code_2_rounded,
+                      compact: true,
+                      onPressed: _showPairMobileDeviceDialog,
+                    )
+                  else
+                    ShelfdSecondaryButton(
+                      key: const Key('switch_server_button'),
+                      label: 'Switch Server',
+                      icon: Icons.swap_horiz_rounded,
+                      compact: true,
+                      onPressed: _handleSwitchServer,
+                    ),
                 ],
               ),
               if (status != null) ...[
@@ -780,6 +935,8 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   }
 
   Widget _buildAccountCard(ShelfdColors colors, String currentUsername) {
+    final currentTokenId = ref.watch(storageServiceProvider).getAuthTokenId();
+
     return ShelfdSectionCard(
       icon: Icons.shield_outlined,
       title: 'Account & Security',
@@ -791,7 +948,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Default Username Preference
           Text(
             'Default Username',
             style: AppTypography.bodySans(
@@ -848,7 +1004,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           Divider(color: colors.subtleBorder, height: 1),
           const SizedBox(height: AppTokens.space12),
 
-          // Progressive Disclosure: Change Password
           Material(
             type: MaterialType.transparency,
             child: InkWell(
@@ -1050,7 +1205,135 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           Divider(color: colors.subtleBorder, height: 1),
           const SizedBox(height: AppTokens.space16),
 
-          // Disconnect / Sign Out cleanly anchored at the bottom of Account
+          Row(
+            children: [
+              Icon(
+                Icons.devices_rounded,
+                size: 18,
+                color: colors.secondaryInk,
+              ),
+              const SizedBox(width: AppTokens.space8),
+              Expanded(
+                child: Text(
+                  'Active Devices & API Tokens',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.bodySans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: colors.ink,
+                  ),
+                ),
+              ),
+              IconButton(
+                key: const Key('refresh_api_tokens_button'),
+                tooltip: 'Refresh device tokens',
+                visualDensity: VisualDensity.compact,
+                onPressed: _isLoadingTokens ? null : _loadApiTokens,
+                icon: Icon(
+                  Icons.refresh_rounded,
+                  size: 18,
+                  color: colors.mutedInk,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppTokens.space8),
+          if (_apiTokens.isEmpty)
+            Text(
+              _isLoadingTokens
+                  ? 'Loading active device tokens...'
+                  : 'No active mobile device or MCP tokens issued.',
+              style: AppTypography.captionSans(color: colors.mutedInk),
+            )
+          else
+            ..._apiTokens.map((t) {
+              final isThisDevice =
+                  currentTokenId != null && currentTokenId == t.id;
+              final isRevoking = _revokingTokenId == t.id;
+              final createdLabel = t.createdAt != null
+                  ? t.createdAt!.toLocal().toIso8601String().split('T').first
+                  : '';
+              final tokenRowKey = 'api_token_row_${t.id}';
+              final revokeKey = 'revoke_token_${t.id}';
+              return Padding(
+                key: Key(tokenRowKey),
+                padding: const EdgeInsets.only(bottom: AppTokens.space8),
+                child: Container(
+                  padding: const EdgeInsets.all(AppTokens.space12),
+                  decoration: BoxDecoration(
+                    color: colors.containerLow,
+                    borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                    border: Border.all(color: colors.subtleBorder),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    t.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTypography.bodySans(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: colors.ink,
+                                    ),
+                                  ),
+                                ),
+                                if (isThisDevice) ...[
+                                  const SizedBox(width: AppTokens.space8),
+                                  StatusBadge(
+                                    label: 'This device',
+                                    backgroundColor:
+                                        colors.accentSecondaryContainer,
+                                    textColor: colors.accentSecondary,
+                                  ),
+                                ],
+                              ],
+                            ),
+                            if (createdLabel.isNotEmpty) ...[
+                              const SizedBox(height: AppTokens.space4),
+                              Text(
+                                'Created $createdLabel',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTypography.mono(
+                                  fontSize: 11,
+                                  color: colors.mutedInk,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: AppTokens.space8),
+                      OutlinedButton(
+                        key: Key(revokeKey),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: colors.errorText,
+                          side: BorderSide(color: colors.errorBorder),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed:
+                            isRevoking ? null : () => _handleRevokeToken(t),
+                        child: Text(isRevoking ? 'Revoking...' : 'Revoke'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+
+          const SizedBox(height: AppTokens.space20),
+          Divider(color: colors.subtleBorder, height: 1),
+          const SizedBox(height: AppTokens.space16),
+
           ShelfdDangerButton(
             label: 'Disconnect / Sign Out',
             icon: Icons.logout_rounded,
@@ -1061,3 +1344,231 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     );
   }
 }
+
+class _PairMobileDeviceDialog extends ConsumerStatefulWidget {
+  const _PairMobileDeviceDialog();
+
+  @override
+  ConsumerState<_PairMobileDeviceDialog> createState() =>
+      _PairMobileDeviceDialogState();
+}
+
+class _PairMobileDeviceDialogState
+    extends ConsumerState<_PairMobileDeviceDialog> {
+  late final TextEditingController _serverUrlController;
+  Timer? _refreshTimer;
+  PairingCodeSession? _session;
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    final apiBase = ref.read(apiServiceProvider).baseUrl.trim();
+    final webBase = Uri.base;
+    final initialOrigin = apiBase.isNotEmpty
+        ? apiBase
+        : ((webBase.scheme == 'http' || webBase.scheme == 'https')
+            ? webBase.origin
+            : '');
+    _serverUrlController = TextEditingController(text: initialOrigin);
+    _fetchPairingCode();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      _fetchPairingCode();
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _serverUrlController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _fetchPairingCode() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    try {
+      final session = await ref.read(apiServiceProvider).beginPairing();
+      if (!mounted) return;
+      setState(() {
+        _session = session;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Failed to generate pairing code: $e';
+      });
+    }
+  }
+
+  ({String? pairingUri, bool isLoopback, String? urlError}) _resolveQrData() {
+    final rawUrl = _serverUrlController.text.trim();
+    if (rawUrl.isEmpty) {
+      return (
+        pairingUri: null,
+        isLoopback: false,
+        urlError: 'Enter the server URL reachable from your phone.',
+      );
+    }
+    try {
+      final normalized = UrlNormalizer.normalizeServerUrl(rawUrl);
+      if (UrlNormalizer.isLoopbackHost(normalized.uri.host)) {
+        return (
+          pairingUri: null,
+          isLoopback: true,
+          urlError: null,
+        );
+      }
+      final code = _session?.code ?? '';
+      if (code.isEmpty) {
+        return (pairingUri: null, isLoopback: false, urlError: null);
+      }
+      final uri = UrlNormalizer.buildPairingUri(
+        serverUrl: normalized.url,
+        code: code,
+      );
+      return (pairingUri: uri, isLoopback: false, urlError: null);
+    } on FormatException catch (e) {
+      return (pairingUri: null, isLoopback: false, urlError: e.message);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.shelfdColors;
+    final resolved = _resolveQrData();
+
+    return AlertDialog(
+      backgroundColor: colors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppTokens.radiusLg),
+        side: BorderSide(color: colors.border),
+      ),
+      title: Row(
+        children: [
+          Icon(Icons.qr_code_2_rounded, size: 22, color: colors.accentPrimary),
+          const SizedBox(width: AppTokens.space8),
+          Expanded(
+            child: Text(
+              'Pair Mobile Device',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
+            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Scan this single-use QR code in the Shelfd Android app to sign in with a revocable device token. Codes rotate automatically every 45 seconds.',
+                style: AppTypography.bodySans(
+                  fontSize: 13,
+                  color: colors.secondaryInk,
+                ),
+              ),
+              const SizedBox(height: AppTokens.space16),
+              TextFormField(
+                key: const Key('pairing_reachable_url_field'),
+                controller: _serverUrlController,
+                onChanged: (_) => setState(() {}),
+                style: AppTypography.mono(fontSize: 12, color: colors.ink),
+                decoration: InputDecoration(
+                  labelText: 'Reachable Server URL',
+                  hintText:
+                      'http://192.168.1.50:8080 or https://shelfd.tailnet.ts.net',
+                  errorText: resolved.urlError,
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                  ),
+                ),
+              ),
+              if (resolved.isLoopback) ...[
+                const SizedBox(height: AppTokens.space12),
+                ShelfdInlineBanner(
+                  message:
+                      'This browser is opened via localhost, which points to the phone itself. Enter your server LAN IP or Tailscale address above to generate a scannable QR code.',
+                  tone: ShelfdBannerTone.error,
+                ),
+              ],
+              if (_errorMessage != null) ...[
+                const SizedBox(height: AppTokens.space12),
+                ShelfdInlineBanner(
+                  message: _errorMessage!,
+                  tone: ShelfdBannerTone.error,
+                ),
+              ],
+              const SizedBox(height: AppTokens.space16),
+              if (_isLoading && _session == null)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: AppTokens.space24),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (resolved.pairingUri != null) ...[
+                Center(
+                  child: Container(
+                    key: const Key('pairing_qr_image'),
+                    padding: const EdgeInsets.all(AppTokens.space12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                      border: Border.all(color: colors.subtleBorder),
+                    ),
+                    child: QrImageView(
+                      data: resolved.pairingUri!,
+                      size: 210,
+                      backgroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppTokens.space12),
+                Center(
+                  child: OutlinedButton.icon(
+                    key: const Key('copy_pairing_link_button'),
+                    onPressed: () async {
+                      await Clipboard.setData(
+                        ClipboardData(text: resolved.pairingUri!),
+                      );
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Pairing link copied to clipboard.'),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.copy_rounded, size: 16),
+                    label: const Text('Copy Pairing Link'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: _isLoading ? null : _fetchPairingCode,
+          icon: const Icon(Icons.refresh_rounded, size: 16),
+          label: const Text('Refresh Code'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+}
+

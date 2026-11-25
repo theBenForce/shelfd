@@ -492,21 +492,45 @@ func RewritePageHTML(rawHTML, bookID, chapterHref string, pageWidth, pageHeight 
     }
   });
 
+  function postToShelfdBridge(payload) {
+    if (window.ShelfdBridge && typeof window.ShelfdBridge.postMessage === 'function') {
+      try {
+        window.ShelfdBridge.postMessage(JSON.stringify(payload));
+      } catch (_) {}
+    }
+  }
+
   document.addEventListener('click', function(ev) {
-    var node = ev.target;
+    var sel = window.getSelection ? String(window.getSelection()).trim() : '';
+    var targetEl = ev.target && ev.target.nodeType === 1 ? ev.target : (ev.target ? ev.target.parentElement : null);
+    var isInteractive = targetEl && targetEl.closest && targetEl.closest('a, button, input, select, textarea, audio, video, [data-shelfd-readalong-id]');
+
+    var node = targetEl;
+    var sentReadalong = false;
     while (node && node !== document.body && node !== document.documentElement) {
       if (node.id) {
+        var clickPayload = {
+          type: 'shelfd:readalong-click',
+          bookId: currentBookId,
+          chapterHref: currentChapterHref,
+          fragmentId: node.id
+        };
         if (window.parent && window.parent !== window) {
-          window.parent.postMessage({
-            type: 'shelfd:readalong-click',
-            bookId: currentBookId,
-            chapterHref: currentChapterHref,
-            fragmentId: node.id
-          }, '*');
+          window.parent.postMessage(clickPayload, '*');
         }
+        postToShelfdBridge(clickPayload);
+        sentReadalong = true;
         break;
       }
       node = node.parentElement;
+    }
+
+    if (!sentReadalong && !isInteractive && sel.length === 0) {
+      postToShelfdBridge({
+        type: 'shelfd:toggle-controls',
+        bookId: currentBookId,
+        chapterHref: currentChapterHref
+      });
     }
   });
 })();

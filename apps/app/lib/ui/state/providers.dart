@@ -18,8 +18,13 @@ import '../../data/repositories/book_repository.dart';
 import '../../data/repositories/reader_repository.dart';
 import '../../data/services/api_service.dart';
 import '../../data/services/storage_service.dart';
+import '../../data/utils/connect_diagnostics.dart';
+import '../../platform/qr_scanner_service.dart';
 import '../core/theme.dart';
 import '../features/library/library_query_parser.dart';
+import '../features/reader/html_view.dart';
+import 'audio_player_provider.dart';
+import 'audio_player_state.dart';
 import 'background_jobs_provider.dart';
 import 'cast_provider.dart';
 import 'plugins_provider.dart';
@@ -32,16 +37,16 @@ export 'plugins_provider.dart';
 export 'readalong_pip_provider.dart';
 export 'upload_provider.dart';
 
-/// Resolves the default server URL based on the runtime platform and environment.
-/// In local web dev (e.g. localhost:3000), defaults to http://localhost:8080.
-/// In deployed web environments, defaults to the hosting origin (Uri.base.origin).
-/// In native environments (iOS, Android, macOS), defaults to http://localhost:8080.
 String resolveDefaultServerUrl() {
   if (kIsWeb) {
     if ((Uri.base.host == 'localhost' || Uri.base.host == '127.0.0.1') && Uri.base.port != 8080) {
       return 'http://localhost:8080';
     }
     return Uri.base.origin;
+  }
+  if (defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS) {
+    return '';
   }
   return 'http://localhost:8080';
 }
@@ -56,11 +61,67 @@ final storageServiceProvider = Provider<StorageService>((ref) {
   return StorageService(prefs);
 });
 
+final qrScannerServiceProvider = Provider<QrScannerService>((ref) {
+  final service = QrScannerService();
+  ref.onDispose(service.dispose);
+  return service;
+});
+
+final authRefreshListenableProvider = Provider<ValueNotifier<int>>((ref) {
+  final notifier = ValueNotifier<int>(0);
+  ref.onDispose(notifier.dispose);
+  return notifier;
+});
+
+final unauthorizedSignalProvider = Provider<ValueNotifier<int>>((ref) {
+  final signal = ValueNotifier<int>(0);
+  ref.onDispose(signal.dispose);
+  return signal;
+});
+
+class SessionCredentialsNotifier
+    extends Notifier<({String serverUrl, String? token})> {
+  @override
+  ({String serverUrl, String? token}) build() {
+    final storage = ref.watch(storageServiceProvider);
+    return (
+      serverUrl: storage.getServerUrl() ?? resolveDefaultServerUrl(),
+      token: storage.getAuthToken(),
+    );
+  }
+
+  void update({
+    String? serverUrl,
+    String? token,
+    bool clearToken = false,
+  }) {
+    state = (
+      serverUrl: serverUrl ?? state.serverUrl,
+      token: clearToken ? null : (token ?? state.token),
+    );
+  }
+}
+
+final sessionCredentialsProvider = NotifierProvider<
+    SessionCredentialsNotifier, ({String serverUrl, String? token})>(
+  SessionCredentialsNotifier.new,
+);
+
 final apiServiceProvider = Provider<ApiService>((ref) {
   final storage = ref.watch(storageServiceProvider);
-  final serverUrl = storage.getServerUrl() ?? resolveDefaultServerUrl();
-  final token = storage.getAuthToken();
-  return ApiService(baseUrl: serverUrl, token: token);
+  final creds = ref.watch(sessionCredentialsProvider);
+  final unauthorizedSignal = ref.watch(unauthorizedSignalProvider);
+  final serverUrl = creds.serverUrl.isNotEmpty
+      ? creds.serverUrl
+      : (storage.getServerUrl() ?? resolveDefaultServerUrl());
+  final token = creds.token ?? storage.getAuthToken();
+  return ApiService(
+    baseUrl: serverUrl,
+    token: token,
+    onUnauthorized: () {
+      unauthorizedSignal.value++;
+    },
+  );
 });
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
@@ -96,13 +157,17 @@ class AuthState {
   final User? user;
   final bool isLoading;
   final String? error;
+  final ConnectDiagnostic? diagnostic;
   final String? serverUrl;
+  final String? token;
 
   const AuthState({
     this.user,
     this.isLoading = false,
     this.error,
+    this.diagnostic,
     this.serverUrl,
+    this.token,
   });
 
   bool get isAuthenticated => user != null;
@@ -111,43 +176,94 @@ class AuthState {
     User? user,
     bool? isLoading,
     String? error,
+    ConnectDiagnostic? diagnostic,
     String? serverUrl,
+    String? token,
     bool clearUser = false,
+    bool clearError = false,
+    bool clearDiagnostic = false,
+    bool clearToken = false,
   }) {
     return AuthState(
       user: clearUser ? null : (user ?? this.user),
       isLoading: isLoading ?? this.isLoading,
-      error: error,
+      error: clearError ? null : error,
+      diagnostic: clearDiagnostic ? null : (diagnostic ?? this.diagnostic),
       serverUrl: serverUrl ?? this.serverUrl,
+      token: clearToken ? null : (token ?? this.token),
     );
   }
 }
 
 class AuthNotifier extends Notifier<AuthState> {
+  bool _handlingUnauthorized = false;
+
   @override
   AuthState build() {
     final storage = ref.watch(storageServiceProvider);
+    final unauthorizedSignal = ref.watch(unauthorizedSignalProvider);
+    void onUnauthorizedSignal() {
+      Future.microtask(handleUnauthorized);
+    }
+
+    unauthorizedSignal.addListener(onUnauthorizedSignal);
+    ref.onDispose(() {
+      unauthorizedSignal.removeListener(onUnauthorizedSignal);
+    });
+
     final url = storage.getServerUrl() ?? resolveDefaultServerUrl();
-    return AuthState(serverUrl: url);
+    final token = storage.getAuthToken();
+    return AuthState(serverUrl: url, token: token);
   }
 
   Future<void> checkAuth() async {
-    state = state.copyWith(isLoading: true, error: null);
+    state = state.copyWith(
+      isLoading: true,
+      clearError: true,
+      clearDiagnostic: true,
+    );
     final authRepo = ref.read(authRepositoryProvider);
+    final storage = ref.read(storageServiceProvider);
     try {
       final isAuthed = await authRepo.checkInitialAuth();
       if (isAuthed) {
-        final storage = ref.read(storageServiceProvider);
         final savedUsername = storage.getSavedUsername() ?? 'Connected';
+        final savedUrl = storage.getServerUrl() ?? state.serverUrl ?? '';
+        final savedToken = storage.getAuthToken();
+        ref.read(sessionCredentialsProvider.notifier).update(
+              serverUrl: savedUrl,
+              token: savedToken,
+            );
         state = state.copyWith(
           user: User(id: 'current', username: savedUsername, role: 'user'),
           isLoading: false,
+          serverUrl: savedUrl,
+          token: savedToken,
+          clearError: true,
+          clearDiagnostic: true,
         );
       } else {
-        state = state.copyWith(clearUser: true, isLoading: false);
+        final savedUrl = storage.getServerUrl() ?? state.serverUrl ?? '';
+        ref.read(sessionCredentialsProvider.notifier).update(
+              serverUrl: savedUrl,
+              clearToken: true,
+            );
+        state = state.copyWith(
+          clearUser: true,
+          clearToken: true,
+          isLoading: false,
+          serverUrl: savedUrl,
+        );
+        ref.read(authRefreshListenableProvider).value++;
       }
     } catch (e) {
-      state = state.copyWith(clearUser: true, isLoading: false, error: e.toString());
+      final diag = ConnectDiagnostics.fromError(e, serverUrl: state.serverUrl);
+      state = state.copyWith(
+        clearUser: true,
+        isLoading: false,
+        error: diag.message,
+        diagnostic: diag,
+      );
     }
   }
 
@@ -155,15 +271,97 @@ class AuthNotifier extends Notifier<AuthState> {
     final storage = ref.read(storageServiceProvider);
     final fallbackUrl = storage.getServerUrl() ?? resolveDefaultServerUrl();
     final effectiveUrl = serverUrl.trim().isNotEmpty ? serverUrl.trim() : fallbackUrl;
-    state = state.copyWith(isLoading: true, error: null, serverUrl: effectiveUrl);
+    state = state.copyWith(
+      isLoading: true,
+      clearError: true,
+      clearDiagnostic: true,
+      serverUrl: effectiveUrl,
+    );
     final authRepo = ref.read(authRepositoryProvider);
     try {
-      final user = await authRepo.login(effectiveUrl, username, password);
-      state = state.copyWith(user: user, isLoading: false, serverUrl: effectiveUrl);
+      String? deviceName;
+      if (!kIsWeb) {
+        deviceName = await ref.read(qrScannerServiceProvider).getDeviceTokenLabel();
+      }
+      final user = await authRepo.login(
+        effectiveUrl,
+        username,
+        password,
+        deviceName: deviceName,
+      );
+      final normalizedSavedUrl = storage.getServerUrl() ?? effectiveUrl;
+      final savedToken = storage.getAuthToken();
+      ref.read(sessionCredentialsProvider.notifier).update(
+            serverUrl: normalizedSavedUrl,
+            token: savedToken,
+          );
+      state = state.copyWith(
+        user: user,
+        isLoading: false,
+        serverUrl: normalizedSavedUrl,
+        token: savedToken,
+        clearError: true,
+        clearDiagnostic: true,
+      );
+      ref.read(authRefreshListenableProvider).value++;
       ref.invalidate(queueProvider);
       return true;
     } catch (e) {
-      state = state.copyWith(clearUser: true, isLoading: false, error: e.toString());
+      final diag = ConnectDiagnostics.fromError(e, serverUrl: effectiveUrl);
+      state = state.copyWith(
+        clearUser: true,
+        isLoading: false,
+        error: diag.message,
+        diagnostic: diag,
+      );
+      return false;
+    }
+  }
+
+  Future<bool> pairWithQrUri(
+    String rawUri, {
+    bool rejectLoopback = true,
+  }) async {
+    state = state.copyWith(
+      isLoading: true,
+      clearError: true,
+      clearDiagnostic: true,
+    );
+    final authRepo = ref.read(authRepositoryProvider);
+    final qrService = ref.read(qrScannerServiceProvider);
+    final storage = ref.read(storageServiceProvider);
+    try {
+      final deviceLabel = await qrService.getDeviceTokenLabel();
+      final user = await authRepo.pairWithUri(
+        rawUri,
+        deviceName: deviceLabel,
+        rejectLoopback: rejectLoopback,
+      );
+      final savedUrl = storage.getServerUrl() ?? state.serverUrl ?? '';
+      final savedToken = storage.getAuthToken();
+      ref.read(sessionCredentialsProvider.notifier).update(
+            serverUrl: savedUrl,
+            token: savedToken,
+          );
+      state = state.copyWith(
+        user: user,
+        isLoading: false,
+        serverUrl: savedUrl,
+        token: savedToken,
+        clearError: true,
+        clearDiagnostic: true,
+      );
+      ref.read(authRefreshListenableProvider).value++;
+      ref.invalidate(queueProvider);
+      return true;
+    } catch (e) {
+      final diag = ConnectDiagnostics.fromError(e, serverUrl: state.serverUrl);
+      state = state.copyWith(
+        clearUser: true,
+        isLoading: false,
+        error: diag.message,
+        diagnostic: diag,
+      );
       return false;
     }
   }
@@ -173,10 +371,61 @@ class AuthNotifier extends Notifier<AuthState> {
     await authRepo.changePassword(currentPassword, newPassword);
   }
 
-  Future<void> logout() async {
+  Future<void> handleUnauthorized() async {
+    if (_handlingUnauthorized) return;
+    final storage = ref.read(storageServiceProvider);
+    final currentToken = state.token ?? storage.getAuthToken();
+    if (currentToken == null || currentToken.isEmpty) {
+      return;
+    }
+    _handlingUnauthorized = true;
+    try {
+      try {
+        if (ref.read(audioPlayerProvider).status != AudioPlaybackStatus.idle) {
+          await ref.read(audioPlayerProvider.notifier).stop();
+        }
+      } catch (_) {}
+      try {
+        await clearHtmlAuthCookies();
+      } catch (_) {}
+      await storage.clearAuthToken();
+      ref.read(apiServiceProvider).updateConnection(newToken: '');
+      ref.read(sessionCredentialsProvider.notifier).update(clearToken: true);
+      state = state.copyWith(
+        clearUser: true,
+        clearToken: true,
+        isLoading: false,
+        error: 'Session expired or revoked. Sign in again.',
+      );
+      ref.read(authRefreshListenableProvider).value++;
+    } finally {
+      _handlingUnauthorized = false;
+    }
+  }
+
+  Future<void> logout({bool clearServerUrl = false}) async {
+    try {
+      if (ref.read(audioPlayerProvider).status != AudioPlaybackStatus.idle) {
+        await ref.read(audioPlayerProvider.notifier).stop();
+      }
+    } catch (_) {}
     final authRepo = ref.read(authRepositoryProvider);
-    await authRepo.logout();
-    state = state.copyWith(clearUser: true, isLoading: false);
+    await authRepo.logout(clearServerUrl: clearServerUrl);
+    final storage = ref.read(storageServiceProvider);
+    final nextServerUrl = clearServerUrl
+        ? resolveDefaultServerUrl()
+        : (storage.getServerUrl() ?? state.serverUrl ?? resolveDefaultServerUrl());
+    ref.read(sessionCredentialsProvider.notifier).update(
+          serverUrl: nextServerUrl,
+          clearToken: true,
+        );
+    state = AuthState(
+      user: null,
+      isLoading: false,
+      serverUrl: nextServerUrl,
+      token: null,
+    );
+    ref.read(authRefreshListenableProvider).value++;
   }
 }
 
@@ -544,8 +793,7 @@ class LibraryNotifier extends Notifier<LibraryState> {
       );
     } catch (e) {
       if (e is ApiException && e.statusCode == 401) {
-        await ref.read(storageServiceProvider).clearAuthToken();
-        ref.read(apiServiceProvider).updateConnection(newToken: '');
+        await ref.read(authProvider.notifier).handleUnauthorized();
       }
       state = state.copyWith(isLoading: false, error: e.toString());
     }
@@ -940,8 +1188,7 @@ class QueueNotifier extends Notifier<QueueState> {
   Future<void> _handleUnauthorized(Object err) async {
     _subscription?.cancel();
     _reconnectTimer?.cancel();
-    await ref.read(storageServiceProvider).clearAuthToken();
-    ref.read(apiServiceProvider).updateConnection(newToken: '');
+    await ref.read(authProvider.notifier).handleUnauthorized();
     if (!_isDisposed) {
       state = state.copyWith(isLoading: false, error: err.toString());
     }

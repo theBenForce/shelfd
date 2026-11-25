@@ -1,12 +1,16 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -15,10 +19,29 @@ import (
 	"github.com/shelfd/shelfd/internal/repository"
 )
 
+const (
+	pairNonceTTL         = 90 * time.Second
+	pairMaxEntries       = 64
+	pairRateWindow       = 60 * time.Second
+	pairMaxPerIPAttempts = 10
+	pairMaxGlobalFails   = 30
+	bookMediaTokenTTL    = 2 * time.Hour
+)
+
+type pairNonceEntry struct {
+	userID    string
+	expiresAt time.Time
+}
+
 type AuthHandler struct {
-	repo      repository.StorageEngine
-	jwtSecret string
-	logger    *slog.Logger
+	repo           repository.StorageEngine
+	jwtSecret      string
+	logger         *slog.Logger
+	nowFunc        func() time.Time
+	pairMu         sync.Mutex
+	pairCodes      map[string]pairNonceEntry
+	ipAttempts     map[string][]time.Time
+	globalFailures []time.Time
 }
 
 func NewAuthHandler(repo repository.StorageEngine, jwtSecret string, logger *slog.Logger) *AuthHandler {
@@ -26,15 +49,60 @@ func NewAuthHandler(repo repository.StorageEngine, jwtSecret string, logger *slo
 		logger = slog.Default()
 	}
 	return &AuthHandler{
-		repo:      repo,
-		jwtSecret: jwtSecret,
-		logger:    logger,
+		repo:       repo,
+		jwtSecret:  jwtSecret,
+		logger:     logger,
+		nowFunc:    time.Now,
+		pairCodes:  make(map[string]pairNonceEntry),
+		ipAttempts: make(map[string][]time.Time),
 	}
 }
 
+func (h *AuthHandler) SetClockForTest(nowFunc func() time.Time) {
+	h.pairMu.Lock()
+	defer h.pairMu.Unlock()
+	if nowFunc == nil {
+		h.nowFunc = time.Now
+	} else {
+		h.nowFunc = nowFunc
+	}
+}
+
+func issueAPIToken(ctx context.Context, repo repository.StorageEngine, userID, name string) (*repository.APIToken, string, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		cleanName = "API Token"
+	}
+	if len(cleanName) > 120 {
+		cleanName = cleanName[:120]
+	}
+
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return nil, "", err
+	}
+
+	rawToken := "shelfd_" + hex.EncodeToString(buf)
+	tokenHash := mcp.HashToken(rawToken)
+
+	token := &repository.APIToken{
+		UserID:    userID,
+		TokenHash: tokenHash,
+		Name:      cleanName,
+		CreatedAt: time.Now().UTC(),
+	}
+
+	if err := repo.CreateAPIToken(ctx, token); err != nil {
+		return nil, "", err
+	}
+
+	return token, rawToken, nil
+}
+
 type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	DeviceName string `json:"device_name,omitempty"`
 }
 
 type UserResponse struct {
@@ -44,9 +112,11 @@ type UserResponse struct {
 }
 
 type LoginResponse struct {
-	Token     string       `json:"token"`
-	ExpiresAt time.Time    `json:"expires_at"`
-	User      UserResponse `json:"user"`
+	Token      string       `json:"token"`
+	ExpiresAt  time.Time    `json:"expires_at"`
+	APIToken   string       `json:"api_token,omitempty"`
+	APITokenID string       `json:"api_token_id,omitempty"`
+	User       UserResponse `json:"user"`
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +157,20 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	var rawAPIToken string
+	var apiTokenID string
+	if deviceName := strings.TrimSpace(req.DeviceName); deviceName != "" {
+		apiTok, rawTok, issueErr := issueAPIToken(r.Context(), h.repo, user.ID, deviceName)
+		if issueErr != nil {
+			h.logger.Error("Failed to issue device API token", "user_id", user.ID, "error", issueErr)
+			writeJSONError(w, http.StatusInternalServerError, "Failed to issue device token")
+			return
+		}
+		rawAPIToken = rawTok
+		apiTokenID = apiTok.ID
+	}
+
+	isSecure := isHTTPSRequest(r)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "shelfd_token",
 		Value:    token,
@@ -101,8 +184,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("User logged in successfully", "user_id", user.ID, "username", user.Username, "remote_ip", clientIP(r))
 
 	writeJSON(w, http.StatusOK, LoginResponse{
-		Token:     token,
-		ExpiresAt: expiresAt,
+		Token:      token,
+		ExpiresAt:  expiresAt,
+		APIToken:   rawAPIToken,
+		APITokenID: apiTokenID,
 		User: UserResponse{
 			ID:        user.ID,
 			Username:  user.Username,
@@ -126,8 +211,8 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	authHeader := r.Header.Get("Authorization")
 	if strings.HasPrefix(authHeader, "Bearer ") {
 		token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
-		if token != "" {
-			isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+		if token != "" && !strings.HasPrefix(token, "shelfd_") {
+			isSecure := isHTTPSRequest(r)
 			http.SetCookie(w, &http.Cookie{
 				Name:     "shelfd_token",
 				Value:    token,
@@ -154,7 +239,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	isSecure := isHTTPSRequest(r)
 	http.SetCookie(w, &http.Cookie{
 		Name:     "shelfd_token",
 		Value:    "",
@@ -257,27 +342,8 @@ func (h *AuthHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" {
-		req.Name = "API Token"
-	}
-
-	buf := make([]byte, 24)
-	if _, err := rand.Read(buf); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Failed to generate token entropy")
-		return
-	}
-
-	rawToken := "shelfd_" + hex.EncodeToString(buf)
-	tokenHash := mcp.HashToken(rawToken)
-
-	token := &repository.APIToken{
-		UserID:    user.ID,
-		TokenHash: tokenHash,
-		Name:      req.Name,
-	}
-
-	if err := h.repo.CreateAPIToken(r.Context(), token); err != nil {
+	token, rawToken, err := issueAPIToken(r.Context(), h.repo, user.ID, req.Name)
+	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to save token")
 		return
 	}
@@ -314,7 +380,7 @@ func (h *AuthHandler) ListTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var items []APITokenListItem
+	items := make([]APITokenListItem, 0, len(tokens))
 	for _, t := range tokens {
 		items = append(items, APITokenListItem{
 			ID:        t.ID,
@@ -350,12 +416,263 @@ func (h *AuthHandler) DeleteToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.repo.DeleteAPIToken(r.Context(), tokenID); err != nil {
+	if err := h.repo.DeleteAPIToken(r.Context(), user.ID, tokenID); err != nil {
 		writeJSONError(w, http.StatusNotFound, "Token not found")
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "deleted",
+	})
+}
+
+type PairBeginResponse struct {
+	Code      string    `json:"code"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type PairExchangeRequest struct {
+	Code       string `json:"code"`
+	DeviceName string `json:"device_name"`
+}
+
+type PairExchangeResponse struct {
+	ID        string       `json:"id"`
+	Name      string       `json:"name"`
+	Token     string       `json:"token"`
+	CreatedAt time.Time    `json:"created_at"`
+	User      UserResponse `json:"user"`
+}
+
+func remoteHostOnly(r *http.Request) string {
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return ip
+}
+
+func pruneTimestamps(src []time.Time, cutoff time.Time) []time.Time {
+	idx := 0
+	for idx < len(src) && !src[idx].After(cutoff) {
+		idx++
+	}
+	if idx == 0 {
+		return src
+	}
+	out := make([]time.Time, len(src)-idx)
+	copy(out, src[idx:])
+	return out
+}
+
+func (h *AuthHandler) PairBegin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to generate pairing code")
+		return
+	}
+	rawCode := hex.EncodeToString(buf)
+	codeHash := mcp.HashToken(rawCode)
+
+	h.pairMu.Lock()
+	now := h.nowFunc().UTC()
+	for k, v := range h.pairCodes {
+		if !now.Before(v.expiresAt) {
+			delete(h.pairCodes, k)
+		}
+	}
+	if len(h.pairCodes) >= pairMaxEntries {
+		var oldestKey string
+		var oldestExp time.Time
+		for k, v := range h.pairCodes {
+			if oldestKey == "" || v.expiresAt.Before(oldestExp) {
+				oldestKey = k
+				oldestExp = v.expiresAt
+			}
+		}
+		if oldestKey != "" {
+			delete(h.pairCodes, oldestKey)
+		}
+	}
+	expiresAt := now.Add(pairNonceTTL)
+	h.pairCodes[codeHash] = pairNonceEntry{
+		userID:    user.ID,
+		expiresAt: expiresAt,
+	}
+	h.pairMu.Unlock()
+
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusCreated, PairBeginResponse{
+		Code:      rawCode,
+		ExpiresAt: expiresAt,
+	})
+}
+
+func (h *AuthHandler) PairExchange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	remoteIP := remoteHostOnly(r)
+
+	h.pairMu.Lock()
+	now := h.nowFunc().UTC()
+	cutoff := now.Add(-pairRateWindow)
+	h.globalFailures = pruneTimestamps(h.globalFailures, cutoff)
+	for ip, list := range h.ipAttempts {
+		pruned := pruneTimestamps(list, cutoff)
+		if len(pruned) == 0 {
+			delete(h.ipAttempts, ip)
+		} else {
+			h.ipAttempts[ip] = pruned
+		}
+	}
+	ipList := h.ipAttempts[remoteIP]
+	if len(ipList) >= pairMaxPerIPAttempts || len(h.globalFailures) >= pairMaxGlobalFails {
+		h.pairMu.Unlock()
+		writeJSONError(w, http.StatusTooManyRequests, "Too many pairing attempts. Try again in a minute.")
+		return
+	}
+	h.pairMu.Unlock()
+
+	var req PairExchangeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.recordPairFailure(remoteIP)
+		writeJSONError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	code := strings.TrimSpace(req.Code)
+	if code == "" {
+		h.recordPairFailure(remoteIP)
+		writeJSONError(w, http.StatusBadRequest, "Pairing code is required")
+		return
+	}
+
+	codeHash := mcp.HashToken(code)
+
+	h.pairMu.Lock()
+	now = h.nowFunc().UTC()
+	entry, ok := h.pairCodes[codeHash]
+	if ok {
+		delete(h.pairCodes, codeHash)
+	}
+	valid := ok && now.Before(entry.expiresAt)
+	if !valid {
+		h.ipAttempts[remoteIP] = append(h.ipAttempts[remoteIP], now)
+		h.globalFailures = append(h.globalFailures, now)
+	}
+	h.pairMu.Unlock()
+
+	if !valid {
+		writeJSONError(w, http.StatusUnauthorized, "Invalid or expired pairing code")
+		return
+	}
+
+	user, err := h.repo.GetUserByID(r.Context(), entry.userID)
+	if err != nil || user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Paired user no longer exists")
+		return
+	}
+
+	deviceName := strings.TrimSpace(req.DeviceName)
+	if deviceName == "" {
+		deviceName = "Shelfd Mobile"
+	}
+
+	apiTok, rawToken, err := issueAPIToken(r.Context(), h.repo, user.ID, deviceName)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to issue device token")
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, PairExchangeResponse{
+		ID:        apiTok.ID,
+		Name:      apiTok.Name,
+		Token:     rawToken,
+		CreatedAt: apiTok.CreatedAt,
+		User: UserResponse{
+			ID:        user.ID,
+			Username:  user.Username,
+			CreatedAt: user.CreatedAt,
+		},
+	})
+}
+
+func (h *AuthHandler) recordPairFailure(remoteIP string) {
+	h.pairMu.Lock()
+	defer h.pairMu.Unlock()
+	now := h.nowFunc().UTC()
+	if remoteIP != "" {
+		h.ipAttempts[remoteIP] = append(h.ipAttempts[remoteIP], now)
+	}
+	h.globalFailures = append(h.globalFailures, now)
+}
+
+type BookMediaTokenResponse struct {
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func (h *AuthHandler) MintBookMediaToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	user := CurrentUser(r.Context())
+	if user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	if bookID == "" {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		for i, p := range parts {
+			if p == "books" && i+1 < len(parts) {
+				bookID = parts[i+1]
+				break
+			}
+		}
+	}
+	if bookID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Book ID required")
+		return
+	}
+
+	book, err := h.repo.GetBookByID(r.Context(), bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to load book")
+		return
+	}
+
+	jwtStr, expiresAt, err := GenerateCastMediaJWT(user.ID, user.Username, bookID, h.jwtSecret, bookMediaTokenTTL)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to mint book media token")
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, BookMediaTokenResponse{
+		Token:     jwtStr,
+		ExpiresAt: expiresAt,
 	})
 }

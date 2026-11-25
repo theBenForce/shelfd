@@ -31,3 +31,9 @@ build/
 /library/
 .env
 .env.local
+
+*.jks
+*.keystore
+key.properties
+*play-service-account*.json
+google-play-key.json

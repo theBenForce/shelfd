@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -24,7 +25,8 @@ class PluginConfigDialog extends ConsumerStatefulWidget {
   ConsumerState<PluginConfigDialog> createState() => _PluginConfigDialogState();
 }
 
-class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
+class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog>
+    with WidgetsBindingObserver {
   final Map<String, TextEditingController> _controllers = {};
   final Map<String, TextEditingController> _authControllers = {};
   final TextEditingController _authCodeController = TextEditingController();
@@ -249,11 +251,13 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
         _showTokenAuthFields = true;
       }
     }
+    WidgetsBinding.instance.addObserver(this);
     _loadExistingConfig();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     for (final c in _controllers.values) {
       c.dispose();
     }
@@ -264,13 +268,43 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
     super.dispose();
   }
 
-  String _resolveRedirectUri() {
-    final base = Uri.base;
-    final encodedPlugin = Uri.encodeComponent(widget.plugin.name);
-    if (base.scheme == 'http' || base.scheme == 'https') {
-      return '${base.origin}/settings?plugin=$encodedPlugin';
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!kIsWeb &&
+        state == AppLifecycleState.resumed &&
+        widget.plugin.hasAuth &&
+        mounted) {
+      _loadExistingConfig();
+      ref.read(pluginsProvider.notifier).loadPlugins(silent: true);
     }
-    return 'http://localhost:8080/settings?plugin=$encodedPlugin';
+  }
+
+  String _resolveServerWebOrigin() {
+    final base = Uri.base;
+    if (kIsWeb && (base.scheme == 'http' || base.scheme == 'https')) {
+      return base.origin;
+    }
+    final rawBase = ref.read(apiServiceProvider).baseUrl.trim();
+    if (rawBase.isNotEmpty) {
+      return rawBase.endsWith('/')
+          ? rawBase.substring(0, rawBase.length - 1)
+          : rawBase;
+    }
+    if (base.scheme == 'http' || base.scheme == 'https') {
+      return base.origin;
+    }
+    return 'http://localhost:8080';
+  }
+
+  String _resolveRedirectUri() {
+    final encodedPlugin = Uri.encodeComponent(widget.plugin.name);
+    final origin = _resolveServerWebOrigin();
+    return '$origin/settings?plugin=$encodedPlugin';
+  }
+
+  Future<void> _handleOpenWebDashboardForAuth() async {
+    final targetUrl = _resolveRedirectUri();
+    await openExternalUrl(targetUrl);
   }
 
   Future<void> _loadExistingConfig() async {
@@ -838,16 +872,41 @@ class _PluginConfigDialogState extends ConsumerState<PluginConfigDialog> {
                 spacing: AppTokens.space8,
                 runSpacing: AppTokens.space8,
                 children: [
-                  FilledButton.icon(
-                    key: const Key('plugin_auth_oauth_begin_button'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: colors.accentPrimary,
-                      foregroundColor: colors.onAccent,
+                  if (!kIsWeb)
+                    FilledButton.icon(
+                      key: const Key('plugin_auth_open_web_dashboard_button'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: colors.accentPrimary,
+                        foregroundColor: colors.onAccent,
+                      ),
+                      onPressed: _isAuthBusy
+                          ? null
+                          : _handleOpenWebDashboardForAuth,
+                      icon: const Icon(Icons.open_in_browser_rounded, size: 16),
+                      label: const Text('Open Web Dashboard to Link Account'),
                     ),
-                    onPressed: _isAuthBusy ? null : _handleBeginOAuth,
-                    icon: const Icon(Icons.open_in_new_rounded, size: 16),
-                    label: const Text('Connect with OAuth (PKCE)'),
-                  ),
+                  if (kIsWeb)
+                    FilledButton.icon(
+                      key: const Key('plugin_auth_oauth_begin_button'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: colors.accentPrimary,
+                        foregroundColor: colors.onAccent,
+                      ),
+                      onPressed: _isAuthBusy ? null : _handleBeginOAuth,
+                      icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                      label: const Text('Connect with OAuth (PKCE)'),
+                    )
+                  else
+                    OutlinedButton.icon(
+                      key: const Key('plugin_auth_oauth_begin_button'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: colors.ink,
+                        side: BorderSide(color: colors.border),
+                      ),
+                      onPressed: _isAuthBusy ? null : _handleBeginOAuth,
+                      icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                      label: const Text('Connect with OAuth (PKCE)'),
+                    ),
                   if (authSpec.supportsToken)
                     TextButton.icon(
                       key: const Key('plugin_auth_toggle_token_button'),

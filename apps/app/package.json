@@ -6,11 +6,13 @@
     "build": "pnpm run build:web",
     "build:macos": "if [ -f pubspec.yaml ]; then flutter build macos --debug; else echo 'App scaffolded in Milestone 6'; fi",
     "build:apk": "if [ -f pubspec.yaml ]; then flutter build apk; else echo 'App scaffolded in Milestone 6'; fi",
+    "build:aab": "flutter build appbundle",
     "build:web": "if [ -f pubspec.yaml ]; then flutter build web --release --no-web-resources-cdn; else echo 'App scaffolded in Milestone 6'; fi",
     "dev": "./scripts/dev.sh",
     "dev:web": "flutter run -d web-server --web-port 3000",
     "dev:macos": "flutter run -d macos",
     "test": "if [ -d test ]; then flutter test; else echo 'No tests found in @shelfd/app yet (Milestone 6)'; fi",
+    "test:live": "flutter test test_live",
     "lint": "if [ -f pubspec.yaml ]; then flutter analyze --no-fatal-infos --no-fatal-warnings; else echo 'No pubspec.yaml in @shelfd/app yet (Milestone 6)'; fi",
     "clean": "if [ -f pubspec.yaml ]; then flutter clean; fi",
     "generate:icons": "./scripts/generate_icons.sh"

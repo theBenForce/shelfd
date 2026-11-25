@@ -21,6 +21,7 @@ abstract class AudioPlayerEngine {
     String url, {
     Duration? initialPosition,
     AudioMediaMetadata? metadata,
+    Map<String, String>? headers,
   });
   Future<void> play();
   Future<void> pause();
@@ -68,30 +69,33 @@ class JustAudioPlayerEngine implements AudioPlayerEngine {
     String url, {
     Duration? initialPosition,
     AudioMediaMetadata? metadata,
+    Map<String, String>? headers,
   }) async {
     if (!kIsWeb && metadata != null) {
       try {
         await _player.setAudioSource(
           AudioSource.uri(
             Uri.parse(url),
+            headers: headers,
             tag: MediaItem(
               id: metadata.id,
               title: metadata.title,
               artist: metadata.artist,
               album: metadata.album,
               artUri: metadata.artworkUri,
+              artHeaders: metadata.artworkHeaders,
               duration: metadata.duration,
             ),
           ),
           initialPosition: initialPosition,
         );
       } on AssertionError {
-        await _player.setUrl(url, initialPosition: initialPosition);
+        await _player.setUrl(url, headers: headers, initialPosition: initialPosition);
       } on StateError {
-        await _player.setUrl(url, initialPosition: initialPosition);
+        await _player.setUrl(url, headers: headers, initialPosition: initialPosition);
       }
     } else {
-      await _player.setUrl(url, initialPosition: initialPosition);
+      await _player.setUrl(url, headers: headers, initialPosition: initialPosition);
     }
     if (initialPosition != null &&
         initialPosition > Duration.zero &&
@@ -135,6 +139,9 @@ class SimulatedAudioPlayerEngine implements AudioPlayerEngine {
   AudioPlaybackStatus _currentStatus = AudioPlaybackStatus.idle;
   double _currentSpeed = 1.0;
   double _currentVolume = 1.0;
+  String? lastUrl;
+  Map<String, String>? lastHeaders;
+  AudioMediaMetadata? lastMetadata;
   Timer? _ticker;
 
   SimulatedAudioPlayerEngine({Duration? initialDuration}) {
@@ -161,7 +168,11 @@ class SimulatedAudioPlayerEngine implements AudioPlayerEngine {
     String url, {
     Duration? initialPosition,
     AudioMediaMetadata? metadata,
+    Map<String, String>? headers,
   }) async {
+    lastUrl = url;
+    lastHeaders = headers;
+    lastMetadata = metadata;
     _currentPosition = initialPosition ?? Duration.zero;
     _currentStatus = AudioPlaybackStatus.ready;
     _statusController.add(_currentStatus);
@@ -304,6 +315,30 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
         },
       ),
     );
+  }
+
+  Future<Map<String, String>?> _resolveStreamAuthHeaders(
+    String bookId,
+    String targetUrl,
+  ) async {
+    if (kIsWeb) return null;
+    final apiService = ref.read(apiServiceProvider);
+    final cleanToken = apiService.token?.trim();
+    if (cleanToken == null ||
+        cleanToken.isEmpty ||
+        !apiService.isSameOriginAsServer(targetUrl)) {
+      return null;
+    }
+    String bearer = cleanToken;
+    try {
+      final mediaToken = await apiService.mintBookMediaToken(bookId);
+      if (mediaToken.token.trim().isNotEmpty) {
+        bearer = mediaToken.token.trim();
+      }
+    } catch (_) {}
+    return <String, String>{
+      'Authorization': 'Bearer $bearer',
+    };
   }
 
   AudioMediaMetadata? _buildMediaMetadata(AudioPlayerState targetState) {
@@ -506,11 +541,13 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
           activeChapter: initialActiveChapter,
         ),
       );
+      final streamHeaders = await _resolveStreamAuthHeaders(book.id, streamUrl);
 
       await _engine.setUrl(
         streamUrl,
         initialPosition: startPos,
         metadata: initialMetadata,
+        headers: streamHeaders,
       );
       if (progress.speed != 1.0) {
         await _engine.setSpeed(progress.speed);
@@ -825,7 +862,16 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     if (preservedBook != null) {
       try {
         final url = _repository.getStreamUrl(preservedBook.id);
-        await _localEngine.setUrl(url, initialPosition: preservedPosition);
+        final streamHeaders = await _resolveStreamAuthHeaders(
+          preservedBook.id,
+          url,
+        );
+        await _localEngine.setUrl(
+          url,
+          initialPosition: preservedPosition,
+          metadata: _buildMediaMetadata(state),
+          headers: streamHeaders,
+        );
         await _localEngine.setSpeed(preservedSpeed);
       } catch (_) {}
       _startPeriodicSync();

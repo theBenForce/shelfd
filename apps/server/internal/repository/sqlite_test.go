@@ -681,7 +681,19 @@ func TestUsersAndTokens(t *testing.T) {
 		t.Fatalf("expected 1 token for user, got %v", tokens)
 	}
 
-	if err := repo.DeleteAPIToken(ctx, token.ID); err != nil {
+	otherUser := &repository.User{
+		Username:     "other-user",
+		PasswordHash: "$2a$12$otherMockHash",
+	}
+	if err := repo.CreateUser(ctx, otherUser); err != nil {
+		t.Fatalf("failed to create other user: %v", err)
+	}
+
+	if err := repo.DeleteAPIToken(ctx, otherUser.ID, token.ID); err != repository.ErrNotFound {
+		t.Fatalf("expected ErrNotFound when deleting another user's token, got %v", err)
+	}
+
+	if err := repo.DeleteAPIToken(ctx, user.ID, token.ID); err != nil {
 		t.Fatalf("failed to delete api token: %v", err)
 	}
 
@@ -690,7 +702,7 @@ func TestUsersAndTokens(t *testing.T) {
 		t.Fatalf("expected ErrNotFound after token delete, got %v", err)
 	}
 
-	if err := repo.DeleteAPIToken(ctx, "ghost-token"); err != repository.ErrNotFound {
+	if err := repo.DeleteAPIToken(ctx, user.ID, "ghost-token"); err != repository.ErrNotFound {
 		t.Errorf("expected ErrNotFound on deleting missing token, got %v", err)
 	}
 

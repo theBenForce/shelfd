@@ -24,13 +24,35 @@ void main() {
   group('Repositories Tests', () {
     test('AuthRepository login and session persistence', () async {
       final mockClient = MockClient((request) async {
+        if (request.url.path == '/api/v1/server/connect-info') {
+          return http.Response(
+            jsonEncode({'server_name': 'Shelfd', 'version': '1.0.0'}),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
         if (request.url.path == '/api/v1/auth/login') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          if (body['device_name'] == 'Shelfd Android (Pixel 9)') {
+            return http.Response(
+              jsonEncode({
+                'token': 'jwt-short',
+                'api_token': 'shelfd_device_123',
+                'api_token_id': 'tok-id-1',
+                'user': {'id': 'u1', 'username': 'admin', 'role': 'admin'},
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
           return http.Response(jsonEncode({'token': 'token-abc'}), 200,
               headers: {'content-type': 'application/json'});
         } else if (request.url.path == '/api/v1/auth/me') {
           return http.Response(
-              jsonEncode({'id': 'u1', 'username': 'admin', 'role': 'admin'}), 200,
+              jsonEncode({'user': {'id': 'u1', 'username': 'admin', 'role': 'admin'}}), 200,
               headers: {'content-type': 'application/json'});
+        } else if (request.method == 'DELETE' && request.url.path == '/api/v1/auth/tokens/tok-id-1') {
+          return http.Response('', 204);
         }
         return http.Response('Not found', 404);
       });
@@ -40,9 +62,15 @@ void main() {
 
       expect(await authRepo.checkInitialAuth(), isFalse);
 
-      final user = await authRepo.login('http://localhost:8080', 'admin', 'pass');
+      final user = await authRepo.login(
+        'http://localhost:8080',
+        'admin',
+        'pass',
+        deviceName: 'Shelfd Android (Pixel 9)',
+      );
       expect(user.username, 'admin');
-      expect(storageService.getAuthToken(), 'token-abc');
+      expect(storageService.getAuthToken(), 'shelfd_device_123');
+      expect(storageService.getAuthTokenId(), 'tok-id-1');
       expect(storageService.getServerUrl(), 'http://localhost:8080');
       expect(storageService.getSavedUsername(), 'admin');
 
@@ -50,6 +78,10 @@ void main() {
 
       await authRepo.logout();
       expect(await authRepo.checkInitialAuth(), isFalse);
+      expect(storageService.getServerUrl(), 'http://localhost:8080');
+
+      await authRepo.logout(clearServerUrl: true);
+      expect(storageService.getServerUrl(), isNull);
     });
 
     test('AuthRepository changePassword delegates to ApiService', () async {

@@ -542,10 +542,25 @@ void main() {
       await expectLater(apiService.deleteUploadJob('job-xyz-789'), completes);
     });
 
-    test('getBookDownloadUrl returns formatted URL with token', () {
-      final apiService = ApiService(baseUrl: 'http://localhost:8080', token: 'test-token');
-      final url = apiService.getBookDownloadUrl('book-123');
-      expect(url, 'http://localhost:8080/api/v1/books/book-123/download?token=test-token');
+    test('getBookDownloadUrl omits query token on native and includes it on web', () {
+      final nativeApi = ApiService(
+        baseUrl: 'http://localhost:8080',
+        token: 'test-token',
+        isWebOverride: false,
+      );
+      final webApi = ApiService(
+        baseUrl: 'http://localhost:8080',
+        token: 'test-token',
+        isWebOverride: true,
+      );
+      expect(
+        nativeApi.getBookDownloadUrl('book-123'),
+        'http://localhost:8080/api/v1/books/book-123/download',
+      );
+      expect(
+        webApi.getBookDownloadUrl('book-123'),
+        'http://localhost:8080/api/v1/books/book-123/download?token=test-token',
+      );
     });
 
     test('downloadBookEpub returns bytes on success', () async {
@@ -569,10 +584,25 @@ void main() {
       expect(bytes, epubBytes);
     });
 
-    test('getBookMarkdownUrl returns formatted URL with token', () {
-      final apiService = ApiService(baseUrl: 'http://localhost:8080', token: 'test-token');
-      final url = apiService.getBookMarkdownUrl('book-123');
-      expect(url, 'http://localhost:8080/api/v1/books/book-123/markdown?token=test-token');
+    test('getBookMarkdownUrl omits query token on native and includes it on web', () {
+      final nativeApi = ApiService(
+        baseUrl: 'http://localhost:8080',
+        token: 'test-token',
+        isWebOverride: false,
+      );
+      final webApi = ApiService(
+        baseUrl: 'http://localhost:8080',
+        token: 'test-token',
+        isWebOverride: true,
+      );
+      expect(
+        nativeApi.getBookMarkdownUrl('book-123'),
+        'http://localhost:8080/api/v1/books/book-123/markdown',
+      );
+      expect(
+        webApi.getBookMarkdownUrl('book-123'),
+        'http://localhost:8080/api/v1/books/book-123/markdown?token=test-token',
+      );
     });
 
     test('downloadBookMarkdown returns markdown bytes on success', () async {

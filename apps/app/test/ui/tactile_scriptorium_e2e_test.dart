@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1644,8 +1645,12 @@ void main() {
         expect(find.text('Connect & Sync Library'), findsOneWidget);
       });
 
-      test('F11-T1-05: resolveDefaultServerUrl returns localhost fallback on native test platform', () {
+      test('F11-T1-05: resolveDefaultServerUrl returns empty on mobile and localhost fallback on desktop', () {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        expect(resolveDefaultServerUrl(), '');
+        debugDefaultTargetPlatformOverride = TargetPlatform.linux;
         expect(resolveDefaultServerUrl(), 'http://localhost:8080');
+        debugDefaultTargetPlatformOverride = null;
       });
     });
 

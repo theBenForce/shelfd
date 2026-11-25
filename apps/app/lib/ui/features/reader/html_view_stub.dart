@@ -1,24 +1,9 @@
 import 'package:flutter/material.dart';
+import 'html_view_models.dart';
 
-class ReadalongFrameHighlight {
-  final String? targetViewKey;
-  final String? bookId;
-  final String? chapterHref;
-  final String fragmentId;
-  final String activeClass;
-  final String playbackActiveClass;
-  final bool playing;
+export 'html_view_models.dart';
 
-  const ReadalongFrameHighlight({
-    this.targetViewKey,
-    this.bookId,
-    this.chapterHref,
-    required this.fragmentId,
-    this.activeClass = '-epub-media-overlay-active',
-    this.playbackActiveClass = '-epub-media-overlay-playing',
-    this.playing = true,
-  });
-}
+bool get requiresNativeMediaCookie => false;
 
 ReadalongFrameHighlight? _lastHighlight;
 
@@ -35,11 +20,20 @@ void resetHtmlFrameHighlightsForTest() {
   _lastHighlight = null;
 }
 
+Future<void> seedHtmlAuthCookie({
+  required String serverBaseUrl,
+  required String mediaJwt,
+}) async {}
+
+Future<void> clearHtmlAuthCookies() async {}
+
 Widget buildHtmlFrame({
   required String viewKey,
   required String url,
   required double width,
   required double height,
+  OnReadalongClick? onReadalongClick,
+  OnToggleControls? onToggleControls,
 }) {
   return Container(
     key: Key('html-frame-$viewKey'),
@@ -74,4 +68,3 @@ void highlightHtmlFrame({
     playing: playing,
   );
 }
-

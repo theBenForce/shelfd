@@ -6,6 +6,7 @@ import '../../../data/models/upload_job.dart';
 import '../book_detail/metadata_search_dialog.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
+import '../../core/shelfd_authenticated_image.dart';
 import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
@@ -541,8 +542,8 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: coverUrl != null
-                      ? Image.network(
-                          coverUrl,
+                      ? ShelfdAuthenticatedImage(
+                          imageUrl: coverUrl,
                           fit: BoxFit.contain,
                           errorBuilder: (ctx, err, stack) => _CoverPlaceholder(title: widget.job.metadata.title),
                         )

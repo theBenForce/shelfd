@@ -298,4 +298,131 @@ void main() {
     expect(find.text('75%'), findsWidgets);
     expect(find.textContaining('Host:'), findsOneWidget);
   });
+
+  testWidgets('SettingsView Web Pair Mobile Device modal warns on localhost and renders QR when LAN IP is entered', (tester) async {
+    setLargeViewport(tester);
+
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/auth/pair/begin') {
+        return http.Response(
+          jsonEncode({
+            'code': '0123456789abcdef0123456789abcdef',
+            'expires_at': DateTime.now().toUtc().add(const Duration(seconds: 90)).toIso8601String(),
+          }),
+          201,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (request.url.path == '/api/v1/auth/tokens') {
+        return http.Response(jsonEncode({'tokens': []}), 200);
+      }
+      return http.Response('Not Found', 404);
+    });
+
+    final api = ApiService(
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token-123',
+      client: mockClient,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          queueProvider.overrideWith(() => FakeQueueNotifier()),
+          apiServiceProvider.overrideWithValue(api),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const SettingsView(isWebOverride: true),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('pair_mobile_device_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('opened via localhost'), findsOneWidget);
+    expect(find.byKey(const Key('pairing_qr_image')), findsNothing);
+
+    await tester.enterText(
+      find.byKey(const Key('pairing_reachable_url_field')),
+      'http://192.168.1.50:8080',
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('pairing_qr_image')), findsOneWidget);
+    expect(find.byKey(const Key('copy_pairing_link_button')), findsOneWidget);
+  });
+
+  testWidgets('SettingsView lists Active Devices & API Tokens and revokes selected device', (tester) async {
+    setLargeViewport(tester);
+
+    String? deletedTokenId;
+    var tokens = <Map<String, dynamic>>[
+      {
+        'id': 'tok-self',
+        'name': 'Shelfd Android (Pixel 9)',
+        'created_at': '2026-11-24T12:00:00Z',
+      },
+      {
+        'id': 'tok-tablet',
+        'name': 'Shelfd Android (Galaxy Tab)',
+        'created_at': '2026-11-24T13:00:00Z',
+      },
+    ];
+
+    SharedPreferences.setMockInitialValues({
+      'shelfd_saved_username': 'test_admin',
+      'shelfd_server_url': 'https://shelfd.example.com',
+      'shelfd_auth_token': 'shelfd_self_tok',
+      'shelfd_auth_token_id': 'tok-self',
+    });
+    final localPrefs = await SharedPreferences.getInstance();
+
+    final mockClient = MockClient((request) async {
+      if (request.method == 'GET' && request.url.path == '/api/v1/auth/tokens') {
+        return http.Response(jsonEncode({'tokens': tokens}), 200);
+      }
+      if (request.method == 'DELETE' && request.url.path == '/api/v1/auth/tokens/tok-tablet') {
+        deletedTokenId = 'tok-tablet';
+        tokens = tokens.where((t) => t['id'] != 'tok-tablet').toList();
+        return http.Response('', 204);
+      }
+      return http.Response('Not Found', 404);
+    });
+
+    final api = ApiService(
+      baseUrl: 'https://shelfd.example.com',
+      token: 'shelfd_self_tok',
+      client: mockClient,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(localPrefs),
+          queueProvider.overrideWith(() => FakeQueueNotifier()),
+          apiServiceProvider.overrideWithValue(api),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const SettingsView(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Active Devices & API Tokens'), findsOneWidget);
+    expect(find.text('Shelfd Android (Pixel 9)'), findsOneWidget);
+    expect(find.text('This device'), findsOneWidget);
+    expect(find.text('Shelfd Android (Galaxy Tab)'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('revoke_token_tok-tablet')));
+    await tester.pumpAndSettle();
+
+    expect(deletedTokenId, 'tok-tablet');
+    expect(find.text('Shelfd Android (Galaxy Tab)'), findsNothing);
+  });
 }

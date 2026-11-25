@@ -127,6 +127,10 @@ func (h *AudiobookHandler) StreamAudio(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.HasSuffix(strings.ToLower(resolvedPath), ".epub") {
+		modTime := time.Time{}
+		if fi, sErr := os.Stat(resolvedPath); sErr == nil {
+			modTime = fi.ModTime()
+		}
 		if reader, oErr := epub.Open(resolvedPath); oErr == nil {
 			defer reader.Close()
 			if manifest, mErr := reader.ExtractMediaOverlays(); mErr == nil && manifest != nil {
@@ -135,7 +139,7 @@ func (h *AudiobookHandler) StreamAudio(w http.ResponseWriter, r *http.Request) {
 						if data, mime, aErr := reader.ExtractMediaAsset(seg.AudioSrc); aErr == nil && len(data) > 0 {
 							w.Header().Set("Content-Type", mime)
 							w.Header().Set("Accept-Ranges", "bytes")
-							http.ServeContent(w, r, filepath.Base(seg.AudioSrc), time.Now(), bytes.NewReader(data))
+							http.ServeContent(w, r, filepath.Base(seg.AudioSrc), modTime, bytes.NewReader(data))
 							return
 						}
 					}

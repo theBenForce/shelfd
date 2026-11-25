@@ -44,6 +44,20 @@ void main() {
       expect(info.capabilities, contains('mcp'));
       expect(info.capabilities, contains('semantic_search'));
       expect(info.toJson(), json);
+
+      final liveServerJson = {
+        'server_name': 'Shelfd',
+        'version': '1.31.0',
+        'api_base': '/api/v1',
+        'mcp_base': '/mcp',
+        'default_username': 'admin',
+      };
+      final liveInfo = ServerConnectInfo.fromJson(liveServerJson);
+      expect(liveInfo.serverName, 'Shelfd');
+      expect(liveInfo.version, '1.31.0');
+      expect(liveInfo.apiBase, '/api/v1');
+      expect(liveInfo.mcpBase, '/mcp');
+      expect(liveInfo.defaultUsername, 'admin');
     });
 
     test('Author, Genre, Series fromJson & toJson', () {
@@ -75,27 +89,29 @@ void main() {
         'synopsis': 'A classic sci-fi novel about Gethen.',
         'cover_url': '/api/v1/books/book-42/cover',
         'authors': [
-          {'id': 'auth-1', 'name': 'Ursula K. Le Guin'}
+          {'id': 'auth-1', 'name': 'Ursula K. Le Guin', 'photo_url': '/api/v1/authors/auth-1/photo'}
         ],
         'genres': [
           {'id': 'gen-1', 'name': 'Sci-Fi'}
         ],
-        'series': {'id': 'ser-1', 'name': 'Hainish Cycle'},
+        'series': {'id': 'ser-1', 'name': 'Hainish Cycle', 'cover_book_id': 'book-42'},
         'series_sequence': 4.0,
         'spine': [
           {'id': '01J7SPINE1', 'book_id': 'book-42', 'chapter_index': 1, 'title': 'Prologue'}
         ],
       };
 
-      final book = Book.fromJson(bookJson);
+      final book = Book.fromJson(bookJson, baseUrl: 'https://shelfd.example.com/');
       expect(book.id, 'book-42');
       expect(book.title, 'The Left Hand of Darkness');
       expect(book.synopsis, 'A classic sci-fi novel about Gethen.');
-      expect(book.coverUrl, '/api/v1/books/book-42/cover');
+      expect(book.coverUrl, 'https://shelfd.example.com/api/v1/books/book-42/cover');
       expect(book.authors.length, 1);
       expect(book.authors.first.name, 'Ursula K. Le Guin');
+      expect(book.authors.first.photoUrl, 'https://shelfd.example.com/api/v1/authors/auth-1/photo');
       expect(book.genres.first.name, 'Sci-Fi');
       expect(book.series?.name, 'Hainish Cycle');
+      expect(book.series?.coverUrl, 'https://shelfd.example.com/api/v1/books/book-42/cover');
       expect(book.seriesSequence, 4.0);
       expect(book.authorDisplay, 'Ursula K. Le Guin');
       expect(book.spine.length, 1);

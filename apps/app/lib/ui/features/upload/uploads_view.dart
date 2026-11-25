@@ -7,6 +7,7 @@ import '../../../data/models/upload_job.dart';
 import '../../core/primitives.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
+import '../../core/shelfd_authenticated_image.dart';
 import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
@@ -668,8 +669,8 @@ class _StagedJobCard extends ConsumerWidget {
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: coverUrl != null
-                    ? Image.network(
-                        coverUrl,
+                    ? ShelfdAuthenticatedImage(
+                        imageUrl: coverUrl,
                         fit: BoxFit.cover,
                         errorBuilder: (_, _, _) => Center(
                           child: Icon(
@@ -1261,8 +1262,8 @@ class _MetadataInspectorState extends ConsumerState<_MetadataInspector> {
                           ),
                           clipBehavior: Clip.antiAlias,
                           child: coverUrl != null
-                              ? Image.network(
-                                  coverUrl,
+                              ? ShelfdAuthenticatedImage(
+                                  imageUrl: coverUrl,
                                   fit: BoxFit.cover,
                                   errorBuilder: (_, _, _) => Center(
                                     child: Icon(

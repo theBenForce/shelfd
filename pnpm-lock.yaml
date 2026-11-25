@@ -23,11 +23,7 @@ importers:
 
   apps/app: {}
 
-  apps/server:
-    dependencies:
-      '@shelfd/app':
-        specifier: workspace:*
-        version: link:../app
+  apps/server: {}
 
   packages/plugin-sdk: {}
 

@@ -1494,8 +1494,8 @@ func (r *SQLiteStorageEngine) ListAPITokensByUserID(ctx context.Context, userID 
 	return tokens, rows.Err()
 }
 
-func (r *SQLiteStorageEngine) DeleteAPIToken(ctx context.Context, id string) error {
-	res, err := r.db.ExecContext(ctx, "DELETE FROM api_tokens WHERE id = ?", id)
+func (r *SQLiteStorageEngine) DeleteAPIToken(ctx context.Context, userID, tokenID string) error {
+	res, err := r.db.ExecContext(ctx, "DELETE FROM api_tokens WHERE id = ? AND user_id = ?", tokenID, userID)
 	if err != nil {
 		return fmt.Errorf("deleting api token: %w", err)
 	}

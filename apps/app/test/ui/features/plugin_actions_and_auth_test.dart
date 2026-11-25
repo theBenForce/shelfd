@@ -8,11 +8,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/background_job.dart';
 import 'package:shelf/data/models/plugin.dart';
 import 'package:shelf/data/services/api_service.dart';
+import 'package:shelf/platform/external_url_launcher.dart';
 import 'package:shelf/ui/core/shared_layout.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/plugins/plugin_action_dialog.dart';
 import 'package:shelf/ui/features/plugins/plugin_action_runner.dart';
 import 'package:shelf/ui/features/settings/plugin_config_dialog.dart';
+import 'package:shelf/ui/features/settings/settings_view.dart';
 import 'package:shelf/ui/state/providers.dart';
 
 class _FakeQueueNotifier extends QueueNotifier {
@@ -806,5 +808,95 @@ void main() {
 
     expect(downloadedMarkdown, isTrue);
     expect(find.text('Prepared "Dune.md" for NotebookLM.'), findsOneWidget);
+  });
+
+  testWidgets(
+      'Mobile PluginConfigDialog launches server Web Dashboard settings URL and SettingsView auto-opens requested plugin',
+      (tester) async {
+    setDesktopViewport(tester);
+
+    Uri? launchedUri;
+    debugExternalUrlLauncherOverride = (uri) async {
+      launchedUri = uri;
+      return true;
+    };
+    addTearDown(() {
+      debugExternalUrlLauncherOverride = null;
+    });
+
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/plugins') {
+        return http.Response(
+          jsonEncode({
+            'plugins': [
+              {
+                'name': 'yoto',
+                'display_name': 'Yoto Player',
+                'version': '1.0.0',
+                'enabled': true,
+                'configured': true,
+                'status': 'running',
+                'has_auth': true,
+                'auth': {
+                  'title': 'Yoto Account',
+                  'methods': ['oauth_pkce', 'token'],
+                },
+              },
+            ],
+          }),
+          200,
+        );
+      }
+      if (request.url.path == '/api/v1/plugins/yoto/auth/status') {
+        return http.Response(
+          jsonEncode({
+            'linked': false,
+            'client_id': 'yoto-client',
+            'methods': ['oauth_pkce', 'token'],
+          }),
+          200,
+        );
+      }
+      if (request.url.path == '/api/v1/auth/tokens') {
+        return http.Response(jsonEncode({'tokens': []}), 200);
+      }
+      return http.Response('Not Found', 404);
+    });
+
+    final api = ApiService(
+      baseUrl: 'https://shelfd.tailnet.ts.net/',
+      token: 'shelfd_mobile_token',
+      client: mockClient,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          apiServiceProvider.overrideWithValue(api),
+          queueProvider.overrideWith(_FakeQueueNotifier.new),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const SettingsView(initialPluginName: 'yoto'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Configure Yoto Player'), findsOneWidget);
+    final openWebBtn = find.byKey(
+      const Key('plugin_auth_open_web_dashboard_button'),
+    );
+    expect(openWebBtn, findsOneWidget);
+    expect(find.byKey(const Key('plugin_auth_code_field')), findsOneWidget);
+
+    await tester.tap(openWebBtn);
+    await tester.pumpAndSettle();
+
+    expect(
+      launchedUri?.toString(),
+      'https://shelfd.tailnet.ts.net/settings?plugin=yoto',
+    );
   });
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -90,6 +91,13 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   ReadalongManifest? _readalongManifest;
   ReadalongSegment? _activeSegment;
   bool _autoTurnPages = true;
+  late bool _cookieReady;
+  String? _cookieError;
+  Timer? _mediaTokenRefreshTimer;
+
+  String? _lastHighlightedViewKey;
+  String? _lastHighlightedFragmentId;
+  bool? _lastHighlightedPlaying;
 
   bool get _hasReadalong =>
       widget.book.canReadAlong ||
@@ -100,8 +108,55 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   void initState() {
     super.initState();
     _readalongManifest = widget.initialReadalongManifest;
+    _cookieReady = !requiresNativeMediaCookie;
     _resolveInitialSpread();
+    if (!_cookieReady) {
+      Future.microtask(_prepareNativeMediaCookie);
+    }
     Future.microtask(_loadReadalongManifest);
+  }
+
+  Future<void> _prepareNativeMediaCookie() async {
+    _mediaTokenRefreshTimer?.cancel();
+    if (mounted && _cookieError != null) {
+      setState(() {
+        _cookieError = null;
+      });
+    }
+    try {
+      final apiService = ref.read(apiServiceProvider);
+      final mediaToken = await apiService.mintBookMediaToken(widget.book.id);
+      await seedHtmlAuthCookie(
+        serverBaseUrl: apiService.baseUrl,
+        mediaJwt: mediaToken.token,
+      );
+      final refreshIn = mediaToken.expiresAt
+              .toUtc()
+              .difference(DateTime.now().toUtc()) -
+          const Duration(minutes: 5);
+      final clampedRefresh = refreshIn > const Duration(minutes: 1)
+          ? refreshIn
+          : const Duration(minutes: 55);
+      _mediaTokenRefreshTimer = Timer(clampedRefresh, () {
+        if (mounted) {
+          _prepareNativeMediaCookie();
+        }
+      });
+      if (mounted) {
+        setState(() {
+          _cookieReady = true;
+          _cookieError = null;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _cookieReady = false;
+          _cookieError =
+              'Unable to authorize book media. Check your server connection and try again.';
+        });
+      }
+    }
   }
 
   static String _normalizeHref(String raw) {
@@ -164,6 +219,10 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   @override
   void didUpdateWidget(covariant FixedLayoutReader oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.book.id != widget.book.id && requiresNativeMediaCookie) {
+      _cookieReady = false;
+      Future.microtask(_prepareNativeMediaCookie);
+    }
     if (widget.initialReadalongManifest != null && _readalongManifest == null) {
       _readalongManifest = widget.initialReadalongManifest;
       final audioState = ref.read(audioPlayerProvider);
@@ -217,11 +276,39 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
     } catch (_) {}
   }
 
+  void _emitDeduplicatedHighlight({
+    String? targetViewKey,
+    required String bookId,
+    String? chapterHref,
+    required String fragmentId,
+    required String activeClass,
+    required String playbackActiveClass,
+    required bool playing,
+  }) {
+    if (_lastHighlightedViewKey == targetViewKey &&
+        _lastHighlightedFragmentId == fragmentId &&
+        _lastHighlightedPlaying == playing) {
+      return;
+    }
+    _lastHighlightedViewKey = targetViewKey;
+    _lastHighlightedFragmentId = fragmentId;
+    _lastHighlightedPlaying = playing;
+    highlightHtmlFrame(
+      targetViewKey: targetViewKey,
+      bookId: bookId,
+      chapterHref: chapterHref,
+      fragmentId: fragmentId,
+      activeClass: activeClass,
+      playbackActiveClass: playbackActiveClass,
+      playing: playing,
+    );
+  }
+
   void _onAudioStateChanged(AudioPlayerState audioState, {bool forceSyncSpread = false}) {
     if (audioState.book?.id != widget.book.id) {
       if (_activeSegment != null) {
         _activeSegment = null;
-        highlightHtmlFrame(
+        _emitDeduplicatedHighlight(
           bookId: widget.book.id,
           fragmentId: '',
           activeClass: _readalongManifest?.activeClass ?? '-epub-media-overlay-active',
@@ -266,17 +353,66 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
       }
     }
 
-    highlightHtmlFrame(
+    final resolvedFragment =
+        seg != null && (targetPage != null || widget.book.spine.isEmpty)
+            ? seg.fragmentId
+            : '';
+    _emitDeduplicatedHighlight(
       targetViewKey: targetViewKey,
       bookId: widget.book.id,
       chapterHref: effectiveChapterHref,
-      fragmentId: seg != null && (targetPage != null || widget.book.spine.isEmpty)
-          ? seg.fragmentId
-          : '',
+      fragmentId: resolvedFragment,
       activeClass: manifest.activeClass,
       playbackActiveClass: manifest.playbackActiveClass,
       playing: audioState.isPlaying,
     );
+  }
+
+  Future<void> _handleReadalongClick(String fragmentId) async {
+    final manifest = _readalongManifest;
+    if (manifest == null || manifest.segments.isEmpty || fragmentId.isEmpty) {
+      _toggleControls();
+      return;
+    }
+    ReadalongSegment? matched;
+    if (_currentSpreads.isNotEmpty && _currentSpreadIndex < _currentSpreads.length) {
+      final curSpread = _currentSpreads[_currentSpreadIndex];
+      for (final seg in manifest.segments) {
+        if (seg.fragmentId == fragmentId &&
+            curSpread.containsChapterIndex(seg.chapterIndex, widget.book.spine)) {
+          matched = seg;
+          break;
+        }
+      }
+    }
+    matched ??= manifest.segments
+        .where((seg) => seg.fragmentId == fragmentId)
+        .firstOrNull;
+    if (matched == null) {
+      _toggleControls();
+      return;
+    }
+
+    final audioState = ref.read(audioPlayerProvider);
+    final notifier = ref.read(audioPlayerProvider.notifier);
+    notifier.setPlaybackMode(AudioPlaybackMode.readalong);
+    notifier.syncBookMetadata(widget.book);
+    if (audioState.book?.id != widget.book.id ||
+        audioState.status == AudioPlaybackStatus.idle ||
+        audioState.status == AudioPlaybackStatus.error) {
+      await notifier.loadBook(
+        widget.book,
+        initialPosition: matched.globalBegin,
+        autoPlay: true,
+      );
+    } else {
+      await notifier.seek(
+        Duration(milliseconds: (matched.globalBegin * 1000).round()),
+      );
+      if (!audioState.isPlaying) {
+        await notifier.play();
+      }
+    }
   }
 
   void _switchToAudiobook(BuildContext context) {
@@ -327,6 +463,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
 
   @override
   void dispose() {
+    _mediaTokenRefreshTimer?.cancel();
     _focusNode.dispose();
     super.dispose();
   }
@@ -852,14 +989,45 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
     double availWidth,
     double availHeight,
   ) {
+    if (!_cookieReady) {
+      final colors = ShelfdColors.of(context);
+      if (_cookieError != null) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _cookieError!,
+                  textAlign: TextAlign.center,
+                  style: AppTypography.bodySans(color: colors.ink),
+                ),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  onPressed: _prepareNativeMediaCookie,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      return Center(
+        child: CircularProgressIndicator(color: colors.accentPrimary),
+      );
+    }
+
+    final horizMargin = availWidth < 600 ? 16.0 : 80.0;
+    final vertMargin = availHeight < 600 ? 16.0 : 40.0;
+    final stageW = max(40.0, availWidth - horizMargin);
+    final stageH = max(40.0, availHeight - vertMargin);
+
     if (spread.isSingle || spread.leftPage == null) {
-      // Single Page (Cover, Gatefold, or Single-page mode)
       final page = spread.rightPage;
       final pw = page.pageWidth ?? 1000.0;
       final ph = page.pageHeight ?? 1000.0;
 
-      final stageW = availWidth - 80;
-      final stageH = availHeight - 40;
       final scale = min(stageW / pw, stageH / ph).clamp(0.05, 2.0);
 
       final displayW = pw * scale;
@@ -889,11 +1057,12 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
             url: url,
             width: displayW,
             height: displayH,
+            onReadalongClick: _handleReadalongClick,
+            onToggleControls: _toggleControls,
           ),
         ),
       );
     } else {
-      // Two-Page Facing Spread [leftPage, rightPage]
       final leftPage = spread.leftPage!;
       final rightPage = spread.rightPage;
 
@@ -905,8 +1074,6 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
       final combinedW = leftW + rightW;
       final combinedH = max(leftH, rightH);
 
-      final stageW = availWidth - 80;
-      final stageH = availHeight - 40;
       final scale = min(stageW / combinedW, stageH / combinedH).clamp(0.05, 2.0);
 
       final leftDisplayW = leftW * scale;
@@ -934,7 +1101,6 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Left Page (Verso)
               Container(
                 width: leftDisplayW,
                 height: displayH,
@@ -948,10 +1114,10 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   url: leftUrl,
                   width: leftDisplayW,
                   height: displayH,
+                  onReadalongClick: _handleReadalongClick,
+                  onToggleControls: _toggleControls,
                 ),
               ),
-
-              // Open-book Spine Crease / Gutter
               Container(
                 width: 2,
                 height: displayH,
@@ -965,8 +1131,6 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   ),
                 ),
               ),
-
-              // Right Page (Recto)
               Container(
                 width: rightDisplayW,
                 height: displayH,
@@ -980,6 +1144,8 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   url: rightUrl,
                   width: rightDisplayW,
                   height: displayH,
+                  onReadalongClick: _handleReadalongClick,
+                  onToggleControls: _toggleControls,
                 ),
               ),
             ],

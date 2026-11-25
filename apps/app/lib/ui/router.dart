@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../data/services/storage_service.dart';
+import '../data/utils/url_normalizer.dart';
 import 'core/app_shell.dart';
 import 'features/audiobook/audiobook_player_view.dart';
 import 'features/authors/author_detail_view.dart';
@@ -17,9 +18,14 @@ import 'features/topics/topic_detail_view.dart';
 import 'features/upload/uploads_view.dart';
 import 'features/utilities/utilities_view.dart';
 
-GoRouter createRouter({required String initialLocation, StorageService? storageService}) {
+GoRouter createRouter({
+  required String initialLocation,
+  StorageService? storageService,
+  Listenable? refreshListenable,
+}) {
   return GoRouter(
     initialLocation: initialLocation,
+    refreshListenable: refreshListenable,
     redirect: (context, state) {
       if (storageService == null) return null;
       final token = storageService.getAuthToken();
@@ -27,10 +33,21 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
       final isConnect = state.matchedLocation == '/connect';
 
       if (!hasToken && !isConnect) {
+        final safeRedirect = UrlNormalizer.sanitizeSameOriginRedirect(
+          state.uri.toString(),
+        );
+        if (safeRedirect != null &&
+            safeRedirect != '/' &&
+            safeRedirect != '/books') {
+          return '/connect?redirect=${Uri.encodeComponent(safeRedirect)}';
+        }
         return '/connect';
       }
       if (hasToken && isConnect) {
-        return '/books';
+        final safeRedirect = UrlNormalizer.sanitizeSameOriginRedirect(
+          state.uri.queryParameters['redirect'],
+        );
+        return safeRedirect ?? '/books';
       }
       return null;
     },
@@ -154,7 +171,9 @@ GoRouter createRouter({required String initialLocation, StorageService? storageS
           ),
           GoRoute(
             path: '/settings',
-            builder: (context, state) => const SettingsView(),
+            builder: (context, state) => SettingsView(
+              initialPluginName: state.uri.queryParameters['plugin'],
+            ),
           ),
           GoRoute(
             path: '/utilities',

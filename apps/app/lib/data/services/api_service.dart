@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/author.dart';
 import '../models/background_job.dart';
@@ -20,6 +21,7 @@ import '../models/paginated_books.dart';
 import '../models/plugin.dart';
 import '../models/upload_job.dart';
 import '../models/user.dart';
+import '../utils/url_normalizer.dart';
 
 class ApiException implements Exception {
   final int statusCode;
@@ -29,6 +31,104 @@ class ApiException implements Exception {
 
   @override
   String toString() => 'ApiException($statusCode): $message';
+}
+
+class LoginResult {
+  final String token;
+  final String? tokenId;
+  final User? user;
+
+  const LoginResult({
+    required this.token,
+    this.tokenId,
+    this.user,
+  });
+}
+
+class PairingCodeSession {
+  final String code;
+  final DateTime expiresAt;
+
+  const PairingCodeSession({
+    required this.code,
+    required this.expiresAt,
+  });
+
+  factory PairingCodeSession.fromJson(Map<String, dynamic> json) {
+    final rawExpires = json['expires_at']?.toString() ?? '';
+    return PairingCodeSession(
+      code: json['code']?.toString() ?? '',
+      expiresAt: DateTime.tryParse(rawExpires) ??
+          DateTime.now().toUtc().add(const Duration(seconds: 90)),
+    );
+  }
+}
+
+class PairingExchangeResult {
+  final String tokenId;
+  final String name;
+  final String token;
+  final User user;
+
+  const PairingExchangeResult({
+    required this.tokenId,
+    required this.name,
+    required this.token,
+    required this.user,
+  });
+
+  factory PairingExchangeResult.fromJson(Map<String, dynamic> json) {
+    final rawUser = json['user'];
+    final userMap = rawUser is Map<String, dynamic>
+        ? rawUser
+        : const <String, dynamic>{'id': 'current', 'username': 'user', 'role': 'user'};
+    return PairingExchangeResult(
+      tokenId: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      token: json['token']?.toString() ?? '',
+      user: User.fromJson(userMap),
+    );
+  }
+}
+
+class ApiTokenInfo {
+  final String id;
+  final String name;
+  final DateTime? createdAt;
+
+  const ApiTokenInfo({
+    required this.id,
+    required this.name,
+    this.createdAt,
+  });
+
+  factory ApiTokenInfo.fromJson(Map<String, dynamic> json) {
+    final rawCreated = json['created_at']?.toString();
+    return ApiTokenInfo(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      createdAt: rawCreated != null ? DateTime.tryParse(rawCreated) : null,
+    );
+  }
+}
+
+class BookMediaToken {
+  final String token;
+  final DateTime expiresAt;
+
+  const BookMediaToken({
+    required this.token,
+    required this.expiresAt,
+  });
+
+  factory BookMediaToken.fromJson(Map<String, dynamic> json) {
+    final rawExpires = json['expires_at']?.toString() ?? '';
+    return BookMediaToken(
+      token: json['token']?.toString() ?? '',
+      expiresAt: DateTime.tryParse(rawExpires) ??
+          DateTime.now().toUtc().add(const Duration(hours: 2)),
+    );
+  }
 }
 
 sealed class ShelfdEvent {
@@ -81,15 +181,22 @@ class CastDevicesEvent extends ShelfdEvent {
 }
 
 class ApiService {
+  static const Duration defaultAuthTimeout = Duration(seconds: 8);
+
   String baseUrl;
   String? token;
   final http.Client client;
+  final VoidCallback? onUnauthorized;
+  final bool _isWeb;
 
   ApiService({
     required this.baseUrl,
     this.token,
     http.Client? client,
-  }) : client = client ?? http.Client();
+    this.onUnauthorized,
+    bool? isWebOverride,
+  })  : client = client ?? http.Client(),
+        _isWeb = isWebOverride ?? kIsWeb;
 
   void updateConnection({String? newBaseUrl, String? newToken}) {
     if (newBaseUrl != null) {
@@ -102,12 +209,49 @@ class ApiService {
     }
   }
 
+  bool isSameOriginAsServer(String targetUrl) {
+    return UrlNormalizer.isSameOrigin(baseUrl, targetUrl);
+  }
+
   Map<String, String> _headers() {
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       if (token != null && token!.isNotEmpty) 'Authorization': 'Bearer $token',
     };
+  }
+
+  String _extractErrorMessage(String rawBody, int statusCode) {
+    if (rawBody.trim().isEmpty) {
+      return 'HTTP $statusCode';
+    }
+    try {
+      final decoded = jsonDecode(rawBody);
+      if (decoded is Map<String, dynamic> && decoded['error'] != null) {
+        return decoded['error'].toString();
+      }
+    } catch (_) {}
+    return rawBody;
+  }
+
+  void _checkResponse(
+    http.Response response, {
+    bool notifyUnauthorized = true,
+    Set<int> allowStatuses = const <int>{},
+  }) {
+    if (response.statusCode < 400 || allowStatuses.contains(response.statusCode)) {
+      return;
+    }
+    if (notifyUnauthorized &&
+        response.statusCode == 401 &&
+        token != null &&
+        token!.isNotEmpty) {
+      onUnauthorized?.call();
+    }
+    throw ApiException(
+      response.statusCode,
+      _extractErrorMessage(response.body, response.statusCode),
+    );
   }
 
   Uri _uri(String path, [Map<String, dynamic>? queryParameters]) {
@@ -121,37 +265,182 @@ class ApiService {
     return parsed;
   }
 
-  Future<ServerConnectInfo> getConnectInfo() async {
-    final response = await client.get(_uri('/api/v1/server/connect-info'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+  Future<ServerConnectInfo> getConnectInfo({
+    Duration timeout = defaultAuthTimeout,
+  }) async {
+    final response = await client
+        .get(_uri('/api/v1/server/connect-info'), headers: _headers())
+        .timeout(timeout);
+    _checkResponse(response, notifyUnauthorized: false);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return ServerConnectInfo.fromJson(data);
   }
 
-  Future<String> login(String username, String password) async {
-    final response = await client.post(
-      _uri('/api/v1/auth/login'),
-      headers: _headers(),
-      body: jsonEncode({'username': username, 'password': password}),
-    );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+  Future<LoginResult> loginWithDevice(
+    String username,
+    String password, {
+    String? deviceName,
+    Duration timeout = defaultAuthTimeout,
+  }) async {
+    final trimmedDevice = deviceName?.trim();
+    final response = await client
+        .post(
+          _uri('/api/v1/auth/login'),
+          headers: _headers(),
+          body: jsonEncode({
+            'username': username,
+            'password': password,
+            if (trimmedDevice != null && trimmedDevice.isNotEmpty)
+              'device_name': trimmedDevice,
+          }),
+        )
+        .timeout(timeout);
+    _checkResponse(response, notifyUnauthorized: false);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    final token = data['token'] as String? ?? '';
-    this.token = token;
-    return token;
+    final apiToken = data['api_token']?.toString();
+    final jwtToken = data['token']?.toString();
+    final resolvedToken =
+        (apiToken != null && apiToken.isNotEmpty) ? apiToken : (jwtToken ?? '');
+    final rawTokenId = data['api_token_id']?.toString();
+    final rawUser = data['user'];
+    final parsedUser =
+        rawUser is Map<String, dynamic> ? User.fromJson(rawUser) : null;
+    token = resolvedToken;
+    return LoginResult(
+      token: resolvedToken,
+      tokenId: (rawTokenId != null && rawTokenId.isNotEmpty) ? rawTokenId : null,
+      user: parsedUser,
+    );
+  }
+
+  Future<String> login(
+    String username,
+    String password, {
+    String? deviceName,
+    Duration timeout = defaultAuthTimeout,
+  }) async {
+    final result = await loginWithDevice(
+      username,
+      password,
+      deviceName: deviceName,
+      timeout: timeout,
+    );
+    return result.token;
+  }
+
+  Future<PairingCodeSession> beginPairing({
+    Duration timeout = defaultAuthTimeout,
+  }) async {
+    final response = await client
+        .post(
+          _uri('/api/v1/auth/pair/begin'),
+          headers: _headers(),
+          body: jsonEncode(const <String, dynamic>{}),
+        )
+        .timeout(timeout);
+    _checkResponse(response);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return PairingCodeSession.fromJson(data);
+  }
+
+  Future<PairingExchangeResult> exchangePairing(
+    String code, {
+    required String deviceName,
+    Duration timeout = defaultAuthTimeout,
+  }) async {
+    final response = await client
+        .post(
+          _uri('/api/v1/auth/pair/exchange'),
+          headers: _headers(),
+          body: jsonEncode({
+            'code': code.trim(),
+            'device_name': deviceName.trim(),
+          }),
+        )
+        .timeout(timeout);
+    _checkResponse(response, notifyUnauthorized: false);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final result = PairingExchangeResult.fromJson(data);
+    token = result.token;
+    return result;
+  }
+
+  Future<({String id, String name, String token})> createApiToken(
+    String name,
+  ) async {
+    final response = await client.post(
+      _uri('/api/v1/auth/tokens'),
+      headers: _headers(),
+      body: jsonEncode({'name': name.trim()}),
+    );
+    _checkResponse(response);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return (
+      id: data['id']?.toString() ?? '',
+      name: data['name']?.toString() ?? '',
+      token: data['token']?.toString() ?? '',
+    );
+  }
+
+  Future<List<ApiTokenInfo>> listApiTokens() async {
+    final response = await client.get(
+      _uri('/api/v1/auth/tokens'),
+      headers: _headers(),
+    );
+    _checkResponse(response);
+    final decoded = jsonDecode(response.body);
+    final List<dynamic> items;
+    if (decoded is Map<String, dynamic>) {
+      items = decoded['tokens'] as List<dynamic>? ?? const [];
+    } else if (decoded is List<dynamic>) {
+      items = decoded;
+    } else {
+      items = const [];
+    }
+    return items
+        .whereType<Map>()
+        .map((e) => ApiTokenInfo.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  Future<void> deleteApiToken(
+    String tokenId, {
+    Duration timeout = const Duration(seconds: 3),
+    bool notifyUnauthorized = true,
+  }) async {
+    final encoded = Uri.encodeComponent(tokenId);
+    final response = await client
+        .delete(
+          _uri('/api/v1/auth/tokens/$encoded'),
+          headers: _headers(),
+        )
+        .timeout(timeout);
+    _checkResponse(
+      response,
+      notifyUnauthorized: notifyUnauthorized,
+      allowStatuses: const <int>{404},
+    );
+  }
+
+  Future<BookMediaToken> mintBookMediaToken(String bookId) async {
+    final encoded = Uri.encodeComponent(bookId);
+    final response = await client.post(
+      _uri('/api/v1/books/$encoded/media-token'),
+      headers: _headers(),
+      body: jsonEncode(const <String, dynamic>{}),
+    );
+    _checkResponse(response);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return BookMediaToken.fromJson(data);
   }
 
   Future<User> getMe() async {
     final response = await client.get(_uri('/api/v1/auth/me'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return User.fromJson(data);
+    final userPayload =
+        data['user'] is Map<String, dynamic> ? data['user'] as Map<String, dynamic> : data;
+    return User.fromJson(userPayload);
   }
 
   Future<void> changePassword(String currentPassword, String newPassword) async {
@@ -163,16 +452,7 @@ class ApiService {
         'new_password': newPassword,
       }),
     );
-    if (response.statusCode >= 400) {
-      String errorMessage = response.body;
-      try {
-        final decoded = jsonDecode(response.body);
-        if (decoded is Map<String, dynamic> && decoded.containsKey('error')) {
-          errorMessage = decoded['error'].toString();
-        }
-      } catch (_) {}
-      throw ApiException(response.statusCode, errorMessage);
-    }
+    _checkResponse(response, notifyUnauthorized: false);
   }
 
   Future<PaginatedBooks> getBooksPage({
@@ -203,9 +483,7 @@ class ApiService {
     };
 
     final response = await client.get(_uri('/api/v1/books', params), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final body = jsonDecode(response.body);
     List<dynamic> data = [];
     int total = 0;
@@ -265,31 +543,27 @@ class ApiService {
 
   Future<Book> getBook(String id) async {
     final response = await client.get(_uri('/api/v1/books/$id'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return Book.fromJson(data, baseUrl: baseUrl);
   }
 
   Future<ReadalongManifest> getBookReadalong(String id) async {
     final response = await client.get(_uri('/api/v1/books/$id/readalong'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return ReadalongManifest.fromJson(data);
   }
 
   String getAudioStreamUrl(String bookId) {
-    if (token != null && token!.isNotEmpty) {
+    if (_isWeb && token != null && token!.isNotEmpty) {
       return _uri('/api/v1/audiobooks/$bookId/stream', {'token': token!}).toString();
     }
     return _uri('/api/v1/audiobooks/$bookId/stream').toString();
   }
 
   String getBookFileStreamUrl(String bookId, String fileId) {
-    if (token != null && token!.isNotEmpty) {
+    if (_isWeb && token != null && token!.isNotEmpty) {
       return _uri('/api/v1/books/$bookId/files/$fileId/stream', {'token': token!}).toString();
     }
     return _uri('/api/v1/books/$bookId/files/$fileId/stream').toString();
@@ -297,18 +571,14 @@ class ApiService {
 
   Future<List<AudioChapter>> getAudioChapters(String bookId) async {
     final response = await client.get(_uri('/api/v1/audiobooks/$bookId/chapters'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as List<dynamic>? ?? [];
     return data.whereType<Map<String, dynamic>>().map((c) => AudioChapter.fromJson(c)).toList();
   }
 
   Future<AudiobookProgress> getAudiobookProgress(String bookId) async {
     final response = await client.get(_uri('/api/v1/audiobooks/$bookId/progress'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return AudiobookProgress.fromJson(data);
   }
@@ -328,22 +598,18 @@ class ApiService {
         'is_completed': isCompleted,
       }),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return AudiobookProgress.fromJson(data);
   }
 
   Future<void> deleteAudiobookProgress(String bookId) async {
     final response = await client.delete(_uri('/api/v1/audiobooks/$bookId/progress'), headers: _headers());
-    if (response.statusCode >= 400 && response.statusCode != 404) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response, allowStatuses: const <int>{404});
   }
 
   String getBookDownloadUrl(String bookId) {
-    if (token != null && token!.isNotEmpty) {
+    if (_isWeb && token != null && token!.isNotEmpty) {
       return _uri('/api/v1/books/$bookId/download', {'token': token!}).toString();
     }
     return _uri('/api/v1/books/$bookId/download').toString();
@@ -354,14 +620,12 @@ class ApiService {
       _uri('/api/v1/books/$bookId/download'),
       headers: _headers(),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     return response.bodyBytes;
   }
 
   String getBookMarkdownUrl(String bookId) {
-    if (token != null && token!.isNotEmpty) {
+    if (_isWeb && token != null && token!.isNotEmpty) {
       return _uri('/api/v1/books/$bookId/markdown', {'token': token!}).toString();
     }
     return _uri('/api/v1/books/$bookId/markdown').toString();
@@ -372,9 +636,7 @@ class ApiService {
       _uri('/api/v1/books/$bookId/markdown'),
       headers: _headers(),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     return response.bodyBytes;
   }
 
@@ -384,9 +646,7 @@ class ApiService {
       _uri(normalizedPath),
       headers: _headers(),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     return response.bodyBytes;
   }
 
@@ -395,9 +655,7 @@ class ApiService {
       _uri('/api/v1/books/$bookId/chapters/$chapterIdentifier'),
       headers: _headers(),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return Chapter.fromJson(data);
   }
@@ -411,17 +669,13 @@ class ApiService {
       _uri('/api/v1/books/$bookId/chapters/$chapterIdentifier/html'),
       headers: _headers(),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     return response.body;
   }
 
   Future<List<Author>> getAuthors() async {
     final response = await client.get(_uri('/api/v1/authors'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final body = jsonDecode(response.body);
     List<dynamic> data = [];
     if (body is Map<String, dynamic>) {
@@ -437,9 +691,7 @@ class ApiService {
 
   Future<List<Genre>> getGenres() async {
     final response = await client.get(_uri('/api/v1/genres'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final body = jsonDecode(response.body);
     List<dynamic> data = [];
     if (body is Map<String, dynamic>) {
@@ -455,9 +707,7 @@ class ApiService {
 
   Future<List<Topic>> getTopics() async {
     final response = await client.get(_uri('/api/v1/topics'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final body = jsonDecode(response.body);
     List<dynamic> data = [];
     if (body is Map<String, dynamic>) {
@@ -473,9 +723,7 @@ class ApiService {
 
   Future<List<Series>> getSeries() async {
     final response = await client.get(_uri('/api/v1/series'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final body = jsonDecode(response.body);
     List<dynamic> data = [];
     if (body is Map<String, dynamic>) {
@@ -501,18 +749,14 @@ class ApiService {
     };
 
     final response = await client.get(_uri('/api/v1/search', params), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as List<dynamic>? ?? [];
     return data.map((h) => SemanticSearchHit.fromJson(h as Map<String, dynamic>)).toList();
   }
 
   Future<BackgroundJob?> triggerLibraryScan() async {
     final response = await client.post(_uri('/api/v1/library/scan'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     if (response.body.trim().isEmpty) return null;
     try {
       final decoded = jsonDecode(response.body);
@@ -527,9 +771,7 @@ class ApiService {
 
   Future<QueueStatus> getQueueStatus() async {
     final response = await client.get(_uri('/api/v1/queue/status'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return QueueStatus.fromJson(data);
   }
@@ -545,9 +787,14 @@ class ApiService {
     final response = await client.send(request);
     if (response.statusCode >= 400) {
       final body = await response.stream.bytesToString();
+      if (response.statusCode == 401 && token != null && token!.isNotEmpty) {
+        onUnauthorized?.call();
+      }
       throw ApiException(
         response.statusCode,
-        body.isNotEmpty ? body : 'Failed to connect to queue events stream',
+        body.isNotEmpty
+            ? _extractErrorMessage(body, response.statusCode)
+            : 'Failed to connect to queue events stream',
       );
     }
 
@@ -636,18 +883,14 @@ class ApiService {
         if (chapterId != null && chapterId.isNotEmpty) 'chapter_id': chapterId,
       }),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return Bookmark.fromJson(data);
   }
 
   Future<List<Bookmark>> getBookmarks(String bookId) async {
     final response = await client.get(_uri('/api/v1/books/$bookId/bookmarks'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as List<dynamic>? ?? [];
     return data.whereType<Map<String, dynamic>>().map((b) => Bookmark.fromJson(b)).toList();
   }
@@ -657,9 +900,7 @@ class ApiService {
         ? '/api/v1/books/$bookId/bookmarks/$bookmarkId'
         : '/api/v1/bookmarks/$bookmarkId';
     final response = await client.delete(_uri(path), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
   }
 
   Future<Highlight> createHighlight(
@@ -689,18 +930,14 @@ class ApiService {
         if (location != null && location.isNotEmpty) 'location': location,
       }),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return Highlight.fromJson(data);
   }
 
   Future<List<Highlight>> getHighlights(String bookId) async {
     final response = await client.get(_uri('/api/v1/books/$bookId/highlights'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as List<dynamic>? ?? [];
     return data.whereType<Map<String, dynamic>>().map((h) => Highlight.fromJson(h)).toList();
   }
@@ -710,9 +947,7 @@ class ApiService {
         ? '/api/v1/books/$bookId/highlights/$highlightId'
         : '/api/v1/highlights/$highlightId';
     final response = await client.delete(_uri(path), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
   }
 
   Future<BookChatResponse> chatWithBook(
@@ -728,9 +963,7 @@ class ApiService {
         if (history != null && history.isNotEmpty) 'history': history,
       }),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return BookChatResponse.fromJson(data);
   }
@@ -741,7 +974,7 @@ class ApiService {
     if (version != null) {
       params.add('v=$version');
     }
-    if (token != null && token!.isNotEmpty) {
+    if (_isWeb && token != null && token!.isNotEmpty) {
       params.add('token=$token');
     }
     final queryString = params.isNotEmpty ? '?${params.join('&')}' : '';
@@ -768,9 +1001,7 @@ class ApiService {
 
     final streamedResponse = await client.send(request);
     final response = await http.Response.fromStream(streamedResponse);
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
   }
 
   Future<StagedUploadJob> stageUploadBook({
@@ -803,9 +1034,7 @@ class ApiService {
 
     final streamedResponse = await client.send(request);
     final response = await http.Response.fromStream(streamedResponse);
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return StagedUploadJob.fromJson(data);
   }
@@ -816,9 +1045,7 @@ class ApiService {
       headers: _headers(),
       body: jsonEncode(metadata.toJson()),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return Book.fromJson(data, baseUrl: baseUrl);
   }
@@ -828,9 +1055,7 @@ class ApiService {
       _uri('/api/v1/books/upload/jobs?status=staged'),
       headers: _headers(),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final jobsList = data['jobs'] as List<dynamic>? ?? [];
     return jobsList
@@ -843,9 +1068,7 @@ class ApiService {
       _uri('/api/v1/books/upload/jobs/$jobId'),
       headers: _headers(),
     );
-    if (response.statusCode >= 400 && response.statusCode != 404) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response, allowStatuses: const <int>{404});
   }
 
   Future<Book> updateBookMetadata(
@@ -875,9 +1098,7 @@ class ApiService {
         if (topics != null) 'topics': topics,
       }),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return Book.fromJson(data, baseUrl: baseUrl);
   }
@@ -902,9 +1123,7 @@ class ApiService {
 
     final streamedResponse = await client.send(request);
     final response = await http.Response.fromStream(streamedResponse);
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
   }
 
   Future<DuplicateScanResult> getDuplicateBooks() async {
@@ -912,9 +1131,7 @@ class ApiService {
       _uri('/api/v1/utilities/duplicates'),
       headers: _headers(),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return DuplicateScanResult.fromJson(data);
   }
@@ -933,9 +1150,7 @@ class ApiService {
         if (options != null) 'options': options.toJson(),
       }),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final bookData = data['book'] as Map<String, dynamic>? ?? data;
     return Book.fromJson(bookData, baseUrl: baseUrl);
@@ -959,9 +1174,7 @@ class ApiService {
       _uri('/api/v1/metadata/search', queryParams.isNotEmpty ? queryParams : null),
       headers: _headers(),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final list = jsonDecode(response.body) as List<dynamic>;
     return list
         .map((item) => MetadataSearchResult.fromJson(item as Map<String, dynamic>))
@@ -974,9 +1187,7 @@ class ApiService {
       headers: _headers(),
       body: jsonEncode({'cover_url': coverUrl}),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
   }
 
   Future<void> fetchJobCoverFromUrl(String jobId, String coverUrl) async {
@@ -985,21 +1196,16 @@ class ApiService {
       headers: _headers(),
       body: jsonEncode({'cover_url': coverUrl}),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
   }
 
   // Plugin Management, Storefront Catalog, Auth & Declarative Actions Endpoints
   Never _throwPluginError(http.Response response) {
-    String message = response.body;
-    try {
-      final decoded = jsonDecode(response.body);
-      if (decoded is Map<String, dynamic> && decoded['error'] != null) {
-        message = decoded['error'].toString();
-      }
-    } catch (_) {}
-    throw ApiException(response.statusCode, message);
+    _checkResponse(response);
+    throw ApiException(
+      response.statusCode,
+      _extractErrorMessage(response.body, response.statusCode),
+    );
   }
 
   Future<List<PluginSummary>> getPlugins() async {
@@ -1429,9 +1635,7 @@ class ApiService {
       _uri('/api/v1/jobs'),
       headers: _headers(),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final decoded = jsonDecode(response.body);
     final List<dynamic> list;
     if (decoded is Map<String, dynamic>) {
@@ -1453,9 +1657,7 @@ class ApiService {
       _uri('/api/v1/jobs/$encoded'),
       headers: _headers(),
     );
-    if (response.statusCode >= 400 && response.statusCode != 404) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response, allowStatuses: const <int>{404});
   }
 
   Future<void> clearFinishedBackgroundJobs() async {
@@ -1463,17 +1665,13 @@ class ApiService {
       _uri('/api/v1/jobs'),
       headers: _headers(),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
   }
 
   Future<List<CastDevice>> getCastDevices({bool refresh = false}) async {
     final path = refresh ? '/api/v1/cast/devices?refresh=true' : '/api/v1/cast/devices';
     final response = await client.get(_uri(path), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final map = jsonDecode(response.body) as Map<String, dynamic>;
     final list = (map['devices'] as List?) ?? const [];
     return list
@@ -1484,9 +1682,7 @@ class ApiService {
 
   Future<CastSessionSnapshot?> getCastSession() async {
     final response = await client.get(_uri('/api/v1/cast/session'), headers: _headers());
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final map = jsonDecode(response.body) as Map<String, dynamic>;
     final raw = map['session'];
     if (raw is! Map) return null;
@@ -1514,9 +1710,7 @@ class ApiService {
       headers: _headers(),
       body: jsonEncode(payload),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final map = jsonDecode(response.body) as Map<String, dynamic>;
     return CastSessionSnapshot.fromJson(
       Map<String, dynamic>.from(map['session'] as Map),
@@ -1544,9 +1738,7 @@ class ApiService {
       headers: _headers(),
       body: jsonEncode(payload),
     );
-    if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response);
     final map = jsonDecode(response.body) as Map<String, dynamic>;
     final raw = map['session'];
     if (raw is! Map) return null;
@@ -1558,8 +1750,6 @@ class ApiService {
       _uri('/api/v1/cast/session'),
       headers: _headers(),
     );
-    if (response.statusCode >= 400 && response.statusCode != 404) {
-      throw ApiException(response.statusCode, response.body);
-    }
+    _checkResponse(response, allowStatuses: const <int>{404});
   }
 }

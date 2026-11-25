@@ -4,20 +4,25 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Dry run (simulate release without publishing tag, release, or container)'
+        description: 'Dry run (simulate release without publishing tag, release, container, or Play bundle)'
         type: boolean
         default: false
+      release_tag:
+        description: 'Existing vX.Y.Z git tag to retry/rollback on Google Play (skips semantic-release)'
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.ref }}-${{ inputs.release_tag }}
   cancel-in-progress: false
 
 jobs:
   release:
     name: Verify & Cut Release
+    if: ${{ inputs.release_tag == '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -291,3 +296,182 @@ jobs:
           VERSION: ${{ needs.release.outputs.new_release_version }}
         run: |
           docker buildx imagetools inspect "${IMAGE}:${VERSION}"
+
+  publish-android:
+    name: Publish Android App Bundle (Internal)
+    needs: release
+    if: ${{ always() && !cancelled() && ((needs.release.result == 'success' && needs.release.outputs.new_release_published == 'true') || (needs.release.result == 'skipped' && inputs.release_tag != '')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Resolve target version and ref
+        id: target
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          SEMANTIC_VERSION: ${{ needs.release.outputs.new_release_version }}
+          IS_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_RELEASE_TAG}" ]; then
+            if [[ ! "${INPUT_RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Invalid release_tag '${INPUT_RELEASE_TAG}'. Expected format vX.Y.Z." >&2
+              exit 1
+            fi
+            VERSION="${INPUT_RELEASE_TAG#v}"
+            CHECKOUT_REF="refs/tags/${INPUT_RELEASE_TAG}"
+          else
+            VERSION="${SEMANTIC_VERSION}"
+            if [[ ! "v${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Invalid semantic version '${VERSION}'." >&2
+              exit 1
+            fi
+            if [ "${IS_DRY_RUN}" = "true" ]; then
+              CHECKOUT_REF="${GITHUB_SHA}"
+            else
+              CHECKOUT_REF="refs/tags/v${VERSION}"
+            fi
+          fi
+          # Note: github.run_number is scoped to .github/workflows/release.yml.
+          # If this workflow file is ever renamed, raise the 100000 base offset.
+          BUILD_NUMBER=$((100000 + GITHUB_RUN_NUMBER))
+          if [ "${BUILD_NUMBER}" -le 100000 ]; then
+            echo "Computed BUILD_NUMBER (${BUILD_NUMBER}) must exceed 100000." >&2
+            exit 1
+          fi
+          {
+            echo "version=${VERSION}"
+            echo "checkout_ref=${CHECKOUT_REF}"
+            echo "build_number=${BUILD_NUMBER}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout target release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.checkout_ref }}
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Prepare Android signing keystore
+        id: keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          IS_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          KEYSTORE_FILE="${RUNNER_TEMP}/upload-keystore.jks"
+          if [ -n "${ANDROID_KEYSTORE_BASE64}" ]; then
+            printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${KEYSTORE_FILE}"
+            echo "keystore_path=${KEYSTORE_FILE}" >> "${GITHUB_OUTPUT}"
+            echo "ephemeral=false" >> "${GITHUB_OUTPUT}"
+          elif [ "${IS_DRY_RUN}" = "true" ]; then
+            keytool -genkeypair \
+              -keystore "${KEYSTORE_FILE}" \
+              -storetype JKS \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 1 \
+              -alias dryrun \
+              -storepass dryrunpass \
+              -keypass dryrunpass \
+              -dname "CN=Shelfd Dry Run,O=Shelfd,C=US"
+            echo "keystore_path=${KEYSTORE_FILE}" >> "${GITHUB_OUTPUT}"
+            echo "ephemeral=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Missing ANDROID_KEYSTORE_BASE64 secret for Android release build." >&2
+            exit 1
+          fi
+          if [ "${IS_DRY_RUN}" != "true" ] && [ -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON}" ]; then
+            echo "Missing GOOGLE_PLAY_SERVICE_ACCOUNT_JSON secret for Google Play upload." >&2
+            exit 1
+          fi
+
+      - name: Resolve Flutter dependencies
+        working-directory: apps/app
+        run: flutter pub get
+
+      - name: Build signed Android App Bundle
+        working-directory: apps/app
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.keystore.outputs.keystore_path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ steps.keystore.outputs.ephemeral == 'true' && 'dryrunpass' || secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ steps.keystore.outputs.ephemeral == 'true' && 'dryrun' || secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ steps.keystore.outputs.ephemeral == 'true' && 'dryrunpass' || secrets.ANDROID_KEY_PASSWORD }}
+          VERSION: ${{ steps.target.outputs.version }}
+          BUILD_NUMBER: ${{ steps.target.outputs.build_number }}
+        run: |
+          flutter build appbundle --release \
+            --build-name="${VERSION}" \
+            --build-number="${BUILD_NUMBER}"
+
+      - name: Verify merged manifest permissions and 16 KB ELF alignment
+        run: |
+          set -euo pipefail
+          MANIFEST="apps/app/build/app/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml"
+          test -f "${MANIFEST}"
+          if grep -q 'android.permission.CAMERA' "${MANIFEST}"; then
+            echo "Merged release AndroidManifest.xml unexpectedly contains android.permission.CAMERA" >&2
+            exit 1
+          fi
+          AAB="apps/app/build/app/outputs/bundle/release/app-release.aab"
+          test -f "${AAB}"
+          EXTRACT_DIR="$(mktemp -d)"
+          unzip -q "${AAB}" 'base/lib/arm64-v8a/*.so' 'base/lib/x86_64/*.so' -d "${EXTRACT_DIR}"
+          SO_COUNT=0
+          while IFS= read -r -d '' so_file; do
+            SO_COUNT=$((SO_COUNT + 1))
+            while IFS= read -r align_hex; do
+              align_val=$((align_hex))
+              if [ "${align_val}" -lt $((0x4000)) ]; then
+                echo "Library ${so_file} has LOAD alignment ${align_hex} (< 0x4000)" >&2
+                exit 1
+              fi
+            done < <(readelf -lW "${so_file}" | awk '$1 == "LOAD" { print $NF }')
+          done < <(find "${EXTRACT_DIR}/base/lib" -name '*.so' -print0)
+          rm -rf "${EXTRACT_DIR}"
+          if [ "${SO_COUNT}" -eq 0 ]; then
+            echo "No native .so libraries found in ${AAB}" >&2
+            exit 1
+          fi
+
+      - name: Upload Android App Bundle and R8 mapping artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: shelfd-android-v${{ steps.target.outputs.version }}-${{ steps.target.outputs.build_number }}
+          path: |
+            apps/app/build/app/outputs/bundle/release/app-release.aab
+            apps/app/build/app/outputs/mapping/release/mapping.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload to Google Play internal track
+        if: ${{ !inputs.dry_run }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.justwriteapps.shelfd
+          releaseFiles: apps/app/build/app/outputs/bundle/release/app-release.aab
+          mappingFile: apps/app/build/app/outputs/mapping/release/mapping.txt
+          track: internal
+          status: completed
+
+      - name: Clean temporary keystore
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/upload-keystore.jks"

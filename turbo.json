@@ -49,6 +49,20 @@
         "build/web/**"
       ]
     },
+    "@shelfd/app#build:aab": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "lib/**",
+        "android/**",
+        "assets/**",
+        "fonts/**",
+        "pubspec.yaml",
+        "pubspec.lock"
+      ],
+      "outputs": [
+        "build/app/outputs/bundle/**"
+      ]
+    },
     "test": {
       "inputs": [
         "$TURBO_DEFAULT$",
@@ -59,6 +73,9 @@
         "test/**",
         "pubspec.yaml"
       ]
+    },
+    "@shelfd/app#test:live": {
+      "cache": false
     },
     "@shelfd/plugin-sdk#test": {
       "dependsOn": ["build"]

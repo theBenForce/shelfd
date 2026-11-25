@@ -103,21 +103,31 @@ class Book {
     if (json['series'] is List && (json['series'] as List).isNotEmpty) {
       final firstSeries = (json['series'] as List).first;
       if (firstSeries is Map<String, dynamic>) {
-        seriesObj = Series.fromJson(firstSeries);
+        seriesObj = Series.fromJson(firstSeries, baseUrl: baseUrl);
         seqNum = (firstSeries['sequence_number'] as num?)?.toDouble();
       }
     } else if (json['series'] is Map<String, dynamic>) {
-      seriesObj = Series.fromJson(json['series'] as Map<String, dynamic>);
+      seriesObj = Series.fromJson(
+        json['series'] as Map<String, dynamic>,
+        baseUrl: baseUrl,
+      );
       seqNum = (json['series_sequence'] as num?)?.toDouble();
     }
 
     final id = json['id'] as String? ?? '';
+    final cleanBase = (baseUrl != null && baseUrl.isNotEmpty)
+        ? (baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl)
+        : '';
     String? cover = json['cover_url'] as String?;
-    if (cover == null && json['cover_path'] != null) {
-      final cleanBase = (baseUrl != null && baseUrl.isNotEmpty)
-          ? (baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl)
-          : '';
-      cover = cleanBase.isNotEmpty ? '$cleanBase/api/v1/books/$id/cover' : '/api/v1/books/$id/cover';
+    if (cover != null &&
+        cover.startsWith('/') &&
+        !cover.startsWith('//') &&
+        cleanBase.isNotEmpty) {
+      cover = '$cleanBase$cover';
+    } else if (cover == null && json['cover_path'] != null) {
+      cover = cleanBase.isNotEmpty
+          ? '$cleanBase/api/v1/books/$id/cover'
+          : '/api/v1/books/$id/cover';
     }
 
     final durationSec = (json['duration_seconds'] as num?)?.toDouble();
@@ -139,7 +149,7 @@ class Book {
       coverUrl: cover,
       authors: rawAuthors
           .whereType<Map<String, dynamic>>()
-          .map((a) => Author.fromJson(a))
+          .map((a) => Author.fromJson(a, baseUrl: baseUrl))
           .toList(),
       genres: rawGenres
           .whereType<Map<String, dynamic>>()
