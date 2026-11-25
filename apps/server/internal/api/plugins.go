@@ -80,7 +80,12 @@ func (h *PluginHandler) installOrUpdatePlugin(w http.ResponseWriter, r *http.Req
 		writeJSONError(w, http.StatusServiceUnavailable, "Plugin host is not configured")
 		return
 	}
-	if err := r.ParseMultipartForm(55 << 20); err != nil {
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse multipart form: %v", err))
 		return
 	}
@@ -565,6 +570,11 @@ func (h *PluginHandler) UploadActionAsset(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	if err := r.ParseMultipartForm(maxPluginActionAssetBytes + (1 << 20)); err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse multipart form: %v", err))
 		return

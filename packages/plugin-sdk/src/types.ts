@@ -347,8 +347,7 @@ export interface MetadataDefaults {
   narrator?: string;
 }
 
-export interface StageBookInput {
-  data: Uint8Array | ArrayBuffer | Blob;
+export interface StageBookCommonInput {
   filename: string;
   mimeType?: string;
   externalId?: string;
@@ -359,6 +358,16 @@ export interface StageBookInput {
   };
   metadataDefaults?: MetadataDefaults;
 }
+
+export type StageBookInput =
+  | (StageBookCommonInput & {
+      data: Uint8Array | ArrayBuffer | Blob;
+      filePath?: never;
+    })
+  | (StageBookCommonInput & {
+      filePath: string;
+      data?: never;
+    });
 
 export interface StageBookResponse {
   job_id: string;

@@ -119,6 +119,11 @@ func (h *TaxonomyHandler) UploadAuthorPhoto(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "Invalid form: max 10MB photo")
 		return
@@ -148,7 +153,7 @@ func (h *TaxonomyHandler) UploadAuthorPhoto(w http.ResponseWriter, r *http.Reque
 	}
 	defer outFile.Close()
 
-	if _, err := io.Copy(outFile, file); err != nil {
+	if _, err := io.Copy(outFile, io.LimitReader(file, 10<<20)); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to write author photo")
 		return
 	}
