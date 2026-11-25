@@ -767,3 +767,140 @@ definePlugin({
 });
 
 
+
+test("stageBook refreshes the token when the server closes the socket mid-upload (early 401 regression)", async () => {
+  const { spawn } = await import("node:child_process");
+  const http = await import("node:http");
+  const readline = await import("node:readline");
+
+  const tmpPluginDir = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-early-close-"));
+  const seenAuths = [];
+  let acceptedAuth = "";
+
+  // Server behavior: on an expired token it rejects immediately by destroying the
+  // socket without reading or draining the request body — the exact production
+  // failure mode that made fetch() throw instead of returning a 401 Response.
+  const mockStageServer = http.createServer((req, res) => {
+    const auth = req.headers.authorization ?? "";
+    seenAuths.push(auth);
+    if (auth === "Bearer expired-early-close-tok") {
+      req.socket.destroy();
+      return;
+    }
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      acceptedAuth = auth;
+      res.writeHead(201, { "content-type": "application/json" });
+      res.end(JSON.stringify({ job_id: "upload-job-early-close", status: "staged", filename: "big.m4b" }));
+    });
+  });
+
+  await new Promise((resolve) => mockStageServer.listen(0, "127.0.0.1", resolve));
+  const addr = mockStageServer.address();
+  const apiBase = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+
+  try {
+    fs.mkdirSync(path.join(tmpPluginDir, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpPluginDir, "plugin.json"),
+      JSON.stringify({
+        name: "early-close-fixture",
+        version: "1.0.0",
+        entrypoint: { command: "node", args: ["dist/index.mjs"] },
+        capabilities: ["catalog"],
+        catalog_modes: ["browse"],
+        api_scopes: ["uploads:stage"],
+      })
+    );
+    // Large payload so the client is still streaming the body when the socket dies.
+    fs.writeFileSync(
+      path.join(tmpPluginDir, "src", "index.ts"),
+      `import { definePlugin } from "@shelfd/plugin-sdk";
+definePlugin({
+  name: "early-close-fixture",
+  version: "1.0.0",
+  catalog: {
+    async browse() { return { items: [] }; },
+    async stage(req, ctx) {
+      const data = new Uint8Array(8 * 1024 * 1024);
+      data.fill(7);
+      const staged = await ctx.stageBook({
+        data,
+        filename: "big.m4b",
+        externalId: req.items[0].external_id,
+      });
+      return { results: [{ external_id: req.items[0].external_id, upload_job_id: staged.job_id, status: "staged" }] };
+    },
+  },
+});
+`
+    );
+
+    const built = await buildPlugin(tmpPluginDir);
+    const child = spawn(process.execPath, [built.outFile], {
+      cwd: tmpPluginDir,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const pending = new Map();
+    let refreshCount = 0;
+
+    const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+    rl.on("line", (line) => {
+      if (!line.trim()) return;
+      const msg = JSON.parse(line);
+      if (msg.method === "host/refresh_token" && msg.id !== undefined) {
+        refreshCount += 1;
+        child.stdin.write(
+          `${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { invocation_token: "fresh-early-close-tok" } })}\n`
+        );
+        return;
+      }
+      if (msg.id !== undefined && pending.has(String(msg.id))) {
+        const resolve = pending.get(String(msg.id));
+        pending.delete(String(msg.id));
+        resolve(msg);
+      }
+    });
+
+    let seq = 0;
+    const callRpc = (method, params) => {
+      seq += 1;
+      const id = String(seq);
+      return new Promise((resolve) => {
+        pending.set(id, resolve);
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+      });
+    };
+
+    await callRpc("initialize", {
+      protocol_version: "2026-11-01",
+      shelfd_version: "0.1.0",
+      api_base: apiBase,
+      data_dir: tmpPluginDir,
+    });
+
+    const stageRes = await callRpc("catalog/stage", {
+      job_id: "pjob-early-close",
+      items: [{ external_id: "ext-9", title: "Odyssey" }],
+      auth: {
+        user_id: "u-stage",
+        invocation_token: "expired-early-close-tok",
+        api_base: apiBase,
+        config: {},
+      },
+    });
+
+    assert.equal(stageRes.result.results[0].status, "staged");
+    assert.equal(stageRes.result.results[0].upload_job_id, "upload-job-early-close");
+    assert.deepEqual(seenAuths, ["Bearer expired-early-close-tok", "Bearer fresh-early-close-tok"]);
+    assert.equal(acceptedAuth, "Bearer fresh-early-close-tok");
+    assert.equal(refreshCount, 1);
+
+    await callRpc("shutdown", {});
+  } finally {
+    mockStageServer.close();
+    fs.rmSync(tmpPluginDir, { recursive: true, force: true });
+  }
+});

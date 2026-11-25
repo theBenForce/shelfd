@@ -29,6 +29,38 @@ export * from "./types.ts";
 
 const MAX_NOTIFICATION_BYTES = 62 * 1024;
 
+/** Safety margin (ms) before JWT expiry at which we proactively refresh the invocation token. */
+const PROACTIVE_REFRESH_MARGIN_MS = 60_000;
+
+/**
+ * Decode a JWT `exp` claim and report whether it is already past, or within `marginMs` of, now.
+ * Non-JWT tokens return false (the server remains the authority on validity).
+ */
+export const jwtExpiresWithinMs = (token: string, marginMs: number): boolean => {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as { exp?: unknown };
+    if (typeof payload?.exp !== "number") return false;
+    return payload.exp * 1000 - Date.now() <= marginMs;
+  } catch {
+    return false;
+  }
+};
+
+/** Human-readable description of an error including its cause chain (e.g. fetch/undici socket errors). */
+export const describeError = (err: unknown): string => {
+  if (!(err instanceof Error)) return String(err);
+  const cause = err.cause as { code?: unknown; message?: unknown } | undefined;
+  if (cause && typeof cause === "object") {
+    const code = typeof cause.code === "string" ? cause.code : undefined;
+    const msg = cause.message !== undefined ? String(cause.message) : undefined;
+    const detail = [code, msg].filter(Boolean).join(": ");
+    return detail ? `${err.message} (${detail})` : err.message;
+  }
+  return err.message;
+};
+
 /**
  * Thrown by plugin handlers when storefront credentials are missing, expired, or rejected (HTTP 401/403).
  * Maps to JSON-RPC error code -32001 so Shelfd surfaces an actionable re-authentication prompt.
@@ -317,6 +349,17 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
      * both the 401 and why recovery was impossible, so the Shelfd jobs UI shows an
      * actionable reason instead of a bare "HTTP 401".
      */
+    /**
+     * Proactively refresh the invocation token when it is expired or within the safety margin,
+     * so long uploads start with a token that will still be valid when the body lands.
+     */
+    const ensureFreshToken = async (): Promise<void> => {
+      if (!userId || !currentToken) return;
+      if (jwtExpiresWithinMs(currentToken, PROACTIVE_REFRESH_MARGIN_MS)) {
+        currentToken = await ctx.refreshInvocationToken();
+      }
+    };
+
     const recoverFromExpiredToken = async (action: string): Promise<string> => {
       if (!userId) {
         throw new Error(
@@ -363,10 +406,20 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
         const normalizedPath = path.startsWith("/") ? path : `/${path}`;
         const url = `${apiBase}${normalizedPath}`;
 
-        const doFetch = (token: string): Promise<Response> => {
+        try {
+          await ensureFreshToken();
+        } catch (err) {
+          throw new Error(`fetchLoopback ${normalizedPath}: token refresh before request failed: ${describeError(err)}`);
+        }
+
+        const doFetch = async (token: string): Promise<Response> => {
           const headers = new Headers(init?.headers);
           headers.set("Authorization", `Bearer ${token}`);
-          return fetch(url, { ...init, headers });
+          try {
+            return await fetch(url, { ...init, headers });
+          } catch (err) {
+            throw new Error(`fetchLoopback ${normalizedPath}: network error: ${describeError(err)}`);
+          }
         };
 
         const firstRes = await doFetch(currentToken);
@@ -441,14 +494,42 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
           return form;
         };
 
-        const postStage = (token: string): Promise<Response> =>
-          fetch(`${apiBase}/api/v1/books/upload/stage`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body: buildForm(),
-          });
+        const postStage = async (token: string): Promise<Response> => {
+          try {
+            return await fetch(`${apiBase}/api/v1/books/upload/stage`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+              body: buildForm(),
+            });
+          } catch (err) {
+            throw new Error(`StageUploadBook: network error: ${describeError(err)}`);
+          }
+        };
 
-        let res = await postStage(currentToken);
+        try {
+          await ensureFreshToken();
+        } catch (err) {
+          throw new Error(`StageUploadBook: token refresh before upload failed: ${describeError(err)}`);
+        }
+
+        let res: Response;
+        try {
+          res = await postStage(currentToken);
+        } catch (err) {
+          // Early socket close (e.g. server rejected the request without draining the body):
+          // refresh once and retry the upload exactly one time.
+          const originalMsg = err instanceof Error ? err.message : String(err);
+          if (!userId) {
+            throw new Error(originalMsg);
+          }
+          let nextToken: string;
+          try {
+            nextToken = await ctx.refreshInvocationToken();
+          } catch (refreshErr) {
+            throw new Error(`${originalMsg}; token refresh failed: ${describeError(refreshErr)}`);
+          }
+          res = await postStage(nextToken);
+        }
         if (res.status === 401) {
           const nextToken = await recoverFromExpiredToken("StageUploadBook");
           res = await postStage(nextToken);

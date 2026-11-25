@@ -1127,12 +1127,14 @@ func (h *Host) StageCatalogItems(ctx context.Context, pluginName string, items [
 			if errors.Is(callErr, context.Canceled) && h.ctx.Err() == nil {
 				errMsg = fmt.Sprintf("plugin job timed out after %s without progress activity", watchdogDur)
 			}
+			h.logger.Warn("catalog_stage job failed", "component", "plugin."+pluginName, "job_id", job.ID, "error", errMsg)
 			h.jobs.FailJob(job.ID, errMsg)
 			return
 		}
 
 		var res CatalogStageResult
 		if err := json.Unmarshal(raw, &res); err != nil {
+			h.logger.Warn("catalog_stage job failed: invalid response", "component", "plugin."+pluginName, "job_id", job.ID, "error", err.Error())
 			h.jobs.FailJob(job.ID, fmt.Sprintf("invalid catalog/stage response: %v", err))
 			return
 		}
@@ -1166,6 +1168,7 @@ func (h *Host) StageCatalogItems(ctx context.Context, pluginName string, items [
 			if errSummary == "" {
 				errSummary = "Failed to stage selected catalog items"
 			}
+			h.logger.Warn("catalog_stage job failed: all items failed", "component", "plugin."+pluginName, "job_id", job.ID, "error", errSummary)
 			h.jobs.FailJob(job.ID, errSummary)
 			return
 		}
