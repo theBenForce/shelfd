@@ -1172,6 +1172,7 @@ class ApiService {
     String? group,
     String? cursor,
     String? filter,
+    bool forceRefresh = false,
   }) async {
     final encoded = Uri.encodeComponent(name);
     final params = <String, dynamic>{
@@ -1180,6 +1181,7 @@ class ApiService {
       if (group != null && group.isNotEmpty) 'group': group,
       if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
       if (filter != null && filter.isNotEmpty) 'filter': filter,
+      if (forceRefresh) 'refresh': 'true',
     };
     final response = await client.get(
       _uri('/api/v1/plugins/$encoded/catalog', params.isNotEmpty ? params : null),

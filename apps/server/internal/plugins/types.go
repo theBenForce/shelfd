@@ -352,6 +352,13 @@ type CatalogPage struct {
 	Groups     []CatalogGroup `json:"groups,omitempty"`
 	NextCursor string         `json:"next_cursor,omitempty"`
 	TotalCount *int           `json:"total_count,omitempty"`
+	Cached     bool           `json:"cached,omitempty"`
+	CachedAt   *time.Time     `json:"cached_at,omitempty"`
+}
+
+// CatalogQueryOptions controls caching behavior for catalog browse/search calls.
+type CatalogQueryOptions struct {
+	ForceRefresh bool
 }
 
 // CatalogStageItem identifies a remote item and optional format preference to stage for review.

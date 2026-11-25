@@ -22,6 +22,7 @@ type Config struct {
 	AI       AIConfig       `yaml:"ai"`
 	MCP      MCPConfig      `yaml:"mcp"`
 	Plugins  PluginsConfig  `yaml:"plugins"`
+	Cache    CacheConfig    `yaml:"cache"`
 	Auth     AuthConfig     `yaml:"auth"`
 	Logging  LoggingConfig  `yaml:"logging"`
 	Cast     CastConfig     `yaml:"cast"`
@@ -117,8 +118,9 @@ type MCPConfig struct {
 
 // PluginsConfig defines server settings for out-of-process plugins.
 type PluginsConfig struct {
-	Dir                string `yaml:"dir"`
-	IdleTimeoutSeconds int    `yaml:"idle_timeout_seconds,omitempty"`
+	Dir                    string `yaml:"dir"`
+	IdleTimeoutSeconds     int    `yaml:"idle_timeout_seconds,omitempty"`
+	CatalogCacheTTLSeconds int    `yaml:"catalog_cache_ttl_seconds,omitempty"`
 }
 
 // ResolvedDir returns the configured plugins directory or <dataDir>/plugins by default.
@@ -138,6 +140,32 @@ func (p PluginsConfig) ResolvedIdleTimeout() time.Duration {
 		return time.Duration(p.IdleTimeoutSeconds) * time.Second
 	}
 	return 120 * time.Second
+}
+
+// ResolvedCatalogCacheTTL returns the TTL for cached plugin storefront catalog pages.
+// Returns 0 when caching is explicitly disabled (CatalogCacheTTLSeconds < 0).
+func (p PluginsConfig) ResolvedCatalogCacheTTL() time.Duration {
+	if p.CatalogCacheTTLSeconds < 0 {
+		return 0
+	}
+	if p.CatalogCacheTTLSeconds > 0 {
+		return time.Duration(p.CatalogCacheTTLSeconds) * time.Second
+	}
+	return 15 * time.Minute
+}
+
+// CacheConfig defines optional external cache settings (defaults to in-memory when RedisURL is empty).
+type CacheConfig struct {
+	RedisURL  string `yaml:"redis_url,omitempty"`
+	KeyPrefix string `yaml:"key_prefix,omitempty"`
+}
+
+// ResolvedKeyPrefix returns the configured cache key prefix or "shelfd" by default.
+func (c CacheConfig) ResolvedKeyPrefix() string {
+	if p := strings.TrimRight(strings.TrimSpace(c.KeyPrefix), ":"); p != "" {
+		return p
+	}
+	return "shelfd"
 }
 
 type AuthConfig struct {
@@ -216,8 +244,13 @@ func DefaultConfig() *Config {
 			Path:    "/mcp",
 		},
 		Plugins: PluginsConfig{
-			Dir:                "",
-			IdleTimeoutSeconds: 120,
+			Dir:                    "",
+			IdleTimeoutSeconds:     120,
+			CatalogCacheTTLSeconds: 900,
+		},
+		Cache: CacheConfig{
+			RedisURL:  "",
+			KeyPrefix: "shelfd",
 		},
 		Auth: AuthConfig{
 			AdminUsername: "admin",
@@ -783,6 +816,19 @@ func ApplyEnvOverrides(cfg *Config) {
 		if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && secs > 0 {
 			cfg.Plugins.IdleTimeoutSeconds = secs
 		}
+	}
+	if v := os.Getenv("SHELFD_PLUGINS_CATALOG_CACHE_TTL_SECONDS"); v != "" {
+		if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			cfg.Plugins.CatalogCacheTTLSeconds = secs
+		}
+	}
+	if v := os.Getenv("SHELFD_REDIS_URL"); v != "" {
+		cfg.Cache.RedisURL = strings.TrimSpace(v)
+	} else if v := os.Getenv("SHELFD_CACHE_REDIS_URL"); v != "" {
+		cfg.Cache.RedisURL = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("SHELFD_CACHE_KEY_PREFIX"); v != "" {
+		cfg.Cache.KeyPrefix = strings.TrimSpace(v)
 	}
 
 	if v := os.Getenv("SHELFD_ADMIN_USERNAME"); v != "" {

@@ -234,14 +234,34 @@ func main() {
 		w.Write([]byte(`{"status":"ok","version":"` + Version + `"}`))
 	})
 
+	// Initialize plugin catalog cache (optional Redis, default in-memory)
+	cachePrefix := cfg.Cache.ResolvedKeyPrefix()
+	var catalogCache plugins.CatalogCache
+	if strings.TrimSpace(cfg.Cache.RedisURL) != "" {
+		rc, err := plugins.NewRedisCatalogCache(context.Background(), cfg.Cache.RedisURL, cachePrefix, logger)
+		if err != nil {
+			logger.Warn("failed to connect to Redis for plugin catalog cache; falling back to in-memory cache", "error", err)
+			catalogCache = plugins.NewMemoryCatalogCache(cachePrefix, 0)
+		} else {
+			catalogCache = rc
+			logger.Info("Plugin catalog cache using Redis backend", "key_prefix", cachePrefix)
+		}
+	} else {
+		catalogCache = plugins.NewMemoryCatalogCache(cachePrefix, 0)
+	}
+	catalogCacheTTL := cfg.Plugins.ResolvedCatalogCacheTTL()
+
 	// Initialize out-of-process Plugin Host
 	pluginsDir := cfg.Plugins.ResolvedDir(cfg.Storage.DataDir)
 	pluginHost := plugins.NewHost(repo, plugins.HostConfig{
-		PluginsDir:    pluginsDir,
-		APIBase:       fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port),
-		ShelfdVersion: Version,
-		MasterSecret:  cfg.Server.JWTSecret,
-		IdleTimeout:   cfg.Plugins.ResolvedIdleTimeout(),
+		PluginsDir:          pluginsDir,
+		APIBase:             fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port),
+		ShelfdVersion:       Version,
+		MasterSecret:        cfg.Server.JWTSecret,
+		IdleTimeout:         cfg.Plugins.ResolvedIdleTimeout(),
+		CatalogCache:        catalogCache,
+		CatalogCacheTTL:     catalogCacheTTL,
+		DisableCatalogCache: catalogCacheTTL <= 0,
 		TokenIssuer: func(userID, username, pluginName string, scopes []string) (string, error) {
 			tok, _, err := api.GeneratePluginInvocationJWT(userID, username, pluginName, scopes, cfg.Server.JWTSecret, 5*time.Minute)
 			return tok, err

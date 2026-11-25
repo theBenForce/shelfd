@@ -1338,18 +1338,23 @@ class CatalogPage {
   final List<CatalogGroup> groups;
   final String? nextCursor;
   final int? totalCount;
+  final bool cached;
+  final DateTime? cachedAt;
 
   const CatalogPage({
     this.items = const [],
     this.groups = const [],
     this.nextCursor,
     this.totalCount,
+    this.cached = false,
+    this.cachedAt,
   });
 
   bool get hasMore => nextCursor != null && nextCursor!.isNotEmpty;
 
   factory CatalogPage.fromJson(Map<String, dynamic> json) {
     final rawNext = json['next_cursor'] as String?;
+    final rawCachedAt = json['cached_at'] as String?;
     return CatalogPage(
       items: (json['items'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
@@ -1361,6 +1366,10 @@ class CatalogPage {
           .toList(),
       nextCursor: (rawNext != null && rawNext.isNotEmpty) ? rawNext : null,
       totalCount: (json['total_count'] as num?)?.toInt(),
+      cached: json['cached'] as bool? ?? false,
+      cachedAt: (rawCachedAt != null && rawCachedAt.isNotEmpty)
+          ? DateTime.tryParse(rawCachedAt)
+          : null,
     );
   }
 }

@@ -407,6 +407,9 @@ class CatalogBrowserState {
   final String? stagingMessage;
   final String? errorMessage;
   final bool isAuthExpired;
+  final bool hideExisting;
+  final bool isCached;
+  final DateTime? cachedAt;
 
   const CatalogBrowserState({
     this.selectedPluginName,
@@ -426,12 +429,22 @@ class CatalogBrowserState {
     this.stagingMessage,
     this.errorMessage,
     this.isAuthExpired = false,
+    this.hideExisting = true,
+    this.isCached = false,
+    this.cachedAt,
   });
 
   bool get hasMore => nextCursor != null && nextCursor!.isNotEmpty;
 
   bool isItemStaging(String externalId) =>
       stagingExternalIds.contains(externalId);
+
+  List<CatalogItem> get visibleItems {
+    if (!hideExisting) return items;
+    return items.where((i) => !i.isInLibrary && !i.isStaged).toList();
+  }
+
+  int get hiddenExistingCount => items.length - visibleItems.length;
 
   CatalogBrowserState copyWith({
     String? selectedPluginName,
@@ -456,6 +469,10 @@ class CatalogBrowserState {
     String? errorMessage,
     bool clearError = false,
     bool? isAuthExpired,
+    bool? hideExisting,
+    bool? isCached,
+    DateTime? cachedAt,
+    bool clearCachedAt = false,
   }) {
     return CatalogBrowserState(
       selectedPluginName: clearSelectedPlugin
@@ -479,6 +496,9 @@ class CatalogBrowserState {
           : (stagingMessage ?? this.stagingMessage),
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       isAuthExpired: isAuthExpired ?? this.isAuthExpired,
+      hideExisting: hideExisting ?? this.hideExisting,
+      isCached: isCached ?? this.isCached,
+      cachedAt: clearCachedAt ? null : (cachedAt ?? this.cachedAt),
     );
   }
 }
@@ -695,6 +715,7 @@ class CatalogBrowserNotifier extends Notifier<CatalogBrowserState> {
       selectedPluginName: pluginName,
       mode: defaultMode,
       stagingExternalIds: inFlight,
+      hideExisting: state.hideExisting,
     );
 
     if (summary != null &&
@@ -756,7 +777,14 @@ class CatalogBrowserNotifier extends Notifier<CatalogBrowserState> {
     await loadCatalog(reset: true);
   }
 
-  Future<void> loadCatalog({bool reset = true}) async {
+  void setHideExisting(bool hide) {
+    if (_isDisposed || state.hideExisting == hide) return;
+    state = state.copyWith(hideExisting: hide);
+  }
+
+  Future<void> forceRefresh() => loadCatalog(reset: true, forceRefresh: true);
+
+  Future<void> loadCatalog({bool reset = true, bool forceRefresh = false}) async {
     if (_isDisposed) return;
     final pluginName = state.selectedPluginName;
     if (pluginName == null || pluginName.isEmpty) return;
@@ -781,6 +809,7 @@ class CatalogBrowserNotifier extends Notifier<CatalogBrowserState> {
         query: state.query.isNotEmpty ? state.query : null,
         group: state.selectedGroup.isNotEmpty ? state.selectedGroup : null,
         cursor: reset ? null : state.nextCursor,
+        forceRefresh: forceRefresh,
       );
       if (_isDisposed) return;
 
@@ -795,6 +824,9 @@ class CatalogBrowserNotifier extends Notifier<CatalogBrowserState> {
         clearNextCursor: page.nextCursor == null || page.nextCursor!.isEmpty,
         totalCount: page.totalCount,
         clearTotalCount: page.totalCount == null && reset,
+        isCached: page.cached,
+        cachedAt: page.cachedAt,
+        clearCachedAt: page.cachedAt == null && reset,
         isLoading: false,
         isLoadingMore: false,
         isAuthExpired: false,

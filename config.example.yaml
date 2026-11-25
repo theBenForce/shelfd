@@ -103,6 +103,16 @@ plugins:
   dir: "/data/plugins"
   # Seconds of inactivity before non-daemon child plugin processes are stopped (default: 120).
   idle_timeout_seconds: 120
+  # TTL in seconds for cached plugin storefront catalog responses (default: 900 = 15m; set -1 to disable).
+  # Can also be overridden via SHELFD_PLUGINS_CATALOG_CACHE_TTL_SECONDS.
+  catalog_cache_ttl_seconds: 900
+
+cache:
+  # Optional Redis URL for shared/persistent caching (e.g. "redis://localhost:6379/0" or "rediss://...").
+  # Leave empty to use the built-in in-memory cache (SHELFD_REDIS_URL).
+  redis_url: ""
+  # Optional Redis key namespace prefix (default: "shelfd", SHELFD_CACHE_KEY_PREFIX).
+  key_prefix: "shelfd"
 
 cast:
   # Enable server-side CastV2 discovery and playback control (SHELFD_CAST_ENABLED).

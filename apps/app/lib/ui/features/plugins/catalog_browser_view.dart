@@ -175,6 +175,7 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
                       colors,
                       enabledCatalogPlugins,
                       selectedPlugin,
+                      catalogState,
                     ),
                     const SizedBox(height: AppTokens.space16),
                     if (selectedPlugin != null) ...[
@@ -204,45 +205,17 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
                         padding: EdgeInsets.symmetric(vertical: AppTokens.space48),
                         child: Center(child: CircularProgressIndicator()),
                       )
-                    else if (catalogState.items.isEmpty)
-                      _buildEmptyResults(colors, catalogState)
-                    else ...[
+                    else if (catalogState.visibleItems.isEmpty) ...[
+                      _buildEmptyResults(colors, catalogState),
+                      if (catalogState.hasMore) ...[
+                        const SizedBox(height: AppTokens.space20),
+                        _buildLoadMoreButton(colors, catalogState),
+                      ],
+                    ] else ...[
                       _buildItemsGrid(context, colors, catalogState),
                       if (catalogState.hasMore) ...[
                         const SizedBox(height: AppTokens.space20),
-                        Center(
-                          child: OutlinedButton.icon(
-                            key: const Key('catalog_load_more_button'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: colors.ink,
-                              side: BorderSide(color: colors.border),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: AppTokens.space20,
-                                vertical: AppTokens.space12,
-                              ),
-                            ),
-                            onPressed: catalogState.isLoadingMore
-                                ? null
-                                : () => ref
-                                    .read(catalogBrowserProvider.notifier)
-                                    .loadMore(),
-                            icon: catalogState.isLoadingMore
-                                ? SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: colors.accentPrimary,
-                                    ),
-                                  )
-                                : const Icon(Icons.expand_more_rounded, size: 18),
-                            label: Text(
-                              catalogState.isLoadingMore
-                                  ? 'Loading...'
-                                  : 'Load More Books',
-                            ),
-                          ),
-                        ),
+                        _buildLoadMoreButton(colors, catalogState),
                       ],
                     ],
                   ],
@@ -306,6 +279,7 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
     ShelfdColors colors,
     List<PluginSummary> plugins,
     PluginSummary? selectedPlugin,
+    CatalogBrowserState catalogState,
   ) {
     return Row(
       children: [
@@ -321,10 +295,25 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
             },
           ),
         ),
+        if (selectedPlugin != null) ...[
+          const SizedBox(width: AppTokens.space12),
+          OutlinedButton.icon(
+            key: const Key('catalog_force_refresh_button'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: colors.ink,
+              side: BorderSide(color: colors.border),
+            ),
+            onPressed: catalogState.isLoading
+                ? null
+                : () => ref.read(catalogBrowserProvider.notifier).forceRefresh(),
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('Force Refresh'),
+          ),
+        ],
         if (selectedPlugin != null &&
             (selectedPlugin.hasConfigSchema ||
                 selectedPlugin.commands.isNotEmpty)) ...[
-          const SizedBox(width: AppTokens.space12),
+          const SizedBox(width: AppTokens.space8),
           OutlinedButton.icon(
             key: const Key('catalog_configure_plugin_button'),
             style: OutlinedButton.styleFrom(
@@ -539,86 +528,231 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
     );
   }
 
+  String _formatCachedLabel(DateTime? cachedAt) {
+    if (cachedAt == null) return 'Cached';
+    final diff = DateTime.now().difference(cachedAt.toLocal());
+    if (diff.inSeconds < 60) return 'Cached · just now';
+    if (diff.inMinutes < 60) return 'Cached · ${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return 'Cached · ${diff.inHours}h ago';
+    return 'Cached · ${diff.inDays}d ago';
+  }
+
   Widget _buildSelectionToolbar(
     BuildContext context,
     ShelfdColors colors,
     CatalogBrowserState state,
   ) {
-    final availableCount = state.items
+    final visible = state.visibleItems;
+    final hiddenCount = state.hiddenExistingCount;
+    final availableCount = visible
         .where(
           (i) =>
               i.isAvailable && !state.stagingExternalIds.contains(i.externalId),
         )
         .length;
     final selectedCount = state.selectedExternalIds.length;
-    final countLabel = state.totalCount != null
-        ? 'Showing ${state.items.length} of ${state.totalCount}'
-        : '${state.items.length} ${state.items.length == 1 ? 'book' : 'books'}';
 
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            countLabel,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: AppTypography.captionSans(color: colors.mutedInk),
-          ),
-        ),
-        if (availableCount > 0) ...[
-          TextButton(
-            onPressed: selectedCount == availableCount
-                ? () => ref.read(catalogBrowserProvider.notifier).clearSelection()
-                : () =>
-                    ref.read(catalogBrowserProvider.notifier).selectAllAvailable(),
-            child: Text(
-              selectedCount == availableCount ? 'Clear Selection' : 'Select All',
-              style: AppTypography.bodySans(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: colors.secondaryInk,
+    String countLabel;
+    if (state.totalCount != null) {
+      countLabel = 'Showing ${visible.length} of ${state.totalCount}';
+    } else {
+      countLabel = '${visible.length} ${visible.length == 1 ? 'book' : 'books'}';
+    }
+    if (state.hideExisting && hiddenCount > 0) {
+      countLabel = '$countLabel ($hiddenCount in Shelfd hidden)';
+    }
+
+    return SizedBox(
+      width: double.infinity,
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: AppTokens.space12,
+        runSpacing: AppTokens.space8,
+        children: [
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: AppTokens.space12,
+          runSpacing: AppTokens.space8,
+          children: [
+            Text(
+              countLabel,
+              style: AppTypography.captionSans(color: colors.mutedInk),
+            ),
+            if (state.isCached && !state.isLoading)
+              Container(
+                key: const Key('catalog_cached_indicator'),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: colors.containerLow,
+                  borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                  border: Border.all(color: colors.subtleBorder),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.bolt_rounded, size: 12, color: colors.mutedInk),
+                    const SizedBox(width: 4),
+                    Text(
+                      _formatCachedLabel(state.cachedAt),
+                      style: AppTypography.captionSans(color: colors.mutedInk),
+                    ),
+                  ],
+                ),
               ),
+            FilterChip(
+              key: const Key('catalog_hide_existing_toggle'),
+              label: Text(
+                'Hide in Shelfd',
+                style: AppTypography.captionSans(
+                  color: state.hideExisting
+                      ? colors.accentPrimary
+                      : colors.secondaryInk,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              selected: state.hideExisting,
+              onSelected: (val) => ref
+                  .read(catalogBrowserProvider.notifier)
+                  .setHideExisting(val),
+              selectedColor: colors.accentContainer,
+              checkmarkColor: colors.accentPrimary,
+              backgroundColor: colors.surface,
+              side: BorderSide(
+                color: state.hideExisting ? colors.accentPrimary : colors.border,
+              ),
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-          ),
-          const SizedBox(width: AppTokens.space8),
-        ],
-        FilledButton.icon(
-          key: const Key('stage_selected_catalog_button'),
-          style: FilledButton.styleFrom(
-            backgroundColor: colors.accentPrimary,
-            foregroundColor: colors.onAccent,
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppTokens.space16,
-              vertical: AppTokens.space12,
+          ],
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (availableCount > 0) ...[
+              TextButton(
+                onPressed: selectedCount == availableCount
+                    ? () => ref
+                        .read(catalogBrowserProvider.notifier)
+                        .clearSelection()
+                    : () => ref
+                        .read(catalogBrowserProvider.notifier)
+                        .selectAllAvailable(),
+                child: Text(
+                  selectedCount == availableCount
+                      ? 'Clear Selection'
+                      : 'Select All',
+                  style: AppTypography.bodySans(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: colors.secondaryInk,
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppTokens.space8),
+            ],
+            FilledButton.icon(
+              key: const Key('stage_selected_catalog_button'),
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.accentPrimary,
+                foregroundColor: colors.onAccent,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppTokens.space16,
+                  vertical: AppTokens.space12,
+                ),
+              ),
+              onPressed: (selectedCount > 0 && !state.isStaging)
+                  ? _handleStageSelected
+                  : null,
+              icon: const Icon(Icons.download_for_offline_outlined, size: 16),
+              label: Text('Stage Selected ($selectedCount)'),
             ),
-          ),
-          onPressed:
-              (selectedCount > 0 && !state.isStaging) ? _handleStageSelected : null,
-          icon: const Icon(Icons.download_for_offline_outlined, size: 16),
-          label: Text('Stage Selected ($selectedCount)'),
+          ],
         ),
       ],
+      ),
+    );
+  }
+
+  Widget _buildLoadMoreButton(
+    ShelfdColors colors,
+    CatalogBrowserState catalogState,
+  ) {
+    return Center(
+      child: OutlinedButton.icon(
+        key: const Key('catalog_load_more_button'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: colors.ink,
+          side: BorderSide(color: colors.border),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppTokens.space20,
+            vertical: AppTokens.space12,
+          ),
+        ),
+        onPressed: catalogState.isLoadingMore
+            ? null
+            : () => ref.read(catalogBrowserProvider.notifier).loadMore(),
+        icon: catalogState.isLoadingMore
+            ? SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: colors.accentPrimary,
+                ),
+              )
+            : const Icon(Icons.expand_more_rounded, size: 18),
+        label: Text(
+          catalogState.isLoadingMore ? 'Loading...' : 'Load More Books',
+        ),
+      ),
     );
   }
 
   Widget _buildEmptyResults(ShelfdColors colors, CatalogBrowserState state) {
+    final allFilteredOut =
+        state.hideExisting && state.items.isNotEmpty && state.visibleItems.isEmpty;
+
     return BentoCard(
       padding: const EdgeInsets.all(AppTokens.space32),
       child: Center(
         child: Column(
           children: [
-            Icon(Icons.menu_book_outlined, size: 32, color: colors.mutedInk),
+            Icon(
+              allFilteredOut
+                  ? Icons.library_add_check_outlined
+                  : Icons.menu_book_outlined,
+              size: 32,
+              color: colors.mutedInk,
+            ),
             const SizedBox(height: AppTokens.space8),
             Text(
-              state.mode == 'search' && state.query.isEmpty
-                  ? 'Enter a search query above to find books.'
-                  : 'No catalog items matched your filter.',
+              allFilteredOut
+                  ? 'All ${state.items.length} loaded ${state.items.length == 1 ? 'book is' : 'books are'} already in Shelfd.'
+                  : (state.mode == 'search' && state.query.isEmpty
+                      ? 'Enter a search query above to find books.'
+                      : 'No catalog items matched your filter.'),
               style: AppTypography.bodySans(
                 fontSize: 14,
                 color: colors.mutedInk,
               ),
               textAlign: TextAlign.center,
             ),
+            if (allFilteredOut) ...[
+              const SizedBox(height: AppTokens.space12),
+              OutlinedButton.icon(
+                key: const Key('catalog_show_existing_button'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: colors.ink,
+                  side: BorderSide(color: colors.border),
+                ),
+                onPressed: () => ref
+                    .read(catalogBrowserProvider.notifier)
+                    .setHideExisting(false),
+                icon: const Icon(Icons.visibility_outlined, size: 16),
+                label: const Text('Show items in Shelfd'),
+              ),
+            ],
           ],
         ),
       ),
@@ -630,6 +764,7 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
     ShelfdColors colors,
     CatalogBrowserState state,
   ) {
+    final visible = state.visibleItems;
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxWidth = constraints.maxWidth;
@@ -641,7 +776,7 @@ class _CatalogBrowserViewState extends ConsumerState<CatalogBrowserView> {
         return Wrap(
           spacing: spacing,
           runSpacing: spacing,
-          children: state.items.map((item) {
+          children: visible.map((item) {
             final isSelected =
                 state.selectedExternalIds.contains(item.externalId);
             final isItemStaging = state.isItemStaging(item.externalId);

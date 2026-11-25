@@ -45,16 +45,19 @@ type TokenIssuer func(userID, username, pluginName string, scopes []string) (str
 
 // HostConfig configures the Shelfd Plugin Host.
 type HostConfig struct {
-	PluginsDir     string
-	APIBase        string
-	ShelfdVersion  string
-	MasterSecret   string
-	IdleTimeout    time.Duration
-	JobIdleTimeout time.Duration
-	TokenIssuer    TokenIssuer
-	Hub            *events.Hub
-	JobManager     *jobs.Manager
-	Logger         *slog.Logger
+	PluginsDir          string
+	APIBase             string
+	ShelfdVersion       string
+	MasterSecret        string
+	IdleTimeout         time.Duration
+	JobIdleTimeout      time.Duration
+	CatalogCache        CatalogCache
+	CatalogCacheTTL     time.Duration
+	DisableCatalogCache bool
+	TokenIssuer         TokenIssuer
+	Hub                 *events.Hub
+	JobManager          *jobs.Manager
+	Logger              *slog.Logger
 }
 
 type pluginProcess struct {
@@ -179,6 +182,8 @@ type Host struct {
 	masterSecret       string
 	idleTimeout        time.Duration
 	jobWatchdogTimeout time.Duration
+	catalogCache       CatalogCache
+	catalogCacheTTL    time.Duration
 	tokenIssuer        TokenIssuer
 	hub                *events.Hub
 	jobs               *PluginJobManager
@@ -206,6 +211,18 @@ func NewHost(repo repository.StorageEngine, cfg HostConfig) *Host {
 	if jobWatchdog <= 0 {
 		jobWatchdog = defaultJobWatchdogTimeout
 	}
+	var catalogCache CatalogCache
+	var catalogCacheTTL time.Duration
+	if !cfg.DisableCatalogCache {
+		catalogCacheTTL = cfg.CatalogCacheTTL
+		if catalogCacheTTL <= 0 {
+			catalogCacheTTL = defaultCatalogCacheTTL
+		}
+		catalogCache = cfg.CatalogCache
+		if catalogCache == nil {
+			catalogCache = NewMemoryCatalogCache("shelfd", defaultMemoryCatalogCacheSize)
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	pjm := NewPluginJobManager(cfg.Hub)
 	if cfg.JobManager != nil {
@@ -220,6 +237,8 @@ func NewHost(repo repository.StorageEngine, cfg HostConfig) *Host {
 		masterSecret:       cfg.MasterSecret,
 		idleTimeout:        idleTimeout,
 		jobWatchdogTimeout: jobWatchdog,
+		catalogCache:       catalogCache,
+		catalogCacheTTL:    catalogCacheTTL,
 		tokenIssuer:        cfg.TokenIssuer,
 		hub:                cfg.Hub,
 		jobs:               pjm,
@@ -300,6 +319,12 @@ func (h *Host) Stop() {
 		mp.mu.Unlock()
 		if proc != nil {
 			h.stopProcess(proc)
+		}
+	}
+
+	if h.catalogCache != nil {
+		if err := h.catalogCache.Close(); err != nil {
+			h.logger.Warn("failed closing plugin catalog cache", "error", err)
 		}
 	}
 }
@@ -493,6 +518,10 @@ func (h *Host) InstallOrUpdateZip(ctx context.Context, archiveBytes []byte, opts
 		}
 	}
 
+	if h.catalogCache != nil {
+		h.catalogCache.InvalidatePlugin(ctx, manifest.Name)
+	}
+
 	sum, err := h.GetPluginSummary(ctx, manifest.Name, opts.UserID)
 	if err != nil {
 		return nil, err
@@ -533,6 +562,10 @@ func (h *Host) SetEnabled(ctx context.Context, name string, enabled bool, userID
 
 	if procToStop != nil {
 		h.stopProcess(procToStop)
+	}
+
+	if h.catalogCache != nil {
+		h.catalogCache.InvalidatePlugin(ctx, name)
 	}
 
 	if err := h.repo.UpsertPluginState(ctx, &repository.PluginState{
@@ -716,6 +749,10 @@ func (h *Host) UpdateUserConfig(ctx context.Context, userID, pluginName string, 
 		})
 	}
 
+	if h.catalogCache != nil {
+		h.catalogCache.InvalidatePluginUser(ctx, pluginName, userID)
+	}
+
 	redacted, secretSet := RedactStoredConfig(schema, stored)
 	if secretSet == nil {
 		secretSet = []string{}
@@ -829,12 +866,40 @@ func (h *Host) InvokeCommand(ctx context.Context, pluginName, command string, ar
 	})
 }
 
-// BrowseCatalog invokes catalog/browse and enriches returned items with staged/in_library status.
+// BrowseCatalog invokes catalog/browse (using cache when available) and enriches returned items with staged/in_library status.
 func (h *Host) BrowseCatalog(ctx context.Context, pluginName, group, cursor, filter, userID, username string) (*CatalogPage, error) {
+	return h.BrowseCatalogWithOptions(ctx, pluginName, group, cursor, filter, userID, username, CatalogQueryOptions{})
+}
+
+// BrowseCatalogWithOptions invokes catalog/browse with optional cache bypass and enriches returned items with staged/in_library status.
+func (h *Host) BrowseCatalogWithOptions(ctx context.Context, pluginName, group, cursor, filter, userID, username string, opts CatalogQueryOptions) (*CatalogPage, error) {
 	mp := h.getManaged(pluginName)
 	if mp == nil {
 		return nil, ErrPluginNotFound
 	}
+	mp.mu.Lock()
+	enabled := mp.enabled
+	mp.mu.Unlock()
+	if !enabled {
+		return nil, ErrPluginDisabled
+	}
+
+	var cacheKey string
+	useCache := h.catalogCache != nil && h.catalogCacheTTL > 0
+	if useCache {
+		cacheKey = buildCatalogCacheKey(h.catalogCache.KeyPrefix(), pluginName, userID, "browse", "", group, cursor, filter, nil)
+		if !opts.ForceRefresh {
+			if cached, ok := h.catalogCache.Get(ctx, cacheKey); ok {
+				page := cloneCatalogPage(cached.Page)
+				ts := cached.CachedAt
+				page.Cached = true
+				page.CachedAt = &ts
+				h.enrichCatalogPage(ctx, pluginName, &page)
+				return &page, nil
+			}
+		}
+	}
+
 	auth, err := h.buildInvocationAuth(ctx, mp, userID, username)
 	if err != nil {
 		return nil, err
@@ -852,16 +917,54 @@ func (h *Host) BrowseCatalog(ctx context.Context, pluginName, group, cursor, fil
 	if err := json.Unmarshal(raw, &page); err != nil {
 		return nil, fmt.Errorf("decoding catalog/browse response: %w", err)
 	}
+
+	now := time.Now().UTC()
+	if useCache {
+		h.catalogCache.Set(ctx, cacheKey, CachedCatalogPage{
+			Page:     cloneCatalogPage(page),
+			CachedAt: now,
+		}, h.catalogCacheTTL)
+	}
+	page.Cached = false
+	page.CachedAt = &now
 	h.enrichCatalogPage(ctx, pluginName, &page)
 	return &page, nil
 }
 
-// SearchCatalog invokes catalog/search and enriches returned items with staged/in_library status.
+// SearchCatalog invokes catalog/search (using cache when available) and enriches returned items with staged/in_library status.
 func (h *Host) SearchCatalog(ctx context.Context, pluginName, query, cursor string, filters map[string]any, userID, username string) (*CatalogPage, error) {
+	return h.SearchCatalogWithOptions(ctx, pluginName, query, cursor, filters, userID, username, CatalogQueryOptions{})
+}
+
+// SearchCatalogWithOptions invokes catalog/search with optional cache bypass and enriches returned items with staged/in_library status.
+func (h *Host) SearchCatalogWithOptions(ctx context.Context, pluginName, query, cursor string, filters map[string]any, userID, username string, opts CatalogQueryOptions) (*CatalogPage, error) {
 	mp := h.getManaged(pluginName)
 	if mp == nil {
 		return nil, ErrPluginNotFound
 	}
+	mp.mu.Lock()
+	enabled := mp.enabled
+	mp.mu.Unlock()
+	if !enabled {
+		return nil, ErrPluginDisabled
+	}
+
+	var cacheKey string
+	useCache := h.catalogCache != nil && h.catalogCacheTTL > 0
+	if useCache {
+		cacheKey = buildCatalogCacheKey(h.catalogCache.KeyPrefix(), pluginName, userID, "search", query, "", cursor, "", filters)
+		if !opts.ForceRefresh {
+			if cached, ok := h.catalogCache.Get(ctx, cacheKey); ok {
+				page := cloneCatalogPage(cached.Page)
+				ts := cached.CachedAt
+				page.Cached = true
+				page.CachedAt = &ts
+				h.enrichCatalogPage(ctx, pluginName, &page)
+				return &page, nil
+			}
+		}
+	}
+
 	auth, err := h.buildInvocationAuth(ctx, mp, userID, username)
 	if err != nil {
 		return nil, err
@@ -879,6 +982,16 @@ func (h *Host) SearchCatalog(ctx context.Context, pluginName, query, cursor stri
 	if err := json.Unmarshal(raw, &page); err != nil {
 		return nil, fmt.Errorf("decoding catalog/search response: %w", err)
 	}
+
+	now := time.Now().UTC()
+	if useCache {
+		h.catalogCache.Set(ctx, cacheKey, CachedCatalogPage{
+			Page:     cloneCatalogPage(page),
+			CachedAt: now,
+		}, h.catalogCacheTTL)
+	}
+	page.Cached = false
+	page.CachedAt = &now
 	h.enrichCatalogPage(ctx, pluginName, &page)
 	return &page, nil
 }
@@ -1164,6 +1277,9 @@ func (h *Host) CompleteAuth(ctx context.Context, pluginName string, params AuthC
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, fmt.Errorf("decoding auth/complete response: %w", err)
 	}
+	if h.catalogCache != nil {
+		h.catalogCache.InvalidatePluginUser(ctx, pluginName, userID)
+	}
 	return &res, nil
 }
 
@@ -1186,6 +1302,9 @@ func (h *Host) DisconnectAuth(ctx context.Context, pluginName, userID, username 
 	var res AuthStatusResult
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &res)
+	}
+	if h.catalogCache != nil {
+		h.catalogCache.InvalidatePluginUser(ctx, pluginName, userID)
 	}
 	return &res, nil
 }
