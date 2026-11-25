@@ -341,6 +341,9 @@ rl.on('line', async (line) => {
 	if len(pageBefore.Items) != 1 || pageBefore.Items[0].Status != "available" {
 		t.Fatalf("expected 1 available item before staging, got %+v", pageBefore.Items)
 	}
+	if pageBefore.Cached {
+		t.Fatalf("expected initial catalog response to have Cached=false")
+	}
 
 	// 4. POST /api/v1/plugins/zip-catalog/catalog/stage -> stages EPUB via loopback API!
 	stageReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/plugins/zip-catalog/catalog/stage", strings.NewReader(`{"items":[{"external_id":"1342"}]}`))
@@ -356,7 +359,7 @@ rl.on('line', async (line) => {
 		t.Fatalf("expected staged entry with job ID, got %+v", stageRes)
 	}
 
-	// 5. Re-query GET /api/v1/plugins/zip-catalog/catalog -> status is now "staged"!
+	// 5. Re-query GET /api/v1/plugins/zip-catalog/catalog -> served from cache AND freshly enriched as "staged"!
 	catReq2, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/plugins/zip-catalog/catalog?mode=browse", nil)
 	catReq2.Header.Set("Authorization", "Bearer "+userToken)
 	catResp2, _ := http.DefaultClient.Do(catReq2)
@@ -365,6 +368,23 @@ rl.on('line', async (line) => {
 	catResp2.Body.Close()
 	if len(pageAfter.Items) != 1 || pageAfter.Items[0].Status != "staged" {
 		t.Fatalf("expected item status 'staged' after catalog/stage, got %+v", pageAfter.Items)
+	}
+	if !pageAfter.Cached {
+		t.Fatalf("expected second catalog response to have Cached=true")
+	}
+
+	// 6. Force refresh bypasses cache -> Cached=false, still enriched as "staged"
+	catReq3, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/plugins/zip-catalog/catalog?mode=browse&refresh=true", nil)
+	catReq3.Header.Set("Authorization", "Bearer "+userToken)
+	catResp3, _ := http.DefaultClient.Do(catReq3)
+	var pageRefreshed plugins.CatalogPage
+	_ = json.NewDecoder(catResp3.Body).Decode(&pageRefreshed)
+	catResp3.Body.Close()
+	if pageRefreshed.Cached {
+		t.Fatalf("expected ?refresh=true response to have Cached=false")
+	}
+	if len(pageRefreshed.Items) != 1 || pageRefreshed.Items[0].Status != "staged" {
+		t.Fatalf("expected refreshed item status 'staged', got %+v", pageRefreshed.Items)
 	}
 }
 

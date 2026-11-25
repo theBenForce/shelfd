@@ -166,9 +166,20 @@ void main() {
 
     expect(find.text('Storefront Catalog'), findsOneWidget);
     expect(find.text('Pride and Prejudice'), findsOneWidget);
+    // Frankenstein (in_library) is hidden by default until Hide in Shelfd is toggled off.
+    expect(find.text('Frankenstein'), findsNothing);
+    expect(find.text('In Library'), findsNothing);
+    expect(find.text('Stage Selected (0)'), findsOneWidget);
+
+    // Toggle Hide in Shelfd off -> Frankenstein and its In Library badge appear.
+    final hideToggle = find.byKey(const Key('catalog_hide_existing_toggle'));
+    await tester.ensureVisible(hideToggle);
+    await tester.pumpAndSettle();
+    await tester.tap(hideToggle);
+    await tester.pumpAndSettle();
+
     expect(find.text('Frankenstein'), findsOneWidget);
     expect(find.text('In Library'), findsOneWidget);
-    expect(find.text('Stage Selected (0)'), findsOneWidget);
 
     // Select Pride and Prejudice
     final checkboxFinder = find.byKey(const Key('catalog_checkbox_1342'));
@@ -190,6 +201,134 @@ void main() {
     expect(stagedRequestItems!.single['external_id'], '1342');
     expect(find.text('Staged'), findsOneWidget);
     expect(fakeUpload.reloadCalls, greaterThanOrEqualTo(1));
+  });
+
+  testWidgets(
+      'CatalogBrowserView hides in_library and staged items by default, supports Force Refresh, and preserves Load More',
+      (tester) async {
+    setDesktopViewport(tester);
+
+    final fakeUpload = _FakeUploadNotifier();
+    final refreshFlags = <String?>[];
+    int catalogCallCount = 0;
+
+    final mockClient = MockClient((request) async {
+      if (request.url.path == '/api/v1/plugins') {
+        return http.Response(
+          jsonEncode({
+            'plugins': [
+              {
+                'name': 'project-gutenberg',
+                'display_name': 'Project Gutenberg',
+                'version': '0.1.0',
+                'enabled': true,
+                'status': 'idle',
+                'capabilities': ['catalog'],
+                'catalog_modes': ['browse', 'search'],
+                'configured': true,
+              },
+            ],
+          }),
+          200,
+        );
+      }
+
+      if (request.url.path == '/api/v1/plugins/project-gutenberg/catalog') {
+        catalogCallCount++;
+        refreshFlags.add(request.url.queryParameters['refresh']);
+        if (catalogCallCount == 1) {
+          return http.Response(
+            jsonEncode({
+              'items': [
+                {
+                  'external_id': '84',
+                  'title': 'Frankenstein',
+                  'authors': ['Mary Shelley'],
+                  'status': 'in_library',
+                  'book_id': 'b-84',
+                },
+                {
+                  'external_id': '11',
+                  'title': 'Alice in Wonderland',
+                  'authors': ['Lewis Carroll'],
+                  'status': 'staged',
+                  'upload_job_id': 'job-11',
+                },
+              ],
+              'next_cursor': 'page-2',
+              'total_count': 4,
+              'cached': true,
+              'cached_at': DateTime.now().toUtc().toIso8601String(),
+            }),
+            200,
+          );
+        }
+        // Force refresh response returns a fresh available item.
+        return http.Response(
+          jsonEncode({
+            'items': [
+              {
+                'external_id': '2701',
+                'title': 'Moby Dick',
+                'authors': ['Herman Melville'],
+                'status': 'available',
+              },
+            ],
+            'total_count': 1,
+            'cached': false,
+            'cached_at': DateTime.now().toUtc().toIso8601String(),
+          }),
+          200,
+        );
+      }
+
+      return http.Response('Not Found', 404);
+    });
+
+    final api = ApiService(
+      baseUrl: 'http://localhost:8080',
+      token: 'test-token-123',
+      client: mockClient,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          apiServiceProvider.overrideWithValue(api),
+          queueProvider.overrideWith(_FakeQueueNotifier.new),
+          uploadProvider.overrideWith(() => fakeUpload),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const CatalogBrowserView(initialPlugin: 'project-gutenberg'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Both in_library and staged items are hidden by default.
+    expect(find.text('Frankenstein'), findsNothing);
+    expect(find.text('Alice in Wonderland'), findsNothing);
+    expect(find.byKey(const Key('catalog_cached_indicator')), findsOneWidget);
+    expect(find.text('All 2 loaded books are already in Shelfd.'), findsOneWidget);
+    // Load More Books remains visible even when all items on the current page are filtered out.
+    expect(find.byKey(const Key('catalog_load_more_button')), findsOneWidget);
+
+    // Tapping "Show items in Shelfd" reveals both in_library and staged items.
+    await tester.tap(find.byKey(const Key('catalog_show_existing_button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Frankenstein'), findsOneWidget);
+    expect(find.text('Alice in Wonderland'), findsOneWidget);
+    expect(find.text('In Library'), findsOneWidget);
+    expect(find.text('Staged'), findsOneWidget);
+
+    // Tapping Force Refresh sends refresh=true and renders fresh non-cached items.
+    await tester.tap(find.byKey(const Key('catalog_force_refresh_button')));
+    await tester.pumpAndSettle();
+    expect(refreshFlags, [null, 'true']);
+    expect(find.text('Moby Dick'), findsOneWidget);
+    expect(find.byKey(const Key('catalog_cached_indicator')), findsNothing);
   });
 
   testWidgets(
@@ -741,11 +880,21 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Succeeded item flips to Staged, failed item reverts to selectable checkbox
+    // Succeeded item flips to Staged (hidden by default while Hide in Shelfd is on),
+    // failed item reverts to selectable checkbox
     expect(find.text('Staging...'), findsNothing);
-    expect(find.text('Staged'), findsOneWidget);
+    expect(find.text('Pride and Prejudice'), findsNothing);
     expect(find.byKey(const Key('catalog_checkbox_84')), findsOneWidget);
     expect(fakeUpload.reloadCalls, greaterThanOrEqualTo(1));
+
+    // Toggling Hide in Shelfd off reveals the newly Staged item and its badge
+    final hideToggle = find.byKey(const Key('catalog_hide_existing_toggle'));
+    await tester.ensureVisible(hideToggle);
+    await tester.pumpAndSettle();
+    await tester.tap(hideToggle);
+    await tester.pumpAndSettle();
+    expect(find.text('Pride and Prejudice'), findsOneWidget);
+    expect(find.text('Staged'), findsOneWidget);
   });
 
   testWidgets(

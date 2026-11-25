@@ -286,6 +286,9 @@ func (h *PluginHandler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 	group := strings.TrimSpace(r.URL.Query().Get("group"))
 	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
 	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
+	forceRefresh := parseBoolQueryParam(r.URL.Query().Get("refresh")) ||
+		parseBoolQueryParam(r.URL.Query().Get("force_refresh"))
+	opts := plugins.CatalogQueryOptions{ForceRefresh: forceRefresh}
 
 	if mode == "" {
 		if query != "" {
@@ -304,9 +307,9 @@ func (h *PluginHandler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 		if group != "" {
 			filters["group"] = group
 		}
-		page, err = h.host.SearchCatalog(r.Context(), name, query, cursor, filters, user.ID, user.Username)
+		page, err = h.host.SearchCatalogWithOptions(r.Context(), name, query, cursor, filters, user.ID, user.Username, opts)
 	} else {
-		page, err = h.host.BrowseCatalog(r.Context(), name, group, cursor, filter, user.ID, user.Username)
+		page, err = h.host.BrowseCatalogWithOptions(r.Context(), name, group, cursor, filter, user.ID, user.Username, opts)
 	}
 
 	if err != nil {
@@ -314,6 +317,15 @@ func (h *PluginHandler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, page)
+}
+
+func parseBoolQueryParam(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *PluginHandler) StageCatalogItems(w http.ResponseWriter, r *http.Request) {

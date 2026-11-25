@@ -683,3 +683,36 @@ func TestSplitModelEndpointsSSRFValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestCacheAndPluginCatalogCacheConfigEnvOverrides(t *testing.T) {
+	cfg := config.DefaultConfig()
+	if cfg.Plugins.ResolvedCatalogCacheTTL().Seconds() != 900 {
+		t.Fatalf("expected default catalog cache TTL 900s, got %v", cfg.Plugins.ResolvedCatalogCacheTTL())
+	}
+	if cfg.Cache.ResolvedKeyPrefix() != "shelfd" {
+		t.Fatalf("expected default cache key prefix 'shelfd', got %q", cfg.Cache.ResolvedKeyPrefix())
+	}
+
+	t.Setenv("SHELFD_REDIS_URL", "redis://127.0.0.1:6379/2")
+	t.Setenv("SHELFD_CACHE_KEY_PREFIX", "custom-prefix:")
+	t.Setenv("SHELFD_PLUGINS_CATALOG_CACHE_TTL_SECONDS", "300")
+	config.ApplyEnvOverrides(cfg)
+
+	if cfg.Cache.RedisURL != "redis://127.0.0.1:6379/2" {
+		t.Errorf("expected RedisURL override, got %q", cfg.Cache.RedisURL)
+	}
+	if cfg.Cache.ResolvedKeyPrefix() != "custom-prefix" {
+		t.Errorf("expected trimmed prefix 'custom-prefix', got %q", cfg.Cache.ResolvedKeyPrefix())
+	}
+	if cfg.Plugins.ResolvedCatalogCacheTTL().Seconds() != 300 {
+		t.Errorf("expected catalog cache TTL 300s, got %v", cfg.Plugins.ResolvedCatalogCacheTTL())
+	}
+
+	// Negative TTL explicitly disables caching
+	t.Setenv("SHELFD_PLUGINS_CATALOG_CACHE_TTL_SECONDS", "-1")
+	config.ApplyEnvOverrides(cfg)
+	if cfg.Plugins.ResolvedCatalogCacheTTL() != 0 {
+		t.Errorf("expected disabled catalog cache TTL (0), got %v", cfg.Plugins.ResolvedCatalogCacheTTL())
+	}
+}
+
