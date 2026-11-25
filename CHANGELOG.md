@@ -1,3 +1,10 @@
+## [1.30.2](https://github.com/theBenForce/shelfd/compare/v1.30.1...v1.30.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **plugins:** make invocation-token 401 recovery deterministic in SDK stage/fetch paths ([2145cd5](https://github.com/theBenForce/shelfd/commit/2145cd52ac4555afdbfb25fee00af0db4e08fec4))
+
 ## [1.30.1](https://github.com/theBenForce/shelfd/compare/v1.30.0...v1.30.1) (2026-11-24)
 
 
