@@ -1,3 +1,11 @@
+## [1.31.1](https://github.com/theBenForce/shelfd/compare/v1.31.0...v1.31.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **plugins:** proactively refresh invocation token and retry early socket close on stage uploads ([0c9a022](https://github.com/theBenForce/shelfd/commit/0c9a022fe4035ab03f3b3fec99442c0bdfd459bd))
+* **uploads:** stream multipart book uploads from disk to prevent 1 GB container OOM ([#106](https://github.com/theBenForce/shelfd/issues/106)) ([e158e68](https://github.com/theBenForce/shelfd/commit/e158e68fede6751cd986afc34ef9ac580ae772ec))
+
 # [1.31.0](https://github.com/theBenForce/shelfd/compare/v1.30.2...v1.31.0) (2026-11-25)
 
 
