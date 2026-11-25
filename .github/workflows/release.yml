@@ -352,12 +352,20 @@ jobs:
           ref: ${{ steps.target.outputs.checkout_ref }}
           persist-credentials: false
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
           cache: 'gradle'
+
+      - name: Cache Android NDK and CMake
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/lib/android/sdk/ndk/28.2.13676358
+            /usr/local/lib/android/sdk/cmake/3.22.1
+          key: android-sdk-ndk28c-cmake322-${{ runner.os }}
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
