@@ -18,7 +18,6 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/shelfd/shelfd/internal/mcp"
 	"github.com/shelfd/shelfd/internal/repository"
 )
 
@@ -93,21 +92,8 @@ func (h *OAuthHandler) HandleProtectedResourceDiscovery(w http.ResponseWriter, r
 	writeJSON(w, http.StatusOK, meta)
 }
 
-// resolveBaseURL dynamically derives the server's public base URL honoring reverse proxy headers.
 func resolveBaseURL(r *http.Request) string {
-	scheme := "http"
-	if xfp := r.Header.Get("X-Forwarded-Proto"); xfp != "" {
-		scheme = xfp
-	} else if r.TLS != nil {
-		scheme = "https"
-	}
-
-	host := r.Host
-	if xfh := r.Header.Get("X-Forwarded-Host"); xfh != "" {
-		host = xfh
-	}
-
-	return fmt.Sprintf("%s://%s", scheme, host)
+	return resolveExternalOrigin(r, "", 0)
 }
 
 // HandleDiscovery implements RFC 8414 OAuth 2.0 Authorization Server Metadata
@@ -771,20 +757,8 @@ func (h *OAuthHandler) HandleToken(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Issue a persistent Shelfd API Token for the user and client
-	tokenBytes := make([]byte, 24)
-	_, _ = rand.Read(tokenBytes)
-	rawToken := "shelfd_" + hex.EncodeToString(tokenBytes)
-	tokenHash := mcp.HashToken(rawToken)
-
-	apiToken := &repository.APIToken{
-		UserID:    codeRecord.UserID,
-		TokenHash: tokenHash,
-		Name:      fmt.Sprintf("OAuth: %s", client.ClientName),
-		CreatedAt: time.Now().UTC(),
-	}
-
-	if err := h.repo.CreateAPIToken(r.Context(), apiToken); err != nil {
+	_, rawToken, err := issueAPIToken(r.Context(), h.repo, codeRecord.UserID, fmt.Sprintf("OAuth: %s", client.ClientName))
+	if err != nil {
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "Failed to generate access token")
 		return
 	}

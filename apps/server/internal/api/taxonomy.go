@@ -62,7 +62,7 @@ func (h *TaxonomyHandler) ListAuthors(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaxonomyHandler) GetAuthorPhoto(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}

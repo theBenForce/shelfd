@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
+import '../../../platform/external_url_launcher.dart';
 
 List<String> _inferAllowedExtensions(String fileName, String? mimeType) {
   final lower = fileName.toLowerCase();
@@ -70,8 +71,14 @@ Future<bool> saveDownloadedFile(
 Future<bool> openExternalUrl(String url) async {
   final trimmed = url.trim();
   if (trimmed.isEmpty) return false;
+  if (debugExternalUrlLauncherOverride != null) {
+    return launchExternalBrowserUrl(trimmed);
+  }
   if (Platform.environment.containsKey('FLUTTER_TEST')) {
     return true;
+  }
+  if (Platform.isAndroid || Platform.isIOS) {
+    return launchExternalBrowserUrl(trimmed);
   }
   try {
     if (Platform.isMacOS) {

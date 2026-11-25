@@ -113,6 +113,7 @@ class CastAudioPlayerEngine implements AudioPlayerEngine {
     String url, {
     Duration? initialPosition,
     AudioMediaMetadata? metadata,
+    Map<String, String>? headers,
   }) async {
     if (initialPosition != null) {
       _anchorPosition = initialPosition;

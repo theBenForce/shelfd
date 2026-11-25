@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import '../../data/models/book.dart';
+import '../../data/utils/url_normalizer.dart';
 import 'audio_player_state.dart';
 
 String? resolveAuthenticatedCoverUrl(
@@ -6,19 +8,21 @@ String? resolveAuthenticatedCoverUrl(
   required String baseUrl,
   String? token,
   String? fallbackOrigin,
+  bool isWeb = kIsWeb,
 }) {
   final raw = book.coverUrl?.trim();
   if (raw == null || raw.isEmpty) return null;
 
+  final effectiveOrigin = baseUrl.trim().isNotEmpty
+      ? baseUrl.trim()
+      : (fallbackOrigin?.trim() ?? '');
+
   var resolved = raw;
-  if (resolved.startsWith('/')) {
-    final origin = baseUrl.trim().isNotEmpty
-        ? baseUrl.trim()
-        : (fallbackOrigin?.trim() ?? '');
-    if (origin.isNotEmpty) {
-      final cleanOrigin = origin.endsWith('/')
-          ? origin.substring(0, origin.length - 1)
-          : origin;
+  if (resolved.startsWith('/') && !resolved.startsWith('//')) {
+    if (effectiveOrigin.isNotEmpty) {
+      final cleanOrigin = effectiveOrigin.endsWith('/')
+          ? effectiveOrigin.substring(0, effectiveOrigin.length - 1)
+          : effectiveOrigin;
       resolved = '$cleanOrigin$resolved';
     }
   }
@@ -27,9 +31,12 @@ String? resolveAuthenticatedCoverUrl(
   if (uri == null) return resolved;
 
   final cleanToken = token?.trim();
-  if (cleanToken != null &&
+  if (isWeb &&
+      cleanToken != null &&
       cleanToken.isNotEmpty &&
-      (uri.queryParameters['token'] ?? '').isEmpty) {
+      (uri.queryParameters['token'] ?? '').isEmpty &&
+      (effectiveOrigin.isEmpty ||
+          UrlNormalizer.isSameOrigin(effectiveOrigin, resolved))) {
     return uri.replace(
       queryParameters: {
         ...uri.queryParameters,
@@ -39,6 +46,32 @@ String? resolveAuthenticatedCoverUrl(
   }
 
   return uri.toString();
+}
+
+Map<String, String>? resolveAuthenticatedArtworkHeaders({
+  required String? artworkUrl,
+  required String baseUrl,
+  String? token,
+  String? fallbackOrigin,
+  bool isWeb = kIsWeb,
+}) {
+  if (isWeb || artworkUrl == null || artworkUrl.trim().isEmpty) {
+    return null;
+  }
+  final cleanToken = token?.trim();
+  if (cleanToken == null || cleanToken.isEmpty) {
+    return null;
+  }
+  final effectiveOrigin = baseUrl.trim().isNotEmpty
+      ? baseUrl.trim()
+      : (fallbackOrigin?.trim() ?? '');
+  if (effectiveOrigin.isEmpty ||
+      !UrlNormalizer.isSameOrigin(effectiveOrigin, artworkUrl)) {
+    return null;
+  }
+  return <String, String>{
+    'Authorization': 'Bearer $cleanToken',
+  };
 }
 
 String _formatSeriesAlbum(Book book) {
@@ -57,6 +90,7 @@ class AudioMediaMetadata {
   final String artist;
   final String album;
   final String? artworkUrl;
+  final Map<String, String>? artworkHeaders;
   final Duration? duration;
   final bool isReadalong;
 
@@ -66,6 +100,7 @@ class AudioMediaMetadata {
     required this.artist,
     required this.album,
     this.artworkUrl,
+    this.artworkHeaders,
     this.duration,
     this.isReadalong = false,
   });
@@ -81,6 +116,7 @@ class AudioMediaMetadata {
     required String baseUrl,
     String? token,
     String? fallbackOrigin,
+    bool isWeb = kIsWeb,
   }) {
     final book = state.book;
     if (book == null) return null;
@@ -94,17 +130,28 @@ class AudioMediaMetadata {
             ? seriesLabel
             : (isReadalong ? 'Read-Along' : 'Audiobook'));
 
+    final resolvedCoverUrl = resolveAuthenticatedCoverUrl(
+      book,
+      baseUrl: baseUrl,
+      token: token,
+      fallbackOrigin: fallbackOrigin,
+      isWeb: isWeb,
+    );
+    final resolvedHeaders = resolveAuthenticatedArtworkHeaders(
+      artworkUrl: resolvedCoverUrl,
+      baseUrl: baseUrl,
+      token: token,
+      fallbackOrigin: fallbackOrigin,
+      isWeb: isWeb,
+    );
+
     return AudioMediaMetadata(
       id: book.id,
       title: book.title,
       artist: book.authorDisplay.isNotEmpty ? book.authorDisplay : 'Shelfd',
       album: album,
-      artworkUrl: resolveAuthenticatedCoverUrl(
-        book,
-        baseUrl: baseUrl,
-        token: token,
-        fallbackOrigin: fallbackOrigin,
-      ),
+      artworkUrl: resolvedCoverUrl,
+      artworkHeaders: resolvedHeaders,
       duration: state.duration > Duration.zero ? state.duration : null,
       isReadalong: isReadalong,
     );
@@ -119,6 +166,7 @@ class AudioMediaMetadata {
             other.artist == artist &&
             other.album == album &&
             other.artworkUrl == artworkUrl &&
+            mapEquals(other.artworkHeaders, artworkHeaders) &&
             other.duration == duration &&
             other.isReadalong == isReadalong;
   }
@@ -130,6 +178,12 @@ class AudioMediaMetadata {
         artist,
         album,
         artworkUrl,
+        artworkHeaders == null
+            ? null
+            : Object.hashAll(
+                artworkHeaders!.entries
+                    .map((e) => Object.hash(e.key, e.value)),
+              ),
         duration,
         isReadalong,
       );

@@ -132,21 +132,29 @@ void main() {
       );
     });
 
-    test('resolves relative cover path against baseUrl and appends token', () {
+    test('resolves relative cover path, omits ?token on native, and appends ?token on web', () {
       const book = Book(
         id: 'b1',
         title: 'Dune',
         coverUrl: '/api/v1/books/b1/cover',
       );
 
-      final url = resolveAuthenticatedCoverUrl(
+      final nativeUrl = resolveAuthenticatedCoverUrl(
         book,
         baseUrl: 'https://shelf.example.com/',
         token: 'jwt-123',
+        isWeb: false,
       );
+      expect(nativeUrl, 'https://shelf.example.com/api/v1/books/b1/cover');
 
+      final webUrl = resolveAuthenticatedCoverUrl(
+        book,
+        baseUrl: 'https://shelf.example.com/',
+        token: 'jwt-123',
+        isWeb: true,
+      );
       expect(
-        url,
+        webUrl,
         'https://shelf.example.com/api/v1/books/b1/cover?token=jwt-123',
       );
     });
@@ -163,6 +171,7 @@ void main() {
         baseUrl: '',
         token: 'jwt-123',
         fallbackOrigin: 'http://localhost:3000/',
+        isWeb: true,
       );
 
       expect(
@@ -182,6 +191,7 @@ void main() {
         book,
         baseUrl: 'https://shelf.example.com',
         token: 'different',
+        isWeb: true,
       );
 
       expect(
@@ -202,7 +212,7 @@ void main() {
       );
     });
 
-    test('uses active chapter title as album when present', () {
+    test('uses active chapter title as album and attaches origin-scoped artworkHeaders on native', () {
       const book = Book(
         id: 'b1',
         title: 'Project Hail Mary',
@@ -226,21 +236,45 @@ void main() {
         activeChapter: chapter,
       );
 
-      final meta = AudioMediaMetadata.fromAudioState(
+      final nativeMeta = AudioMediaMetadata.fromAudioState(
         state,
         baseUrl: 'https://shelf.local',
         token: 'tok',
+        isWeb: false,
       );
 
-      expect(meta, isNotNull);
-      expect(meta!.id, 'b1');
-      expect(meta.title, 'Project Hail Mary');
-      expect(meta.artist, 'Andy Weir');
-      expect(meta.album, 'Chapter 1: Awakening');
-      expect(meta.artworkUrl, 'https://shelf.local/api/v1/books/b1/cover?token=tok');
-      expect(meta.artworkUri, Uri.parse('https://shelf.local/api/v1/books/b1/cover?token=tok'));
-      expect(meta.duration, const Duration(hours: 1));
-      expect(meta.isReadalong, isFalse);
+      expect(nativeMeta, isNotNull);
+      expect(nativeMeta!.id, 'b1');
+      expect(nativeMeta.title, 'Project Hail Mary');
+      expect(nativeMeta.artist, 'Andy Weir');
+      expect(nativeMeta.album, 'Chapter 1: Awakening');
+      expect(nativeMeta.artworkUrl, 'https://shelf.local/api/v1/books/b1/cover');
+      expect(nativeMeta.artworkUri, Uri.parse('https://shelf.local/api/v1/books/b1/cover'));
+      expect(nativeMeta.artworkHeaders, {'Authorization': 'Bearer tok'});
+      expect(nativeMeta.duration, const Duration(hours: 1));
+      expect(nativeMeta.isReadalong, isFalse);
+
+      final webMeta = AudioMediaMetadata.fromAudioState(
+        state,
+        baseUrl: 'https://shelf.local',
+        token: 'tok',
+        isWeb: true,
+      );
+      expect(webMeta!.artworkUrl, 'https://shelf.local/api/v1/books/b1/cover?token=tok');
+      expect(webMeta.artworkHeaders, isNull);
+
+      const externalCoverBook = Book(
+        id: 'b-ext',
+        title: 'External Cover',
+        coverUrl: 'https://covers.openlibrary.org/b/id/123-L.jpg',
+      );
+      final externalMeta = AudioMediaMetadata.fromAudioState(
+        const AudioPlayerState(book: externalCoverBook),
+        baseUrl: 'https://shelf.local',
+        token: 'tok',
+        isWeb: false,
+      );
+      expect(externalMeta!.artworkHeaders, isNull);
     });
 
     test('falls back to series label and then playback mode', () {
@@ -359,7 +393,15 @@ void main() {
       expect(mediaBridge.metadataUpdates.last.album, 'Chapter 1');
       expect(
         mediaBridge.metadataUpdates.last.artworkUrl,
-        'http://localhost:8080/api/v1/books/book-1/cover?token=secret-tok',
+        'http://localhost:8080/api/v1/books/book-1/cover',
+      );
+      expect(
+        mediaBridge.metadataUpdates.last.artworkHeaders,
+        {'Authorization': 'Bearer secret-tok'},
+      );
+      expect(
+        engine.lastHeaders,
+        {'Authorization': 'Bearer secret-tok'},
       );
       expect(mediaBridge.playbackUpdates.last.status, AudioPlaybackStatus.playing);
 

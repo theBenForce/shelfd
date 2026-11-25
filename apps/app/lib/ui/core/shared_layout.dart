@@ -10,6 +10,7 @@ import '../features/audiobook/widgets/mini_player_bar.dart';
 import '../state/providers.dart';
 import 'background_tasks_ui.dart';
 import 'responsive.dart';
+import 'shelfd_authenticated_image.dart';
 import 'theme.dart';
 import 'tokens.dart';
 import 'typography.dart';
@@ -223,8 +224,8 @@ class AuthorAvatar extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: photoUrl != null && photoUrl!.isNotEmpty
-          ? Image.network(
-              photoUrl!,
+          ? ShelfdAuthenticatedImage(
+              imageUrl: photoUrl!,
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) =>
                   _buildInitials(colors),
@@ -1302,9 +1303,9 @@ class TactileBookCover extends StatelessWidget {
                 fit: StackFit.expand,
                 children: [
                   hasCover
-                      ? Image.network(
-                          coverUrl!,
-                          headers: headers,
+                      ? ShelfdAuthenticatedImage(
+                          imageUrl: coverUrl!,
+                          extraHeaders: headers,
                           fit: BoxFit.cover,
                           width: double.infinity,
                           height: double.infinity,

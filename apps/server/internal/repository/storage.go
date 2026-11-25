@@ -111,7 +111,7 @@ type StorageEngine interface {
 	CreateAPIToken(ctx context.Context, token *APIToken) error
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (*APIToken, error)
 	ListAPITokensByUserID(ctx context.Context, userID string) ([]*APIToken, error)
-	DeleteAPIToken(ctx context.Context, id string) error
+	DeleteAPIToken(ctx context.Context, userID, tokenID string) error
 
 	// Upload Jobs
 	CreateUploadJob(ctx context.Context, job *UploadJob) error

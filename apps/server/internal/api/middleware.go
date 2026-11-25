@@ -16,8 +16,21 @@ import (
 type contextKey string
 
 const (
-	UserContextKey contextKey = "shelfd_user"
+	UserContextKey            contextKey = "shelfd_user"
+	authDiagnosticsContextKey contextKey = "shelfd_auth_diag"
 )
+
+type authLogDiagnostics struct {
+	source      string
+	errorReason string
+}
+
+func getAuthLogDiagnostics(ctx context.Context) *authLogDiagnostics {
+	if d, ok := ctx.Value(authDiagnosticsContextKey).(*authLogDiagnostics); ok {
+		return d
+	}
+	return nil
+}
 
 // CurrentUser retrieves the authenticated User from the request context.
 func CurrentUser(ctx context.Context) *repository.User {
@@ -32,33 +45,54 @@ func AuthMiddleware(repo repository.StorageEngine, jwtSecret string) func(http.H
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rawToken := ""
+			authSource := "none"
 
 			authHeader := r.Header.Get("Authorization")
 			if authHeader != "" {
 				parts := strings.SplitN(authHeader, " ", 2)
 				if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
 					rawToken = strings.TrimSpace(parts[1])
+					if rawToken != "" {
+						if strings.HasPrefix(rawToken, "shelfd_") {
+							authSource = "bearer_api_token"
+						} else {
+							authSource = "bearer_jwt"
+						}
+					}
 				}
 			}
 
 			if rawToken == "" {
 				if cookie, err := r.Cookie("shelfd_token"); err == nil && cookie.Value != "" {
 					rawToken = strings.TrimSpace(cookie.Value)
+					if rawToken != "" {
+						authSource = "cookie"
+					}
 				}
 			}
 
 			if rawToken == "" {
 				rawToken = strings.TrimSpace(r.URL.Query().Get("token"))
+				if rawToken != "" {
+					authSource = "query"
+				}
+			}
+
+			diag := getAuthLogDiagnostics(r.Context())
+			if diag != nil {
+				diag.source = authSource
 			}
 
 			if rawToken == "" {
+				if diag != nil {
+					diag.errorReason = "missing_token"
+				}
 				writeJSONError(w, http.StatusUnauthorized, "Missing authorization token")
 				return
 			}
 
 			var user *repository.User
 
-			// 1. Try persistent API token (e.g. shelfd_...)
 			if strings.HasPrefix(rawToken, "shelfd_") {
 				tokenHash := mcp.HashToken(rawToken)
 				apiToken, err := repo.GetAPITokenByHash(r.Context(), tokenHash)
@@ -70,7 +104,6 @@ func AuthMiddleware(repo repository.StorageEngine, jwtSecret string) func(http.H
 				}
 			}
 
-			// 2. Try JWT token
 			var jwtClaims *UserClaims
 			if user == nil && jwtSecret != "" {
 				claims, err := ValidateJWT(rawToken, jwtSecret)
@@ -83,7 +116,6 @@ func AuthMiddleware(repo repository.StorageEngine, jwtSecret string) func(http.H
 				}
 			}
 
-			// 3. Fallback: try raw API token without shelfd_ prefix
 			if user == nil {
 				tokenHash := mcp.HashToken(rawToken)
 				apiToken, err := repo.GetAPITokenByHash(r.Context(), tokenHash)
@@ -91,16 +123,24 @@ func AuthMiddleware(repo repository.StorageEngine, jwtSecret string) func(http.H
 					u, err := repo.GetUserByID(r.Context(), apiToken.UserID)
 					if err == nil && u != nil {
 						user = u
+						if authSource == "bearer_jwt" {
+							authSource = "bearer_api_token"
+							if diag != nil {
+								diag.source = authSource
+							}
+						}
 					}
 				}
 			}
 
 			if user == nil {
+				if diag != nil {
+					diag.errorReason = "invalid_token"
+				}
 				writeJSONError(w, http.StatusUnauthorized, "Invalid or expired authorization token")
 				return
 			}
 
-			// Enforce scope restrictions for plugin-scoped and cast-scoped JWTs
 			if jwtClaims != nil && (jwtClaims.PluginName != "" || len(jwtClaims.Scopes) > 0) {
 				allowed := false
 				if jwtClaims.PluginName != "" {
@@ -109,6 +149,9 @@ func AuthMiddleware(repo repository.StorageEngine, jwtSecret string) func(http.H
 					allowed = CastScopeAllowsRequest(jwtClaims.Scopes, r.Method, r.URL.Path)
 				}
 				if !allowed {
+					if diag != nil {
+						diag.errorReason = "insufficient_scope"
+					}
 					writeJSONError(w, http.StatusForbidden, "Insufficient token scope for requested endpoint")
 					return
 				}
@@ -144,6 +187,9 @@ func CastScopeAllowsRequest(scopes []string, method, reqPath string) bool {
 			return true
 		}
 		if strings.HasPrefix(reqPath, "/api/v1/books/"+bookID+"/files/") && strings.HasSuffix(reqPath, "/stream") {
+			return true
+		}
+		if strings.HasPrefix(reqPath, "/api/v1/books/"+bookID+"/chapters/") && strings.HasSuffix(reqPath, "/html") {
 			return true
 		}
 	}
@@ -270,8 +316,10 @@ func RequestLoggerMiddleware(logger *slog.Logger) func(http.Handler) http.Handle
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			sw := &statusResponseWriter{ResponseWriter: w}
+			diag := &authLogDiagnostics{}
+			reqWithDiag := r.WithContext(context.WithValue(r.Context(), authDiagnosticsContextKey, diag))
 
-			next.ServeHTTP(sw, r)
+			next.ServeHTTP(sw, reqWithDiag)
 
 			duration := time.Since(start)
 			statusCode := sw.statusCode
@@ -279,7 +327,6 @@ func RequestLoggerMiddleware(logger *slog.Logger) func(http.Handler) http.Handle
 				statusCode = http.StatusOK
 			}
 
-			// Health checks logged at debug level to prevent log clutter
 			level := slog.LevelInfo
 			if r.URL.Path == "/health" {
 				level = slog.LevelDebug
@@ -298,11 +345,16 @@ func RequestLoggerMiddleware(logger *slog.Logger) func(http.Handler) http.Handle
 				"remote_ip", clientIP(r),
 			}
 
-			if user := CurrentUser(r.Context()); user != nil {
+			if (statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden) &&
+				(diag.source != "" || diag.errorReason != "") {
+				attrs = append(attrs, "auth_source", diag.source, "auth_error_reason", diag.errorReason)
+			}
+
+			if user := CurrentUser(reqWithDiag.Context()); user != nil {
 				attrs = append(attrs, "user_id", user.ID, "username", user.Username)
 			}
 
-			logger.Log(r.Context(), level, "http_request", attrs...)
+			logger.Log(reqWithDiag.Context(), level, "http_request", attrs...)
 		})
 	}
 }

@@ -2,26 +2,11 @@ import 'dart:js_interop';
 import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
+import 'html_view_models.dart';
 
-class ReadalongFrameHighlight {
-  final String? targetViewKey;
-  final String? bookId;
-  final String? chapterHref;
-  final String fragmentId;
-  final String activeClass;
-  final String playbackActiveClass;
-  final bool playing;
+export 'html_view_models.dart';
 
-  const ReadalongFrameHighlight({
-    this.targetViewKey,
-    this.bookId,
-    this.chapterHref,
-    required this.fragmentId,
-    this.activeClass = '-epub-media-overlay-active',
-    this.playbackActiveClass = '-epub-media-overlay-playing',
-    this.playing = true,
-  });
-}
+bool get requiresNativeMediaCookie => false;
 
 final Set<String> _registeredViews = <String>{};
 final Map<String, web.HTMLIFrameElement> _activeIframes = <String, web.HTMLIFrameElement>{};
@@ -40,6 +25,13 @@ String activeFragmentForViewKey(String viewKey) {
 void resetHtmlFrameHighlightsForTest() {
   _lastHighlight = null;
 }
+
+Future<void> seedHtmlAuthCookie({
+  required String serverBaseUrl,
+  required String mediaJwt,
+}) async {}
+
+Future<void> clearHtmlAuthCookies() async {}
 
 void _postHighlightToIframe(
   String iframeViewKey,
@@ -68,6 +60,8 @@ Widget buildHtmlFrame({
   required String url,
   required double width,
   required double height,
+  OnReadalongClick? onReadalongClick,
+  OnToggleControls? onToggleControls,
 }) {
   final uniqueKey = '${viewKey}_${url.hashCode}';
   _iframeViewKeys[uniqueKey] = viewKey;

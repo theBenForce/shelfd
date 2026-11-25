@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../data/models/book.dart';
+import '../../../core/shelfd_authenticated_image.dart';
 import '../../../core/tokens.dart';
 import '../../../core/typography.dart';
 import '../../../state/providers.dart';
@@ -198,8 +199,8 @@ class _ChapterDrawerSheetState extends ConsumerState<ChapterDrawerSheet> {
                       height: 44,
                       color: AppTokens.obsidianSurface,
                       child: effectiveBook.coverUrl != null
-                          ? Image.network(
-                              effectiveBook.coverUrl!,
+                          ? ShelfdAuthenticatedImage(
+                              imageUrl: effectiveBook.coverUrl!,
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) =>
                                   const Icon(Icons.headphones, color: AppTokens.amberAccent, size: 24),

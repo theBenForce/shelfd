@@ -1699,8 +1699,8 @@ func (r *BunStorageEngine) ListAPITokensByUserID(ctx context.Context, userID str
 	return tokens, nil
 }
 
-func (r *BunStorageEngine) DeleteAPIToken(ctx context.Context, id string) error {
-	res, err := r.db.NewDelete().Model((*APIToken)(nil)).Where("id = ?", id).Exec(ctx)
+func (r *BunStorageEngine) DeleteAPIToken(ctx context.Context, userID, tokenID string) error {
+	res, err := r.db.NewDelete().Model((*APIToken)(nil)).Where("id = ? AND user_id = ?", tokenID, userID).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("deleting API token: %w", err)
 	}

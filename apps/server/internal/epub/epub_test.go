@@ -1277,3 +1277,25 @@ func TestExtractChapters_SelfClosingTitleAndOdnormSpanWhitespace(t *testing.T) {
 		t.Errorf("expected ContentPlain %q, got %q", expectedPlain, chapters[0].ContentPlain)
 	}
 }
+
+func TestRewritePageHTMLShelfdBridge(t *testing.T) {
+	pw, ph := 600, 800
+	raw := `<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><link rel="stylesheet" href="css/page.css"/></head>
+<body><div class="spread"><img src="img/p1.jpg"/><span id="frag-1">Hello</span></div></body>
+</html>`
+	rewritten := epub.RewritePageHTML(raw, "book-123", "OEBPS/xhtml/page1.xhtml", &pw, &ph)
+	for _, needle := range []string{
+		"/api/v1/books/book-123/assets/OEBPS/xhtml/css/page.css",
+		"/api/v1/books/book-123/assets/OEBPS/xhtml/img/p1.jpg",
+		"window.ShelfdBridge",
+		"shelfd:readalong-click",
+		"shelfd:toggle-controls",
+	} {
+		if !strings.Contains(rewritten, needle) {
+			t.Errorf("expected rewritten HTML to contain %q", needle)
+		}
+	}
+}
+

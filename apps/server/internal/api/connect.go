@@ -5,7 +5,43 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
+
+func firstForwardedValue(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	parts := strings.Split(raw, ",")
+	return strings.TrimSpace(parts[0])
+}
+
+func isHTTPSRequest(r *http.Request) bool {
+	if xfp := firstForwardedValue(r.Header.Get("X-Forwarded-Proto")); xfp != "" {
+		return strings.EqualFold(xfp, "https")
+	}
+	return r.TLS != nil
+}
+
+func resolveExternalOrigin(r *http.Request, cfgHost string, cfgPort int) string {
+	scheme := "http"
+	if isHTTPSRequest(r) {
+		scheme = "https"
+	}
+
+	host := ""
+	if xfh := firstForwardedValue(r.Header.Get("X-Forwarded-Host")); xfh != "" {
+		host = xfh
+	} else if (cfgHost == "0.0.0.0" || cfgHost == "") && r.Host != "" {
+		host = r.Host
+	} else if cfgHost != "" && cfgPort > 0 {
+		host = fmt.Sprintf("%s:%d", cfgHost, cfgPort)
+	} else {
+		host = r.Host
+	}
+
+	return fmt.Sprintf("%s://%s", scheme, host)
+}
 
 type ConnectHandler struct {
 	host            string
@@ -40,23 +76,7 @@ func (h *ConnectHandler) GetConnectInfo(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	host := ""
-	if xfh := r.Header.Get("X-Forwarded-Host"); xfh != "" {
-		host = xfh
-	} else if h.host == "0.0.0.0" || h.host == "" {
-		host = r.Host
-	} else {
-		host = fmt.Sprintf("%s:%d", h.host, h.port)
-	}
-
-	scheme := "http"
-	if xfp := r.Header.Get("X-Forwarded-Proto"); xfp != "" {
-		scheme = xfp
-	} else if r.TLS != nil {
-		scheme = "https"
-	}
-
-	serverURL := fmt.Sprintf("%s://%s", scheme, host)
+	serverURL := resolveExternalOrigin(r, h.host, h.port)
 	payloadMap := map[string]any{
 		"server":  serverURL,
 		"api":     serverURL + "/api/v1",

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../data/models/book.dart';
+import '../../core/shelfd_authenticated_image.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
@@ -383,8 +384,8 @@ class _AudiobookPlayerViewState extends ConsumerState<AudiobookPlayerView> {
                             fit: StackFit.expand,
                             children: [
                               book.coverUrl != null
-                                  ? Image.network(
-                                      book.coverUrl!,
+                                  ? ShelfdAuthenticatedImage(
+                                      imageUrl: book.coverUrl!,
                                       fit: BoxFit.cover,
                                       errorBuilder: (context, error, stackTrace) =>
                                           _buildCoverFallback(book.title),

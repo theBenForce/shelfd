@@ -3155,7 +3155,6 @@ func TestCLIWorkflow_OAuthSearchAndUpload(t *testing.T) {
 		t.Fatalf("unexpected upload response: %+v", uploadResp)
 	}
 
-	// 7. Query job status using the same Bearer token
 	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/"+uploadResp.JobID, nil)
 	statusReq.Header.Set("Authorization", "Bearer "+accessToken)
 	statusRec := httptest.NewRecorder()
@@ -3165,6 +3164,405 @@ func TestCLIWorkflow_OAuthSearchAndUpload(t *testing.T) {
 		t.Fatalf("expected 200 OK on job status query, got %d: %s", statusRec.Code, statusRec.Body.String())
 	}
 }
+
+func TestAPI_Auth_DeviceLoginAndMeCookieContainment(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	webBody := fmt.Sprintf(`{"username":"%s","password":"%s"}`, f.user.Username, f.password)
+	webReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(webBody))
+	webRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(webRec, webReq)
+	if webRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on web login, got %d: %s", webRec.Code, webRec.Body.String())
+	}
+	var webResp api.LoginResponse
+	if err := json.Unmarshal(webRec.Body.Bytes(), &webResp); err != nil {
+		t.Fatalf("decode web login response: %v", err)
+	}
+	if webResp.APIToken != "" || webResp.APITokenID != "" {
+		t.Fatalf("expected empty api_token on web login without device_name, got %q / %q", webResp.APIToken, webResp.APITokenID)
+	}
+
+	mobileBody := fmt.Sprintf(`{"username":"%s","password":"%s","device_name":"Shelfd Android (Pixel 9)"}`, f.user.Username, f.password)
+	mobileReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(mobileBody))
+	mobileRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(mobileRec, mobileReq)
+	if mobileRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on mobile login, got %d: %s", mobileRec.Code, mobileRec.Body.String())
+	}
+	var mobileResp api.LoginResponse
+	if err := json.Unmarshal(mobileRec.Body.Bytes(), &mobileResp); err != nil {
+		t.Fatalf("decode mobile login response: %v", err)
+	}
+	if !strings.HasPrefix(mobileResp.APIToken, "shelfd_") || mobileResp.APITokenID == "" {
+		t.Fatalf("expected shelfd_ device token and id, got token=%q id=%q", mobileResp.APIToken, mobileResp.APITokenID)
+	}
+
+	meAPITokenReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	meAPITokenReq.Header.Set("Authorization", "Bearer "+mobileResp.APIToken)
+	meAPITokenRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(meAPITokenRec, meAPITokenReq)
+	if meAPITokenRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /auth/me with shelfd_ token, got %d", meAPITokenRec.Code)
+	}
+	if len(meAPITokenRec.Result().Cookies()) != 0 {
+		t.Fatalf("expected zero Set-Cookie headers when authenticating with shelfd_ API token, got %v", meAPITokenRec.Result().Cookies())
+	}
+
+	meJWTReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	meJWTReq.Header.Set("Authorization", "Bearer "+webResp.Token)
+	meJWTRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(meJWTRec, meJWTReq)
+	if meJWTRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /auth/me with JWT, got %d", meJWTRec.Code)
+	}
+	if len(meJWTRec.Result().Cookies()) == 0 {
+		t.Fatalf("expected Set-Cookie header when authenticating /auth/me with JWT")
+	}
+}
+
+func TestAPI_Auth_PairBeginExchangeReplayExpiryAndRateLimit(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	unauthBeginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/pair/begin", nil)
+	unauthBeginRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(unauthBeginRec, unauthBeginReq)
+	if unauthBeginRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on unauthenticated pair/begin, got %d", unauthBeginRec.Code)
+	}
+
+	jwtToken := f.loginAndGetToken(t)
+
+	beginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/pair/begin", nil)
+	beginReq.Header.Set("Authorization", "Bearer "+jwtToken)
+	beginRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(beginRec, beginReq)
+	if beginRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on pair/begin, got %d: %s", beginRec.Code, beginRec.Body.String())
+	}
+	var beginResp api.PairBeginResponse
+	if err := json.Unmarshal(beginRec.Body.Bytes(), &beginResp); err != nil {
+		t.Fatalf("decode pair/begin: %v", err)
+	}
+	if len(beginResp.Code) != 64 {
+		t.Fatalf("expected 64-hex pairing code, got len=%d (%q)", len(beginResp.Code), beginResp.Code)
+	}
+
+	exchangeBody := fmt.Sprintf(`{"code":"%s","device_name":"Shelfd Android (Pixel 8)"}`, beginResp.Code)
+	exReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/pair/exchange", strings.NewReader(exchangeBody))
+	exReq.RemoteAddr = "192.168.1.50:54321"
+	exRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(exRec, exReq)
+	if exRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on pair/exchange, got %d: %s", exRec.Code, exRec.Body.String())
+	}
+	var exResp api.PairExchangeResponse
+	if err := json.Unmarshal(exRec.Body.Bytes(), &exResp); err != nil {
+		t.Fatalf("decode pair/exchange: %v", err)
+	}
+	if !strings.HasPrefix(exResp.Token, "shelfd_") || exResp.ID == "" || exResp.Name != "Shelfd Android (Pixel 8)" {
+		t.Fatalf("unexpected pair/exchange response: %+v", exResp)
+	}
+	if exResp.User.Username != f.user.Username {
+		t.Fatalf("expected paired username %q, got %q", f.user.Username, exResp.User.Username)
+	}
+
+	replayReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/pair/exchange", strings.NewReader(exchangeBody))
+	replayReq.RemoteAddr = "192.168.1.50:54321"
+	replayRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(replayRec, replayReq)
+	if replayRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on replayed pairing code, got %d", replayRec.Code)
+	}
+
+	now := time.Now().UTC()
+	authHandler := api.NewAuthHandler(f.repo, f.jwtSecret, slog.Default())
+	authHandler.SetClockForTest(func() time.Time { return now })
+	authMw := api.AuthMiddleware(f.repo, f.jwtSecret)
+
+	expBeginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/pair/begin", nil)
+	expBeginReq.Header.Set("Authorization", "Bearer "+jwtToken)
+	expBeginRec := httptest.NewRecorder()
+	authMw(http.HandlerFunc(authHandler.PairBegin)).ServeHTTP(expBeginRec, expBeginReq)
+	var expBeginResp api.PairBeginResponse
+	_ = json.Unmarshal(expBeginRec.Body.Bytes(), &expBeginResp)
+
+	authHandler.SetClockForTest(func() time.Time { return now.Add(91 * time.Second) })
+	expExReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/pair/exchange", strings.NewReader(fmt.Sprintf(`{"code":"%s"}`, expBeginResp.Code)))
+	expExReq.RemoteAddr = "10.0.0.15:40000"
+	expExRec := httptest.NewRecorder()
+	authHandler.PairExchange(expExRec, expExReq)
+	if expExRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on expired pairing code, got %d", expExRec.Code)
+	}
+
+	for attempt := 0; attempt < 10; attempt++ {
+		rlReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/pair/exchange", strings.NewReader(`{"code":"deadbeef"}`))
+		rlReq.RemoteAddr = "10.0.0.99:41000"
+		rlRec := httptest.NewRecorder()
+		authHandler.PairExchange(rlRec, rlReq)
+		if rlRec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected 401 before rate limit, got %d", attempt, rlRec.Code)
+		}
+	}
+	blockedReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/pair/exchange", strings.NewReader(`{"code":"deadbeef"}`))
+	blockedReq.RemoteAddr = "10.0.0.99:41000"
+	blockedRec := httptest.NewRecorder()
+	authHandler.PairExchange(blockedRec, blockedReq)
+	if blockedRec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 Too Many Requests after 10 attempts per IP, got %d", blockedRec.Code)
+	}
+}
+
+func TestAPI_Auth_CrossUserDeleteTokenIsolation(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	hashB, _ := bcrypt.GenerateFromPassword([]byte("bob-pass-123"), bcrypt.MinCost)
+	bob := &repository.User{
+		Username:     "bob",
+		PasswordHash: string(hashB),
+	}
+	if err := f.repo.CreateUser(context.Background(), bob); err != nil {
+		t.Fatalf("create bob: %v", err)
+	}
+
+	adminJWT := f.loginAndGetToken(t)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/tokens", strings.NewReader(`{"name":"Admin Phone"}`))
+	createReq.Header.Set("Authorization", "Bearer "+adminJWT)
+	createRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create token failed: %d", createRec.Code)
+	}
+	var created api.CreateTokenResponse
+	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
+
+	bobJWT, _, err := api.GenerateJWT(bob.ID, bob.Username, f.jwtSecret, time.Hour)
+	if err != nil {
+		t.Fatalf("bob jwt: %v", err)
+	}
+
+	crossDelReq := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/tokens/"+created.ID, nil)
+	crossDelReq.Header.Set("Authorization", "Bearer "+bobJWT)
+	crossDelRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(crossDelRec, crossDelReq)
+	if crossDelRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when bob tries to delete admin token, got %d", crossDelRec.Code)
+	}
+
+	ownDelReq := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/tokens/"+created.ID, nil)
+	ownDelReq.Header.Set("Authorization", "Bearer "+adminJWT)
+	ownDelRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(ownDelRec, ownDelReq)
+	if ownDelRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 when admin deletes own token, got %d", ownDelRec.Code)
+	}
+}
+
+func TestAPI_BookMediaTokenScopeAndHeadRoutes(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	adminJWT := f.loginAndGetToken(t)
+
+	bookDir := filepath.Join(f.libDir, "Beatrix Potter", "Peter Rabbit")
+	if err := os.MkdirAll(bookDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	var epubBuf bytes.Buffer
+	zw := zip.NewWriter(&epubBuf)
+	mt, _ := zw.CreateHeader(&zip.FileHeader{Name: "mimetype", Method: zip.Store})
+	_, _ = mt.Write([]byte("application/epub+zip"))
+	ct, _ := zw.Create("META-INF/container.xml")
+	_, _ = ct.Write([]byte(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`))
+	opf, _ := zw.Create("OEBPS/content.opf")
+	_, _ = opf.Write([]byte(`<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Peter Rabbit</dc:title>
+    <dc:creator>Beatrix Potter</dc:creator>
+    <meta property="rendition:layout">pre-paginated</meta>
+  </metadata>
+  <manifest>
+    <item id="p1" href="page1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="img1" href="images/rabbit.png" media-type="image/png" properties="cover-image"/>
+  </manifest>
+  <spine><itemref idref="p1"/></spine>
+</package>`))
+	p1, _ := zw.Create("OEBPS/page1.xhtml")
+	_, _ = p1.Write([]byte(`<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><meta name="viewport" content="width=600, height=800"/></head><body><img src="images/rabbit.png"/><span id="s1">Once upon a time</span></body></html>`))
+	img1, _ := zw.Create("OEBPS/images/rabbit.png")
+	pngBytes := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	_, _ = img1.Write(pngBytes)
+	_ = zw.Close()
+
+	epubPath := filepath.Join(bookDir, "Peter Rabbit.epub")
+	if err := os.WriteFile(epubPath, epubBuf.Bytes(), 0644); err != nil {
+		t.Fatalf("write epub: %v", err)
+	}
+	book1, err := f.ingester.IngestFile(context.Background(), epubPath, "Beatrix Potter/Peter Rabbit/Peter Rabbit.epub")
+	if err != nil {
+		t.Fatalf("ingest book1: %v", err)
+	}
+
+	book2 := &repository.Book{
+		Title:    "Other Book",
+		FilePath: "Other/Book.epub",
+	}
+	if err := f.repo.CreateBook(context.Background(), book2); err != nil {
+		t.Fatalf("create book2: %v", err)
+	}
+
+	missingMintReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/non-existent/media-token", nil)
+	missingMintReq.Header.Set("Authorization", "Bearer "+adminJWT)
+	missingMintRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(missingMintRec, missingMintReq)
+	if missingMintRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 on missing book media-token, got %d", missingMintRec.Code)
+	}
+
+	mintReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+book1.ID+"/media-token", nil)
+	mintReq.Header.Set("Authorization", "Bearer "+adminJWT)
+	mintRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(mintRec, mintReq)
+	if mintRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on media-token mint, got %d: %s", mintRec.Code, mintRec.Body.String())
+	}
+	var mintResp api.BookMediaTokenResponse
+	if err := json.Unmarshal(mintRec.Body.Bytes(), &mintResp); err != nil || mintResp.Token == "" {
+		t.Fatalf("decode media-token response: %v / %+v", err, mintResp)
+	}
+
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		chReq := httptest.NewRequest(method, "/api/v1/books/"+book1.ID+"/chapters/1/html", nil)
+		chReq.AddCookie(&http.Cookie{Name: "shelfd_token", Value: mintResp.Token})
+		chRec := httptest.NewRecorder()
+		f.handler.ServeHTTP(chRec, chReq)
+		if chRec.Code != http.StatusOK {
+			t.Fatalf("%s chapter html with book media cookie failed: %d (%s)", method, chRec.Code, chRec.Body.String())
+		}
+		if method == http.MethodHead && chRec.Body.Len() != 0 {
+			t.Fatalf("expected empty body on HEAD chapter html, got %d bytes", chRec.Body.Len())
+		}
+		if method == http.MethodGet && !strings.Contains(chRec.Body.String(), "ShelfdBridge") {
+			t.Fatalf("expected rewritten chapter html to include ShelfdBridge script")
+		}
+
+		assetReq := httptest.NewRequest(method, "/api/v1/books/"+book1.ID+"/assets/OEBPS/images/rabbit.png", nil)
+		assetReq.AddCookie(&http.Cookie{Name: "shelfd_token", Value: mintResp.Token})
+		assetRec := httptest.NewRecorder()
+		f.handler.ServeHTTP(assetRec, assetReq)
+		if assetRec.Code != http.StatusOK {
+			t.Fatalf("%s asset with book media cookie failed: %d", method, assetRec.Code)
+		}
+		if gotCC := assetRec.Header().Get("Cache-Control"); gotCC != "private, max-age=86400" {
+			t.Fatalf("expected private Cache-Control on book asset, got %q", gotCC)
+		}
+	}
+
+	otherBookReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+book2.ID+"/chapters/1/html", nil)
+	otherBookReq.AddCookie(&http.Cookie{Name: "shelfd_token", Value: mintResp.Token})
+	otherBookRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(otherBookRec, otherBookReq)
+	if otherBookRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when using book1 media token on book2, got %d", otherBookRec.Code)
+	}
+
+	nonMediaReq := httptest.NewRequest(http.MethodGet, "/api/v1/books", nil)
+	nonMediaReq.AddCookie(&http.Cookie{Name: "shelfd_token", Value: mintResp.Token})
+	nonMediaRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(nonMediaRec, nonMediaReq)
+	if nonMediaRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when using book media token on /api/v1/books, got %d", nonMediaRec.Code)
+	}
+
+	writeReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/"+book1.ID+"/bookmarks", strings.NewReader(`{"title":"p1","progress":0.5}`))
+	writeReq.AddCookie(&http.Cookie{Name: "shelfd_token", Value: mintResp.Token})
+	writeRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(writeRec, writeReq)
+	if writeRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on write request with book media token, got %d", writeRec.Code)
+	}
+
+	authors, _ := f.repo.ListAuthors(context.Background())
+	if len(authors) > 0 {
+		authorPhotoDir := filepath.Join(f.libDir, "Beatrix Potter")
+		_ = os.WriteFile(filepath.Join(authorPhotoDir, "author.png"), pngBytes, 0644)
+		headAuthorReq := httptest.NewRequest(http.MethodHead, "/api/v1/authors/"+authors[0].ID+"/photo", nil)
+		headAuthorReq.Header.Set("Authorization", "Bearer "+adminJWT)
+		headAuthorRec := httptest.NewRecorder()
+		f.handler.ServeHTTP(headAuthorRec, headAuthorReq)
+		if headAuthorRec.Code != http.StatusOK || headAuthorRec.Body.Len() != 0 {
+			t.Fatalf("expected 200 empty body on HEAD author photo, got %d len=%d", headAuthorRec.Code, headAuthorRec.Body.Len())
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Join(f.dataDir, "uploads"), 0755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(f.dataDir, "uploads", "job-head-1.cover"), pngBytes, 0644); err != nil {
+		t.Fatalf("write job cover: %v", err)
+	}
+	headJobCoverReq := httptest.NewRequest(http.MethodHead, "/api/v1/books/upload/jobs/job-head-1/cover", nil)
+	headJobCoverReq.Header.Set("Authorization", "Bearer "+adminJWT)
+	headJobCoverRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(headJobCoverRec, headJobCoverReq)
+	if headJobCoverRec.Code != http.StatusOK || headJobCoverRec.Body.Len() != 0 {
+		t.Fatalf("expected 200 empty body on HEAD upload job cover, got %d len=%d", headJobCoverRec.Code, headJobCoverRec.Body.Len())
+	}
+}
+
+func TestAPI_ForwardedHeadersAndRedactedAuthLogging(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	connReq := httptest.NewRequest(http.MethodGet, "/api/v1/server/connect-info", nil)
+	connReq.Header.Set("X-Forwarded-Host", "shelfd.tailnet.ts.net, 10.0.0.2:8080")
+	connReq.Header.Set("X-Forwarded-Proto", "https, http")
+	connRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(connRec, connReq)
+	if connRec.Code != http.StatusOK {
+		t.Fatalf("connect-info failed: %d", connRec.Code)
+	}
+	var connResp api.ConnectInfoResponse
+	_ = json.Unmarshal(connRec.Body.Bytes(), &connResp)
+	decodedPayload, err := base64.StdEncoding.DecodeString(connResp.PairingPayload)
+	if err != nil {
+		t.Fatalf("decode pairing_payload: %v", err)
+	}
+	if !strings.Contains(string(decodedPayload), `"server":"https://shelfd.tailnet.ts.net"`) {
+		t.Fatalf("expected first X-Forwarded-Host/Proto in pairing_payload, got %s", string(decodedPayload))
+	}
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+	loggedHandler := api.RequestLoggerMiddleware(logger)(f.handler)
+
+	secretLeakToken := "shelfd_supersecret_do_not_log_me"
+	badReq := httptest.NewRequest(http.MethodGet, "/api/v1/books?token="+secretLeakToken, nil)
+	badRec := httptest.NewRecorder()
+	loggedHandler.ServeHTTP(badRec, badReq)
+	if badRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for invalid query token, got %d", badRec.Code)
+	}
+
+	logOutput := logBuf.String()
+	if strings.Contains(logOutput, secretLeakToken) {
+		t.Fatalf("request logger leaked raw token in log output: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"auth_source":"query"`) || !strings.Contains(logOutput, `"auth_error_reason":"invalid_token"`) {
+		t.Fatalf("expected auth_source and auth_error_reason in 401 log output, got %s", logOutput)
+	}
+}
+
 
 
 
