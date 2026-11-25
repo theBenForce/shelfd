@@ -5,12 +5,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/shelfd/shelfd/internal/repository"
 )
@@ -350,5 +355,460 @@ func TestAPI_ExportBookMarkdown_And_GetSeries(t *testing.T) {
 		t.Fatalf("expected files array populated on series book entry, got %+v", serResp.Books[0].Files)
 	}
 }
+
+func assertNoFilesInUploadsDir(t *testing.T, dataDir string) {
+	t.Helper()
+	uploadsDir := filepath.Join(dataDir, "uploads")
+	entries, err := os.ReadDir(uploadsDir)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("failed to read uploadsDir %s: %v", uploadsDir, err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("expected no leftover files in %s, found: %v", uploadsDir, names)
+	}
+}
+
+func TestAPI_StageUploadBook_MultipartPartOrderings(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+	ctx := context.Background()
+
+	// Audio with blank title/author so metadata_defaults populates them
+	audioBytes := createSyntheticMP3("", "", "", 120000, nil)
+	coverBytes := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x01, 0x02, 0xAA, 0xBB}
+
+	cases := []struct {
+		name       string
+		externalID string
+		title      string
+		buildParts func(t *testing.T, mpw *multipart.Writer, metaJSON string)
+	}{
+		{
+			name:       "file_first_then_cover_and_metadata",
+			externalID: "odyssey-order-1",
+			title:      "The Odyssey (File First)",
+			buildParts: func(t *testing.T, mpw *multipart.Writer, metaJSON string) {
+				fp, err := mpw.CreateFormFile("file", "odyssey_first.m4b")
+				if err != nil {
+					t.Fatalf("create file part: %v", err)
+				}
+				_, _ = fp.Write(audioBytes)
+
+				cp, err := mpw.CreateFormFile("cover", "cover.jpg")
+				if err != nil {
+					t.Fatalf("create cover part: %v", err)
+				}
+				_, _ = cp.Write(coverBytes)
+
+				_ = mpw.WriteField("source_plugin", "overdrive")
+				_ = mpw.WriteField("source_external_id", "odyssey-order-1")
+				_ = mpw.WriteField("metadata_defaults", metaJSON)
+			},
+		},
+		{
+			name:       "metadata_and_cover_first_then_file_last",
+			externalID: "odyssey-order-2",
+			title:      "The Odyssey (File Last)",
+			buildParts: func(t *testing.T, mpw *multipart.Writer, metaJSON string) {
+				_ = mpw.WriteField("source_plugin", "overdrive")
+				_ = mpw.WriteField("source_external_id", "odyssey-order-2")
+				_ = mpw.WriteField("metadata_defaults", metaJSON)
+
+				cp, err := mpw.CreateFormFile("cover", "cover.jpg")
+				if err != nil {
+					t.Fatalf("create cover part: %v", err)
+				}
+				_, _ = cp.Write(coverBytes)
+
+				fp, err := mpw.CreateFormFile("file", "odyssey_last.m4b")
+				if err != nil {
+					t.Fatalf("create file part: %v", err)
+				}
+				_, _ = fp.Write(audioBytes)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			metaDefaults, _ := json.Marshal(map[string]any{
+				"title":           tc.title,
+				"authors":         []string{"Homer", "Emily Wilson"},
+				"series":          "Greek Epics",
+				"sequence_number": 2,
+				"description":     "Translated by Emily Wilson.",
+				"publisher":       "W. W. Norton & Company",
+				"language":        "en",
+				"genres":          []string{"Classics", "Poetry"},
+				"narrator":        "Claire Danes",
+			})
+
+			var body bytes.Buffer
+			mpw := multipart.NewWriter(&body)
+			tc.buildParts(t, mpw, string(metaDefaults))
+			_ = mpw.Close()
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/stage", &body)
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", mpw.FormDataContentType())
+			rec := httptest.NewRecorder()
+			f.handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+			}
+
+			var resp struct {
+				JobID    string `json:"job_id"`
+				Status   string `json:"status"`
+				HasCover bool   `json:"has_cover"`
+				Metadata struct {
+					Title       string   `json:"title"`
+					Authors     []string `json:"authors"`
+					Series      *string  `json:"series"`
+					Description *string  `json:"description"`
+					Publisher   *string  `json:"publisher"`
+					Language    *string  `json:"language"`
+					Genres      []string `json:"genres"`
+					Narrator    *string  `json:"narrator"`
+					BookType    string   `json:"book_type"`
+				} `json:"metadata"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+
+			if resp.Status != "staged" || resp.JobID == "" {
+				t.Fatalf("expected staged job, got %+v", resp)
+			}
+			if !resp.HasCover {
+				t.Errorf("expected has_cover=true")
+			}
+			if resp.Metadata.Title != tc.title {
+				t.Errorf("expected title %q, got %q", tc.title, resp.Metadata.Title)
+			}
+			if len(resp.Metadata.Authors) != 2 || resp.Metadata.Authors[0] != "Homer" || resp.Metadata.Authors[1] != "Emily Wilson" {
+				t.Errorf("unexpected authors: %+v", resp.Metadata.Authors)
+			}
+			if resp.Metadata.Narrator == nil || *resp.Metadata.Narrator != "Claire Danes" {
+				t.Errorf("unexpected narrator: %v", resp.Metadata.Narrator)
+			}
+			if resp.Metadata.Publisher == nil || *resp.Metadata.Publisher != "W. W. Norton & Company" {
+				t.Errorf("unexpected publisher: %v", resp.Metadata.Publisher)
+			}
+			if resp.Metadata.Series == nil || *resp.Metadata.Series != "Greek Epics" {
+				t.Errorf("unexpected series: %v", resp.Metadata.Series)
+			}
+
+			// Verify cover bytes persisted
+			covReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/upload/jobs/"+resp.JobID+"/cover", nil)
+			covReq.Header.Set("Authorization", "Bearer "+token)
+			covRec := httptest.NewRecorder()
+			f.handler.ServeHTTP(covRec, covReq)
+			if covRec.Code != http.StatusOK || !bytes.Equal(covRec.Body.Bytes(), coverBytes) {
+				t.Fatalf("expected stored cover bytes to match, status=%d", covRec.Code)
+			}
+
+			// Verify provenance recorded in book_sources
+			sources, err := f.repo.GetBookSourcesByExternalIDs(ctx, "overdrive", []string{tc.externalID})
+			if err != nil || len(sources) != 1 {
+				t.Fatalf("expected 1 book_source row for %s, got len=%d err=%v", tc.externalID, len(sources), err)
+			}
+			if sources[0].UploadJobID == nil || *sources[0].UploadJobID != resp.JobID {
+				t.Errorf("expected UploadJobID %s on book_source, got %+v", resp.JobID, sources[0].UploadJobID)
+			}
+
+			// Clean up staged job so uploadsDir stays tidy
+			delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/books/upload/jobs/"+resp.JobID, nil)
+			delReq.Header.Set("Authorization", "Bearer "+token)
+			delRec := httptest.NewRecorder()
+			f.handler.ServeHTTP(delRec, delReq)
+			if delRec.Code != http.StatusNoContent {
+				t.Fatalf("expected 204 deleting staged job, got %d", delRec.Code)
+			}
+		})
+	}
+
+	assertNoFilesInUploadsDir(t, f.dataDir)
+}
+
+type failAfterHeaderReader struct {
+	prefix    []byte
+	offset    int
+	bodyReads int
+}
+
+func (r *failAfterHeaderReader) Read(p []byte) (int, error) {
+	if r.offset < len(r.prefix) {
+		n := copy(p, r.prefix[r.offset:])
+		r.offset += n
+		return n, nil
+	}
+	r.bodyReads++
+	if r.bodyReads > 32 {
+		return 0, io.EOF
+	}
+	for i := range p {
+		p[i] = 'X'
+	}
+	return len(p), nil
+}
+
+func TestAPI_StageUploadBook_RejectsUnsupportedAndMalformedWithoutLeftoverFiles(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+	coverBytes := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x01, 0x02}
+
+	t.Run("unsupported_extension_rejected_before_streaming_body", func(t *testing.T) {
+		boundary := "shelfdtestboundary12345"
+		headerPrefix := "--" + boundary + "\r\n" +
+			`Content-Disposition: form-data; name="cover"; filename="cover.jpg"` + "\r\n" +
+			"Content-Type: image/jpeg\r\n\r\n" +
+			string(coverBytes) + "\r\n" +
+			"--" + boundary + "\r\n" +
+			`Content-Disposition: form-data; name="file"; filename="malware.exe"` + "\r\n" +
+			"Content-Type: application/octet-stream\r\n\r\n"
+
+		stream := &failAfterHeaderReader{prefix: []byte(headerPrefix)}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/stage", stream)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request for unsupported extension, got %d: %s", rec.Code, rec.Body.String())
+		}
+		if stream.bodyReads > 1 {
+			t.Errorf("expected handler to reject unsupported extension before streaming body, but read %d body chunks", stream.bodyReads)
+		}
+		assertNoFilesInUploadsDir(t, f.dataDir)
+	})
+
+	t.Run("truncated_file_stream_cleans_up_partial_staged_file", func(t *testing.T) {
+		boundary := "shelfdtruncatedboundary"
+		partialStream := "--" + boundary + "\r\n" +
+			`Content-Disposition: form-data; name="file"; filename="unfinished.m4b"` + "\r\n" +
+			"Content-Type: audio/mp4\r\n\r\n" +
+			strings.Repeat("A", 64*1024) // no closing boundary -> UnexpectedEOF
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/stage", strings.NewReader(partialStream))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request on truncated stream, got %d: %s", rec.Code, rec.Body.String())
+		}
+		assertNoFilesInUploadsDir(t, f.dataDir)
+	})
+
+	t.Run("oversized_metadata_field_after_file_cleans_up_staged_file", func(t *testing.T) {
+		audioBytes := createSyntheticMP3("Odyssey", "Homer", "", 60000, nil)
+		var body bytes.Buffer
+		mpw := multipart.NewWriter(&body)
+		fp, _ := mpw.CreateFormFile("file", "odyssey.m4b")
+		_, _ = fp.Write(audioBytes)
+		// Write > 1 MB metadata_defaults field
+		_ = mpw.WriteField("metadata_defaults", strings.Repeat("x", (1<<20)+1024))
+		_ = mpw.Close()
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload/stage", &body)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", mpw.FormDataContentType())
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 Bad Request on oversized metadata_defaults, got %d: %s", rec.Code, rec.Body.String())
+		}
+		assertNoFilesInUploadsDir(t, f.dataDir)
+	})
+}
+
+func TestAPI_StageUploadBook_SlowStreamSurvivesShortServerReadTimeout(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+	audioBytes := createSyntheticMP3("Slow Stream Odyssey", "Homer", "Claire Danes", 90000, nil)
+
+	var body bytes.Buffer
+	mpw := multipart.NewWriter(&body)
+	fp, _ := mpw.CreateFormFile("file", "slow_odyssey.m4b")
+	_, _ = fp.Write(audioBytes)
+	_ = mpw.Close()
+	rawPayload := body.Bytes()
+
+	srv := httptest.NewUnstartedServer(f.handler)
+	srv.Config.ReadTimeout = 40 * time.Millisecond
+	srv.Start()
+	defer srv.Close()
+
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		chunkSize := len(rawPayload)/4 + 1
+		for offset := 0; offset < len(rawPayload); offset += chunkSize {
+			end := offset + chunkSize
+			if end > len(rawPayload) {
+				end = len(rawPayload)
+			}
+			if _, err := pw.Write(rawPayload[offset:end]); err != nil {
+				return
+			}
+			time.Sleep(35 * time.Millisecond) // Total ~140ms > 40ms ReadTimeout
+		}
+	}()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/books/upload/stage", pr)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", mpw.FormDataContentType())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("slow upload failed despite ResponseController read deadline override: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK on slow streamed upload, got %d: %s", resp.StatusCode, string(respBytes))
+	}
+}
+
+func TestAPI_StageUploadBook_LargeStreamBoundedHeap(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+	id3Header := createSyntheticMP3("Bounded Heap Odyssey", "Homer", "Claire Danes", 3600000, nil)
+	const payloadSize = 64 << 20 // 64 MiB
+
+	srv := httptest.NewServer(f.handler)
+	defer srv.Close()
+
+	runtime.GC()
+	var baseMem runtime.MemStats
+	runtime.ReadMemStats(&baseMem)
+
+	var peakHeapDelta atomic.Int64
+	stopSampling := make(chan struct{})
+	samplerDone := make(chan struct{})
+	go func() {
+		defer close(samplerDone)
+		var ms runtime.MemStats
+		for {
+			select {
+			case <-stopSampling:
+				return
+			default:
+				runtime.ReadMemStats(&ms)
+				if ms.HeapAlloc > baseMem.HeapAlloc {
+					delta := int64(ms.HeapAlloc - baseMem.HeapAlloc)
+					for {
+						cur := peakHeapDelta.Load()
+						if delta <= cur || peakHeapDelta.CompareAndSwap(cur, delta) {
+							break
+						}
+					}
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+	}()
+
+	pr, pw := io.Pipe()
+	mpw := multipart.NewWriter(pw)
+	go func() {
+		defer pw.Close()
+		part, err := mpw.CreateFormFile("file", "bounded_heap_odyssey.mp3")
+		if err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		if _, err := part.Write(id3Header); err != nil {
+			_ = pw.CloseWithError(err)
+			return
+		}
+		chunk := bytes.Repeat([]byte{0x5A}, 64*1024)
+		remaining := payloadSize - len(id3Header)
+		for remaining > 0 {
+			toWrite := len(chunk)
+			if remaining < toWrite {
+				toWrite = remaining
+			}
+			if _, err := part.Write(chunk[:toWrite]); err != nil {
+				_ = pw.CloseWithError(err)
+				return
+			}
+			remaining -= toWrite
+		}
+		_ = mpw.WriteField("source_plugin", "overdrive")
+		_ = mpw.WriteField("source_external_id", "bounded-heap-64mb")
+		_ = mpw.Close()
+	}()
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/books/upload/stage", pr)
+	if err != nil {
+		close(stopSampling)
+		<-samplerDone
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", mpw.FormDataContentType())
+
+	resp, err := http.DefaultClient.Do(req)
+	close(stopSampling)
+	<-samplerDone
+	if err != nil {
+		t.Fatalf("upload failed: %v", err)
+	}
+	defer resp.Body.Close()
+	respBytes, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", resp.StatusCode, string(respBytes))
+	}
+
+	var stageResp struct {
+		JobID string `json:"job_id"`
+	}
+	_ = json.Unmarshal(respBytes, &stageResp)
+	stagedFile := filepath.Join(f.dataDir, "uploads", stageResp.JobID+".mp3")
+	fi, err := os.Stat(stagedFile)
+	if err != nil {
+		t.Fatalf("staged file missing: %v", err)
+	}
+	if fi.Size() != payloadSize {
+		t.Fatalf("expected staged file size %d, got %d", payloadSize, fi.Size())
+	}
+
+	const maxAllowedHeapDelta = 24 << 20 // 24 MiB (< 64 MiB payload)
+	if got := peakHeapDelta.Load(); got > maxAllowedHeapDelta {
+		t.Fatalf("Go HeapAlloc grew by %.2f MiB while streaming 64 MiB upload (limit %.2f MiB)",
+			float64(got)/(1<<20), float64(maxAllowedHeapDelta)/(1<<20))
+	}
+}
+
+
 
 

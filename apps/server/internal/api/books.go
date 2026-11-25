@@ -1082,6 +1082,194 @@ func (h *BookHandler) GetChapterHTML(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(rewrittenHTML))
 }
 
+const (
+	maxUploadCoverBytes = 10 << 20 // 10 MB max cover image in multipart upload
+	maxUploadFieldBytes = 1 << 20  // 1 MB max text form field (e.g. metadata_defaults)
+)
+
+type parsedBookUpload struct {
+	jobID            string
+	uploadsDir       string
+	stagedPath       string
+	filename         string
+	ext              string
+	fileType         string
+	sizeBytes        int64
+	coverData        []byte
+	sourcePlugin     string
+	sourceExternalID string
+	rawMetaDefaults  string
+}
+
+func writeUploadedCoverIfValid(uploadsDir, jobID string, coverData []byte) bool {
+	if len(coverData) == 0 {
+		return false
+	}
+	ct := http.DetectContentType(coverData)
+	if !strings.HasPrefix(ct, "image/") {
+		return false
+	}
+	coverPath := filepath.Join(uploadsDir, jobID+".cover")
+	return os.WriteFile(coverPath, coverData, 0644) == nil
+}
+
+// parseStreamingBookUpload streams a multipart book upload directly to <dataDir>/uploads/<jobID><ext>
+// in O(1) memory regardless of part ordering, rejecting unsupported extensions before streaming the body
+// and capping non-book parts with io.LimitReader.
+func parseStreamingBookUpload(w http.ResponseWriter, r *http.Request, dataDir string) (*parsedBookUpload, bool) {
+	// Clear any connection-level read deadline so slow multi-hundred-MB audiobook uploads
+	// are not cut off mid-stream if an http.Server ReadTimeout is configured.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
+
+	mr, err := r.MultipartReader()
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse multipart form: %v", err))
+		return nil, false
+	}
+
+	jobID := uuid.NewString()
+	uploadsDir := filepath.Join(dataDir, "uploads")
+	res := &parsedBookUpload{
+		jobID:      jobID,
+		uploadsDir: uploadsDir,
+	}
+	seenFile := false
+
+	cleanup := func() {
+		if res.stagedPath != "" {
+			_ = os.Remove(res.stagedPath)
+		}
+	}
+
+	for {
+		part, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			cleanup()
+			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse multipart form: %v", err))
+			return nil, false
+		}
+
+		formName := part.FormName()
+		switch formName {
+		case "file":
+			if seenFile {
+				cleanup()
+				writeJSONError(w, http.StatusBadRequest, "Duplicate 'file' field in multipart upload")
+				return nil, false
+			}
+			filename := part.FileName()
+			if strings.TrimSpace(filename) == "" {
+				cleanup()
+				writeJSONError(w, http.StatusBadRequest, "Missing 'file' field in multipart upload")
+				return nil, false
+			}
+
+			ext := strings.ToLower(filepath.Ext(filename))
+			fileType, isPrimary := scanner.DetectFileType(filename)
+			if !isPrimary || (fileType != "epub" && fileType != "audiobook") {
+				cleanup()
+				writeJSONError(w, http.StatusBadRequest, "Only .epub, .m4b, .mp3, .m4a, and .flac files are accepted")
+				return nil, false
+			}
+
+			if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+				cleanup()
+				writeJSONError(w, http.StatusInternalServerError, "Failed to create uploads directory")
+				return nil, false
+			}
+
+			stagedPath := filepath.Join(uploadsDir, jobID+ext)
+			stagedFile, err := os.OpenFile(stagedPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+			if err != nil {
+				cleanup()
+				writeJSONError(w, http.StatusInternalServerError, "Failed to create staged upload file")
+				return nil, false
+			}
+			res.stagedPath = stagedPath
+
+			writtenBytes, copyErr := io.Copy(stagedFile, part)
+			closeErr := stagedFile.Close()
+			if copyErr != nil || closeErr != nil {
+				cleanup()
+				if copyErr != nil && (errors.Is(copyErr, io.ErrUnexpectedEOF) || strings.Contains(copyErr.Error(), "multipart:")) {
+					writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to read uploaded file stream: %v", copyErr))
+					return nil, false
+				}
+				writeJSONError(w, http.StatusInternalServerError, "Failed to write staged upload file")
+				return nil, false
+			}
+
+			res.filename = filename
+			res.ext = ext
+			res.fileType = fileType
+			res.sizeBytes = writtenBytes
+			seenFile = true
+
+		case "cover":
+			data, readErr := io.ReadAll(io.LimitReader(part, maxUploadCoverBytes+1))
+			if readErr != nil {
+				cleanup()
+				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to read cover image: %v", readErr))
+				return nil, false
+			}
+			if len(data) > maxUploadCoverBytes {
+				cleanup()
+				writeJSONError(w, http.StatusBadRequest, "Cover image exceeds maximum size of 10 MB")
+				return nil, false
+			}
+			if len(data) > 0 {
+				res.coverData = data
+			}
+
+		case "source_plugin", "source_external_id", "metadata_defaults":
+			data, readErr := io.ReadAll(io.LimitReader(part, maxUploadFieldBytes+1))
+			if readErr != nil {
+				cleanup()
+				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to read form field %q: %v", formName, readErr))
+				return nil, false
+			}
+			if len(data) > maxUploadFieldBytes {
+				cleanup()
+				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Form field %q exceeds maximum size of 1 MB", formName))
+				return nil, false
+			}
+			val := strings.TrimSpace(string(data))
+			switch formName {
+			case "source_plugin":
+				res.sourcePlugin = val
+			case "source_external_id":
+				res.sourceExternalID = val
+			case "metadata_defaults":
+				res.rawMetaDefaults = val
+			}
+
+		default:
+			n, readErr := io.Copy(io.Discard, io.LimitReader(part, maxUploadFieldBytes+1))
+			if readErr != nil {
+				cleanup()
+				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to read multipart field: %v", readErr))
+				return nil, false
+			}
+			if n > maxUploadFieldBytes {
+				cleanup()
+				writeJSONError(w, http.StatusBadRequest, "Multipart form field exceeds maximum size of 1 MB")
+				return nil, false
+			}
+		}
+	}
+
+	if !seenFile {
+		cleanup()
+		writeJSONError(w, http.StatusBadRequest, "Missing 'file' field in multipart upload")
+		return nil, false
+	}
+
+	return res, true
+}
+
 func (h *BookHandler) UploadBook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -1093,86 +1281,37 @@ func (h *BookHandler) UploadBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Limit upload size to 500MB for audiobooks
-	if err := r.ParseMultipartForm(500 << 20); err != nil {
-		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse multipart form: %v", err))
+	// 1. Stream upload directly to dataDir/uploads/<job_id><ext>
+	up, ok := parseStreamingBookUpload(w, r, h.dataDir)
+	if !ok {
 		return
 	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "Missing 'file' field in multipart upload")
-		return
-	}
-	defer file.Close()
-
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	fileType, isPrimary := scanner.DetectFileType(header.Filename)
-	if !isPrimary || (fileType != "epub" && fileType != "audiobook") {
-		writeJSONError(w, http.StatusBadRequest, "Only .epub, .m4b, .mp3, .m4a, and .flac files are accepted")
-		return
-	}
-
-	// 1. Stage upload to dataDir/uploads/<job_id><ext>
-	jobID := uuid.NewString()
-	uploadsDir := filepath.Join(h.dataDir, "uploads")
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Failed to create uploads directory")
-		return
-	}
-
-	stagedPath := filepath.Join(uploadsDir, jobID+ext)
-	stagedFile, err := os.OpenFile(stagedPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Failed to create staged upload file")
-		return
-	}
-
-	if _, err := io.Copy(stagedFile, file); err != nil {
-		stagedFile.Close()
-		_ = os.Remove(stagedPath)
-		writeJSONError(w, http.StatusInternalServerError, "Failed to write staged upload file")
-		return
-	}
-	stagedFile.Close()
 
 	// 2. Validate zip archive header if EPUB
-	if fileType == "epub" {
-		zipReader, err := zip.OpenReader(stagedPath)
+	if up.fileType == "epub" {
+		zipReader, err := zip.OpenReader(up.stagedPath)
 		if err != nil {
-			_ = os.Remove(stagedPath)
+			_ = os.Remove(up.stagedPath)
 			writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Invalid EPUB archive: %v", err))
 			return
 		}
 		zipReader.Close()
 	}
 
-	// Check optional cover in multipart form
-	hasCover := false
-	if coverFile, _, coverErr := r.FormFile("cover"); coverErr == nil {
-		defer coverFile.Close()
-		if coverData, err := io.ReadAll(coverFile); err == nil && len(coverData) > 0 {
-			ct := http.DetectContentType(coverData)
-			if strings.HasPrefix(ct, "image/") {
-				coverPath := filepath.Join(uploadsDir, jobID+".cover")
-				if err := os.WriteFile(coverPath, coverData, 0644); err == nil {
-					hasCover = true
-				}
-			}
-		}
-	}
+	// Save optional cover provided in multipart form
+	hasCover := writeUploadedCoverIfValid(up.uploadsDir, up.jobID, up.coverData)
 
 	// 3. Create upload job in database
 	job := &repository.UploadJob{
-		ID:         jobID,
-		Filename:   header.Filename,
-		StagedPath: stagedPath,
+		ID:         up.jobID,
+		Filename:   up.filename,
+		StagedPath: up.stagedPath,
 		Status:     "queued",
 		HasCover:   hasCover,
 	}
 	if err := h.repo.CreateUploadJob(r.Context(), job); err != nil {
-		_ = os.Remove(stagedPath)
-		_ = os.Remove(filepath.Join(uploadsDir, jobID+".cover"))
+		_ = os.Remove(up.stagedPath)
+		_ = os.Remove(filepath.Join(up.uploadsDir, up.jobID+".cover"))
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to enqueue upload job: %v", err))
 		return
 	}
@@ -1183,7 +1322,7 @@ func (h *BookHandler) UploadBook(w http.ResponseWriter, r *http.Request) {
 	}
 	h.broadcastQueueStatus(r.Context())
 
-	h.logger.Info("Enqueued book upload job", "job_id", job.ID, "filename", job.Filename, "size_bytes", header.Size)
+	h.logger.Info("Enqueued book upload job", "job_id", job.ID, "filename", job.Filename, "size_bytes", up.sizeBytes)
 
 	// 5. Return 202 Accepted
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -1235,61 +1374,17 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(500 << 20); err != nil {
-		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("Failed to parse multipart form: %v", err))
+	up, ok := parseStreamingBookUpload(w, r, h.dataDir)
+	if !ok {
 		return
 	}
 
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "Missing 'file' field in multipart upload")
-		return
-	}
-	defer file.Close()
-
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	fileType, isPrimary := scanner.DetectFileType(header.Filename)
-	if !isPrimary || (fileType != "epub" && fileType != "audiobook") {
-		writeJSONError(w, http.StatusBadRequest, "Only .epub, .m4b, .mp3, .m4a, and .flac files are accepted")
-		return
-	}
-
-	jobID := uuid.NewString()
-	uploadsDir := filepath.Join(h.dataDir, "uploads")
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Failed to create uploads directory")
-		return
-	}
-
-	stagedPath := filepath.Join(uploadsDir, jobID+ext)
-	stagedFile, err := os.OpenFile(stagedPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "Failed to create staged upload file")
-		return
-	}
-
-	if _, err := io.Copy(stagedFile, file); err != nil {
-		stagedFile.Close()
-		_ = os.Remove(stagedPath)
-		writeJSONError(w, http.StatusInternalServerError, "Failed to write staged upload file")
-		return
-	}
-	stagedFile.Close()
-
-	// Check optional cover provided directly in multipart form
-	hasCover := false
-	if coverFile, _, coverErr := r.FormFile("cover"); coverErr == nil {
-		defer coverFile.Close()
-		if coverData, err := io.ReadAll(coverFile); err == nil && len(coverData) > 0 {
-			ct := http.DetectContentType(coverData)
-			if strings.HasPrefix(ct, "image/") {
-				coverPath := filepath.Join(uploadsDir, jobID+".cover")
-				if err := os.WriteFile(coverPath, coverData, 0644); err == nil {
-					hasCover = true
-				}
-			}
-		}
-	}
+	jobID := up.jobID
+	uploadsDir := up.uploadsDir
+	stagedPath := up.stagedPath
+	ext := up.ext
+	fileType := up.fileType
+	hasCover := writeUploadedCoverIfValid(uploadsDir, jobID, up.coverData)
 
 	var title string
 	var authors []string
@@ -1397,9 +1492,9 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Apply optional fallback metadata provided by an importer plugin (metadata_defaults JSON)
-	sourcePlugin := strings.TrimSpace(r.FormValue("source_plugin"))
-	sourceExternalID := strings.TrimSpace(r.FormValue("source_external_id"))
-	rawMetaDefaults := strings.TrimSpace(r.FormValue("metadata_defaults"))
+	sourcePlugin := up.sourcePlugin
+	sourceExternalID := up.sourceExternalID
+	rawMetaDefaults := up.rawMetaDefaults
 	if rawMetaDefaults != "" {
 		var defaults struct {
 			Title          string   `json:"title"`
@@ -1454,7 +1549,7 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			if (narrator == nil || strings.TrimSpace(*narrator) == "") && defaults.Narrator != nil && strings.TrimSpace(*narrator) != "" {
+			if (narrator == nil || strings.TrimSpace(*narrator) == "") && defaults.Narrator != nil && strings.TrimSpace(*defaults.Narrator) != "" {
 				n := strings.TrimSpace(*defaults.Narrator)
 				narrator = &n
 			}
@@ -1465,7 +1560,7 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 		authors = []string{"Unknown"}
 	}
 	if title == "" {
-		title = strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
+		title = strings.TrimSuffix(up.filename, filepath.Ext(up.filename))
 	}
 
 	var warnings []string
@@ -1493,7 +1588,7 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 				updatedBook, wasDuplicate, attachErr := h.ingester.AttachReadalongAudio(
 					r.Context(),
 					matchedBook,
-					header.Filename,
+					up.filename,
 					audioFile,
 					authors,
 					narrator,
@@ -1522,7 +1617,7 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 
 					job := &repository.UploadJob{
 						ID:         jobID,
-						Filename:   header.Filename,
+						Filename:   up.filename,
 						StagedPath: stagedPath,
 						Status:     "completed",
 						BookID:     &updatedBook.ID,
@@ -1638,7 +1733,7 @@ func (h *BookHandler) StageUploadBook(w http.ResponseWriter, r *http.Request) {
 
 	job := &repository.UploadJob{
 		ID:         jobID,
-		Filename:   header.Filename,
+		Filename:   up.filename,
 		StagedPath: stagedPath,
 		Status:     "staged",
 		Metadata:   &metaStr,
@@ -2074,6 +2169,11 @@ func (h *BookHandler) UploadJobCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "Invalid form data: max 10MB cover image")
 		return
@@ -2089,9 +2189,13 @@ func (h *BookHandler) UploadJobCover(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	coverData, err := io.ReadAll(file)
+	coverData, err := io.ReadAll(io.LimitReader(file, maxUploadCoverBytes+1))
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to read cover image")
+		return
+	}
+	if len(coverData) > maxUploadCoverBytes {
+		writeJSONError(w, http.StatusBadRequest, "Invalid form data: max 10MB cover image")
 		return
 	}
 
@@ -3084,6 +3188,11 @@ func (h *BookHandler) UploadBookCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
 		writeJSONError(w, http.StatusBadRequest, "Invalid form data: max 10MB cover image")
 		return
@@ -3099,9 +3208,13 @@ func (h *BookHandler) UploadBookCover(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	coverData, err := io.ReadAll(file)
+	coverData, err := io.ReadAll(io.LimitReader(file, maxUploadCoverBytes+1))
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to read cover image")
+		return
+	}
+	if len(coverData) > maxUploadCoverBytes {
+		writeJSONError(w, http.StatusBadRequest, "Invalid form data: max 10MB cover image")
 		return
 	}
 

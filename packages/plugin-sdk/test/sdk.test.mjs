@@ -904,3 +904,451 @@ definePlugin({
     fs.rmSync(tmpPluginDir, { recursive: true, force: true });
   }
 });
+
+test("stageBook({ filePath }) streams disk-backed files via openAsBlob and re-streams cleanly on 401 and early socket close", async () => {
+  const { spawn } = await import("node:child_process");
+  const crypto = await import("node:crypto");
+  const http = await import("node:http");
+  const readline = await import("node:readline");
+
+  const tmpPluginDir = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-filepath-stage-"));
+  const audioFilePath = path.join(tmpPluginDir, "odyssey.m4b");
+  // 8 MB payload so early socket destroy happens mid-stream
+  const expectedAudioBuf = crypto.randomBytes(8 * 1024 * 1024);
+  const expectedSha256 = crypto.createHash("sha256").update(expectedAudioBuf).digest("hex");
+  fs.writeFileSync(audioFilePath, expectedAudioBuf);
+
+  const seenRequests = [];
+
+  const mockStageServer = http.createServer(async (req, res) => {
+    const auth = req.headers.authorization ?? "";
+    const contentType = req.headers["content-type"] ?? "";
+
+    if (auth === "Bearer expired-socket-close-tok") {
+      seenRequests.push({ auth, outcome: "socket_destroyed" });
+      req.socket.destroy();
+      return;
+    }
+
+    if (auth === "Bearer expired-401-tok") {
+      // Drain body then return 401
+      for await (const _chunk of req) {
+        // drain
+      }
+      seenRequests.push({ auth, outcome: "http_401" });
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "token expired" }));
+      return;
+    }
+
+    // Parse multipart request using Web Request + FormData to verify streamed contents
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const rawBody = Buffer.concat(chunks);
+    const webReq = new Request("http://127.0.0.1/api/v1/books/upload/stage", {
+      method: "POST",
+      headers: { "content-type": contentType },
+      body: rawBody,
+    });
+    const form = await webReq.formData();
+    const fileEntry = form.get("file");
+    const coverEntry = form.get("cover");
+    const fileBuf = Buffer.from(await fileEntry.arrayBuffer());
+    const fileSha256 = crypto.createHash("sha256").update(fileBuf).digest("hex");
+
+    seenRequests.push({
+      auth,
+      outcome: "accepted",
+      fileName: fileEntry.name,
+      fileType: fileEntry.type,
+      fileBytes: fileBuf.byteLength,
+      fileSha256,
+      hasCover: coverEntry instanceof File && coverEntry.size > 0,
+      sourcePlugin: form.get("source_plugin"),
+      sourceExternalId: form.get("source_external_id"),
+      metadataDefaults: JSON.parse(String(form.get("metadata_defaults") ?? "{}")),
+    });
+
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({
+        job_id: `job-${seenRequests.length}`,
+        status: "staged",
+        filename: fileEntry.name,
+        has_cover: Boolean(coverEntry),
+        metadata: { title: "The Odyssey", authors: ["Homer"] },
+      })
+    );
+  });
+
+  await new Promise((resolve) => mockStageServer.listen(0, "127.0.0.1", resolve));
+  const addr = mockStageServer.address();
+  const apiBase = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+
+  try {
+    fs.mkdirSync(path.join(tmpPluginDir, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpPluginDir, "plugin.json"),
+      JSON.stringify({
+        name: "filepath-stage-fixture",
+        version: "1.0.0",
+        entrypoint: { command: "node", args: ["dist/index.mjs"] },
+        capabilities: ["catalog", "commands"],
+        catalog_modes: ["browse"],
+        api_scopes: ["uploads:stage"],
+      })
+    );
+
+    fs.writeFileSync(
+      path.join(tmpPluginDir, "src", "index.ts"),
+      `import { definePlugin } from "@shelfd/plugin-sdk";
+definePlugin({
+  name: "filepath-stage-fixture",
+  version: "1.0.0",
+  commands: {
+    validate_stage_errors: {
+      async execute(args, ctx) {
+        const filePath = String(args.file_path ?? "");
+        const dirPath = String(args.dir_path ?? "");
+        const errors: Record<string, string> = {};
+
+        for (const [label, badInput] of [
+          ["neither", { filename: "odyssey.m4b" }],
+          ["blank_path", { filePath: "   ", filename: "odyssey.m4b" }],
+          ["both", { filePath, data: new Uint8Array([1, 2, 3]), filename: "odyssey.m4b" }],
+          ["missing_file", { filePath: filePath + ".does-not-exist", filename: "odyssey.m4b" }],
+          ["directory_path", { filePath: dirPath, filename: "odyssey.m4b" }],
+        ] as const) {
+          try {
+            await ctx.stageBook(badInput as never);
+            errors[label] = "DID_NOT_THROW";
+          } catch (err) {
+            errors[label] = err instanceof Error ? err.message : String(err);
+          }
+        }
+        return errors;
+      },
+    },
+  },
+  catalog: {
+    async browse() {
+      return { items: [] };
+    },
+    async stage(req, ctx) {
+      const targetPath = String(ctx.config.audio_path ?? "");
+      const staged = await ctx.stageBook({
+        filePath: targetPath,
+        filename: "The_Odyssey.m4b",
+        mimeType: "audio/mp4",
+        externalId: req.items[0].external_id,
+        cover: {
+          data: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]),
+          filename: "cover.jpg",
+          mimeType: "image/jpeg",
+        },
+        metadataDefaults: {
+          title: "The Odyssey",
+          authors: ["Homer"],
+          narrator: "Claire Danes",
+        },
+      });
+      return {
+        results: [{ external_id: req.items[0].external_id, upload_job_id: staged.job_id, status: "staged" }],
+      };
+    },
+  },
+});
+`
+    );
+
+    const built = await buildPlugin(tmpPluginDir);
+    const child = spawn(process.execPath, [built.outFile], {
+      cwd: tmpPluginDir,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const pending = new Map();
+    let refreshSeq = 0;
+
+    const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+    rl.on("line", (line) => {
+      if (!line.trim()) return;
+      const msg = JSON.parse(line);
+      if (msg.method === "host/refresh_token" && msg.id !== undefined) {
+        refreshSeq += 1;
+        child.stdin.write(
+          `${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { invocation_token: `refreshed-tok-${refreshSeq}` } })}\n`
+        );
+        return;
+      }
+      if (msg.id !== undefined && pending.has(String(msg.id))) {
+        const resolve = pending.get(String(msg.id));
+        pending.delete(String(msg.id));
+        resolve(msg);
+      }
+    });
+
+    let seq = 0;
+    const callRpc = (method, params) => {
+      seq += 1;
+      const id = String(seq);
+      return new Promise((resolve) => {
+        pending.set(id, resolve);
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+      });
+    };
+
+    await callRpc("initialize", {
+      protocol_version: "2026-11-01",
+      shelfd_version: "0.1.0",
+      api_base: apiBase,
+      data_dir: tmpPluginDir,
+    });
+
+    // 1. Input validation errors must fail synchronously/locally BEFORE sending any HTTP request
+    const valRes = await callRpc("commands/invoke", {
+      command: "validate_stage_errors",
+      args: { file_path: audioFilePath, dir_path: tmpPluginDir },
+      auth: {
+        user_id: "u-stage",
+        invocation_token: "valid-direct-tok",
+        api_base: apiBase,
+        config: {},
+      },
+    });
+    assert.match(valRes.result.neither, /must provide either data or filePath/);
+    assert.match(valRes.result.blank_path, /must provide either data or filePath/);
+    assert.match(valRes.result.both, /provide either data or filePath, not both/);
+    assert.match(valRes.result.missing_file, /is not readable/);
+    assert.match(valRes.result.directory_path, /is not a regular file/);
+    assert.equal(seenRequests.length, 0, "invalid stageBook inputs must not issue HTTP requests");
+
+    // 2. Direct successful upload streaming filePath from disk
+    const directRes = await callRpc("catalog/stage", {
+      job_id: "pjob-direct",
+      items: [{ external_id: "odyssey-direct", title: "The Odyssey" }],
+      auth: {
+        user_id: "u-stage",
+        invocation_token: "valid-direct-tok",
+        api_base: apiBase,
+        config: { audio_path: audioFilePath },
+      },
+    });
+    assert.equal(directRes.result.results[0].status, "staged");
+    assert.equal(seenRequests.length, 1);
+    assert.equal(seenRequests[0].outcome, "accepted");
+    assert.equal(seenRequests[0].fileName, "The_Odyssey.m4b");
+    assert.equal(seenRequests[0].fileType, "audio/mp4");
+    assert.equal(seenRequests[0].fileBytes, expectedAudioBuf.byteLength);
+    assert.equal(seenRequests[0].fileSha256, expectedSha256);
+    assert.equal(seenRequests[0].hasCover, true);
+    assert.equal(seenRequests[0].sourcePlugin, "filepath-stage-fixture");
+    assert.equal(seenRequests[0].sourceExternalId, "odyssey-direct");
+    assert.equal(seenRequests[0].metadataDefaults.narrator, "Claire Danes");
+
+    // 3. Retry after HTTP 401 re-streams filePath cleanly from disk
+    const retry401Res = await callRpc("catalog/stage", {
+      job_id: "pjob-401",
+      items: [{ external_id: "odyssey-401", title: "The Odyssey" }],
+      auth: {
+        user_id: "u-stage",
+        invocation_token: "expired-401-tok",
+        api_base: apiBase,
+        config: { audio_path: audioFilePath },
+      },
+    });
+    assert.equal(retry401Res.result.results[0].status, "staged");
+    assert.equal(seenRequests.length, 3);
+    assert.equal(seenRequests[1].outcome, "http_401");
+    assert.equal(seenRequests[2].outcome, "accepted");
+    assert.equal(seenRequests[2].auth, "Bearer refreshed-tok-1");
+    assert.equal(seenRequests[2].fileBytes, expectedAudioBuf.byteLength);
+    assert.equal(seenRequests[2].fileSha256, expectedSha256);
+
+    // 4. Retry after early socket close mid-stream re-streams filePath cleanly from disk
+    const retryCloseRes = await callRpc("catalog/stage", {
+      job_id: "pjob-close",
+      items: [{ external_id: "odyssey-close", title: "The Odyssey" }],
+      auth: {
+        user_id: "u-stage",
+        invocation_token: "expired-socket-close-tok",
+        api_base: apiBase,
+        config: { audio_path: audioFilePath },
+      },
+    });
+    assert.equal(retryCloseRes.result.results[0].status, "staged");
+    assert.equal(seenRequests.length, 5);
+    assert.equal(seenRequests[3].outcome, "socket_destroyed");
+    assert.equal(seenRequests[4].outcome, "accepted");
+    assert.equal(seenRequests[4].auth, "Bearer refreshed-tok-2");
+    assert.equal(seenRequests[4].fileBytes, expectedAudioBuf.byteLength);
+    assert.equal(seenRequests[4].fileSha256, expectedSha256);
+
+    await callRpc("shutdown", {});
+  } finally {
+    mockStageServer.close();
+    fs.rmSync(tmpPluginDir, { recursive: true, force: true });
+  }
+});
+
+test("stageBook({ filePath }) enforces TCP backpressure and keeps child Node RSS below file size on a 128 MiB upload", async () => {
+  const { spawn } = await import("node:child_process");
+  const crypto = await import("node:crypto");
+  const http = await import("node:http");
+  const readline = await import("node:readline");
+
+  const tmpPluginDir = fs.mkdtempSync(path.join(os.tmpdir(), "sdk-backpressure-rss-"));
+  const audioFilePath = path.join(tmpPluginDir, "large-128mb.m4b");
+  const fileSizeMB = 128;
+  const chunk1MB = crypto.randomBytes(1024 * 1024);
+  const expectedHash = crypto.createHash("sha256");
+  const fd = fs.openSync(audioFilePath, "w");
+  try {
+    for (let i = 0; i < fileSizeMB; i++) {
+      chunk1MB.writeUInt32BE(i, 0);
+      fs.writeSync(fd, chunk1MB);
+      expectedHash.update(chunk1MB);
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  const expectedTotalBytes = fileSizeMB * 1024 * 1024;
+
+  let receivedMultipartBytes = 0;
+  const mockStageServer = http.createServer(async (req, res) => {
+    let bytesSinceYield = 0;
+    for await (const chunk of req) {
+      receivedMultipartBytes += chunk.length;
+      bytesSinceYield += chunk.length;
+      // Throttle receiver slightly (~120 MB/s) so an unbackpressured sender would buffer all 128 MiB in RAM
+      if (bytesSinceYield >= 512 * 1024) {
+        bytesSinceYield = 0;
+        await new Promise((r) => setTimeout(r, 2));
+      }
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({
+        job_id: "job-128mb",
+        status: "staged",
+        filename: "large-128mb.m4b",
+        has_cover: false,
+        metadata: { title: "Large Audiobook", authors: ["Homer"] },
+      })
+    );
+  });
+
+  await new Promise((resolve) => mockStageServer.listen(0, "127.0.0.1", resolve));
+  const addr = mockStageServer.address();
+  const apiBase = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+
+  try {
+    fs.mkdirSync(path.join(tmpPluginDir, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpPluginDir, "plugin.json"),
+      JSON.stringify({
+        name: "rss-backpressure-fixture",
+        version: "1.0.0",
+        entrypoint: { command: "node", args: ["dist/index.mjs"] },
+        capabilities: ["catalog"],
+        catalog_modes: ["browse"],
+        api_scopes: ["uploads:stage"],
+      })
+    );
+    fs.writeFileSync(
+      path.join(tmpPluginDir, "src", "index.ts"),
+      `import { definePlugin } from "@shelfd/plugin-sdk";
+definePlugin({
+  name: "rss-backpressure-fixture",
+  version: "1.0.0",
+  catalog: {
+    async browse() { return { items: [] }; },
+    async stage(req, ctx) {
+      const staged = await ctx.stageBook({
+        filePath: String(ctx.config.audio_path ?? ""),
+        filename: "large-128mb.m4b",
+        mimeType: "audio/mp4",
+        externalId: req.items[0].external_id,
+      });
+      return { results: [{ external_id: req.items[0].external_id, upload_job_id: staged.job_id, status: "staged" }] };
+    },
+  },
+});
+`
+    );
+
+    const built = await buildPlugin(tmpPluginDir);
+    const child = spawn(process.execPath, [built.outFile], {
+      cwd: tmpPluginDir,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const pending = new Map();
+    const rl = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
+    rl.on("line", (line) => {
+      if (!line.trim()) return;
+      const msg = JSON.parse(line);
+      if (msg.id !== undefined && pending.has(String(msg.id))) {
+        const resolve = pending.get(String(msg.id));
+        pending.delete(String(msg.id));
+        resolve(msg);
+      }
+    });
+
+    let seq = 0;
+    const callRpc = (method, params) => {
+      seq += 1;
+      const id = String(seq);
+      return new Promise((resolve) => {
+        pending.set(id, resolve);
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+      });
+    };
+
+    await callRpc("initialize", {
+      protocol_version: "2026-11-01",
+      shelfd_version: "0.1.0",
+      api_base: apiBase,
+      data_dir: tmpPluginDir,
+    });
+
+    const stageRes = await callRpc("catalog/stage", {
+      job_id: "pjob-rss",
+      items: [{ external_id: "ext-128mb", title: "Large Audiobook" }],
+      auth: {
+        user_id: "u-stage",
+        invocation_token: "valid-rss-tok",
+        api_base: apiBase,
+        config: { audio_path: audioFilePath },
+      },
+    });
+
+    assert.equal(stageRes.result.results[0].status, "staged");
+    assert.ok(receivedMultipartBytes > expectedTotalBytes, "expected full 128 MiB payload received");
+
+    if (process.platform === "linux" && child.pid) {
+      const statusRaw = fs.readFileSync(`/proc/${child.pid}/status`, "utf8");
+      const anonMatch = statusRaw.match(/^RssAnon:\s+(\d+)\s+kB/m);
+      const hwmMatch = statusRaw.match(/^VmHWM:\s+(\d+)\s+kB/m);
+      const rssAnonMB = anonMatch ? Number(anonMatch[1]) / 1024 : 0;
+      const vmHwmMB = hwmMatch ? Number(hwmMatch[1]) / 1024 : 0;
+      assert.ok(
+        rssAnonMB > 0 && rssAnonMB < 96,
+        `expected child Node RssAnon < 96 MiB during 128 MiB upload, got ${rssAnonMB.toFixed(1)} MiB`
+      );
+      assert.ok(
+        vmHwmMB > 0 && vmHwmMB < 120,
+        `expected child Node VmHWM < 120 MiB (< 128 MiB file size), got ${vmHwmMB.toFixed(1)} MiB`
+      );
+    }
+
+    await callRpc("shutdown", {});
+  } finally {
+    mockStageServer.close();
+    fs.rmSync(tmpPluginDir, { recursive: true, force: true });
+  }
+});
+
+

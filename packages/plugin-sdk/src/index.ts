@@ -1,3 +1,6 @@
+import { constants as fsConstants, openAsBlob, promises as fsPromises } from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import readline from "node:readline";
 import util from "node:util";
 import type {
@@ -266,6 +269,151 @@ function toBlob(data: Uint8Array | ArrayBuffer | Blob, mimeType: string): Blob {
   return new Blob([new Uint8Array(data)], { type: mimeType });
 }
 
+/**
+ * Streams a `FormData` payload (including disk-backed `fs.openAsBlob` files) over `node:http` /
+ * `node:https` with explicit socket `drain` backpressure. Node's built-in `fetch` (undici) eagerly
+ * pulls `FormData` / `ReadableStream` bodies faster than TCP/disk receivers drain them, buffering
+ * hundreds of MB in Node RAM; `http.request` with `drain` keeps plugin RSS flat (~O(1)).
+ */
+async function streamMultipartPost(
+  urlStr: string,
+  token: string,
+  form: FormData
+): Promise<{ status: number; bodyText: string }> {
+  const parsedUrl = new URL(urlStr);
+  const transport = parsedUrl.protocol === "https:" ? https : http;
+
+  const webReq = new Request(urlStr, { method: "POST", body: form });
+  const contentType = webReq.headers.get("content-type") ?? "";
+  if (!webReq.body) {
+    throw new Error("FormData request did not produce a readable body stream");
+  }
+
+  const reader = webReq.body.getReader();
+  return await new Promise<{ status: number; bodyText: string }>((resolve, reject) => {
+    let settled = false;
+    let receivedResponse = false;
+    let abortWriteLoop = false;
+    let lastReqError: Error | undefined;
+
+    const settleResolve = (val: { status: number; bodyText: string }): void => {
+      if (settled) return;
+      settled = true;
+      resolve(val);
+    };
+    const settleReject = (err: unknown): void => {
+      if (settled) return;
+      settled = true;
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
+
+    const req = transport.request(
+      parsedUrl,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": contentType,
+        },
+        highWaterMark: 32 * 1024,
+      },
+      (res) => {
+        receivedResponse = true;
+        const status = res.statusCode ?? 0;
+        if (status >= 400) {
+          abortWriteLoop = true;
+        }
+        const chunks: Buffer[] = [];
+        let bufferedBytes = 0;
+        const MAX_RESP_BYTES = 2 * 1024 * 1024;
+        res.on("data", (chunk: Buffer) => {
+          if (bufferedBytes < MAX_RESP_BYTES) {
+            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            chunks.push(buf);
+            bufferedBytes += buf.byteLength;
+          }
+        });
+        res.on("end", () => {
+          settleResolve({ status, bodyText: Buffer.concat(chunks).toString("utf8") });
+        });
+        res.on("error", (err) => {
+          abortWriteLoop = true;
+          settleReject(err);
+        });
+        res.on("close", () => {
+          if (!settled) {
+            if (status >= 400) {
+              settleResolve({ status, bodyText: Buffer.concat(chunks).toString("utf8") });
+            } else {
+              settleReject(lastReqError ?? new Error("Connection closed before response completed"));
+            }
+          }
+        });
+      }
+    );
+
+    req.on("error", (err) => {
+      lastReqError = err;
+      abortWriteLoop = true;
+      if (!receivedResponse) {
+        settleReject(err);
+      }
+    });
+
+    req.on("close", () => {
+      if (!settled && !receivedResponse) {
+        abortWriteLoop = true;
+        settleReject(lastReqError ?? new Error("Socket closed before response"));
+      }
+    });
+
+    (async () => {
+      try {
+        while (!abortWriteLoop) {
+          const { done, value } = await reader.read();
+          if (done || abortWriteLoop) break;
+          if (value && value.byteLength > 0) {
+            const ok = req.write(value);
+            if (!ok && !abortWriteLoop) {
+              await new Promise<void>((onDrainDone, onDrainErr) => {
+                const onDrain = (): void => {
+                  req.removeListener("error", onErr);
+                  req.removeListener("close", onClose);
+                  onDrainDone();
+                };
+                const onErr = (e: Error): void => {
+                  req.removeListener("drain", onDrain);
+                  req.removeListener("close", onClose);
+                  onDrainErr(e);
+                };
+                const onClose = (): void => {
+                  req.removeListener("drain", onDrain);
+                  req.removeListener("error", onErr);
+                  onDrainDone();
+                };
+                req.once("drain", onDrain);
+                req.once("error", onErr);
+                req.once("close", onClose);
+              });
+            }
+          }
+        }
+        if (!abortWriteLoop && !req.destroyed) {
+          req.end();
+        }
+      } catch (err) {
+        if (!receivedResponse) {
+          req.destroy(err instanceof Error ? err : new Error(String(err)));
+          settleReject(err);
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
+    })();
+  });
+}
+
 function parseActionTarget(raw: unknown): ActionTarget {
   const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const rawType = String(obj.type ?? "book");
@@ -473,10 +621,50 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
           throw new Error("Missing scoped invocation_token; ensure \"uploads:stage\" is listed in plugin.json api_scopes");
         }
 
-        const buildForm = (): FormData => {
+        const rawInput = (input && typeof input === "object" ? input : {}) as {
+          data?: Uint8Array | ArrayBuffer | Blob;
+          filePath?: unknown;
+        };
+        const hasData = rawInput.data !== undefined && rawInput.data !== null;
+        const hasFilePath = rawInput.filePath !== undefined && rawInput.filePath !== null;
+        if (hasData && hasFilePath) {
+          throw new Error("StageUploadBook: provide either data or filePath, not both");
+        }
+        if (hasFilePath && typeof rawInput.filePath !== "string") {
+          throw new Error("StageUploadBook: filePath must be a non-empty string");
+        }
+        const filePath = typeof rawInput.filePath === "string" ? rawInput.filePath : "";
+        if (!hasData && filePath.trim() === "") {
+          throw new Error("StageUploadBook: must provide either data or filePath");
+        }
+
+        if (hasFilePath) {
+          let st;
+          try {
+            st = await fsPromises.stat(filePath);
+            await fsPromises.access(filePath, fsConstants.R_OK);
+          } catch (err) {
+            throw new Error(`StageUploadBook: filePath "${filePath}" is not readable: ${describeError(err)}`);
+          }
+          if (!st.isFile()) {
+            throw new Error(`StageUploadBook: filePath "${filePath}" is not a regular file`);
+          }
+        }
+
+        const buildForm = async (): Promise<FormData> => {
           const form = new FormData();
           const fileMime = input.mimeType ?? "application/epub+zip";
-          form.append("file", toBlob(input.data, fileMime), input.filename);
+          let fileBlob: Blob;
+          if (hasFilePath) {
+            try {
+              fileBlob = await openAsBlob(filePath, { type: fileMime });
+            } catch (err) {
+              throw new Error(`StageUploadBook: failed to open filePath "${filePath}": ${describeError(err)}`);
+            }
+          } else {
+            fileBlob = toBlob(rawInput.data!, fileMime);
+          }
+          form.append("file", fileBlob, input.filename);
 
           if (input.cover) {
             const coverMime = input.cover.mimeType ?? "image/jpeg";
@@ -494,13 +682,9 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
           return form;
         };
 
-        const postStage = async (token: string): Promise<Response> => {
+        const sendStage = async (token: string, body: FormData): Promise<{ status: number; bodyText: string }> => {
           try {
-            return await fetch(`${apiBase}/api/v1/books/upload/stage`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${token}` },
-              body: buildForm(),
-            });
+            return await streamMultipartPost(`${apiBase}/api/v1/books/upload/stage`, token, body);
           } catch (err) {
             throw new Error(`StageUploadBook: network error: ${describeError(err)}`);
           }
@@ -512,9 +696,10 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
           throw new Error(`StageUploadBook: token refresh before upload failed: ${describeError(err)}`);
         }
 
-        let res: Response;
+        const initialForm = await buildForm();
+        let res: { status: number; bodyText: string };
         try {
-          res = await postStage(currentToken);
+          res = await sendStage(currentToken, initialForm);
         } catch (err) {
           // Early socket close (e.g. server rejected the request without draining the body):
           // refresh once and retry the upload exactly one time.
@@ -528,14 +713,14 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
           } catch (refreshErr) {
             throw new Error(`${originalMsg}; token refresh failed: ${describeError(refreshErr)}`);
           }
-          res = await postStage(nextToken);
+          res = await sendStage(nextToken, await buildForm());
         }
         if (res.status === 401) {
           const nextToken = await recoverFromExpiredToken("StageUploadBook");
-          res = await postStage(nextToken);
+          res = await sendStage(nextToken, await buildForm());
         }
 
-        const bodyText = await res.text();
+        const bodyText = res.bodyText;
         let parsed: Record<string, unknown> = {};
         try {
           parsed = JSON.parse(bodyText) as Record<string, unknown>;
@@ -543,7 +728,7 @@ export function definePlugin<TConfig extends Record<string, unknown> = Record<st
           // handled below
         }
 
-        if (!res.ok) {
+        if (res.status < 200 || res.status >= 300) {
           const errMsg = typeof parsed.error === "string" ? parsed.error : `HTTP ${res.status}: ${bodyText.slice(0, 200)}`;
           throw new Error(`StageUploadBook failed: ${errMsg}`);
         }
