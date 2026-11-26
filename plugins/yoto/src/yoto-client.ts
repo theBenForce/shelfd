@@ -2,7 +2,7 @@ import * as httpNs from "node:http";
 import * as httpsNs from "node:https";
 import * as nodeStreamNs from "node:stream";
 import * as streamPromisesNs from "node:stream/promises";
-import { AuthExpiredError, type PluginContext } from "@shelfd/plugin-sdk";
+import { AuthExpiredError, type PluginContext } from "@thebenforce/shelfd-plugin-sdk";
 import { normalizeIcon16x16, normalizeYotoIconUri } from "./image-16x16.ts";
 
 const http: typeof httpNs = (httpNs as unknown as { default?: typeof httpNs }).default ?? httpNs;

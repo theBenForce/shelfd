@@ -1,11 +1,11 @@
 ---
 name: create-shelfd-plugin
-description: Scaffold, implement, verify, and package out-of-process TypeScript plugins for Shelfd using @shelfd/plugin-sdk. Use when creating a new Shelfd importer, storefront catalog connector (such as Humble Bundle, Packt Pub, Kobo, or OPDS), outbound book/series action plugin (such as Yoto or NotebookLM), MCP tool plugin, or custom command plugin in this repo or an external plugin repository.
+description: Scaffold, implement, verify, and package out-of-process TypeScript plugins for Shelfd using @thebenforce/shelfd-plugin-sdk. Use when creating a new Shelfd importer, storefront catalog connector (such as Humble Bundle, Packt Pub, Kobo, or OPDS), outbound book/series action plugin (such as Yoto or NotebookLM), MCP tool plugin, or custom command plugin in this repo or an external plugin repository.
 ---
 
 # Create a Shelfd plugin
 
-Shelfd runs plugins as isolated child processes over NDJSON JSON-RPC 2.0 on `stdio`. Plugins written in TypeScript use `@shelfd/plugin-sdk` and compile into a single zero-dependency `dist/index.mjs` file packaged alongside `plugin.json` in a `.zip` archive.
+Shelfd runs plugins as isolated child processes over NDJSON JSON-RPC 2.0 on `stdio`. Plugins written in TypeScript use `@thebenforce/shelfd-plugin-sdk` and compile into a single zero-dependency `dist/index.mjs` file packaged alongside `plugin.json` in a `.zip` archive.
 
 ## Workflow
 
@@ -28,7 +28,7 @@ Shelfd runs plugins as isolated child processes over NDJSON JSON-RPC 2.0 on `std
    - When a plugin supports OAuth 2.0 PKCE or interactive token linking, declare `"auth"` (`methods`: `["oauth_pkce", "token"]`, `title`, `description`, `callback_param`, `fields`) and implement `auth: { status, begin, complete, disconnect }`. Shelfd passes `<origin>/settings?plugin=<name>` as `redirect_uri`; request every API scope required by your endpoints in `auth/begin` (not just `openid profile offline_access`) and assert the `scope` parameter in tests.
    - When a plugin exposes book or series actions, declare `"actions"` in `plugin.json` (`name`, `title`, `description`, `icon`, `targets`: `["book", "series"]`, `media_types`: `["ebook", "audiobook"]`, `mode`: `"immediate" | "form"`, `execution`: `"sync" | "job"`).
 
-4. **Implement handlers with `@shelfd/plugin-sdk`**:
+4. **Implement handlers with `@thebenforce/shelfd-plugin-sdk`**:
    - Read [references/protocol-and-sdk.md](references/protocol-and-sdk.md) for the `definePlugin` contract, `PluginContext` methods, declarative `ActionFormSpec` / `InputFieldSpec` controls, and JSON-RPC wire rules.
    - For authenticated storefronts (cookie sessions, refresh tokens, OPDS), read [references/authenticated-storefront-recipes.md](references/authenticated-storefront-recipes.md).
    - Never write directly to `/library` or Shelfd's SQLite/PostgreSQL database. Always stage downloaded books through `await ctx.stageBook({ filePath, filename, externalId, cover, metadataDefaults })` (preferring disk-backed `filePath` for large `.m4b`/audiobook files so neither Node nor Go buffers them in RAM, or `data` for small in-memory EPUBs) and read library content through `ctx.fetchLoopback(...)`, `ctx.openLoopbackStream(...)`, or `ctx.getBookMarkdown(...)`.

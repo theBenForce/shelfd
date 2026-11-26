@@ -10,5 +10,5 @@ test("project-gutenberg bundle is a standalone single-file ESM artifact", () => 
   const distPath = path.join(pluginRoot, "dist", "index.mjs");
   assert.ok(fs.existsSync(distPath), "dist/index.mjs must exist after build");
   const content = fs.readFileSync(distPath, "utf8");
-  assert.doesNotMatch(content, /from\s+["']@shelfd\/plugin-sdk["']/, "dist/index.mjs must inline @shelfd/plugin-sdk so no node_modules is needed at runtime");
+  assert.doesNotMatch(content, /from\s+["']@thebenforce\/shelfd-plugin-sdk["']/, "dist/index.mjs must inline @thebenforce/shelfd-plugin-sdk so no node_modules is needed at runtime");
 });

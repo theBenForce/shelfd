@@ -7,7 +7,7 @@ import {
   type CatalogItem,
   type CatalogPage,
   type CatalogStagedEntry,
-} from "@shelfd/plugin-sdk";
+} from "@thebenforce/shelfd-plugin-sdk";
 
 export interface GutenbergConfig extends Record<string, unknown> {
   default_language?: string;

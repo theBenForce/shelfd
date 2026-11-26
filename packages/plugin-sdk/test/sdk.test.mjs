@@ -113,7 +113,7 @@ test("buildPlugin, verifyPlugin, and packPlugin end-to-end on a TypeScript plugi
 
     fs.writeFileSync(
       path.join(tmpPluginDir, "src", "index.ts"),
-      `import { definePlugin } from "@shelfd/plugin-sdk";
+      `import { definePlugin } from "@thebenforce/shelfd-plugin-sdk";
 import { formatAuthor } from "./helper.ts";
 
 interface SampleConfig extends Record<string, unknown> {
@@ -266,7 +266,7 @@ test("definePlugin action & auth handlers, ctx.openLoopbackStream, host/refresh_
 
     fs.writeFileSync(
       path.join(tmpPluginDir, "src", "index.ts"),
-      `import { definePlugin } from "@shelfd/plugin-sdk";
+      `import { definePlugin } from "@thebenforce/shelfd-plugin-sdk";
 
 interface ActionConfig extends Record<string, unknown> {
   access_token?: string;
@@ -658,7 +658,7 @@ test("catalog/stage auto-injects job_id into reportProgress and rebuilds fresh F
     );
     fs.writeFileSync(
       path.join(tmpPluginDir, "src", "index.ts"),
-      `import { definePlugin } from "@shelfd/plugin-sdk";
+      `import { definePlugin } from "@thebenforce/shelfd-plugin-sdk";
 definePlugin({
   name: "stage-refresh-fixture",
   version: "1.0.0",
@@ -816,7 +816,7 @@ test("stageBook refreshes the token when the server closes the socket mid-upload
     // Large payload so the client is still streaming the body when the socket dies.
     fs.writeFileSync(
       path.join(tmpPluginDir, "src", "index.ts"),
-      `import { definePlugin } from "@shelfd/plugin-sdk";
+      `import { definePlugin } from "@thebenforce/shelfd-plugin-sdk";
 definePlugin({
   name: "early-close-fixture",
   version: "1.0.0",
@@ -1003,7 +1003,7 @@ test("stageBook({ filePath }) streams disk-backed files via openAsBlob and re-st
 
     fs.writeFileSync(
       path.join(tmpPluginDir, "src", "index.ts"),
-      `import { definePlugin } from "@shelfd/plugin-sdk";
+      `import { definePlugin } from "@thebenforce/shelfd-plugin-sdk";
 definePlugin({
   name: "filepath-stage-fixture",
   version: "1.0.0",
@@ -1259,7 +1259,7 @@ test("stageBook({ filePath }) enforces TCP backpressure and keeps child Node RSS
     );
     fs.writeFileSync(
       path.join(tmpPluginDir, "src", "index.ts"),
-      `import { definePlugin } from "@shelfd/plugin-sdk";
+      `import { definePlugin } from "@thebenforce/shelfd-plugin-sdk";
 definePlugin({
   name: "rss-backpressure-fixture",
   version: "1.0.0",

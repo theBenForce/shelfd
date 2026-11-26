@@ -10,7 +10,7 @@ import {
   type AuthStatusResult,
   type OptionItem,
   type PluginContext,
-} from "@shelfd/plugin-sdk";
+} from "@thebenforce/shelfd-plugin-sdk";
 import { normalizeIcon16x16, normalizeYotoIconUri } from "./image-16x16.ts";
 import {
   DEFAULT_BOOK_ICON_URI,

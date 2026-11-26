@@ -19,7 +19,7 @@ const strippedCli = stripTypeScriptTypes(cliSrc, { mode: "strip" })
   .replace(/^\s*import\s+type\s+[\s\S]*?from\s+["']\.\/types\.ts["'];?\s*$/gm, "");
 
 if (checkOnly) {
-  process.stdout.write("@shelfd/plugin-sdk syntax & type-strip check OK\n");
+  process.stdout.write("@thebenforce/shelfd-plugin-sdk syntax & type-strip check OK\n");
   process.exit(0);
 }
 

@@ -1,6 +1,6 @@
 # Plugin Host & Storefront Catalog Maintainer Manual
 
-Use this guide when modifying Shelfd's Go plugin host (`apps/server/internal/plugins`), plugin REST endpoints (`apps/server/internal/api/plugins.go`), `@shelfd/plugin-sdk` (`packages/plugin-sdk`), or the Flutter catalog browser (`apps/app/lib/ui/features/plugins/`).
+Use this guide when modifying Shelfd's Go plugin host (`apps/server/internal/plugins`), plugin REST endpoints (`apps/server/internal/api/plugins.go`), `@thebenforce/shelfd-plugin-sdk` (`packages/plugin-sdk`), or the Flutter catalog browser (`apps/app/lib/ui/features/plugins/`).
 
 ## Core invariants
 

@@ -29,19 +29,19 @@ importers:
 
   plugins/notebooklm:
     devDependencies:
-      '@shelfd/plugin-sdk':
+      '@thebenforce/shelfd-plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
   plugins/project-gutenberg:
     devDependencies:
-      '@shelfd/plugin-sdk':
+      '@thebenforce/shelfd-plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
   plugins/yoto:
     devDependencies:
-      '@shelfd/plugin-sdk':
+      '@thebenforce/shelfd-plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 

@@ -72,8 +72,8 @@ test("yoto bundle is a standalone single-file ESM artifact", () => {
   const content = fs.readFileSync(distPath, "utf8");
   assert.doesNotMatch(
     content,
-    /from\s+["']@shelfd\/plugin-sdk["']/,
-    "dist/index.mjs must inline @shelfd/plugin-sdk so no node_modules is needed at runtime"
+    /from\s+["']@thebenforce\/shelfd-plugin-sdk["']/,
+    "dist/index.mjs must inline @thebenforce/shelfd-plugin-sdk so no node_modules is needed at runtime"
   );
 });
 

@@ -77,7 +77,7 @@
     "@shelfd/app#test:live": {
       "cache": false
     },
-    "@shelfd/plugin-sdk#test": {
+    "@thebenforce/shelfd-plugin-sdk#test": {
       "dependsOn": ["build"]
     },
     "@shelfd/plugin-project-gutenberg#test": {
