@@ -68,6 +68,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	castHandler := NewCastHandler(cfg.CastManager, logger)
 	studyHandler := NewStudyHandler(cfg.Repo, cfg.AIClient, logger)
 	recapHandler := NewRecapHandler(cfg.Repo, cfg.AIClient, logger)
+	synopticHandler := NewSynopticHandler(cfg.Repo, cfg.AIClient, logger)
 
 	auth := AuthMiddleware(cfg.Repo, cfg.JWTSecret)
 
@@ -170,6 +171,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("DELETE /api/v1/highlights/{highlightId}", auth(http.HandlerFunc(bookHandler.DeleteHighlight)))
 
 	mux.Handle("GET /api/v1/search", auth(http.HandlerFunc(bookHandler.SearchLibrary)))
+	mux.Handle("POST /api/v1/synoptic/query", auth(http.HandlerFunc(synopticHandler.Query)))
 
 	mux.Handle("GET /api/v1/authors", auth(http.HandlerFunc(taxHandler.ListAuthors)))
 	mux.Handle("GET /api/v1/authors/{id}/photo", auth(http.HandlerFunc(taxHandler.GetAuthorPhoto)))
