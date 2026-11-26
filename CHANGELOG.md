@@ -1,3 +1,15 @@
+# [1.32.0](https://github.com/theBenForce/shelfd/compare/v1.31.1...v1.32.0) (2026-11-26)
+
+
+### Bug Fixes
+
+* **android:** use JDK 21 in workflows and skip pub-plugin lintVital on release ([#108](https://github.com/theBenForce/shelfd/issues/108)) ([409d888](https://github.com/theBenForce/shelfd/commit/409d888aecb203eb22525c4c8a07252dfc762eef))
+
+
+### Features
+
+* **android:** add Google Play release pipeline and self-hosted sign-in ([#107](https://github.com/theBenForce/shelfd/issues/107)) ([ee55656](https://github.com/theBenForce/shelfd/commit/ee55656fdeb2da2bb13aa6545c2e6754ee72acbe))
+
 ## [1.31.1](https://github.com/theBenForce/shelfd/compare/v1.31.0...v1.31.1) (2026-11-25)
 
 
