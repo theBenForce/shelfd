@@ -1,3 +1,10 @@
+# [1.36.0](https://github.com/theBenForce/shelfd/compare/v1.35.0...v1.36.0) (2026-11-26)
+
+
+### Features
+
+* **server:** add cross-book synoptic synthesis service and API ([#20](https://github.com/theBenForce/shelfd/issues/20)) ([#117](https://github.com/theBenForce/shelfd/issues/117)) ([1ac8aab](https://github.com/theBenForce/shelfd/commit/1ac8aabc447610b05695c8fe6e092252b6ba1e5b))
+
 # [1.35.0](https://github.com/theBenForce/shelfd/compare/v1.34.0...v1.35.0) (2026-11-26)
 
 
