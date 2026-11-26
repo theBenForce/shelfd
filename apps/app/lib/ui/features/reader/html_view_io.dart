@@ -116,6 +116,7 @@ Widget buildHtmlFrame({
   required double height,
   OnReadalongClick? onReadalongClick,
   OnToggleControls? onToggleControls,
+  OnPageDimensions? onPageDimensions,
 }) {
   if (shouldUseHtmlViewStubForCurrentEnvironment()) {
     return stub.buildHtmlFrame(
@@ -125,6 +126,7 @@ Widget buildHtmlFrame({
       height: height,
       onReadalongClick: onReadalongClick,
       onToggleControls: onToggleControls,
+      onPageDimensions: onPageDimensions,
     );
   }
 
@@ -136,8 +138,11 @@ Widget buildHtmlFrame({
       key: ValueKey<String>(viewKey),
       viewKey: viewKey,
       url: url,
+      width: width,
+      height: height,
       onReadalongClick: onReadalongClick,
       onToggleControls: onToggleControls,
+      onPageDimensions: onPageDimensions,
     ),
   );
 }
@@ -184,16 +189,114 @@ class _ManagedWebViewEntry {
   final String viewKey;
   final WebViewController controller;
   String loadedUrl;
+  double targetWidth;
+  double targetHeight;
   OnReadalongClick? onReadalongClick;
   OnToggleControls? onToggleControls;
+  OnPageDimensions? onPageDimensions;
 
   _ManagedWebViewEntry({
     required this.viewKey,
     required this.controller,
     required this.loadedUrl,
+    required this.targetWidth,
+    required this.targetHeight,
     this.onReadalongClick,
     this.onToggleControls,
+    this.onPageDimensions,
   });
+
+  void applyViewportFit() {
+    if (targetWidth <= 0 || targetHeight <= 0) return;
+    final tw = targetWidth;
+    final th = targetHeight;
+    // Normalizes legacy fixed-pixel viewport metas from older servers and supplies
+    // the exact Flutter logical box when WebView layout dimensions settle asynchronously.
+    final script = '''
+(function(tw, th) {
+  if (!document || !document.documentElement) return;
+  window.__shelfdTargetWidth = tw;
+  window.__shelfdTargetHeight = th;
+  if (typeof window.__shelfdFitPage === 'function') {
+    window.__shelfdFitPage(tw, th);
+    return;
+  }
+  var root = document.documentElement;
+  var savedW = parseFloat(root.getAttribute('data-shelfd-dw') || '0');
+  var savedH = parseFloat(root.getAttribute('data-shelfd-dh') || '0');
+  var metas = document.querySelectorAll('meta[name="viewport"]');
+  for (var i = 0; i < metas.length; i++) {
+    var content = metas[i].getAttribute('content') || '';
+    if (savedW <= 0 || savedH <= 0) {
+      var wm = content.match(/width\\s*=\\s*(\\d+)/i);
+      var hm = content.match(/height\\s*=\\s*(\\d+)/i);
+      if (wm && hm) {
+        savedW = parseFloat(wm[1]);
+        savedH = parseFloat(hm[1]);
+      }
+    }
+    metas[i].setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+  }
+  if (!document.body) return;
+  if (savedW <= 0 || savedH <= 0) {
+    var bs = document.body.getAttribute('style') || '';
+    var bwm = bs.match(/(?:^|[;\\s])width\\s*:\\s*([0-9.]+)\\s*px/i);
+    var bhm = bs.match(/(?:^|[;\\s])height\\s*:\\s*([0-9.]+)\\s*px/i);
+    if (bwm && bhm) {
+      savedW = parseFloat(bwm[1]);
+      savedH = parseFloat(bhm[1]);
+    }
+  }
+  if (savedW <= 0 || savedH <= 0) {
+    var svg = document.querySelector('svg[viewBox]');
+    if (svg) {
+      var vb = (svg.getAttribute('viewBox') || '').trim().split(/[\\s,]+/);
+      if (vb.length === 4) {
+        savedW = parseFloat(vb[2]);
+        savedH = parseFloat(vb[3]);
+      }
+    }
+  }
+  if (savedW <= 0 || savedH <= 0) {
+    var sw = document.body.scrollWidth || 0;
+    var sh = document.body.scrollHeight || 0;
+    if (sw > tw + 8 || sh > th + 8) {
+      savedW = Math.max(sw, tw);
+      savedH = Math.max(sh, th);
+    }
+  }
+  if (savedW > 0 && savedH > 0) {
+    root.setAttribute('data-shelfd-dw', String(savedW));
+    root.setAttribute('data-shelfd-dh', String(savedH));
+    var scale = Math.min(tw / savedW, th / savedH);
+    var ox = Math.max(0, (tw - savedW * scale) / 2);
+    var oy = Math.max(0, (th - savedH * scale) / 2);
+    root.style.setProperty('width', '100%', 'important');
+    root.style.setProperty('height', '100%', 'important');
+    root.style.setProperty('overflow', 'hidden', 'important');
+    var style = document.body.style;
+    style.setProperty('width', savedW + 'px', 'important');
+    style.setProperty('height', savedH + 'px', 'important');
+    style.setProperty('position', 'absolute', 'important');
+    style.setProperty('left', ox + 'px', 'important');
+    style.setProperty('top', oy + 'px', 'important');
+    style.setProperty('transform-origin', '0 0', 'important');
+    style.setProperty('transform', 'scale(' + scale + ')', 'important');
+    style.setProperty('overflow', 'hidden', 'important');
+    if (window.ShelfdBridge && typeof window.ShelfdBridge.postMessage === 'function') {
+      try {
+        window.ShelfdBridge.postMessage(JSON.stringify({
+          type: 'shelfd:page-dimensions',
+          width: Math.round(savedW),
+          height: Math.round(savedH)
+        }));
+      } catch (_) {}
+    }
+  }
+})(${tw.toStringAsFixed(2)}, ${th.toStringAsFixed(2)});
+''';
+    controller.runJavaScript(script).catchError((_) {});
+  }
 
   void applyHighlight(ReadalongFrameHighlight hl) {
     final isTarget = hl.fragmentId.isNotEmpty &&
@@ -216,15 +319,21 @@ class _ManagedWebViewEntry {
 class _NativeEpubWebViewFrame extends StatefulWidget {
   final String viewKey;
   final String url;
+  final double width;
+  final double height;
   final OnReadalongClick? onReadalongClick;
   final OnToggleControls? onToggleControls;
+  final OnPageDimensions? onPageDimensions;
 
   const _NativeEpubWebViewFrame({
     super.key,
     required this.viewKey,
     required this.url,
+    required this.width,
+    required this.height,
     this.onReadalongClick,
     this.onToggleControls,
+    this.onPageDimensions,
   });
 
   @override
@@ -245,12 +354,19 @@ class _NativeEpubWebViewFrameState extends State<_NativeEpubWebViewFrame> {
     super.didUpdateWidget(oldWidget);
     _entry.onReadalongClick = widget.onReadalongClick;
     _entry.onToggleControls = widget.onToggleControls;
+    _entry.onPageDimensions = widget.onPageDimensions;
+    final sizeChanged = (oldWidget.width - widget.width).abs() > 0.5 ||
+        (oldWidget.height - widget.height).abs() > 0.5;
+    _entry.targetWidth = widget.width;
+    _entry.targetHeight = widget.height;
     if (_entry.loadedUrl != widget.url && widget.url.isNotEmpty) {
       _entry.loadedUrl = widget.url;
       final parsed = Uri.tryParse(widget.url);
       if (parsed != null && parsed.hasScheme) {
         _entry.controller.loadRequest(parsed);
       }
+    } else if (sizeChanged) {
+      _entry.applyViewportFit();
     }
   }
 
@@ -265,6 +381,11 @@ class _NativeEpubWebViewFrameState extends State<_NativeEpubWebViewFrame> {
     if (existing != null) {
       existing.onReadalongClick = widget.onReadalongClick;
       existing.onToggleControls = widget.onToggleControls;
+      existing.onPageDimensions = widget.onPageDimensions;
+      final sizeChanged = (existing.targetWidth - widget.width).abs() > 0.5 ||
+          (existing.targetHeight - widget.height).abs() > 0.5;
+      existing.targetWidth = widget.width;
+      existing.targetHeight = widget.height;
       _liveControllers[widget.viewKey] = existing;
       if (existing.loadedUrl != widget.url) {
         existing.loadedUrl = widget.url;
@@ -272,6 +393,8 @@ class _NativeEpubWebViewFrameState extends State<_NativeEpubWebViewFrame> {
         if (parsed != null && parsed.hasScheme) {
           existing.controller.loadRequest(parsed);
         }
+      } else if (sizeChanged) {
+        existing.applyViewportFit();
       }
       return existing;
     }
@@ -313,6 +436,12 @@ class _NativeEpubWebViewFrameState extends State<_NativeEpubWebViewFrame> {
             }
           } else if (type == 'shelfd:toggle-controls') {
             created.onToggleControls?.call();
+          } else if (type == 'shelfd:page-dimensions') {
+            final w = (decoded['width'] as num?)?.toDouble() ?? 0;
+            final h = (decoded['height'] as num?)?.toDouble() ?? 0;
+            if (w > 0 && h > 0) {
+              created.onPageDimensions?.call(w, h);
+            }
           }
         } catch (_) {}
       },
@@ -321,6 +450,12 @@ class _NativeEpubWebViewFrameState extends State<_NativeEpubWebViewFrame> {
     controller.setNavigationDelegate(
       NavigationDelegate(
         onPageFinished: (_) {
+          created.applyViewportFit();
+          Future<void>.delayed(const Duration(milliseconds: 120), () {
+            if (_liveControllers[created.viewKey] == created) {
+              created.applyViewportFit();
+            }
+          });
           final hl = _lastHighlight;
           if (hl != null) {
             created.applyHighlight(hl);
@@ -339,8 +474,11 @@ class _NativeEpubWebViewFrameState extends State<_NativeEpubWebViewFrame> {
       viewKey: widget.viewKey,
       controller: controller,
       loadedUrl: widget.url,
+      targetWidth: widget.width,
+      targetHeight: widget.height,
       onReadalongClick: widget.onReadalongClick,
       onToggleControls: widget.onToggleControls,
+      onPageDimensions: widget.onPageDimensions,
     );
     _liveControllers[widget.viewKey] = created;
 

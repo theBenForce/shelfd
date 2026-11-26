@@ -205,4 +205,75 @@ void main() {
     // Now on gatefold spread (Page 4)
     expect(find.text('Page 4 of 6'), findsWidgets);
   });
+
+  testWidgets(
+      'FixedLayoutReader mobile portrait Read-Along keeps Page 1 of 28 on one line and scales page container',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    final mobileReadalongBook = Book(
+      id: 'spidey-28',
+      title: 'Spidey and His Amazing Friends',
+      layout: 'pre-paginated',
+      hasReadalong: true,
+      durationSeconds: 180.0,
+      spine: List.generate(
+        28,
+        (idx) => SpineItem(
+          id: 'spidey-p${idx + 1}',
+          bookId: 'spidey-28',
+          chapterIndex: idx + 1,
+          title: 'Page ${idx + 1}',
+          pageWidth: 1024,
+          pageHeight: 1024,
+        ),
+      ),
+    );
+
+    const manifest = ReadalongManifest(
+      bookId: 'spidey-28',
+      hasReadalong: true,
+      hasMediaOverlays: true,
+      durationSeconds: 180.0,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+        ],
+        child: MaterialApp(
+          home: FixedLayoutReader(
+            book: mobileReadalongBook,
+            initialReadalongManifest: manifest,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+
+    final pageLabel = find.text('Page 1 of 28');
+    expect(pageLabel, findsOneWidget);
+    final labelSize = tester.getSize(pageLabel);
+    expect(labelSize.height, lessThanOrEqualTo(24.0));
+    expect(labelSize.width, greaterThanOrEqualTo(65.0));
+
+    final titleSize = tester.getSize(find.text('Spidey and His Amazing Friends'));
+    expect(titleSize.width, greaterThanOrEqualTo(120.0));
+
+    expect(find.byKey(const Key('readalong-play-pause-button')), findsOneWidget);
+    expect(find.byKey(const Key('readalong-autoturn-toggle')), findsOneWidget);
+    expect(find.byKey(const Key('readalong-cast-button')), findsOneWidget);
+    expect(find.byKey(const Key('switch_to_audiobook_button')), findsOneWidget);
+
+    final frameFinder = find.byKey(const Key('html-frame-fixed_spidey-28_1'));
+    expect(frameFinder, findsOneWidget);
+    final frameSize = tester.getSize(frameFinder);
+    expect(frameSize.width, closeTo(374.0, 0.5));
+    expect(frameSize.height, closeTo(374.0, 0.5));
+  });
 }

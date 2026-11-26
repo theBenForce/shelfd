@@ -1,4 +1,5 @@
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
@@ -11,6 +12,9 @@ bool get requiresNativeMediaCookie => false;
 final Set<String> _registeredViews = <String>{};
 final Map<String, web.HTMLIFrameElement> _activeIframes = <String, web.HTMLIFrameElement>{};
 final Map<String, String> _iframeViewKeys = <String, String>{};
+final Map<String, OnReadalongClick?> _readalongClickCallbacks = <String, OnReadalongClick?>{};
+final Map<String, OnPageDimensions?> _pageDimensionsCallbacks = <String, OnPageDimensions?>{};
+bool _windowMessageListenerAttached = false;
 ReadalongFrameHighlight? _lastHighlight;
 
 ReadalongFrameHighlight? get lastReadalongHighlight => _lastHighlight;
@@ -32,6 +36,58 @@ Future<void> seedHtmlAuthCookie({
 }) async {}
 
 Future<void> clearHtmlAuthCookies() async {}
+
+void _ensureWindowMessageListener() {
+  if (_windowMessageListenerAttached) return;
+  _windowMessageListenerAttached = true;
+  web.window.addEventListener(
+    'message',
+    (web.Event rawEvent) {
+      final event = rawEvent as web.MessageEvent;
+      final data = event.data;
+      if (data == null || data.isUndefinedOrNull) return;
+      try {
+        final obj = data as JSObject;
+        if (!obj.has('type')) return;
+        final typeAny = obj.getProperty<JSAny?>('type'.toJS);
+        if (typeAny == null || !typeAny.isA<JSString>()) return;
+        final type = (typeAny as JSString).toDart;
+
+        String? matchedViewKey;
+        final sourceWin = event.source;
+        if (sourceWin != null) {
+          for (final entry in _activeIframes.entries) {
+            if (entry.value.contentWindow == sourceWin) {
+              matchedViewKey = _iframeViewKeys[entry.key];
+              break;
+            }
+          }
+        }
+        if (matchedViewKey == null) return;
+
+        if (type == 'shelfd:readalong-click') {
+          final fragAny = obj.getProperty<JSAny?>('fragmentId'.toJS);
+          if (fragAny != null && fragAny.isA<JSString>()) {
+            final frag = (fragAny as JSString).toDart.trim();
+            if (frag.isNotEmpty) {
+              _readalongClickCallbacks[matchedViewKey]?.call(frag);
+            }
+          }
+        } else if (type == 'shelfd:page-dimensions') {
+          final wAny = obj.getProperty<JSAny?>('width'.toJS);
+          final hAny = obj.getProperty<JSAny?>('height'.toJS);
+          if (wAny != null && wAny.isA<JSNumber>() && hAny != null && hAny.isA<JSNumber>()) {
+            final w = (wAny as JSNumber).toDartDouble;
+            final h = (hAny as JSNumber).toDartDouble;
+            if (w > 0 && h > 0) {
+              _pageDimensionsCallbacks[matchedViewKey]?.call(w, h);
+            }
+          }
+        }
+      } catch (_) {}
+    }.toJS,
+  );
+}
 
 void _postHighlightToIframe(
   String iframeViewKey,
@@ -62,7 +118,12 @@ Widget buildHtmlFrame({
   required double height,
   OnReadalongClick? onReadalongClick,
   OnToggleControls? onToggleControls,
+  OnPageDimensions? onPageDimensions,
 }) {
+  _ensureWindowMessageListener();
+  _readalongClickCallbacks[viewKey] = onReadalongClick;
+  _pageDimensionsCallbacks[viewKey] = onPageDimensions;
+
   final uniqueKey = '${viewKey}_${url.hashCode}';
   _iframeViewKeys[uniqueKey] = viewKey;
   if (!_registeredViews.contains(uniqueKey)) {
