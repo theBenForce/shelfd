@@ -8,6 +8,7 @@ import '../models/genre.dart';
 import '../models/highlight.dart';
 import '../models/metadata_search_result.dart';
 import '../models/paginated_books.dart';
+import '../models/recap.dart';
 import '../models/series.dart';
 import '../models/topic.dart';
 import '../models/upload_job.dart';
@@ -281,4 +282,17 @@ class BookRepository {
 
   Future<void> fetchJobCoverFromUrl(String jobId, String coverUrl) =>
       apiService.fetchJobCoverFromUrl(jobId, coverUrl);
+
+  Future<BookRecap> getBookRecap(
+    String bookId, {
+    required int chapterIndex,
+    int paragraphOffset = 0,
+    bool forceRefresh = false,
+  }) =>
+      apiService.getBookRecap(
+        bookId,
+        chapterIndex: chapterIndex,
+        paragraphOffset: paragraphOffset,
+        forceRefresh: forceRefresh,
+      );
 }

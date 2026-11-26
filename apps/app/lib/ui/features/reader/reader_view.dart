@@ -12,6 +12,7 @@ import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
 import '../audiobook/widgets/cast_device_sheet.dart';
+import '../recap/previously_on_sheet.dart';
 import 'fixed_layout_reader.dart';
 import 'reader_markdown.dart';
 
@@ -602,6 +603,41 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
                     style: AppTypography.titleSerif(
                       fontSize: 20,
                       color: colors.ink,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppTokens.space16,
+                    0,
+                    AppTokens.space16,
+                    AppTokens.space12,
+                  ),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      key: const Key('previously_on_drawer_button'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: colors.ink,
+                        side: BorderSide(color: colors.border),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                        ),
+                      ),
+                      icon: const Icon(Icons.history_edu_rounded, size: 18),
+                      label: const Text('Previously On'),
+                      onPressed: () {
+                        final chapterIdx =
+                            _currentChapter?.chapterIndex ?? widget.chapterIndex ?? 1;
+                        final title = book?.title ?? displayTitle;
+                        Navigator.of(context).pop();
+                        showPreviouslyOnSheet(
+                          context,
+                          bookId: widget.bookId,
+                          bookTitle: title,
+                          chapterIndex: chapterIdx,
+                        );
+                      },
                     ),
                   ),
                 ),
