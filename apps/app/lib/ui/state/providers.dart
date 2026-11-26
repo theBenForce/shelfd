@@ -11,6 +11,7 @@ import '../../data/models/queue_status.dart';
 import '../../data/models/recap.dart';
 import '../../data/models/search_result.dart';
 import '../../data/models/series.dart';
+import '../../data/models/synoptic.dart';
 import '../../data/models/topic.dart';
 import '../../data/models/user.dart';
 import '../../data/repositories/auth_repository.dart';
@@ -1071,6 +1072,154 @@ class SearchNotifier extends Notifier<SearchState> {
 }
 
 final searchProvider = NotifierProvider<SearchNotifier, SearchState>(SearchNotifier.new);
+
+enum SearchViewMode { search, synoptic }
+
+class SearchViewModeNotifier extends Notifier<SearchViewMode> {
+  @override
+  SearchViewMode build() => SearchViewMode.search;
+
+  void setMode(SearchViewMode mode) {
+    state = mode;
+  }
+}
+
+final searchViewModeProvider =
+    NotifierProvider<SearchViewModeNotifier, SearchViewMode>(
+  SearchViewModeNotifier.new,
+);
+
+class SynopticState {
+  final List<String> selectedBookIds;
+  final String? selectedGenreId;
+  final String query;
+  final bool isLoading;
+  final String? error;
+  final SynopticResult? result;
+
+  const SynopticState({
+    this.selectedBookIds = const [],
+    this.selectedGenreId,
+    this.query = '',
+    this.isLoading = false,
+    this.error,
+    this.result,
+  });
+
+  bool get hasValidScope =>
+      selectedBookIds.length >= 2 ||
+      (selectedGenreId != null && selectedGenreId!.trim().isNotEmpty);
+
+  SynopticState copyWith({
+    List<String>? selectedBookIds,
+    String? selectedGenreId,
+    bool clearGenre = false,
+    String? query,
+    bool? isLoading,
+    String? error,
+    bool clearError = false,
+    SynopticResult? result,
+    bool clearResult = false,
+  }) {
+    return SynopticState(
+      selectedBookIds: selectedBookIds ?? this.selectedBookIds,
+      selectedGenreId:
+          clearGenre ? null : (selectedGenreId ?? this.selectedGenreId),
+      query: query ?? this.query,
+      isLoading: isLoading ?? this.isLoading,
+      error: clearError ? null : (error ?? this.error),
+      result: clearResult ? null : (result ?? this.result),
+    );
+  }
+}
+
+class SynopticNotifier extends Notifier<SynopticState> {
+  @override
+  SynopticState build() => const SynopticState();
+
+  void toggleBook(String bookId) {
+    final current = List<String>.from(state.selectedBookIds);
+    if (current.contains(bookId)) {
+      current.remove(bookId);
+    } else {
+      current.add(bookId);
+    }
+    state = state.copyWith(
+      selectedBookIds: current,
+      clearError: true,
+    );
+  }
+
+  void clearSelection() {
+    state = state.copyWith(
+      selectedBookIds: const [],
+      clearGenre: true,
+      clearError: true,
+    );
+  }
+
+  void selectGenre(String? genreId) {
+    final normalized = genreId?.trim();
+    if (normalized == null ||
+        normalized.isEmpty ||
+        state.selectedGenreId == normalized) {
+      state = state.copyWith(clearGenre: true, clearError: true);
+    } else {
+      state = state.copyWith(selectedGenreId: normalized, clearError: true);
+    }
+  }
+
+  void setQuery(String query) {
+    state = state.copyWith(query: query, clearError: true);
+  }
+
+  Future<void> runQuery([String? overrideQuery]) async {
+    final activeQuery = (overrideQuery ?? state.query).trim();
+    if (activeQuery.isEmpty) {
+      state = state.copyWith(
+        query: overrideQuery ?? state.query,
+        error: 'Enter a comparative question to synthesize across books.',
+      );
+      return;
+    }
+
+    if (!state.hasValidScope) {
+      state = state.copyWith(
+        query: activeQuery,
+        error: 'Select at least 2 books or choose a genre filter to compare.',
+      );
+      return;
+    }
+
+    state = state.copyWith(
+      query: activeQuery,
+      isLoading: true,
+      clearError: true,
+    );
+
+    final apiService = ref.read(apiServiceProvider);
+    try {
+      final result = await apiService.runSynopticQuery(
+        query: activeQuery,
+        bookIds: state.selectedBookIds,
+        genreId: state.selectedGenreId,
+      );
+      state = state.copyWith(
+        isLoading: false,
+        result: result,
+        clearError: true,
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        error: e.toString(),
+      );
+    }
+  }
+}
+
+final synopticProvider =
+    NotifierProvider<SynopticNotifier, SynopticState>(SynopticNotifier.new);
 
 // Background Queue State & Notifier
 class QueueState {

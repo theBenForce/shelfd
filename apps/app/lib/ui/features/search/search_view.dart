@@ -9,6 +9,7 @@ import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
+import 'synoptic_studio_view.dart';
 
 class SearchView extends ConsumerStatefulWidget {
   const SearchView({super.key});
@@ -47,6 +48,7 @@ class _SearchViewState extends ConsumerState<SearchView> {
   @override
   Widget build(BuildContext context) {
     final searchState = ref.watch(searchProvider);
+    final mode = ref.watch(searchViewModeProvider);
     final horizontalPad = Responsive.horizontalPadding(context);
     final isDesktop = Responsive.isDesktop(context);
     final colors = context.shelfdColors;
@@ -59,7 +61,9 @@ class _SearchViewState extends ConsumerState<SearchView> {
             backgroundColor: colors.background,
             foregroundColor: colors.ink,
             title: Text(
-              'Semantic Search',
+              mode == SearchViewMode.synoptic
+                  ? 'Synoptic Studio'
+                  : 'Semantic Search',
               style: AppTypography.titleSerif(fontSize: 20, color: colors.ink),
             ),
             leading: IconButton(
@@ -78,6 +82,55 @@ class _SearchViewState extends ConsumerState<SearchView> {
             ),
           );
 
+    final modeToggle = Padding(
+      padding: EdgeInsets.fromLTRB(
+        horizontalPad,
+        isDesktop ? AppTokens.space8 : AppTokens.space12,
+        horizontalPad,
+        AppTokens.space8,
+      ),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: SegmentedButton<SearchViewMode>(
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment<SearchViewMode>(
+              value: SearchViewMode.search,
+              label: Text('Search'),
+            ),
+            ButtonSegment<SearchViewMode>(
+              value: SearchViewMode.synoptic,
+              label: Text('Synoptic Studio'),
+            ),
+          ],
+          selected: {mode},
+          onSelectionChanged: (selection) {
+            if (selection.isNotEmpty) {
+              ref.read(searchViewModeProvider.notifier).setMode(selection.first);
+            }
+          },
+          style: ButtonStyle(
+            backgroundColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.selected)) {
+                return colors.accentPrimary;
+              }
+              return colors.containerLow;
+            }),
+            foregroundColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.selected)) {
+                return colors.onAccent;
+              }
+              return colors.secondaryInk;
+            }),
+            side: WidgetStatePropertyAll(BorderSide(color: colors.border)),
+            textStyle: WidgetStatePropertyAll(
+              AppTypography.bodySans(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+      ),
+    );
+
     final bodyContent = SafeArea(
       child: Center(
         child: ConstrainedBox(
@@ -95,7 +148,9 @@ class _SearchViewState extends ConsumerState<SearchView> {
                   child: Row(
                     children: [
                       Text(
-                        'Semantic Search',
+                        mode == SearchViewMode.synoptic
+                            ? 'Synoptic Studio'
+                            : 'Semantic Search',
                         style: AppTypography.displaySerif(
                           fontSize: 30,
                           fontWeight: FontWeight.w600,
@@ -105,112 +160,120 @@ class _SearchViewState extends ConsumerState<SearchView> {
                     ],
                   ),
                 ),
-              // Search Input Header
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: horizontalPad, vertical: AppTokens.space16),
-                child: TextField(
-                  controller: _searchController,
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: _onSearchSubmitted,
-                  style: AppTypography.bodySans(fontSize: 15, color: colors.ink),
-                  decoration: InputDecoration(
-                    hintText: 'Ask your library anything in natural language...',
-                    hintStyle: AppTypography.bodySans(fontSize: 14, color: colors.mutedInk),
-                    filled: true,
-                    fillColor: colors.containerLow,
-                    prefixIcon: Icon(
-                      Icons.auto_awesome_rounded,
-                      color: colors.accentPrimary,
-                      size: 20,
+              modeToggle,
+              if (mode == SearchViewMode.synoptic)
+                const Expanded(child: SynopticStudioView())
+              else ...[
+                // Search Input Header
+                Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: horizontalPad,
+                    vertical: AppTokens.space12,
+                  ),
+                  child: TextField(
+                    controller: _searchController,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: _onSearchSubmitted,
+                    style: AppTypography.bodySans(fontSize: 15, color: colors.ink),
+                    decoration: InputDecoration(
+                      hintText: 'Ask your library anything in natural language...',
+                      hintStyle: AppTypography.bodySans(fontSize: 14, color: colors.mutedInk),
+                      filled: true,
+                      fillColor: colors.containerLow,
+                      prefixIcon: Icon(
+                        Icons.auto_awesome_rounded,
+                        color: colors.accentPrimary,
+                        size: 20,
+                      ),
+                      suffixIcon: IconButton(
+                        icon: Icon(Icons.search_rounded, color: colors.secondaryInk),
+                        onPressed: () => _onSearchSubmitted(_searchController.text),
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                        borderSide: BorderSide(color: colors.border),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                        borderSide: BorderSide(color: colors.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                        borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                     ),
-                    suffixIcon: IconButton(
-                      icon: Icon(Icons.search_rounded, color: colors.secondaryInk),
-                      onPressed: () => _onSearchSubmitted(_searchController.text),
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                      borderSide: BorderSide(color: colors.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                      borderSide: BorderSide(color: colors.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                      borderSide: BorderSide(color: colors.accentPrimary, width: 1.5),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   ),
                 ),
-              ),
-              Divider(color: colors.subtleBorder, height: 1),
+                Divider(color: colors.subtleBorder, height: 1),
 
-              // Results / Empty State
-              Expanded(
-                child: searchState.isLoading
-                    ? Center(child: CircularProgressIndicator(color: colors.accentPrimary))
-                    : searchState.error != null
-                        ? Center(
-                            child: Container(
-                              padding: const EdgeInsets.all(AppTokens.space16),
-                              decoration: BoxDecoration(
-                                color: colors.errorBg,
-                                borderRadius: BorderRadius.circular(AppTokens.radiusMd),
-                                border: Border.all(color: colors.errorBorder),
+                // Results / Empty State
+                Expanded(
+                  child: searchState.isLoading
+                      ? Center(child: CircularProgressIndicator(color: colors.accentPrimary))
+                      : searchState.error != null
+                          ? Center(
+                              child: Container(
+                                padding: const EdgeInsets.all(AppTokens.space16),
+                                decoration: BoxDecoration(
+                                  color: colors.errorBg,
+                                  borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                                  border: Border.all(color: colors.errorBorder),
+                                ),
+                                child: Text(
+                                  searchState.error!,
+                                  style: AppTypography.bodySans(fontSize: 13, color: colors.errorText),
+                                ),
                               ),
-                              child: Text(
-                                searchState.error!,
-                                style: AppTypography.bodySans(fontSize: 13, color: colors.errorText),
-                              ),
-                            ),
-                          )
-                        : searchState.results.isEmpty
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(AppTokens.space32),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                        Icons.saved_search_rounded,
-                                        size: 48,
-                                        color: colors.mutedInk,
-                                      ),
-                                      const SizedBox(height: AppTokens.space16),
-                                      Text(
-                                        'Find passages by meaning',
-                                        style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
-                                      ),
-                                      const SizedBox(height: AppTokens.space8),
-                                      Text(
-                                        'Try questions like "Where do they escape across the glacier?" or "When does Paul first ride a sandworm?"',
-                                        textAlign: TextAlign.center,
-                                        style: AppTypography.bodySans(fontSize: 13, color: colors.secondaryInk),
-                                      ),
-                                    ],
+                            )
+                          : searchState.results.isEmpty
+                              ? Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(AppTokens.space32),
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.saved_search_rounded,
+                                          size: 48,
+                                          color: colors.mutedInk,
+                                        ),
+                                        const SizedBox(height: AppTokens.space16),
+                                        Text(
+                                          'Find passages by meaning',
+                                          style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
+                                        ),
+                                        const SizedBox(height: AppTokens.space8),
+                                        Text(
+                                          'Try questions like "Where do they escape across the glacier?" or "When does Paul first ride a sandworm?"',
+                                          textAlign: TextAlign.center,
+                                          style: AppTypography.bodySans(fontSize: 13, color: colors.secondaryInk),
+                                        ),
+                                      ],
+                                    ),
                                   ),
+                                )
+                              : ListView.builder(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: horizontalPad,
+                                    vertical: AppTokens.space16,
+                                  ),
+                                  itemCount: searchState.results.length,
+                                  itemBuilder: (context, index) {
+                                    final hit = searchState.results[index];
+                                    return _SearchHitCard(
+                                      hit: hit,
+                                      onTap: () {
+                                        final target = (hit.chapterId != null && hit.chapterId!.isNotEmpty)
+                                            ? hit.chapterId!
+                                            : hit.chapterIndex;
+                                        context.go('/books/${hit.bookId}/$target');
+                                      },
+                                    );
+                                  },
                                 ),
-                              )
-                            : ListView.builder(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: horizontalPad,
-                                  vertical: AppTokens.space16,
-                                ),
-                                itemCount: searchState.results.length,
-                                itemBuilder: (context, index) {
-                                  final hit = searchState.results[index];
-                                  return _SearchHitCard(
-                                    hit: hit,
-                                    onTap: () {
-                                      final target = (hit.chapterId != null && hit.chapterId!.isNotEmpty)
-                                          ? hit.chapterId!
-                                          : hit.chapterIndex;
-                                      context.go('/books/${hit.bookId}/$target');
-                                    },
-                                  );
-                                },
-                              ),
-              ),
+                ),
+              ],
             ],
           ),
         ),
