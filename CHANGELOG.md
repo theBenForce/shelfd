@@ -1,3 +1,11 @@
+# [1.34.0](https://github.com/theBenForce/shelfd/compare/v1.33.1...v1.34.0) (2026-11-26)
+
+
+### Features
+
+* **server:** add MCP study extraction tools and study deck export API ([#111](https://github.com/theBenForce/shelfd/issues/111)) ([c3040e2](https://github.com/theBenForce/shelfd/commit/c3040e2c450f0542fd8ba8bde3458edddb5734e7))
+* **server:** extend scoped retrieval filters and add recap cache schema ([#110](https://github.com/theBenForce/shelfd/issues/110)) ([ccd7af0](https://github.com/theBenForce/shelfd/commit/ccd7af001d97b3b80b51e6aa07f24e9e8036b33d))
+
 ## [1.33.1](https://github.com/theBenForce/shelfd/compare/v1.33.0...v1.33.1) (2026-11-26)
 
 
