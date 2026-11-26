@@ -174,6 +174,66 @@ func AvailableTools() []Tool {
 				"required": []string{"book_id"},
 			},
 		},
+		{
+			Name:        "extract_key_concepts",
+			Description: "Extract structured key concepts from a book chapter with paragraph-level citations.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"book_id": map[string]any{
+						"type":        "string",
+						"description": "The unique ID (ULID or UUID) of the book",
+					},
+					"chapter_index": map[string]any{
+						"type":        "integer",
+						"description": "The chapter sequence index (e.g. 1 for Chapter 1)",
+					},
+					"start_paragraph": map[string]any{
+						"type":        "integer",
+						"description": "Optional 1-based start paragraph number (default: 1)",
+					},
+					"end_paragraph": map[string]any{
+						"type":        "integer",
+						"description": "Optional 1-based end paragraph number (inclusive, maximum 50 paragraphs per call)",
+					},
+					"max_concepts": map[string]any{
+						"type":        "integer",
+						"description": "Optional maximum number of concepts to extract (default: 8)",
+					},
+				},
+				"required": []string{"book_id", "chapter_index"},
+			},
+		},
+		{
+			Name:        "generate_study_cards",
+			Description: "Generate question-and-answer study flashcards grounded in a book chapter with paragraph citations.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"book_id": map[string]any{
+						"type":        "string",
+						"description": "The unique ID (ULID or UUID) of the book",
+					},
+					"chapter_index": map[string]any{
+						"type":        "integer",
+						"description": "The chapter sequence index (e.g. 1 for Chapter 1)",
+					},
+					"start_paragraph": map[string]any{
+						"type":        "integer",
+						"description": "Optional 1-based start paragraph number (default: 1)",
+					},
+					"end_paragraph": map[string]any{
+						"type":        "integer",
+						"description": "Optional 1-based end paragraph number (inclusive, maximum 50 paragraphs per call)",
+					},
+					"max_cards": map[string]any{
+						"type":        "integer",
+						"description": "Optional maximum number of flashcards to generate (default: 8)",
+					},
+				},
+				"required": []string{"book_id", "chapter_index"},
+			},
+		},
 	}
 }
 
