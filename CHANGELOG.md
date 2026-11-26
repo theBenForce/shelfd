@@ -1,3 +1,11 @@
+# [1.35.0](https://github.com/theBenForce/shelfd/compare/v1.34.0...v1.35.0) (2026-11-26)
+
+
+### Features
+
+* add anti-spoiler Previously On recap backend and UI ([#17](https://github.com/theBenForce/shelfd/issues/17)) ([#119](https://github.com/theBenForce/shelfd/issues/119)) ([01be6d3](https://github.com/theBenForce/shelfd/commit/01be6d367dccbe5eb934b8165d8f5fb03ab2f087))
+* **app:** add Export Study Deck dialog and file saver formats ([#21](https://github.com/theBenForce/shelfd/issues/21)) ([#118](https://github.com/theBenForce/shelfd/issues/118)) ([453ba13](https://github.com/theBenForce/shelfd/commit/453ba135746f812c023147c54d0f63c0017af6b1))
+
 # [1.34.0](https://github.com/theBenForce/shelfd/compare/v1.33.1...v1.34.0) (2026-11-26)
 
 
