@@ -1,3 +1,10 @@
+## [1.33.1](https://github.com/theBenForce/shelfd/compare/v1.33.0...v1.33.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **reader:** scale fixed-layout pages on mobile WebViews and wrap compact header ([#116](https://github.com/theBenForce/shelfd/issues/116)) ([54630b2](https://github.com/theBenForce/shelfd/commit/54630b2aa21fe76966d22e610c76b75568cd0fd7))
+
 # [1.33.0](https://github.com/theBenForce/shelfd/compare/v1.32.0...v1.33.0) (2026-11-26)
 
 
