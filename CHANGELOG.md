@@ -1,3 +1,10 @@
+# [1.33.0](https://github.com/theBenForce/shelfd/compare/v1.32.0...v1.33.0) (2026-11-26)
+
+
+### Features
+
+* **ci:** publish @thebenforce/shelfd-plugin-sdk and auto-release changed targets on main ([#109](https://github.com/theBenForce/shelfd/issues/109)) ([4548b51](https://github.com/theBenForce/shelfd/commit/4548b51772126d43f49f3000b2375bc39edf41ca))
+
 # [1.32.0](https://github.com/theBenForce/shelfd/compare/v1.31.1...v1.32.0) (2026-11-26)
 
 
