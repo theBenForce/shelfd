@@ -16,6 +16,7 @@ import '../../core/tokens.dart';
 import '../../core/typography.dart';
 import '../../state/providers.dart';
 import '../plugins/plugin_action_runner.dart';
+import '../recap/previously_on_sheet.dart';
 import 'edit_book_metadata_dialog.dart';
 
 class BookDetailView extends ConsumerStatefulWidget {
@@ -991,6 +992,43 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                   ],
                 ),
               ),
+            ),
+          ),
+          const SizedBox(height: AppTokens.space8),
+          SizedBox(
+            width: double.infinity,
+            height: AppTokens.minTouchTarget,
+            child: OutlinedButton.icon(
+              key: const Key('previously_on_hero_button'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: colors.ink,
+                side: BorderSide(color: colors.border),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                ),
+              ),
+              icon: const Icon(Icons.history_edu_rounded, size: 20),
+              label: const Text(
+                'Previously On',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              onPressed: () {
+                final ceilingChapter = book.readingProgress <= 0
+                    ? 0
+                    : (book.spine.isEmpty
+                        ? 1
+                        : book
+                            .spine[((book.readingProgress.clamp(0.0, 1.0)) *
+                                    (book.spine.length - 1))
+                                .round()]
+                            .chapterIndex);
+                showPreviouslyOnSheet(
+                  context,
+                  bookId: book.id,
+                  bookTitle: book.title,
+                  chapterIndex: ceilingChapter,
+                );
+              },
             ),
           ),
           const SizedBox(height: AppTokens.space8),
