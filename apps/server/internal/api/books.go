@@ -172,6 +172,9 @@ func BuildBookListItem(ctx context.Context, repo repository.StorageEngine, b *re
 }
 
 type BookCitation struct {
+	BookID         string  `json:"book_id,omitempty"`
+	BookTitle      string  `json:"book_title,omitempty"`
+	AuthorName     string  `json:"author_name,omitempty"`
 	ChapterID      string  `json:"chapter_id"`
 	ChapterIndex   int     `json:"chapter_index"`
 	ChapterTitle   *string `json:"chapter_title,omitempty"`
@@ -2768,10 +2771,30 @@ func (h *BookHandler) ChatBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var fallbackAuthor string
+	if authors, err := h.repo.GetBookAuthors(r.Context(), book.ID); err == nil && len(authors) > 0 {
+		fallbackAuthor = authors[0].Name
+	}
+
 	citations := make([]BookCitation, 0, len(agentResult.Citations))
 	for _, c := range agentResult.Citations {
 		title := c.ChapterTitle
+		citBookID := c.BookID
+		if citBookID == "" {
+			citBookID = book.ID
+		}
+		citBookTitle := c.BookTitle
+		if citBookTitle == "" {
+			citBookTitle = book.Title
+		}
+		citAuthorName := c.AuthorName
+		if citAuthorName == "" {
+			citAuthorName = fallbackAuthor
+		}
 		citations = append(citations, BookCitation{
+			BookID:         citBookID,
+			BookTitle:      citBookTitle,
+			AuthorName:     citAuthorName,
 			ChapterID:      c.ChapterID,
 			ChapterIndex:   c.ChapterIndex,
 			ChapterTitle:   &title,

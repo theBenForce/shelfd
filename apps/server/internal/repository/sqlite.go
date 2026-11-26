@@ -2156,32 +2156,12 @@ func (r *SQLiteStorageEngine) SearchVectorParagraphs(ctx context.Context, queryE
 	if limit <= 0 {
 		limit = 20
 	}
-	k := limit
-	if filter.AuthorID != nil || filter.GenreID != nil || filter.TopicID != nil || filter.SeriesID != nil || filter.BookID != nil {
-		if k < 100 {
-			k = 100
-		}
-	}
+	k := sqliteKNNLimit(limit, filter)
 
-	bookID := ""
-	if filter.BookID != nil {
-		bookID = *filter.BookID
-	}
-	authorID := ""
-	if filter.AuthorID != nil {
-		authorID = *filter.AuthorID
-	}
-	genreID := ""
-	if filter.GenreID != nil {
-		genreID = *filter.GenreID
-	}
-	topicID := ""
-	if filter.TopicID != nil {
-		topicID = *filter.TopicID
-	}
-	seriesID := ""
-	if filter.SeriesID != nil {
-		seriesID = *filter.SeriesID
+	filterClauses, filterArgs := buildSearchFilterClauses(filter)
+	extraWhere := ""
+	if len(filterClauses) > 0 {
+		extraWhere = " AND " + strings.Join(filterClauses, " AND ")
 	}
 
 	query := `
@@ -2203,25 +2183,17 @@ func (r *SQLiteStorageEngine) SearchVectorParagraphs(ctx context.Context, queryE
 		JOIN paragraphs p ON v.paragraph_id = p.id
 		JOIN chapters c ON p.chapter_id = c.id
 		JOIN books b ON p.book_id = b.id
-		WHERE v.embedding MATCH ? AND k = ?
-		  AND (? = '' OR b.id = ?)
-		  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
-		  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
-		  AND (? = '' OR b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?))
-		  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
+		WHERE v.embedding MATCH ? AND k = ?` + extraWhere + `
 		ORDER BY distance ASC
 		LIMIT ?
 	`
 
-	rows, err := r.db.QueryContext(ctx, query,
-		blob, blob, k,
-		bookID, bookID,
-		authorID, authorID,
-		genreID, genreID,
-		topicID, topicID,
-		seriesID, seriesID,
-		limit,
-	)
+	args := make([]any, 0, 4+len(filterArgs))
+	args = append(args, blob, blob, k)
+	args = append(args, filterArgs...)
+	args = append(args, limit)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("executing vector paragraph search query: %w", err)
 	}
@@ -2265,30 +2237,15 @@ func (r *SQLiteStorageEngine) SearchFTSParagraphs(ctx context.Context, queryText
 		limit = 20
 	}
 
-	bookID := ""
-	if filter.BookID != nil {
-		bookID = *filter.BookID
-	}
-	authorID := ""
-	if filter.AuthorID != nil {
-		authorID = *filter.AuthorID
-	}
-	genreID := ""
-	if filter.GenreID != nil {
-		genreID = *filter.GenreID
-	}
-	topicID := ""
-	if filter.TopicID != nil {
-		topicID = *filter.TopicID
-	}
-	seriesID := ""
-	if filter.SeriesID != nil {
-		seriesID = *filter.SeriesID
-	}
-
 	cleanQuery := strings.TrimSpace(queryText)
 	if cleanQuery == "" {
 		return []*SearchHit{}, nil
+	}
+
+	filterClauses, filterArgs := buildSearchFilterClauses(filter)
+	extraWhere := ""
+	if len(filterClauses) > 0 {
+		extraWhere = " AND " + strings.Join(filterClauses, " AND ")
 	}
 
 	query := `
@@ -2310,25 +2267,17 @@ func (r *SQLiteStorageEngine) SearchFTSParagraphs(ctx context.Context, queryText
 		JOIN paragraphs p ON f.rowid = p.rowid
 		JOIN chapters c ON p.chapter_id = c.id
 		JOIN books b ON p.book_id = b.id
-		WHERE paragraphs_fts MATCH ?
-		  AND (? = '' OR b.id = ?)
-		  AND (? = '' OR b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?))
-		  AND (? = '' OR b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?))
-		  AND (? = '' OR b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?))
-		  AND (? = '' OR b.id IN (SELECT book_id FROM book_series WHERE series_id = ?))
+		WHERE paragraphs_fts MATCH ?` + extraWhere + `
 		ORDER BY rank ASC
 		LIMIT ?
 	`
 
-	rows, err := r.db.QueryContext(ctx, query,
-		cleanQuery,
-		bookID, bookID,
-		authorID, authorID,
-		genreID, genreID,
-		topicID, topicID,
-		seriesID, seriesID,
-		limit,
-	)
+	args := make([]any, 0, 2+len(filterArgs))
+	args = append(args, cleanQuery)
+	args = append(args, filterArgs...)
+	args = append(args, limit)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("executing FTS paragraph search query: %w", err)
 	}
@@ -3089,3 +3038,52 @@ func (r *SQLiteStorageEngine) DeleteUncommittedBookSourceByUploadJob(ctx context
 	}
 	return nil
 }
+
+func (r *SQLiteStorageEngine) GetRecapCache(ctx context.Context, bookID string, chapterIndex int, paragraphOffset int) (*RecapCacheEntry, error) {
+	query := `
+		SELECT book_id, chapter_index, paragraph_offset, content, created_at
+		FROM recap_cache
+		WHERE book_id = ? AND chapter_index = ? AND paragraph_offset = ?
+	`
+	entry := &RecapCacheEntry{}
+	err := r.db.QueryRowContext(ctx, query, bookID, chapterIndex, paragraphOffset).Scan(
+		&entry.BookID,
+		&entry.ChapterIndex,
+		&entry.ParagraphOffset,
+		&entry.Content,
+		&entry.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("getting recap cache: %w", err)
+	}
+	return entry, nil
+}
+
+func (r *SQLiteStorageEngine) UpsertRecapCache(ctx context.Context, entry *RecapCacheEntry) error {
+	if entry.CreatedAt.IsZero() {
+		entry.CreatedAt = time.Now().UTC()
+	}
+
+	query := `
+		INSERT INTO recap_cache (book_id, chapter_index, paragraph_offset, content, created_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (book_id, chapter_index, paragraph_offset) DO UPDATE SET
+			content = excluded.content,
+			created_at = excluded.created_at
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		entry.BookID,
+		entry.ChapterIndex,
+		entry.ParagraphOffset,
+		entry.Content,
+		entry.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upserting recap cache: %w", err)
+	}
+	return nil
+}
+

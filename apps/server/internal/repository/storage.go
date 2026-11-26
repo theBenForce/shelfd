@@ -158,6 +158,10 @@ type StorageEngine interface {
 	LinkBookSourceByUploadJob(ctx context.Context, uploadJobID, bookID string) error
 	DeleteUncommittedBookSourceByUploadJob(ctx context.Context, uploadJobID string) error
 
+	// Recap Cache
+	GetRecapCache(ctx context.Context, bookID string, chapterIndex int, paragraphOffset int) (*RecapCacheEntry, error)
+	UpsertRecapCache(ctx context.Context, entry *RecapCacheEntry) error
+
 	// Lifecycle
 	Close() error
 }
