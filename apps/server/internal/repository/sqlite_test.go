@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -2132,6 +2133,519 @@ func TestExternalFTS5ParagraphsLifecycle(t *testing.T) {
 		t.Fatalf("expected 0 hits after paragraph delete, got %d", len(delHits))
 	}
 }
+
+func setupBothEngines(t *testing.T) []struct {
+	name string
+	repo repository.StorageEngine
+} {
+	t.Helper()
+	ctx := context.Background()
+
+	bunDB, err := database.OpenBunSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("open bun sqlite: %v", err)
+	}
+	if err := database.RunBunMigrations(ctx, bunDB); err != nil {
+		bunDB.Close()
+		t.Fatalf("run bun migrations: %v", err)
+	}
+
+	rawDB, err := database.OpenSQLite(":memory:")
+	if err != nil {
+		bunDB.Close()
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+	if err := database.RunMigrations(ctx, rawDB); err != nil {
+		bunDB.Close()
+		rawDB.Close()
+		t.Fatalf("run raw migrations: %v", err)
+	}
+
+	return []struct {
+		name string
+		repo repository.StorageEngine
+	}{
+		{name: "BunStorageEngine", repo: repository.NewBunStorageEngine(bunDB)},
+		{name: "SQLiteStorageEngine", repo: repository.NewSQLiteStorageEngine(rawDB)},
+	}
+}
+
+func TestScopedRetrievalFilters(t *testing.T) {
+	ctx := context.Background()
+
+	for _, eng := range setupBothEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			repo := eng.repo
+			defer repo.Close()
+
+			authorA, err := repo.UpsertAuthor(ctx, "Frank Herbert")
+			if err != nil {
+				t.Fatalf("upsert author A: %v", err)
+			}
+			authorB, err := repo.UpsertAuthor(ctx, "Ursula K. Le Guin")
+			if err != nil {
+				t.Fatalf("upsert author B: %v", err)
+			}
+			authorC, err := repo.UpsertAuthor(ctx, "Isaac Asimov")
+			if err != nil {
+				t.Fatalf("upsert author C: %v", err)
+			}
+
+			books := []struct {
+				id       string
+				title    string
+				authorID string
+			}{
+				{"book-a", "Dune", authorA.ID},
+				{"book-b", "A Wizard of Earthsea", authorB.ID},
+				{"book-c", "Foundation", authorC.ID},
+			}
+
+			vec := make([]float32, 256)
+			vec[0] = 1.0
+
+			for _, b := range books {
+				if err := repo.CreateBook(ctx, &repository.Book{
+					ID:       b.id,
+					Title:    b.title,
+					FilePath: b.id + ".epub",
+				}); err != nil {
+					t.Fatalf("create book %s: %v", b.id, err)
+				}
+				if err := repo.LinkBookAuthor(ctx, b.id, b.authorID, "author"); err != nil {
+					t.Fatalf("link author %s: %v", b.id, err)
+				}
+
+				for chIdx := 1; chIdx <= 4; chIdx++ {
+					chID := fmt.Sprintf("%s-ch-%d", b.id, chIdx)
+					chTitle := fmt.Sprintf("Chapter %d", chIdx)
+					content := fmt.Sprintf("Prophecy destiny desert ocean chapter %d in %s.", chIdx, b.title)
+					if err := repo.CreateChapter(ctx, &repository.Chapter{
+						ID:           chID,
+						BookID:       b.id,
+						ChapterIndex: chIdx,
+						Title:        &chTitle,
+						Summary:      content,
+						ContentPlain: content,
+					}); err != nil {
+						t.Fatalf("create chapter %s: %v", chID, err)
+					}
+					pID := fmt.Sprintf("%s-p-%d", b.id, chIdx)
+					if err := repo.CreateParagraphs(ctx, []*repository.Paragraph{{
+						ID:             pID,
+						BookID:         b.id,
+						ChapterID:      chID,
+						ChapterIndex:   chIdx,
+						StartParagraph: 1,
+						EndParagraph:   1,
+						Content:        content,
+					}}); err != nil {
+						t.Fatalf("create paragraph %s: %v", pID, err)
+					}
+					if err := repo.InsertParagraphVector(ctx, pID, vec); err != nil {
+						t.Fatalf("insert vector %s: %v", pID, err)
+					}
+				}
+			}
+
+			maxCh := 2
+			vecMaxHits, err := repo.SearchVectorParagraphs(ctx, vec, repository.SearchFilter{
+				MaxChapterIndex: &maxCh,
+				Limit:           20,
+			})
+			if err != nil {
+				t.Fatalf("vector search with MaxChapterIndex: %v", err)
+			}
+			if len(vecMaxHits) != 6 {
+				t.Fatalf("expected 6 vector hits with MaxChapterIndex=2, got %d", len(vecMaxHits))
+			}
+			for _, h := range vecMaxHits {
+				if h.ChapterIndex > maxCh {
+					t.Errorf("vector hit leaked spoiler chapter %d > %d", h.ChapterIndex, maxCh)
+				}
+			}
+
+			ftsMaxHits, err := repo.SearchFTSParagraphs(ctx, "Prophecy", repository.SearchFilter{
+				MaxChapterIndex: &maxCh,
+				Limit:           20,
+			})
+			if err != nil {
+				t.Fatalf("FTS search with MaxChapterIndex: %v", err)
+			}
+			if len(ftsMaxHits) != 6 {
+				t.Fatalf("expected 6 FTS hits with MaxChapterIndex=2, got %d", len(ftsMaxHits))
+			}
+			for _, h := range ftsMaxHits {
+				if h.ChapterIndex > maxCh {
+					t.Errorf("FTS hit leaked spoiler chapter %d > %d", h.ChapterIndex, maxCh)
+				}
+			}
+
+			vecBookHits, err := repo.SearchVectorParagraphs(ctx, vec, repository.SearchFilter{
+				BookIDs: []string{"book-a", "book-b"},
+				Limit:   20,
+			})
+			if err != nil {
+				t.Fatalf("vector search with BookIDs: %v", err)
+			}
+			if len(vecBookHits) != 8 {
+				t.Fatalf("expected 8 vector hits for BookIDs [book-a, book-b], got %d", len(vecBookHits))
+			}
+			for _, h := range vecBookHits {
+				if h.BookID != "book-a" && h.BookID != "book-b" {
+					t.Errorf("vector hit from unexpected book %s", h.BookID)
+				}
+			}
+
+			ftsBookHits, err := repo.SearchFTSParagraphs(ctx, "Prophecy", repository.SearchFilter{
+				BookIDs: []string{"book-a", "book-b"},
+				Limit:   20,
+			})
+			if err != nil {
+				t.Fatalf("FTS search with BookIDs: %v", err)
+			}
+			if len(ftsBookHits) != 8 {
+				t.Fatalf("expected 8 FTS hits for BookIDs [book-a, book-b], got %d", len(ftsBookHits))
+			}
+			for _, h := range ftsBookHits {
+				if h.BookID != "book-a" && h.BookID != "book-b" {
+					t.Errorf("FTS hit from unexpected book %s", h.BookID)
+				}
+			}
+
+			vecAuthorHits, err := repo.SearchVectorParagraphs(ctx, vec, repository.SearchFilter{
+				AuthorIDs: []string{authorA.ID, authorC.ID},
+				Limit:     20,
+			})
+			if err != nil {
+				t.Fatalf("vector search with AuthorIDs: %v", err)
+			}
+			if len(vecAuthorHits) != 8 {
+				t.Fatalf("expected 8 vector hits for AuthorIDs [A, C], got %d", len(vecAuthorHits))
+			}
+			for _, h := range vecAuthorHits {
+				if h.BookID != "book-a" && h.BookID != "book-c" {
+					t.Errorf("vector hit from unexpected author's book %s", h.BookID)
+				}
+			}
+
+			ftsAuthorHits, err := repo.SearchFTSParagraphs(ctx, "Prophecy", repository.SearchFilter{
+				AuthorIDs:       []string{authorA.ID, authorC.ID},
+				MaxChapterIndex: &maxCh,
+				Limit:           20,
+			})
+			if err != nil {
+				t.Fatalf("FTS search with AuthorIDs and MaxChapterIndex: %v", err)
+			}
+			if len(ftsAuthorHits) != 4 {
+				t.Fatalf("expected 4 FTS hits for AuthorIDs [A, C] and MaxChapterIndex=2, got %d", len(ftsAuthorHits))
+			}
+			for _, h := range ftsAuthorHits {
+				if (h.BookID != "book-a" && h.BookID != "book-c") || h.ChapterIndex > maxCh {
+					t.Errorf("unexpected combined FTS hit: book=%s ch=%d", h.BookID, h.ChapterIndex)
+				}
+			}
+		})
+	}
+}
+
+func TestAdaptiveKNNFilteredRetrieval(t *testing.T) {
+	ctx := context.Background()
+
+	for _, eng := range setupBothEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			repo := eng.repo
+			defer repo.Close()
+
+			if err := repo.CreateBook(ctx, &repository.Book{ID: "noise-book", Title: "Noise", FilePath: "noise.epub"}); err != nil {
+				t.Fatalf("create noise book: %v", err)
+			}
+			if err := repo.CreateBook(ctx, &repository.Book{ID: "target-book", Title: "Target", FilePath: "target.epub"}); err != nil {
+				t.Fatalf("create target book: %v", err)
+			}
+
+			if err := repo.CreateChapter(ctx, &repository.Chapter{
+				ID:           "noise-ch-5",
+				BookID:       "noise-book",
+				ChapterIndex: 5,
+				Summary:      "noise",
+				ContentPlain: "noise",
+			}); err != nil {
+				t.Fatalf("create noise chapter: %v", err)
+			}
+			if err := repo.CreateChapter(ctx, &repository.Chapter{
+				ID:           "target-ch-1",
+				BookID:       "target-book",
+				ChapterIndex: 1,
+				Summary:      "target",
+				ContentPlain: "target passage",
+			}); err != nil {
+				t.Fatalf("create target chapter: %v", err)
+			}
+
+			noiseVec := make([]float32, 256)
+			noiseVec[0] = 1.0
+			targetVec := make([]float32, 256)
+			targetVec[0] = 0.8
+			targetVec[1] = 0.6
+
+			paras := make([]*repository.Paragraph, 0, 121)
+			vecs := make([]repository.ParagraphVector, 0, 121)
+			for i := 0; i < 120; i++ {
+				id := fmt.Sprintf("noise-p-%d", i)
+				paras = append(paras, &repository.Paragraph{
+					ID:             id,
+					BookID:         "noise-book",
+					ChapterID:      "noise-ch-5",
+					ChapterIndex:   5,
+					StartParagraph: i + 1,
+					EndParagraph:   i + 1,
+					Content:        "noise paragraph",
+				})
+				vecs = append(vecs, repository.ParagraphVector{ParagraphID: id, Embedding: noiseVec})
+			}
+			paras = append(paras, &repository.Paragraph{
+				ID:             "target-p-1",
+				BookID:         "target-book",
+				ChapterID:      "target-ch-1",
+				ChapterIndex:   1,
+				StartParagraph: 1,
+				EndParagraph:   1,
+				Content:        "target passage",
+			})
+			vecs = append(vecs, repository.ParagraphVector{ParagraphID: "target-p-1", Embedding: targetVec})
+
+			if err := repo.CreateParagraphs(ctx, paras); err != nil {
+				t.Fatalf("create paragraphs: %v", err)
+			}
+			if err := repo.InsertParagraphVectors(ctx, vecs); err != nil {
+				t.Fatalf("insert paragraph vectors: %v", err)
+			}
+
+			maxCh := 2
+			hits, err := repo.SearchVectorParagraphs(ctx, noiseVec, repository.SearchFilter{
+				BookIDs:         []string{"target-book"},
+				MaxChapterIndex: &maxCh,
+				Limit:           5,
+			})
+			if err != nil {
+				t.Fatalf("adaptive KNN search: %v", err)
+			}
+			if len(hits) != 1 || hits[0].BookID != "target-book" || hits[0].ChapterIndex != 1 {
+				t.Fatalf("expected target-book chapter 1 hit beyond k=100 noise rows, got %+v", hits)
+			}
+		})
+	}
+}
+
+func TestRecapCacheCRUDAndCascadeDelete(t *testing.T) {
+	ctx := context.Background()
+
+	for _, eng := range setupBothEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			repo := eng.repo
+			defer repo.Close()
+
+			if err := repo.CreateBook(ctx, &repository.Book{ID: "recap-book-1", Title: "Dune", FilePath: "dune.epub"}); err != nil {
+				t.Fatalf("create book 1: %v", err)
+			}
+			if err := repo.CreateBook(ctx, &repository.Book{ID: "recap-book-2", Title: "Earthsea", FilePath: "earthsea.epub"}); err != nil {
+				t.Fatalf("create book 2: %v", err)
+			}
+
+			if _, err := repo.GetRecapCache(ctx, "recap-book-1", 2, 0); !errors.Is(err, repository.ErrNotFound) {
+				t.Fatalf("expected ErrNotFound on cache miss, got %v", err)
+			}
+
+			if err := repo.UpsertRecapCache(ctx, &repository.RecapCacheEntry{
+				BookID:          "recap-book-1",
+				ChapterIndex:    2,
+				ParagraphOffset: 0,
+				Content:         "Initial recap up to chapter 2.",
+			}); err != nil {
+				t.Fatalf("upsert recap cache: %v", err)
+			}
+
+			entry, err := repo.GetRecapCache(ctx, "recap-book-1", 2, 0)
+			if err != nil {
+				t.Fatalf("get recap cache: %v", err)
+			}
+			if entry.BookID != "recap-book-1" || entry.ChapterIndex != 2 || entry.ParagraphOffset != 0 || entry.Content != "Initial recap up to chapter 2." {
+				t.Fatalf("unexpected recap cache entry: %+v", entry)
+			}
+			if entry.CreatedAt.IsZero() {
+				t.Fatalf("expected non-zero CreatedAt")
+			}
+
+			if err := repo.UpsertRecapCache(ctx, &repository.RecapCacheEntry{
+				BookID:          "recap-book-1",
+				ChapterIndex:    2,
+				ParagraphOffset: 0,
+				Content:         "Refreshed recap up to chapter 2.",
+			}); err != nil {
+				t.Fatalf("upsert overwrite recap cache: %v", err)
+			}
+
+			updated, err := repo.GetRecapCache(ctx, "recap-book-1", 2, 0)
+			if err != nil {
+				t.Fatalf("get updated recap cache: %v", err)
+			}
+			if updated.Content != "Refreshed recap up to chapter 2." {
+				t.Fatalf("expected updated recap content, got %q", updated.Content)
+			}
+
+			if err := repo.UpsertRecapCache(ctx, &repository.RecapCacheEntry{
+				BookID:          "recap-book-1",
+				ChapterIndex:    2,
+				ParagraphOffset: 5,
+				Content:         "Mid-chapter recap at offset 5.",
+			}); err != nil {
+				t.Fatalf("upsert distinct offset: %v", err)
+			}
+			if err := repo.UpsertRecapCache(ctx, &repository.RecapCacheEntry{
+				BookID:          "recap-book-2",
+				ChapterIndex:    2,
+				ParagraphOffset: 0,
+				Content:         "Earthsea recap.",
+			}); err != nil {
+				t.Fatalf("upsert book 2 recap: %v", err)
+			}
+
+			if err := repo.DeleteBook(ctx, "recap-book-1"); err != nil {
+				t.Fatalf("delete book 1: %v", err)
+			}
+
+			if _, err := repo.GetRecapCache(ctx, "recap-book-1", 2, 0); !errors.Is(err, repository.ErrNotFound) {
+				t.Fatalf("expected cascade delete on offset 0, got %v", err)
+			}
+			if _, err := repo.GetRecapCache(ctx, "recap-book-1", 2, 5); !errors.Is(err, repository.ErrNotFound) {
+				t.Fatalf("expected cascade delete on offset 5, got %v", err)
+			}
+
+			other, err := repo.GetRecapCache(ctx, "recap-book-2", 2, 0)
+			if err != nil || other.Content != "Earthsea recap." {
+				t.Fatalf("expected book 2 recap cache to remain intact, got entry=%+v err=%v", other, err)
+			}
+		})
+	}
+}
+
+func BenchmarkSearchParagraphs(b *testing.B) {
+	ctx := context.Background()
+	bunDB, err := database.OpenBunSQLite(":memory:")
+	if err != nil {
+		b.Fatalf("open sqlite: %v", err)
+	}
+	defer bunDB.Close()
+
+	if err := database.RunBunMigrations(ctx, bunDB); err != nil {
+		b.Fatalf("run migrations: %v", err)
+	}
+
+	repo := repository.NewBunStorageEngine(bunDB)
+
+	queryVec := make([]float32, 256)
+	queryVec[0] = 1.0
+
+	bookIDs := make([]string, 0, 4)
+	for bi := 0; bi < 4; bi++ {
+		bID := fmt.Sprintf("bench-book-%d", bi)
+		bookIDs = append(bookIDs, bID)
+		if err := repo.CreateBook(ctx, &repository.Book{
+			ID:       bID,
+			Title:    fmt.Sprintf("Bench Book %d", bi),
+			FilePath: fmt.Sprintf("bench-%d.epub", bi),
+		}); err != nil {
+			b.Fatalf("create book: %v", err)
+		}
+
+		var paras []*repository.Paragraph
+		var vecs []repository.ParagraphVector
+		for ch := 1; ch <= 6; ch++ {
+			chID := fmt.Sprintf("%s-ch-%d", bID, ch)
+			if err := repo.CreateChapter(ctx, &repository.Chapter{
+				ID:           chID,
+				BookID:       bID,
+				ChapterIndex: ch,
+				Summary:      "summary",
+				ContentPlain: "Gom Jabbar spice melange Arrakis desert trial.",
+			}); err != nil {
+				b.Fatalf("create chapter: %v", err)
+			}
+			for pi := 1; pi <= 5; pi++ {
+				pID := fmt.Sprintf("%s-p-%d-%d", bID, ch, pi)
+				paras = append(paras, &repository.Paragraph{
+					ID:             pID,
+					BookID:         bID,
+					ChapterID:      chID,
+					ChapterIndex:   ch,
+					StartParagraph: pi,
+					EndParagraph:   pi,
+					Content:        fmt.Sprintf("Gom Jabbar spice melange Arrakis desert passage %d in chapter %d.", pi, ch),
+				})
+				v := make([]float32, 256)
+				v[0] = 0.9 - float32(bi)*0.05
+				v[1] = 0.1 + float32(ch)*0.05
+				vecs = append(vecs, repository.ParagraphVector{ParagraphID: pID, Embedding: v})
+			}
+		}
+		if err := repo.CreateParagraphs(ctx, paras); err != nil {
+			b.Fatalf("create paragraphs: %v", err)
+		}
+		if err := repo.InsertParagraphVectors(ctx, vecs); err != nil {
+			b.Fatalf("insert vectors: %v", err)
+		}
+	}
+
+	singleBook := bookIDs[0]
+	multiBooks := []string{bookIDs[0], bookIDs[1]}
+	maxCh := 3
+
+	b.Run("VectorSingleBook", func(b *testing.B) {
+		filter := repository.SearchFilter{BookID: &singleBook, Limit: 10}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			hits, err := repo.SearchVectorParagraphs(ctx, queryVec, filter)
+			if err != nil || len(hits) == 0 {
+				b.Fatalf("vector single book: len=%d err=%v", len(hits), err)
+			}
+		}
+	})
+
+	b.Run("VectorMultiBook", func(b *testing.B) {
+		filter := repository.SearchFilter{BookIDs: multiBooks, MaxChapterIndex: &maxCh, Limit: 10}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			hits, err := repo.SearchVectorParagraphs(ctx, queryVec, filter)
+			if err != nil || len(hits) == 0 {
+				b.Fatalf("vector multi book: len=%d err=%v", len(hits), err)
+			}
+		}
+	})
+
+	b.Run("FTSSingleBook", func(b *testing.B) {
+		filter := repository.SearchFilter{BookID: &singleBook, Limit: 10}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			hits, err := repo.SearchFTSParagraphs(ctx, "Gom Jabbar", filter)
+			if err != nil || len(hits) == 0 {
+				b.Fatalf("FTS single book: len=%d err=%v", len(hits), err)
+			}
+		}
+	})
+
+	b.Run("FTSMultiBook", func(b *testing.B) {
+		filter := repository.SearchFilter{BookIDs: multiBooks, MaxChapterIndex: &maxCh, Limit: 10}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			hits, err := repo.SearchFTSParagraphs(ctx, "Gom Jabbar", filter)
+			if err != nil || len(hits) == 0 {
+				b.Fatalf("FTS multi book: len=%d err=%v", len(hits), err)
+			}
+		}
+	})
+}
+
 
 
 

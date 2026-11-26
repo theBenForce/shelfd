@@ -215,12 +215,109 @@ type SearchHit struct {
 
 // SearchFilter specifies filters applied in conjunction with vector search.
 type SearchFilter struct {
-	BookID   *string
-	AuthorID *string
-	GenreID  *string
-	TopicID  *string
-	SeriesID *string
-	Limit    int
+	BookID          *string
+	BookIDs         []string
+	AuthorID        *string
+	AuthorIDs       []string
+	GenreID         *string
+	TopicID         *string
+	SeriesID        *string
+	MaxChapterIndex *int
+	Limit           int
+}
+
+func nonEmptyStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.Repeat("?,", n-1) + "?"
+}
+
+func buildSearchFilterClauses(filter SearchFilter) ([]string, []any) {
+	var clauses []string
+	var args []any
+
+	if filter.BookID != nil && *filter.BookID != "" {
+		clauses = append(clauses, "b.id = ?")
+		args = append(args, *filter.BookID)
+	}
+	if bookIDs := nonEmptyStrings(filter.BookIDs); len(bookIDs) > 0 {
+		clauses = append(clauses, "b.id IN ("+placeholders(len(bookIDs))+")")
+		for _, id := range bookIDs {
+			args = append(args, id)
+		}
+	}
+	if filter.AuthorID != nil && *filter.AuthorID != "" {
+		clauses = append(clauses, "b.id IN (SELECT book_id FROM book_authors WHERE author_id = ?)")
+		args = append(args, *filter.AuthorID)
+	}
+	if authorIDs := nonEmptyStrings(filter.AuthorIDs); len(authorIDs) > 0 {
+		clauses = append(clauses, "b.id IN (SELECT book_id FROM book_authors WHERE author_id IN ("+placeholders(len(authorIDs))+"))")
+		for _, id := range authorIDs {
+			args = append(args, id)
+		}
+	}
+	if filter.GenreID != nil && *filter.GenreID != "" {
+		clauses = append(clauses, "b.id IN (SELECT book_id FROM book_genres WHERE genre_id = ?)")
+		args = append(args, *filter.GenreID)
+	}
+	if filter.TopicID != nil && *filter.TopicID != "" {
+		clauses = append(clauses, "b.id IN (SELECT book_id FROM book_topics WHERE topic_id = ?)")
+		args = append(args, *filter.TopicID)
+	}
+	if filter.SeriesID != nil && *filter.SeriesID != "" {
+		clauses = append(clauses, "b.id IN (SELECT book_id FROM book_series WHERE series_id = ?)")
+		args = append(args, *filter.SeriesID)
+	}
+	if filter.MaxChapterIndex != nil {
+		clauses = append(clauses, "c.chapter_index <= ?")
+		args = append(args, *filter.MaxChapterIndex)
+	}
+
+	return clauses, args
+}
+
+func sqliteKNNLimit(limit int, filter SearchFilter) int {
+	bookIDs := nonEmptyStrings(filter.BookIDs)
+	authorIDs := nonEmptyStrings(filter.AuthorIDs)
+	hasFilter := (filter.BookID != nil && *filter.BookID != "") ||
+		len(bookIDs) > 0 ||
+		(filter.AuthorID != nil && *filter.AuthorID != "") ||
+		len(authorIDs) > 0 ||
+		(filter.GenreID != nil && *filter.GenreID != "") ||
+		(filter.TopicID != nil && *filter.TopicID != "") ||
+		(filter.SeriesID != nil && *filter.SeriesID != "") ||
+		filter.MaxChapterIndex != nil
+
+	if !hasFilter {
+		return limit
+	}
+
+	multiplier := 5
+	if len(bookIDs) > 1 || len(authorIDs) > 1 || filter.MaxChapterIndex != nil {
+		multiplier = 10
+	}
+	k := limit * multiplier
+	if k < 100 {
+		k = 100
+	}
+	if filter.MaxChapterIndex != nil && k < 200 {
+		k = 200
+	}
+	if k > 2000 {
+		k = 2000
+	}
+	return k
 }
 
 // Bookmark represents a saved reading location or user bookmark.
@@ -378,6 +475,16 @@ type BookSource struct {
 	CreatedAt     time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
 	UpdatedAt     time.Time `json:"updated_at" bun:"updated_at,nullzero,default:current_timestamp"`
 }
+
+type RecapCacheEntry struct {
+	bun.BaseModel   `bun:"table:recap_cache"`
+	BookID          string    `json:"book_id" bun:"book_id,pk"`
+	ChapterIndex    int       `json:"chapter_index" bun:"chapter_index,pk"`
+	ParagraphOffset int       `json:"paragraph_offset" bun:"paragraph_offset,pk"`
+	Content         string    `json:"content" bun:"content,notnull"`
+	CreatedAt       time.Time `json:"created_at" bun:"created_at,nullzero,default:current_timestamp"`
+}
+
 
 
 

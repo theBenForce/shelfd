@@ -10,6 +10,9 @@ import (
 )
 
 func getPostgresDSN() string {
+	if dsn := os.Getenv("SHELFD_TEST_POSTGRES_URL"); dsn != "" {
+		return dsn
+	}
 	if dsn := os.Getenv("TEST_POSTGRES_DSN"); dsn != "" {
 		return dsn
 	}
@@ -93,6 +96,19 @@ func TestPostgresStorageEngine(t *testing.T) {
 		t.Fatalf("failed to create chapter: %v", err)
 	}
 
+	title3 := "Functions"
+	chapter3 := &repository.Chapter{
+		ID:           "test-pg-ch-3",
+		BookID:       book.ID,
+		ChapterIndex: 3,
+		Title:        &title3,
+		Summary:      "Functions should be small and do one thing well.",
+		ContentPlain: "Functions should be small in software. We name functions and variables carefully.",
+	}
+	if err := repo.CreateChapter(ctx, chapter3); err != nil {
+		t.Fatalf("failed to create chapter 3: %v", err)
+	}
+
 	para := &repository.Paragraph{
 		ID:             "test-pg-para-1",
 		BookID:         book.ID,
@@ -102,8 +118,17 @@ func TestPostgresStorageEngine(t *testing.T) {
 		EndParagraph:   1,
 		Content:        chapter.ContentPlain,
 	}
-	if err := repo.CreateParagraphs(ctx, []*repository.Paragraph{para}); err != nil {
-		t.Fatalf("failed to create paragraph on postgres: %v", err)
+	para3 := &repository.Paragraph{
+		ID:             "test-pg-para-3",
+		BookID:         book.ID,
+		ChapterID:      chapter3.ID,
+		ChapterIndex:   chapter3.ChapterIndex,
+		StartParagraph: 1,
+		EndParagraph:   1,
+		Content:        chapter3.ContentPlain,
+	}
+	if err := repo.CreateParagraphs(ctx, []*repository.Paragraph{para, para3}); err != nil {
+		t.Fatalf("failed to create paragraphs on postgres: %v", err)
 	}
 
 	// Verify paragraph is initially unindexed
@@ -129,6 +154,9 @@ func TestPostgresStorageEngine(t *testing.T) {
 	if err := repo.InsertParagraphVector(ctx, para.ID, vec); err != nil {
 		t.Fatalf("failed to insert pgvector: %v", err)
 	}
+	if err := repo.InsertParagraphVector(ctx, para3.ID, vec); err != nil {
+		t.Fatalf("failed to insert pgvector for chapter 3: %v", err)
+	}
 
 	// Verify paragraph is no longer unindexed after inserting vector
 	unindexedAfter, err := repo.GetUnindexedParagraphs(ctx, 50)
@@ -141,31 +169,52 @@ func TestPostgresStorageEngine(t *testing.T) {
 		}
 	}
 
-	// 6. Test Vector KNN Search
+	// 6. Test Vector KNN Search with scoped filters
 	queryVec := make([]float32, 256)
 	queryVec[0] = 0.49
 	queryVec[1] = 0.51
-	hits, err := repo.SearchVectorParagraphs(ctx, queryVec, repository.SearchFilter{BookID: &book.ID})
+	maxCh := 2
+	hits, err := repo.SearchVectorParagraphs(ctx, queryVec, repository.SearchFilter{
+		BookIDs:         []string{book.ID},
+		AuthorIDs:       []string{author.ID},
+		MaxChapterIndex: &maxCh,
+	})
 	if err != nil {
 		t.Fatalf("failed to search pgvector paragraphs: %v", err)
 	}
 	if len(hits) != 1 {
-		t.Fatalf("expected 1 hit from pgvector, got %d", len(hits))
+		t.Fatalf("expected 1 hit from pgvector with MaxChapterIndex=2, got %d", len(hits))
 	}
-	if hits[0].BookTitle != book.Title || hits[0].ChapterID != chapter.ID {
+	if hits[0].BookTitle != book.Title || hits[0].ChapterID != chapter.ID || hits[0].ChapterIndex > maxCh {
 		t.Fatalf("unexpected pgvector search hit: %+v", hits[0])
 	}
 
-	// 7. Test Postgres Full-Text Search (tsvector)
-	ftsHits, err := repo.SearchFTSParagraphs(ctx, "software variables functions", repository.SearchFilter{})
+	// 7. Test Postgres Full-Text Search (tsvector) with scoped filters
+	ftsHits, err := repo.SearchFTSParagraphs(ctx, "software variables functions", repository.SearchFilter{
+		BookIDs:         []string{book.ID},
+		MaxChapterIndex: &maxCh,
+	})
 	if err != nil {
 		t.Fatalf("failed to execute postgres FTS search: %v", err)
 	}
-	if len(ftsHits) == 0 {
-		t.Fatalf("expected at least 1 hit for postgres FTS, got 0")
+	if len(ftsHits) != 1 || ftsHits[0].BookID != book.ID || ftsHits[0].ChapterIndex > maxCh {
+		t.Fatalf("unexpected FTS hits: %+v", ftsHits)
 	}
-	if ftsHits[0].BookID != book.ID {
-		t.Fatalf("unexpected FTS hit book ID: %s", ftsHits[0].BookID)
+
+	if err := repo.UpsertRecapCache(ctx, &repository.RecapCacheEntry{
+		BookID:          book.ID,
+		ChapterIndex:    2,
+		ParagraphOffset: 0,
+		Content:         "Recap up to chapter 2.",
+	}); err != nil {
+		t.Fatalf("failed to upsert recap cache: %v", err)
+	}
+	cached, err := repo.GetRecapCache(ctx, book.ID, 2, 0)
+	if err != nil {
+		t.Fatalf("failed to get recap cache: %v", err)
+	}
+	if cached.Content != "Recap up to chapter 2." {
+		t.Fatalf("unexpected recap cache content: %q", cached.Content)
 	}
 
 	// 8. Test Cascade Deletion
@@ -176,6 +225,10 @@ func TestPostgresStorageEngine(t *testing.T) {
 	deletedBook, err := repo.GetBookByID(ctx, book.ID)
 	if err != repository.ErrNotFound || deletedBook != nil {
 		t.Fatalf("expected ErrNotFound after deletion, got %v", err)
+	}
+
+	if _, err := repo.GetRecapCache(ctx, book.ID, 2, 0); err != repository.ErrNotFound {
+		t.Fatalf("expected ErrNotFound for cascaded recap cache, got %v", err)
 	}
 
 	// Paragraph should be cascaded
