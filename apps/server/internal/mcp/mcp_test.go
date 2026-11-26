@@ -258,8 +258,8 @@ func TestMCPServer_ToolsList(t *testing.T) {
 		t.Fatalf("failed to decode tools/list response: %v", err)
 	}
 
-	if len(resp.Result.Tools) != 3 {
-		t.Fatalf("expected 3 tools, got %d", len(resp.Result.Tools))
+	if len(resp.Result.Tools) != 5 {
+		t.Fatalf("expected 5 tools, got %d", len(resp.Result.Tools))
 	}
 
 	toolNames := map[string]bool{}
@@ -267,8 +267,10 @@ func TestMCPServer_ToolsList(t *testing.T) {
 		toolNames[tool.Name] = true
 	}
 
-	if !toolNames["search_library"] || !toolNames["get_book_metadata"] || !toolNames["read_chapter_content"] {
-		t.Errorf("missing expected tools in tools/list: %v", toolNames)
+	for _, want := range []string{"search_library", "get_book_metadata", "read_chapter_content", "extract_key_concepts", "generate_study_cards"} {
+		if !toolNames[want] {
+			t.Errorf("missing expected tool %q in tools/list: %v", want, toolNames)
+		}
 	}
 }
 
@@ -973,5 +975,115 @@ func TestSearchLibrary_BookIDFilterAndInProcess(t *testing.T) {
 		t.Errorf("expected citation BookID %s, got %s", book1.ID, resRead.Citations[0].BookID)
 	}
 }
+
+func TestMCPServer_ToolCall_StudyTools(t *testing.T) {
+	db, repo, token, server := setupTestEnvironment(t)
+	defer db.Close()
+	defer repo.Close()
+
+	ctx := context.Background()
+	book := &repository.Book{
+		Title:    "Dune",
+		FilePath: "Frank Herbert/Dune/Dune.epub",
+	}
+	if err := repo.CreateBook(ctx, book); err != nil {
+		t.Fatalf("create book: %v", err)
+	}
+	title := "The Gom Jabbar"
+	ch := &repository.Chapter{
+		BookID:       book.ID,
+		ChapterIndex: 1,
+		Title:        &title,
+		ContentPlain: "Paul put his right hand into the box.\n\nReverend Mother held the Gom Jabbar at his neck.\n\nFear is the mind-killer.",
+	}
+	if err := repo.CreateChapter(ctx, ch); err != nil {
+		t.Fatalf("create chapter: %v", err)
+	}
+
+	handler := server.Routes()
+
+	callTool := func(body string) mcp.CallToolResult {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/mcp/messages", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			JSONRPC string             `json:"jsonrpc"`
+			ID      any                `json:"id"`
+			Result  mcp.CallToolResult `json:"result"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode rpc response: %v", err)
+		}
+		return resp.Result
+	}
+
+	resConcepts := callTool(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"extract_key_concepts","arguments":{"book_id":"%s","chapter_index":1}}}`, book.ID))
+	if resConcepts.IsError {
+		t.Fatalf("extract_key_concepts failed: %s", resConcepts.Content[0].Text)
+	}
+	var conceptPayload struct {
+		BookID       string `json:"book_id"`
+		ChapterIndex int    `json:"chapter_index"`
+		Concepts     []struct {
+			Title          string `json:"title"`
+			Summary        string `json:"summary"`
+			BookID         string `json:"book_id"`
+			ChapterIndex   int    `json:"chapter_index"`
+			StartParagraph int    `json:"start_paragraph"`
+			EndParagraph   int    `json:"end_paragraph"`
+		} `json:"concepts"`
+	}
+	if err := json.Unmarshal([]byte(resConcepts.Content[0].Text), &conceptPayload); err != nil {
+		t.Fatalf("decode concepts JSON: %v (raw: %s)", err, resConcepts.Content[0].Text)
+	}
+	if len(conceptPayload.Concepts) == 0 {
+		t.Fatalf("expected at least one concept")
+	}
+	if conceptPayload.Concepts[0].StartParagraph < 1 || conceptPayload.Concepts[0].ChapterIndex != 1 {
+		t.Fatalf("unexpected concept attribution: %+v", conceptPayload.Concepts[0])
+	}
+
+	resCards := callTool(fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"generate_study_cards","arguments":{"book_id":"%s","chapter_index":1}}}`, book.ID))
+	if resCards.IsError {
+		t.Fatalf("generate_study_cards failed: %s", resCards.Content[0].Text)
+	}
+	var cardPayload struct {
+		Cards []struct {
+			Front          string `json:"front"`
+			Back           string `json:"back"`
+			BookID         string `json:"book_id"`
+			ChapterIndex   int    `json:"chapter_index"`
+			StartParagraph int    `json:"start_paragraph"`
+			EndParagraph   int    `json:"end_paragraph"`
+		} `json:"cards"`
+	}
+	if err := json.Unmarshal([]byte(resCards.Content[0].Text), &cardPayload); err != nil {
+		t.Fatalf("decode cards JSON: %v (raw: %s)", err, resCards.Content[0].Text)
+	}
+	if len(cardPayload.Cards) == 0 || cardPayload.Cards[0].Front == "" || cardPayload.Cards[0].Back == "" {
+		t.Fatalf("expected non-empty study card: %+v", cardPayload.Cards)
+	}
+
+	resNegChapter := callTool(fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"extract_key_concepts","arguments":{"book_id":"%s","chapter_index":-1}}}`, book.ID))
+	if !resNegChapter.IsError {
+		t.Fatalf("expected error for negative chapter_index, got %s", resNegChapter.Content[0].Text)
+	}
+
+	resInvertedRange := callTool(fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"generate_study_cards","arguments":{"book_id":"%s","chapter_index":1,"start_paragraph":3,"end_paragraph":1}}}`, book.ID))
+	if !resInvertedRange.IsError {
+		t.Fatalf("expected error for inverted paragraph range, got %s", resInvertedRange.Content[0].Text)
+	}
+
+	resOutOfBounds := callTool(fmt.Sprintf(`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"generate_study_cards","arguments":{"book_id":"%s","chapter_index":1,"start_paragraph":99}}}`, book.ID))
+	if !resOutOfBounds.IsError {
+		t.Fatalf("expected error for out-of-bounds start_paragraph, got %s", resOutOfBounds.Content[0].Text)
+	}
+}
+
 
 

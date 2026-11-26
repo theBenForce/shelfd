@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/shelfd/shelfd/internal/ai"
 	"github.com/shelfd/shelfd/internal/plugins"
 	"github.com/shelfd/shelfd/internal/repository"
+	"github.com/shelfd/shelfd/internal/study"
 	"github.com/shelfd/shelfd/internal/ulid"
 )
 
@@ -96,6 +98,10 @@ func (te *ToolExecutor) ExecuteInProcess(ctx context.Context, name string, args 
 		return te.getBookMetadata(ctx, args)
 	case "read_chapter_content":
 		return te.readChapterContent(ctx, args)
+	case "extract_key_concepts":
+		return te.extractKeyConcepts(ctx, args)
+	case "generate_study_cards":
+		return te.generateStudyCards(ctx, args)
 	default:
 		if te.pluginProvider != nil {
 			userID, username := te.resolveInvokingUser(ctx)
@@ -602,3 +608,139 @@ func (te *ToolExecutor) readChapterContent(ctx context.Context, args map[string]
 		Citations: []ai.BookCitation{citation},
 	}, nil
 }
+
+func parseIntArg(args map[string]any, key string) (int, bool) {
+	v, exists := args[key]
+	if !exists || v == nil {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	default:
+		return 0, false
+	}
+}
+
+func (te *ToolExecutor) parseStudyExtractRequest(args map[string]any, maxKey string) (study.ExtractRequest, string) {
+	bookID, _ := args["book_id"].(string)
+	bookID = strings.TrimSpace(bookID)
+	if bookID == "" {
+		return study.ExtractRequest{}, "argument 'book_id' is required"
+	}
+	if !isValidID(bookID) {
+		return study.ExtractRequest{}, fmt.Sprintf("invalid book_id format: %s", bookID)
+	}
+
+	chapterIndex, hasChapter := parseIntArg(args, "chapter_index")
+	if !hasChapter {
+		return study.ExtractRequest{}, "argument 'chapter_index' is required"
+	}
+	if chapterIndex < 0 {
+		return study.ExtractRequest{}, fmt.Sprintf("invalid chapter_index: %d (must be >= 0)", chapterIndex)
+	}
+
+	startPara, hasStart := parseIntArg(args, "start_paragraph")
+	if hasStart && startPara <= 0 {
+		return study.ExtractRequest{}, fmt.Sprintf("invalid start_paragraph: %d (must be >= 1)", startPara)
+	}
+
+	endPara, hasEnd := parseIntArg(args, "end_paragraph")
+	if hasEnd && endPara <= 0 {
+		return study.ExtractRequest{}, fmt.Sprintf("invalid end_paragraph: %d (must be >= 1)", endPara)
+	}
+	if hasStart && hasEnd && endPara < startPara {
+		return study.ExtractRequest{}, fmt.Sprintf("invalid paragraph range: end_paragraph (%d) < start_paragraph (%d)", endPara, startPara)
+	}
+
+	maxItems, _ := parseIntArg(args, maxKey)
+
+	return study.ExtractRequest{
+		BookID:         bookID,
+		ChapterIndex:   chapterIndex,
+		StartParagraph: startPara,
+		EndParagraph:   endPara,
+		MaxItems:       maxItems,
+	}, ""
+}
+
+func (te *ToolExecutor) extractKeyConcepts(ctx context.Context, args map[string]any) (*ai.ToolExecutionResult, error) {
+	req, errMsg := te.parseStudyExtractRequest(args, "max_concepts")
+	if errMsg != "" {
+		return &ai.ToolExecutionResult{IsError: true, Content: errMsg}, nil
+	}
+
+	extractor := study.NewExtractor(te.repo, te.aiClient, te.logger)
+	concepts, err := extractor.ExtractConcepts(ctx, req)
+	if err != nil {
+		return &ai.ToolExecutionResult{IsError: true, Content: err.Error()}, nil
+	}
+
+	payload, err := json.MarshalIndent(map[string]any{
+		"book_id":       req.BookID,
+		"chapter_index": req.ChapterIndex,
+		"concepts":      concepts,
+	}, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal concepts: %w", err)
+	}
+
+	citations := make([]ai.BookCitation, 0, len(concepts))
+	for _, c := range concepts {
+		citations = append(citations, ai.BookCitation{
+			BookID:         c.BookID,
+			ChapterIndex:   c.ChapterIndex,
+			StartParagraph: c.StartParagraph,
+			EndParagraph:   c.EndParagraph,
+			Excerpt:        c.Summary,
+		})
+	}
+
+	return &ai.ToolExecutionResult{
+		Content:   string(payload),
+		Citations: citations,
+	}, nil
+}
+
+func (te *ToolExecutor) generateStudyCards(ctx context.Context, args map[string]any) (*ai.ToolExecutionResult, error) {
+	req, errMsg := te.parseStudyExtractRequest(args, "max_cards")
+	if errMsg != "" {
+		return &ai.ToolExecutionResult{IsError: true, Content: errMsg}, nil
+	}
+
+	extractor := study.NewExtractor(te.repo, te.aiClient, te.logger)
+	cards, err := extractor.GenerateCards(ctx, req)
+	if err != nil {
+		return &ai.ToolExecutionResult{IsError: true, Content: err.Error()}, nil
+	}
+
+	payload, err := json.MarshalIndent(map[string]any{
+		"book_id":       req.BookID,
+		"chapter_index": req.ChapterIndex,
+		"cards":         cards,
+	}, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal study cards: %w", err)
+	}
+
+	citations := make([]ai.BookCitation, 0, len(cards))
+	for _, c := range cards {
+		citations = append(citations, ai.BookCitation{
+			BookID:         c.BookID,
+			ChapterIndex:   c.ChapterIndex,
+			StartParagraph: c.StartParagraph,
+			EndParagraph:   c.EndParagraph,
+			Excerpt:        c.Back,
+		})
+	}
+
+	return &ai.ToolExecutionResult{
+		Content:   string(payload),
+		Citations: citations,
+	}, nil
+}
+
