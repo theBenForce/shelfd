@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AuthExpiredError } from "@shelfd/plugin-sdk";
+import { AuthExpiredError } from "@thebenforce/shelfd-plugin-sdk";
 import { createStarterPlugin } from "../src/index.ts";
 
 test("starter plugin throws AuthExpiredError when api_token is missing", async () => {

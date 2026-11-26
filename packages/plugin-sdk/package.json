@@ -1,7 +1,15 @@
 {
-  "name": "@shelfd/plugin-sdk",
+  "name": "@thebenforce/shelfd-plugin-sdk",
   "version": "0.1.3",
   "description": "TypeScript SDK, bundler, and verification harness for out-of-process Shelfd plugins",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/theBenForce/shelfd.git",
+    "directory": "packages/plugin-sdk"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -26,6 +34,7 @@
   },
   "scripts": {
     "build": "node --no-warnings ./scripts/build-sdk.mjs",
+    "prepublishOnly": "node --no-warnings ./scripts/build-sdk.mjs",
     "test": "node --no-warnings --test ./test/*.test.mjs",
     "lint": "node --no-warnings ./scripts/build-sdk.mjs --check",
     "clean": "rm -rf dist"

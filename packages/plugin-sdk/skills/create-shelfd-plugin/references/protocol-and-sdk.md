@@ -133,7 +133,7 @@ When `mode: "form"`, `actions/prepare` (`POST /api/v1/plugins/{name}/actions/{ac
 - `status: "client_handoff"`: Instructs the client to download `download_api_path` (e.g. `/api/v1/books/{id}/markdown` with `file_name` and `mime_type`) and open `open_url` in the browser.
 - `status: "job_started"`: Returned automatically by the host when `execution: "job"` (or `async: true`), including `job_id` and initial `job` snapshot (`GET /api/v1/plugins/jobs`, `DELETE /api/v1/plugins/jobs/{id}`).
 
-## `@shelfd/plugin-sdk` API
+## `@thebenforce/shelfd-plugin-sdk` API
 
 ```ts
 import {
@@ -143,7 +143,7 @@ import {
   PluginRPCError,
   truncateForMCP,
   type PluginContext,
-} from "@shelfd/plugin-sdk";
+} from "@thebenforce/shelfd-plugin-sdk";
 ```
 
 ### `PluginContext<TConfig>`

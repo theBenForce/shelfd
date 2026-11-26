@@ -3,7 +3,7 @@ import {
   truncateForMCP,
   type ActionResult,
   type PluginContext,
-} from "@shelfd/plugin-sdk";
+} from "@thebenforce/shelfd-plugin-sdk";
 
 export const DEFAULT_NOTEBOOKLM_URL = "https://notebooklm.google.com/";
 

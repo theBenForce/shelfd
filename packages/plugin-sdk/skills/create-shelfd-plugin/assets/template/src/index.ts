@@ -5,7 +5,7 @@ import {
   type CatalogItem,
   type CatalogPage,
   type PluginDefinition,
-} from "@shelfd/plugin-sdk";
+} from "@thebenforce/shelfd-plugin-sdk";
 
 export interface StarterConfig extends Record<string, unknown> {
   api_token?: string;

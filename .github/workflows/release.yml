@@ -1,10 +1,13 @@
-name: Release & Publish Container
+name: Release & Publish
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Dry run (simulate release without publishing tag, release, container, or Play bundle)'
+        description: 'Dry run (simulate release without publishing tag, release, container, SDK, or Play bundle)'
         type: boolean
         default: false
       release_tag:
@@ -31,6 +34,9 @@ jobs:
     outputs:
       new_release_published: ${{ steps.semantic.outputs.new_release_published }}
       new_release_version: ${{ steps.semantic.outputs.new_release_version }}
+      publish_container: ${{ steps.changes.outputs.container }}
+      publish_android: ${{ steps.changes.outputs.android }}
+      publish_plugin_sdk: ${{ steps.changes.outputs.plugin_sdk }}
 
     steps:
       - name: Checkout repository
@@ -38,6 +44,43 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Detect changed publish targets
+        id: changes
+        run: |
+          set -euo pipefail
+          PREV_TAG="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || true)"
+          if [ -z "${PREV_TAG}" ]; then
+            CONTAINER="true"
+            ANDROID="true"
+            PLUGIN_SDK="true"
+            echo "No previous release tag found; marking all publish targets as changed."
+          else
+            CHANGED_FILES="$(git diff --name-only "${PREV_TAG}..HEAD")"
+            echo "Comparing ${PREV_TAG}..HEAD:"
+            echo "${CHANGED_FILES}"
+
+            CONTAINER="false"
+            ANDROID="false"
+            PLUGIN_SDK="false"
+
+            if echo "${CHANGED_FILES}" | grep -Eq '^(apps/server/|apps/app/|packages/plugin-sdk/|plugins/|Dockerfile$|docker/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|turbo\.json$)'; then
+              CONTAINER="true"
+            fi
+            if echo "${CHANGED_FILES}" | grep -Eq '^apps/app/'; then
+              ANDROID="true"
+            fi
+            if echo "${CHANGED_FILES}" | grep -Eq '^packages/plugin-sdk/'; then
+              PLUGIN_SDK="true"
+            fi
+          fi
+
+          echo "Publish targets: container=${CONTAINER}, android=${ANDROID}, plugin_sdk=${PLUGIN_SDK}"
+          {
+            echo "container=${CONTAINER}"
+            echo "android=${ANDROID}"
+            echo "plugin_sdk=${PLUGIN_SDK}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -81,6 +124,7 @@ jobs:
         run: pnpm test
 
       - name: Build Flutter web application
+        if: steps.changes.outputs.container == 'true'
         run: pnpm turbo run build:web
 
       - name: Fetch Git notes
@@ -111,7 +155,7 @@ jobs:
           EOF
 
       - name: Upload Flutter web bundle
-        if: steps.semantic.outputs.new_release_published == 'true'
+        if: steps.semantic.outputs.new_release_published == 'true' && steps.changes.outputs.container == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: flutter-web-bundle
@@ -121,14 +165,17 @@ jobs:
           retention-days: 1
 
       - name: Report Release Status
-        if: steps.semantic.outputs.new_release_published != 'true'
         run: |
-          echo "No new version was published by Semantic Release. Container build and push skipped."
+          if [ "${{ steps.semantic.outputs.new_release_published }}" = "true" ]; then
+            echo "Published v${{ steps.semantic.outputs.new_release_version }} — container=${{ steps.changes.outputs.container }}, android=${{ steps.changes.outputs.android }}, plugin_sdk=${{ steps.changes.outputs.plugin_sdk }}"
+          else
+            echo "No new version was published by Semantic Release. Downstream publish jobs skipped."
+          fi
 
   build-image:
     name: Build Image (${{ matrix.platform }})
     needs: release
-    if: needs.release.outputs.new_release_published == 'true'
+    if: needs.release.outputs.new_release_published == 'true' && needs.release.outputs.publish_container == 'true'
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -216,7 +263,7 @@ jobs:
     needs:
       - release
       - build-image
-    if: needs.release.outputs.new_release_published == 'true' && !inputs.dry_run
+    if: needs.release.outputs.new_release_published == 'true' && needs.release.outputs.publish_container == 'true' && !inputs.dry_run
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -297,10 +344,70 @@ jobs:
         run: |
           docker buildx imagetools inspect "${IMAGE}:${VERSION}"
 
+  publish-plugin-sdk:
+    name: Publish Plugin SDK (GitHub Packages)
+    needs: release
+    if: needs.release.outputs.new_release_published == 'true' && needs.release.outputs.publish_plugin_sdk == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.dry_run && github.sha || format('refs/tags/v{0}', needs.release.outputs.new_release_version) }}
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@thebenforce'
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and test Plugin SDK
+        run: |
+          pnpm --filter @thebenforce/shelfd-plugin-sdk run build
+          pnpm --filter @thebenforce/shelfd-plugin-sdk run test
+
+      - name: Stamp release version
+        env:
+          VERSION: ${{ needs.release.outputs.new_release_version }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const p = "packages/plugin-sdk/package.json";
+            const pkg = JSON.parse(fs.readFileSync(p, "utf8"));
+            pkg.version = process.env.VERSION;
+            fs.writeFileSync(p, `${JSON.stringify(pkg, null, 2)}\n`);
+          '
+
+      - name: Publish @thebenforce/shelfd-plugin-sdk
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IS_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "${IS_DRY_RUN}" = "true" ]; then
+            pnpm --filter @thebenforce/shelfd-plugin-sdk publish --no-git-checks --dry-run
+          else
+            pnpm --filter @thebenforce/shelfd-plugin-sdk publish --no-git-checks
+          fi
+
   publish-android:
     name: Publish Android App Bundle (Internal)
     needs: release
-    if: ${{ always() && !cancelled() && ((needs.release.result == 'success' && needs.release.outputs.new_release_published == 'true') || (needs.release.result == 'skipped' && inputs.release_tag != '')) }}
+    if: ${{ always() && !cancelled() && ((needs.release.result == 'success' && needs.release.outputs.new_release_published == 'true' && needs.release.outputs.publish_android == 'true') || (needs.release.result == 'skipped' && inputs.release_tag != '')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
