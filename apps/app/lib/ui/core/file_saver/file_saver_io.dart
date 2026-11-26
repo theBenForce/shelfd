@@ -14,6 +14,17 @@ List<String> _inferAllowedExtensions(String fileName, String? mimeType) {
       (mimeType != null && mimeType.startsWith('text/plain'))) {
     return ['txt'];
   }
+  if (lower.endsWith('.apkg')) {
+    return ['apkg'];
+  }
+  if (lower.endsWith('.csv') ||
+      (mimeType != null && mimeType.contains('text/csv'))) {
+    return ['csv'];
+  }
+  if (lower.endsWith('.zip') ||
+      (mimeType != null && mimeType == 'application/zip')) {
+    return ['zip'];
+  }
   return ['epub'];
 }
 
@@ -23,6 +34,17 @@ String _inferDialogTitle(String fileName, String? mimeType) {
       lower.endsWith('.markdown') ||
       (mimeType != null && mimeType.contains('markdown'))) {
     return 'Save Book Markdown';
+  }
+  if (lower.endsWith('.apkg')) {
+    return 'Save Anki Study Deck';
+  }
+  if (lower.endsWith('.csv') ||
+      (mimeType != null && mimeType.contains('text/csv'))) {
+    return 'Save Study Deck CSV';
+  }
+  if (lower.endsWith('.zip') ||
+      (mimeType != null && mimeType == 'application/zip')) {
+    return 'Save Study Vault ZIP';
   }
   return 'Save EPUB';
 }
