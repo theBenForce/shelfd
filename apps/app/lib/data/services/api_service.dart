@@ -640,6 +640,24 @@ class ApiService {
     return response.bodyBytes;
   }
 
+  Future<List<int>> downloadStudyDeck(
+    String bookId, {
+    required String format,
+    required List<int> chapterIndices,
+  }) async {
+    final encodedId = Uri.encodeComponent(bookId);
+    final response = await client.post(
+      _uri('/api/v1/books/$encodedId/study-deck'),
+      headers: _headers(),
+      body: jsonEncode({
+        'format': format,
+        if (chapterIndices.isNotEmpty) 'chapter_indices': chapterIndices,
+      }),
+    );
+    _checkResponse(response);
+    return response.bodyBytes;
+  }
+
   Future<List<int>> downloadApiPathBytes(String apiPath) async {
     final normalizedPath = apiPath.startsWith('/') ? apiPath : '/$apiPath';
     final response = await client.get(

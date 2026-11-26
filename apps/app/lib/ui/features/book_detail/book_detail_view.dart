@@ -17,6 +17,7 @@ import '../../core/typography.dart';
 import '../../state/providers.dart';
 import '../plugins/plugin_action_runner.dart';
 import 'edit_book_metadata_dialog.dart';
+import 'study_deck_export_dialog.dart';
 
 class BookDetailView extends ConsumerStatefulWidget {
   final String bookId;
@@ -188,6 +189,9 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
       case 'markdown':
         _downloadMarkdown(book);
         return;
+      case 'study_deck':
+        _exportStudyDeck(book);
+        return;
     }
 
     if (action.startsWith('plugin:')) {
@@ -329,6 +333,26 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           ],
         ),
       ),
+      PopupMenuItem<String>(
+        key: const Key('menu_item_export_study_deck'),
+        value: 'study_deck',
+        child: Row(
+          children: [
+            Icon(Icons.school_outlined, size: 18, color: colors.accentPrimary),
+            const SizedBox(width: AppTokens.space12),
+            Flexible(
+              child: Text(
+                'Export Study Deck',
+                style: AppTypography.bodySans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: colors.ink,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     ];
   }
 
@@ -408,6 +432,65 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to download Markdown: $e'),
+            backgroundColor: Colors.red.shade800,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+        });
+      }
+    }
+  }
+
+  String _sanitizeBookFileBaseName(String rawTitle) {
+    final trimmed = rawTitle.trim();
+    final sanitized = trimmed.replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), '_').trim();
+    return sanitized.isNotEmpty ? sanitized : 'study-deck';
+  }
+
+  Future<void> _exportStudyDeck(Book book) async {
+    if (_isDownloading) return;
+    final selection = await showStudyDeckExportDialog(context, book);
+    if (selection == null || !mounted || _isDownloading) return;
+
+    setState(() {
+      _isDownloading = true;
+    });
+
+    try {
+      final repo = ref.read(bookRepositoryProvider);
+      final bytes = await repo.downloadStudyDeck(
+        book.id,
+        format: selection.format.apiValue,
+        chapterIndices: selection.chapterIndices,
+      );
+      final fileName =
+          '${_sanitizeBookFileBaseName(book.title)}${selection.format.fileSuffix}';
+
+      final saved = await saveDownloadedFile(
+        bytes,
+        fileName,
+        mimeType: selection.format.mimeType,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              saved ? 'Exported $fileName' : 'Export canceled',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to export study deck: $e'),
             backgroundColor: Colors.red.shade800,
             behavior: SnackBarBehavior.floating,
           ),

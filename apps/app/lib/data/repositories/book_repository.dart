@@ -108,6 +108,17 @@ class BookRepository {
   Future<List<int>> downloadBookMarkdown(String bookId) =>
       apiService.downloadBookMarkdown(bookId);
 
+  Future<List<int>> downloadStudyDeck(
+    String bookId, {
+    required String format,
+    required List<int> chapterIndices,
+  }) =>
+      apiService.downloadStudyDeck(
+        bookId,
+        format: format,
+        chapterIndices: chapterIndices,
+      );
+
   Future<List<Author>> getAuthors() => apiService.getAuthors();
   Future<List<Genre>> getGenres() => apiService.getGenres();
   Future<List<Topic>> getTopics() => apiService.getTopics();
