@@ -13,6 +13,15 @@ String _inferMimeType(String fileName, String? mimeType) {
   if (lower.endsWith('.txt')) {
     return 'text/plain;charset=utf-8';
   }
+  if (lower.endsWith('.apkg')) {
+    return 'application/octet-stream';
+  }
+  if (lower.endsWith('.csv')) {
+    return 'text/csv; charset=utf-8';
+  }
+  if (lower.endsWith('.zip')) {
+    return 'application/zip';
+  }
   return 'application/epub+zip';
 }
 
