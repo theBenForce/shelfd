@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 typedef OnReadalongClick = void Function(String fragmentId);
 typedef OnToggleControls = VoidCallback;
+typedef OnPageDimensions = void Function(double width, double height);
 
 class ReadalongFrameHighlight {
   final String? targetViewKey;

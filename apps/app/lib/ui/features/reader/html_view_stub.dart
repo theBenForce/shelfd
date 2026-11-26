@@ -34,6 +34,7 @@ Widget buildHtmlFrame({
   required double height,
   OnReadalongClick? onReadalongClick,
   OnToggleControls? onToggleControls,
+  OnPageDimensions? onPageDimensions,
 }) {
   return Container(
     key: Key('html-frame-$viewKey'),

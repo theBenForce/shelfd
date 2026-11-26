@@ -1130,9 +1130,14 @@ func TestRewritePageHTML(t *testing.T) {
 		t.Errorf("expected z-index: 1 for background image")
 	}
 
-	// Verify viewport meta tag is injected
-	if !strings.Contains(rewritten, `width=1024, height=768`) {
-		t.Errorf("expected injected viewport tag")
+	if !strings.Contains(rewritten, `content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"`) {
+		t.Errorf("expected device-width viewport meta tag, got:\n%s", rewritten)
+	}
+	if !strings.Contains(rewritten, `data-shelfd-page-width="1024" data-shelfd-page-height="768"`) {
+		t.Errorf("expected data-shelfd-page-width/height attributes on viewport meta tag")
+	}
+	if !strings.Contains(rewritten, `window.__shelfdFitPage`) {
+		t.Errorf("expected window.__shelfdFitPage hook in rewritten HTML")
 	}
 
 	// Verify paper canvas default background color is #ffffff rather than transparent
@@ -1298,4 +1303,91 @@ func TestRewritePageHTMLShelfdBridge(t *testing.T) {
 		}
 	}
 }
+
+func TestRewritePageHTML_StripsOriginalFixedViewportAndInferredDimensions(t *testing.T) {
+	raw := `<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=1024, height=1024"/>
+  <link rel="stylesheet" href="../css/page.css"/>
+</head>
+<body style="width:1024px;height:1024px">
+  <div class="spread"><img src="../img/cover.jpg"/></div>
+</body>
+</html>`
+
+	rewritten := epub.RewritePageHTML(raw, "book-spidey", "OEBPS/xhtml/cover.xhtml", nil, nil)
+	if strings.Contains(rewritten, `content="width=1024`) {
+		t.Fatalf("expected original fixed-pixel viewport meta to be stripped, got:\n%s", rewritten)
+	}
+	if !strings.Contains(rewritten, `data-shelfd-page-width="1024" data-shelfd-page-height="1024"`) {
+		t.Errorf("expected inferred 1024x1024 dimensions in rewritten meta tag, got:\n%s", rewritten)
+	}
+	cssIdx := strings.Index(rewritten, `/api/v1/books/book-spidey/assets/OEBPS/css/page.css`)
+	styleIdx := strings.Index(rewritten, `transform-origin: 0 0 !important;`)
+	if cssIdx < 0 || styleIdx < 0 || styleIdx < cssIdx {
+		t.Errorf("expected containment style to be injected after linked EPUB stylesheets (cssIdx=%d, styleIdx=%d)", cssIdx, styleIdx)
+	}
+}
+
+func TestExtractChapters_LinkedStylesheetAndInlineBodyDimensions(t *testing.T) {
+	containerXML := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`
+
+	opfXML := `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Spidey Storybook</dc:title>
+    <meta property="rendition:layout">pre-paginated</meta>
+  </metadata>
+  <manifest>
+    <item id="css" href="css/idGeneratedStyles.css" media-type="text/css"/>
+    <item id="p1" href="xhtml/cover.xhtml" media-type="application/xhtml+xml"/>
+    <item id="p2" href="xhtml/page2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="p1"/>
+    <itemref idref="p2"/>
+  </spine>
+</package>`
+
+	cssBytes := []byte(`body { margin: 0; width: 768px; height: 1024px; }`)
+	coverXHTML := `<!DOCTYPE html><html><head><link rel="stylesheet" href="../css/idGeneratedStyles.css"/></head><body><img src="../img/cover.jpg"/></body></html>`
+	page2XHTML := `<!DOCTYPE html><html><head><title/></head><body style="max-width:none;width:1200px;height:900px"><p>Webs out!</p></body></html>`
+
+	epubBytes := createTestEPUB(map[string][]byte{
+		"META-INF/container.xml":            []byte(containerXML),
+		"OEBPS/content.opf":                 []byte(opfXML),
+		"OEBPS/css/idGeneratedStyles.css":   cssBytes,
+		"OEBPS/xhtml/cover.xhtml":           []byte(coverXHTML),
+		"OEBPS/xhtml/page2.xhtml":           []byte(page2XHTML),
+	})
+
+	zr, err := zip.NewReader(bytes.NewReader(epubBytes), int64(len(epubBytes)))
+	if err != nil {
+		t.Fatalf("zip reader: %v", err)
+	}
+	reader, err := epub.NewReader(zr)
+	if err != nil {
+		t.Fatalf("epub reader: %v", err)
+	}
+	chapters, err := reader.ExtractChapters()
+	if err != nil {
+		t.Fatalf("ExtractChapters: %v", err)
+	}
+	if len(chapters) != 2 {
+		t.Fatalf("expected 2 chapters, got %d", len(chapters))
+	}
+	if chapters[0].PageWidth == nil || *chapters[0].PageWidth != 768 || chapters[0].PageHeight == nil || *chapters[0].PageHeight != 1024 {
+		t.Errorf("expected cover dimensions 768x1024 from linked CSS, got %vx%v", chapters[0].PageWidth, chapters[0].PageHeight)
+	}
+	if chapters[1].PageWidth == nil || *chapters[1].PageWidth != 1200 || chapters[1].PageHeight == nil || *chapters[1].PageHeight != 900 {
+		t.Errorf("expected page2 dimensions 1200x900 from inline body style, got %vx%v", chapters[1].PageWidth, chapters[1].PageHeight)
+	}
+}
+
 

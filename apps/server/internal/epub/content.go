@@ -17,11 +17,20 @@ var (
 	whitespaceRegex       = regexp.MustCompile(`[ \t\r\n]+`)
 	multiNLRegex          = regexp.MustCompile(`\n{3,}`)
 	viewportRegex         = regexp.MustCompile(`(?i)<meta[^>]+content=["']([^"']+)["'][^>]+name=["']viewport["']|<meta[^>]+name=["']viewport["'][^>]+content=["']([^"']+)["']`)
+	viewportTagRegex      = regexp.MustCompile(`(?i)<meta\b[^>]*\bname\s*=\s*["']viewport["'][^>]*>`)
 	widthValRegex         = regexp.MustCompile(`(?i)width\s*=\s*(\d+)`)
 	heightValRegex        = regexp.MustCompile(`(?i)height\s*=\s*(\d+)`)
 	svgViewBoxRegex       = regexp.MustCompile(`(?i)<svg[^>]+viewBox=["']\s*([0-9.]+)[,\s]+([0-9.]+)[,\s]+([0-9.]+)[,\s]+([0-9.]+)["']`)
 	svgWidthHeightRegex   = regexp.MustCompile(`(?i)<svg[^>]+width=["'](\d+)(?:px)?["'][^>]+height=["'](\d+)(?:px)?["']|<svg[^>]+height=["'](\d+)(?:px)?["'][^>]+width=["'](\d+)(?:px)?["']`)
 	imgWidthHeightRegex   = regexp.MustCompile(`(?i)<img[^>]+width=["'](\d+)(?:px)?["'][^>]+height=["'](\d+)(?:px)?["']|<img[^>]+height=["'](\d+)(?:px)?["'][^>]+width=["'](\d+)(?:px)?["']`)
+	bodyStyleAttrRegex    = regexp.MustCompile(`(?i)<body\b[^>]*\bstyle\s*=\s*["']([^"']+)["']`)
+	divStyleAttrRegex     = regexp.MustCompile(`(?i)<div\b[^>]*\bstyle\s*=\s*["']([^"']+)["']`)
+	styleBlockRegex       = regexp.MustCompile(`(?is)<style\b[^>]*>(.*?)</style>`)
+	cssAtPageRegex        = regexp.MustCompile(`(?is)@page\b[^{]*\{([^}]*)\}`)
+	cssPageSizeRegex      = regexp.MustCompile(`(?i)(?:^|[;\s])size\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*px\s+([0-9]+(?:\.[0-9]+)?)\s*px`)
+	cssPageRuleRegex      = regexp.MustCompile(`(?is)(?:^|[}\s,])(?:html|body|\.[a-z0-9_-]*page[a-z0-9_-]*|#[a-z0-9_-]*page[a-z0-9_-]*|div\.[a-z0-9_-]+)\s*\{([^}]*)\}`)
+	cssWidthPxRegex       = regexp.MustCompile(`(?i)(?:^|[;\s])width\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*px`)
+	cssHeightPxRegex      = regexp.MustCompile(`(?i)(?:^|[;\s])height\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*px`)
 	srcAttrRegex          = regexp.MustCompile(`(?i)(<img[^>]+src=["'])([^"']+)(["'])`)
 	imgXlinkRegex         = regexp.MustCompile(`(?i)(<image[^>]+(?:xlink:href|href)=["'])([^"']+)(["'])`)
 	linkHrefRegex         = regexp.MustCompile(`(?i)(<link[^>]+href=["'])([^"']+)(["'])`)
@@ -29,6 +38,7 @@ var (
 	cssUrlRegex           = regexp.MustCompile(`(?i)url\(\s*["']?([^"')]+)["']?\s*\)`)
 	negativeZIndex        = regexp.MustCompile(`(?i)z-index\s*:\s*-\d+`)
 	headTagRegex          = regexp.MustCompile(`(?i)<head[^>]*>`)
+	closeHeadTagRegex     = regexp.MustCompile(`(?i)</head>`)
 	selfClosingTagRegex   = regexp.MustCompile(`<([a-zA-Z][a-zA-Z0-9:-]*)((?:\s+[^>"'/=\s]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=>/]+))?)*)\s*/>`)
 	punctNewlineSpanRegex = regexp.MustCompile(`([^\p{L}\p{N}<>\s])\r?\n\s*(<span\b)`)
 
@@ -69,9 +79,59 @@ var (
 	}
 )
 
+func parseCSSPxPair(decl string, minDim int) (*int, *int) {
+	wm := cssWidthPxRegex.FindStringSubmatch(decl)
+	hm := cssHeightPxRegex.FindStringSubmatch(decl)
+	if len(wm) < 2 || len(hm) < 2 {
+		return nil, nil
+	}
+	wf, wErr := strconv.ParseFloat(wm[1], 64)
+	hf, hErr := strconv.ParseFloat(hm[1], 64)
+	if wErr != nil || hErr != nil {
+		return nil, nil
+	}
+	w := int(wf + 0.5)
+	h := int(hf + 0.5)
+	if w < minDim || h < minDim {
+		return nil, nil
+	}
+	return &w, &h
+}
+
+// ExtractCSSPageDimensions extracts fixed pixel page dimensions from CSS @page or root container rules.
+func ExtractCSSPageDimensions(cssText string) (*int, *int) {
+	for _, m := range cssAtPageRegex.FindAllStringSubmatch(cssText, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		if sm := cssPageSizeRegex.FindStringSubmatch(m[1]); len(sm) >= 3 {
+			wf, wErr := strconv.ParseFloat(sm[1], 64)
+			hf, hErr := strconv.ParseFloat(sm[2], 64)
+			if wErr == nil && hErr == nil && int(wf+0.5) >= 100 && int(hf+0.5) >= 100 {
+				w := int(wf + 0.5)
+				h := int(hf + 0.5)
+				return &w, &h
+			}
+		}
+		if w, h := parseCSSPxPair(m[1], 100); w != nil && h != nil {
+			return w, h
+		}
+	}
+
+	for _, m := range cssPageRuleRegex.FindAllStringSubmatch(cssText, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		if w, h := parseCSSPxPair(m[1], 100); w != nil && h != nil {
+			return w, h
+		}
+	}
+
+	return nil, nil
+}
+
 // ExtractPageDimensions extracts the viewport width and height from an XHTML content document.
 func ExtractPageDimensions(rawHTML string) (width *int, height *int) {
-	// 1. Meta viewport tag
 	if m := viewportRegex.FindStringSubmatch(rawHTML); len(m) > 0 {
 		contentStr := m[1]
 		if contentStr == "" {
@@ -92,7 +152,12 @@ func ExtractPageDimensions(rawHTML string) (width *int, height *int) {
 		}
 	}
 
-	// 2. SVG viewBox fallback
+	if bm := bodyStyleAttrRegex.FindStringSubmatch(rawHTML); len(bm) >= 2 {
+		if w, h := parseCSSPxPair(bm[1], 100); w != nil && h != nil {
+			return w, h
+		}
+	}
+
 	if sm := svgViewBoxRegex.FindStringSubmatch(rawHTML); len(sm) > 4 {
 		wFloat, wErr := strconv.ParseFloat(sm[3], 64)
 		hFloat, hErr := strconv.ParseFloat(sm[4], 64)
@@ -103,7 +168,6 @@ func ExtractPageDimensions(rawHTML string) (width *int, height *int) {
 		}
 	}
 
-	// 3. SVG width/height attribute fallback
 	if swm := svgWidthHeightRegex.FindStringSubmatch(rawHTML); len(swm) > 0 {
 		var wStr, hStr string
 		if swm[1] != "" {
@@ -118,7 +182,21 @@ func ExtractPageDimensions(rawHTML string) (width *int, height *int) {
 		}
 	}
 
-	// 4. Primary img width/height fallback
+	for _, sm := range styleBlockRegex.FindAllStringSubmatch(rawHTML, -1) {
+		if len(sm) >= 2 {
+			if w, h := ExtractCSSPageDimensions(sm[1]); w != nil && h != nil {
+				return w, h
+			}
+		}
+	}
+	for _, dm := range divStyleAttrRegex.FindAllStringSubmatch(rawHTML, 4) {
+		if len(dm) >= 2 {
+			if w, h := parseCSSPxPair(dm[1], 100); w != nil && h != nil {
+				return w, h
+			}
+		}
+	}
+
 	if im := imgWidthHeightRegex.FindStringSubmatch(rawHTML); len(im) > 0 {
 		var wStr, hStr string
 		if im[1] != "" {
@@ -134,6 +212,45 @@ func ExtractPageDimensions(rawHTML string) (width *int, height *int) {
 	}
 
 	return width, height
+}
+
+// ExtractDocumentDimensions resolves fixed page dimensions from a spine XHTML document and its linked stylesheets.
+func (r *Reader) ExtractDocumentDimensions(rawHTML, docHref string) (*int, *int) {
+	if w, h := ExtractPageDimensions(rawHTML); w != nil && h != nil {
+		return w, h
+	}
+	baseDir := path.Dir(docHref)
+	for _, lm := range linkHrefRegex.FindAllStringSubmatch(rawHTML, -1) {
+		if len(lm) < 3 {
+			continue
+		}
+		href := strings.TrimSpace(lm[2])
+		if idx := strings.IndexByte(href, '?'); idx >= 0 {
+			href = href[:idx]
+		}
+		if idx := strings.IndexByte(href, '#'); idx >= 0 {
+			href = href[:idx]
+		}
+		if !strings.HasSuffix(strings.ToLower(href), ".css") {
+			continue
+		}
+		cssPath := path.Clean(path.Join(baseDir, href))
+		zf := r.findFile(cssPath)
+		if zf == nil && r.rootBase != "" {
+			zf = r.findFile(path.Join(r.rootBase, cssPath))
+		}
+		if zf == nil {
+			continue
+		}
+		cssBytes, err := readZipFile(zf)
+		if err != nil {
+			continue
+		}
+		if w, h := ExtractCSSPageDimensions(string(cssBytes)); w != nil && h != nil {
+			return w, h
+		}
+	}
+	return nil, nil
 }
 
 // ExtractChapters walks spine itemrefs in order and converts XHTML content into clean plaintext/markdown.
@@ -186,7 +303,7 @@ func (r *Reader) ExtractChapters() ([]*ParsedChapter, error) {
 		}
 
 		rawHTMLStr := string(rawHTML)
-		pageWidth, pageHeight := ExtractPageDimensions(rawHTMLStr)
+		pageWidth, pageHeight := r.ExtractDocumentDimensions(rawHTMLStr, fullPath)
 
 		// Resolve page spread
 		var pageSpread *string
@@ -536,18 +653,56 @@ func RewritePageHTML(rawHTML, bookID, chapterHref string, pageWidth, pageHeight 
 })();
 </script>`, bookID, chapterHref)
 
-	// Inject defensive containment CSS, viewport meta, and auto-fit scaling for fixed-layout pages
-	var injected string
+	dw, dh := 0, 0
 	if pageWidth != nil && pageHeight != nil && *pageWidth > 0 && *pageHeight > 0 {
-		dw := *pageWidth
-		dh := *pageHeight
-		injected = fmt.Sprintf(`<meta name="viewport" content="width=%d, height=%d" />
+		dw = *pageWidth
+		dh = *pageHeight
+	} else if inferredW, inferredH := ExtractPageDimensions(rawHTML); inferredW != nil && inferredH != nil && *inferredW > 0 && *inferredH > 0 {
+		dw = *inferredW
+		dh = *inferredH
+	}
+
+	// Mobile WebViews treat fixed-pixel viewport metas as top-level layout viewports,
+	// forcing window.innerWidth equal to the page width and defeating scale-to-fit.
+	htmlStr = viewportTagRegex.ReplaceAllString(htmlStr, "")
+
+	metaTag := `<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />`
+	extraCSS := ""
+	if dw > 0 && dh > 0 {
+		metaTag = fmt.Sprintf(
+			`<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" data-shelfd-page-width="%d" data-shelfd-page-height="%d" />`,
+			dw,
+			dh,
+		)
+	} else {
+		extraCSS = `
+body {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+img, svg {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+}`
+	}
+
+	fitConfig := fmt.Sprintf(
+		"var staticW = %d; var staticH = %d; var pageBookId = %q; var pageChapterHref = %q;",
+		dw,
+		dh,
+		bookID,
+		chapterHref,
+	)
+
+	injected := metaTag + `
 <style>
 html {
   margin: 0 !important;
   padding: 0 !important;
-  width: 100%% !important;
-  height: 100%% !important;
+  width: 100% !important;
+  height: 100% !important;
   overflow: hidden !important;
   background-color: #ffffff;
 }
@@ -557,62 +712,144 @@ body {
   overflow: hidden !important;
   background-color: #ffffff;
   transform-origin: 0 0 !important;
-}
+}` + extraCSS + `
 </style>
-%s
+` + readalongBridge + `
 <script>
 (function() {
-  var dw = %d;
-  var dh = %d;
+  ` + fitConfig + `
+  var reportedDims = false;
+  var retryCount = 0;
+
+  function parsePx(val) {
+    if (!val) return 0;
+    var m = String(val).match(/([0-9]+(?:\.[0-9]+)?)\s*px/i);
+    return m ? parseFloat(m[1]) : 0;
+  }
+
+  function detectDimensions(ww, wh) {
+    if (staticW > 0 && staticH > 0) return { w: staticW, h: staticH };
+    if (!document.body) return { w: 0, h: 0 };
+
+    var bodyStyle = document.body.getAttribute('style') || '';
+    var bw = parsePx((bodyStyle.match(/(?:^|[;\s])width\s*:\s*([^;]+)/i) || [])[1]);
+    var bh = parsePx((bodyStyle.match(/(?:^|[;\s])height\s*:\s*([^;]+)/i) || [])[1]);
+    if (bw > 0 && bh > 0) return { w: bw, h: bh };
+
+    var svg = document.querySelector('svg[viewBox]');
+    if (svg) {
+      var vb = (svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/);
+      if (vb.length === 4) {
+        var sw = parseFloat(vb[2]);
+        var sh = parseFloat(vb[3]);
+        if (sw > 0 && sh > 0) return { w: sw, h: sh };
+      }
+    }
+
+    var children = document.body.children;
+    for (var i = 0; i < children.length; i++) {
+      var el = children[i];
+      if (!el || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+      var cs = window.getComputedStyle ? window.getComputedStyle(el) : null;
+      var cw = cs ? parseFloat(cs.width) : 0;
+      var ch = cs ? parseFloat(cs.height) : 0;
+      if (cw >= 100 && ch >= 100 && (cw > ww + 4 || ch > wh + 4)) {
+        return { w: cw, h: ch };
+      }
+      if (el.tagName === 'IMG' && el.naturalWidth >= 100 && el.naturalHeight >= 100 && children.length === 1) {
+        return { w: el.naturalWidth, h: el.naturalHeight };
+      }
+    }
+
+    var scrollW = document.body.scrollWidth || 0;
+    var scrollH = document.body.scrollHeight || 0;
+    if (scrollW > ww + 8 || scrollH > wh + 8) {
+      return { w: Math.max(scrollW, ww), h: Math.max(scrollH, wh) };
+    }
+    return { w: 0, h: 0 };
+  }
+
   function fit() {
-    if (!document.body) return;
-    var ww = window.innerWidth;
-    var wh = window.innerHeight;
-    if (ww <= 0 || wh <= 0) return;
-    var scale = Math.min(ww / dw, wh / dh);
-    var sw = dw * scale;
-    var sh = dh * scale;
+    if (!document.body || !document.documentElement) return;
+    var ww = window.__shelfdTargetWidth || document.documentElement.clientWidth || window.innerWidth;
+    var wh = window.__shelfdTargetHeight || document.documentElement.clientHeight || window.innerHeight;
+    if (ww <= 0 || wh <= 0) {
+      if (retryCount < 60 && typeof requestAnimationFrame === 'function') {
+        retryCount++;
+        requestAnimationFrame(fit);
+      }
+      return;
+    }
+
+    var dims = detectDimensions(ww, wh);
+    var pageW = dims.w;
+    var pageH = dims.h;
+    if (pageW <= 0 || pageH <= 0) return;
+    staticW = pageW;
+    staticH = pageH;
+
+    var scale = Math.min(ww / pageW, wh / pageH);
+    var sw = pageW * scale;
+    var sh = pageH * scale;
     var ox = Math.max(0, (ww - sw) / 2);
     var oy = Math.max(0, (wh - sh) / 2);
-    document.body.style.width = dw + 'px';
-    document.body.style.height = dh + 'px';
-    document.body.style.position = 'absolute';
-    document.body.style.left = ox + 'px';
-    document.body.style.top = oy + 'px';
-    document.body.style.transformOrigin = '0 0';
-    document.body.style.transform = 'scale(' + scale + ')';
-    document.body.style.overflow = 'hidden';
+    var bs = document.body.style;
+    bs.setProperty('width', pageW + 'px', 'important');
+    bs.setProperty('height', pageH + 'px', 'important');
+    bs.setProperty('position', 'absolute', 'important');
+    bs.setProperty('left', ox + 'px', 'important');
+    bs.setProperty('top', oy + 'px', 'important');
+    bs.setProperty('transform-origin', '0 0', 'important');
+    bs.setProperty('transform', 'scale(' + scale + ')', 'important');
+    bs.setProperty('overflow', 'hidden', 'important');
+
+    if (!reportedDims) {
+      reportedDims = true;
+      var dimPayload = {
+        type: 'shelfd:page-dimensions',
+        bookId: pageBookId,
+        chapterHref: pageChapterHref,
+        width: Math.round(pageW),
+        height: Math.round(pageH)
+      };
+      if (window.parent && window.parent !== window) {
+        try { window.parent.postMessage(dimPayload, '*'); } catch (_) {}
+      }
+      if (window.ShelfdBridge && typeof window.ShelfdBridge.postMessage === 'function') {
+        try { window.ShelfdBridge.postMessage(JSON.stringify(dimPayload)); } catch (_) {}
+      }
+    }
   }
+
+  window.__shelfdFitPage = function(tw, th) {
+    if (typeof tw === 'number' && tw > 0 && typeof th === 'number' && th > 0) {
+      window.__shelfdTargetWidth = tw;
+      window.__shelfdTargetHeight = th;
+    }
+    fit();
+  };
+
   window.addEventListener('resize', fit);
+  window.addEventListener('load', fit);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', fit);
+  }
+  if (typeof ResizeObserver === 'function') {
+    try {
+      new ResizeObserver(fit).observe(document.documentElement);
+    } catch (_) {}
+  }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', fit);
   } else {
     fit();
   }
 })();
-</script>`, dw, dh, readalongBridge, dw, dh)
-	} else {
-		injected = `<style>
-html, body {
-  margin: 0 !important;
-  padding: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
-  overflow: hidden !important;
-  box-sizing: border-box !important;
-  background-color: #ffffff;
-}
-img, svg {
-  max-width: 100%;
-  max-height: 100%;
-  display: block;
-}
-</style>
-` + readalongBridge
-	}
+</script>`
 
-	headLoc := headTagRegex.FindStringIndex(htmlStr)
-	if len(headLoc) == 2 {
+	if closeLoc := closeHeadTagRegex.FindStringIndex(htmlStr); len(closeLoc) == 2 {
+		htmlStr = htmlStr[:closeLoc[0]] + injected + "\n" + htmlStr[closeLoc[0]:]
+	} else if headLoc := headTagRegex.FindStringIndex(htmlStr); len(headLoc) == 2 {
 		htmlStr = htmlStr[:headLoc[1]] + "\n" + injected + htmlStr[headLoc[1]:]
 	} else {
 		htmlStr = injected + htmlStr

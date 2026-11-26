@@ -414,6 +414,7 @@ func (h *BookHandler) GetBook(w http.ResponseWriter, r *http.Request) {
 	topics, _ := h.repo.GetBookTopics(r.Context(), book.ID)
 	seriesList, _ := h.repo.GetBookSeries(r.Context(), book.ID)
 	spine, _ := h.repo.GetBookSpine(r.Context(), book.ID)
+	h.backfillMissingSpineDimensions(book, spine)
 	chapters, _ := h.repo.GetChaptersByBookID(r.Context(), book.ID)
 	// Clear ContentPlain on chapters in BookDetailResponse to keep payload lightweight
 	for _, c := range chapters {
@@ -1074,7 +1075,11 @@ func (h *BookHandler) GetChapterHTML(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rewrittenHTML := epub.RewritePageHTML(string(rawHTML), bookID, docHref, chapter.PageWidth, chapter.PageHeight)
+	pw, ph := chapter.PageWidth, chapter.PageHeight
+	if pw == nil || ph == nil || *pw <= 0 || *ph <= 0 {
+		pw, ph = reader.ExtractDocumentDimensions(string(rawHTML), docHref)
+	}
+	rewrittenHTML := epub.RewritePageHTML(string(rawHTML), bookID, docHref, pw, ph)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
@@ -1082,6 +1087,48 @@ func (h *BookHandler) GetChapterHTML(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if r.Method != http.MethodHead {
 		_, _ = w.Write([]byte(rewrittenHTML))
+	}
+}
+
+func (h *BookHandler) backfillMissingSpineDimensions(book *repository.Book, spine []*repository.SpineItem) {
+	if book == nil || book.Layout != "pre-paginated" || len(spine) == 0 {
+		return
+	}
+	needsBackfill := false
+	for _, item := range spine {
+		if item != nil && (item.PageWidth == nil || item.PageHeight == nil || *item.PageWidth <= 0 || *item.PageHeight <= 0) {
+			needsBackfill = true
+			break
+		}
+	}
+	if !needsBackfill {
+		return
+	}
+	epubPath := h.resolveBookFilePath(book)
+	if epubPath == "" {
+		return
+	}
+	reader, err := epub.Open(epubPath)
+	if err != nil {
+		return
+	}
+	defer reader.Close()
+
+	for _, item := range spine {
+		if item == nil || (item.PageWidth != nil && item.PageHeight != nil && *item.PageWidth > 0 && *item.PageHeight > 0) {
+			continue
+		}
+		if item.Href == nil || *item.Href == "" {
+			continue
+		}
+		rawDoc, rErr := reader.ExtractRawDocument(*item.Href)
+		if rErr != nil || len(rawDoc) == 0 {
+			continue
+		}
+		if w, hp := reader.ExtractDocumentDimensions(string(rawDoc), *item.Href); w != nil && hp != nil {
+			item.PageWidth = w
+			item.PageHeight = hp
+		}
 	}
 }
 

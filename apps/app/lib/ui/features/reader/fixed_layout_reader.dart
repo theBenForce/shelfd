@@ -98,6 +98,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   String? _lastHighlightedViewKey;
   String? _lastHighlightedFragmentId;
   bool? _lastHighlightedPlaying;
+  final Map<String, Size> _detectedPageSizes = <String, Size>{};
 
   bool get _hasReadalong =>
       widget.book.canReadAlong ||
@@ -219,9 +220,12 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   @override
   void didUpdateWidget(covariant FixedLayoutReader oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.book.id != widget.book.id && requiresNativeMediaCookie) {
-      _cookieReady = false;
-      Future.microtask(_prepareNativeMediaCookie);
+    if (oldWidget.book.id != widget.book.id) {
+      _detectedPageSizes.clear();
+      if (requiresNativeMediaCookie) {
+        _cookieReady = false;
+        Future.microtask(_prepareNativeMediaCookie);
+      }
     }
     if (widget.initialReadalongManifest != null && _readalongManifest == null) {
       _readalongManifest = widget.initialReadalongManifest;
@@ -642,6 +646,8 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
         final canNext = _currentSpreadIndex < spreads.length - 1;
 
         final colors = ShelfdColors.of(context);
+        final isCompactHeader = screenWidth < 640;
+        final topBarHeight = (isCompactHeader && _hasReadalong) ? 96.0 : 60.0;
 
         return Focus(
           focusNode: _focusNode,
@@ -668,7 +674,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                               context,
                               currentSpread,
                               screenWidth,
-                              screenHeight - (_controlsVisible ? 120 : 0),
+                              screenHeight - (_controlsVisible ? (topBarHeight + 64.0) : 0),
                             ),
                           ),
                   ),
@@ -718,10 +724,16 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   // Top Header Bar
                   AnimatedPositioned(
                     duration: const Duration(milliseconds: 200),
-                    top: _controlsVisible ? 0 : -70,
+                    top: _controlsVisible ? 0 : -(topBarHeight + 10),
                     left: 0,
                     right: 0,
-                    child: _buildTopBar(context, currentSpread, spreads.length, isThisBookPlaying),
+                    child: _buildTopBar(
+                      context,
+                      currentSpread,
+                      spreads.length,
+                      isThisBookPlaying,
+                      screenWidth,
+                    ),
                   ),
 
                   // Bottom Navigation Bar
@@ -747,185 +759,272 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
     FixedSpread? spread,
     int totalSpreads,
     bool isThisBookPlaying,
+    double availWidth,
   ) {
     final colors = ShelfdColors.of(context);
     final pipState = ref.watch(readalongPipProvider);
     final isPipOpen = pipState.isOpen && pipState.bookId == widget.book.id;
+    final isCasting = ref.watch(audioPlayerProvider).isCasting;
+    final isCompact = availWidth < 640;
+
+    const compactConstraints = BoxConstraints(minWidth: 38, minHeight: 38);
+    final btnPadding = isCompact ? const EdgeInsets.all(6) : null;
+    final btnConstraints = isCompact ? compactConstraints : null;
+    final btnIconSize = isCompact ? 21.0 : null;
+
+    final backButton = IconButton(
+      padding: btnPadding,
+      constraints: btnConstraints,
+      iconSize: btnIconSize,
+      icon: Icon(Icons.arrow_back_rounded, color: colors.ink),
+      tooltip: 'Back to Library',
+      onPressed: () {
+        if (widget.onClose != null) {
+          widget.onClose!();
+        } else if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go('/books/${widget.book.id}');
+        }
+      },
+    );
+
+    final titleColumn = Expanded(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.book.title,
+            style: AppTypography.titleSerif(
+              fontSize: isCompact ? 14 : 15,
+              color: colors.ink,
+            ),
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (spread != null)
+            Text(
+              '${spread.label} of ${widget.book.spine.length}',
+              style: AppTypography.mono(
+                fontSize: isCompact ? 11 : 12,
+                color: colors.secondaryInk,
+              ),
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+            ),
+        ],
+      ),
+    );
+
+    final readalongControls = <Widget>[
+      if (_hasReadalong) ...[
+        IconButton(
+          key: const Key('readalong-play-pause-button'),
+          padding: btnPadding,
+          constraints: btnConstraints,
+          iconSize: btnIconSize,
+          icon: Icon(
+            isThisBookPlaying
+                ? Icons.pause_circle_filled_rounded
+                : Icons.play_circle_fill_rounded,
+            color: colors.accentPrimary,
+          ),
+          tooltip: isThisBookPlaying ? 'Pause Read-Along' : 'Play Read-Along',
+          onPressed: _toggleReadalongPlayback,
+        ),
+        IconButton(
+          key: const Key('readalong-autoturn-toggle'),
+          padding: btnPadding,
+          constraints: btnConstraints,
+          iconSize: btnIconSize,
+          icon: Icon(
+            _autoTurnPages ? Icons.sync_rounded : Icons.sync_disabled_rounded,
+            color: _autoTurnPages ? colors.accentPrimary : colors.mutedInk,
+          ),
+          tooltip: _autoTurnPages ? 'Auto-Turn Pages: On' : 'Auto-Turn Pages: Off',
+          onPressed: () {
+            setState(() {
+              _autoTurnPages = !_autoTurnPages;
+            });
+          },
+        ),
+        if (pipState.isSupported)
+          IconButton(
+            key: const Key('readalong-pip-button'),
+            padding: btnPadding,
+            constraints: btnConstraints,
+            iconSize: btnIconSize,
+            icon: Icon(
+              isPipOpen
+                  ? Icons.picture_in_picture_rounded
+                  : Icons.picture_in_picture_alt_rounded,
+              color: isPipOpen ? colors.accentPrimary : colors.ink,
+            ),
+            tooltip: isPipOpen ? 'Close Pop-out Read-Along' : 'Pop out Read-Along',
+            onPressed: () {
+              final manifest = _readalongManifest ??
+                  ReadalongManifest(bookId: widget.book.id, hasReadalong: true);
+              final currentPage = spread?.leftPage ?? spread?.rightPage;
+              ref.read(readalongPipProvider.notifier).togglePopout(
+                    book: widget.book,
+                    manifest: manifest,
+                    currentPage: currentPage,
+                    currentChapterIndex: currentPage?.chapterIndex,
+                    currentChapterTitle: spread?.label,
+                  );
+            },
+          ),
+        IconButton(
+          key: const Key('readalong-cast-button'),
+          padding: btnPadding,
+          constraints: btnConstraints,
+          iconSize: btnIconSize,
+          icon: Icon(
+            isCasting ? Icons.cast_connected : Icons.cast,
+            color: isCasting ? colors.accentPrimary : colors.ink,
+          ),
+          tooltip: 'Cast audio',
+          onPressed: () => showCastDeviceSheet(
+            context,
+            book: widget.book,
+            hasReadalong: true,
+          ),
+        ),
+        IconButton(
+          key: const Key('switch_to_audiobook_button'),
+          padding: btnPadding,
+          constraints: btnConstraints,
+          iconSize: btnIconSize,
+          icon: Icon(Icons.headphones_rounded, color: colors.ink),
+          tooltip: 'Switch to Audiobook Player',
+          onPressed: () => _switchToAudiobook(context),
+        ),
+      ],
+    ];
+
+    final spreadModeButton = IconButton(
+      padding: btnPadding,
+      constraints: btnConstraints,
+      iconSize: btnIconSize,
+      icon: Icon(
+        _spreadMode == SpreadMode.auto
+            ? Icons.auto_stories_rounded
+            : _spreadMode == SpreadMode.twoPage
+                ? Icons.menu_book_rounded
+                : Icons.crop_portrait_rounded,
+        color: colors.ink,
+      ),
+      tooltip: _spreadMode == SpreadMode.auto
+          ? 'Spread Mode: Auto (Responsive)'
+          : _spreadMode == SpreadMode.twoPage
+              ? 'Spread Mode: Two Pages (Facing)'
+              : 'Spread Mode: Single Page',
+      onPressed: () {
+        setState(() {
+          if (_spreadMode == SpreadMode.auto) {
+            _spreadMode = SpreadMode.twoPage;
+          } else if (_spreadMode == SpreadMode.twoPage) {
+            _spreadMode = SpreadMode.singlePage;
+          } else {
+            _spreadMode = SpreadMode.auto;
+          }
+        });
+      },
+    );
+
+    final bookmarkButton = IconButton(
+      padding: btnPadding,
+      constraints: btnConstraints,
+      iconSize: btnIconSize,
+      icon: Icon(Icons.bookmark_add_outlined, color: colors.ink),
+      tooltip: 'Bookmark Page',
+      onPressed: () {
+        if (spread == null) return;
+        final title = spread.label;
+        final progress = (spread.spreadIndex + 1) / totalSpreads;
+        ref.read(bookDetailProvider(widget.book.id).notifier).addBookmark(
+              title: title,
+              progress: progress,
+              chapterId: spread.rightPage.id,
+            );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Bookmarked "$title"'),
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      },
+    );
+
+    final tocButton = Builder(
+      builder: (ctx) => IconButton(
+        padding: btnPadding,
+        constraints: btnConstraints,
+        iconSize: btnIconSize,
+        icon: Icon(Icons.list_rounded, color: colors.ink),
+        tooltip: 'Table of Contents',
+        onPressed: () => Scaffold.of(ctx).openEndDrawer(),
+      ),
+    );
+
+    if (isCompact && _hasReadalong) {
+      return Container(
+        height: 96,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: colors.surface.withValues(alpha: 0.95),
+          border: Border(bottom: BorderSide(color: colors.subtleBorder)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            SizedBox(
+              height: 44,
+              child: Row(
+                children: [
+                  backButton,
+                  const SizedBox(width: 6),
+                  titleColumn,
+                  bookmarkButton,
+                  tocButton,
+                ],
+              ),
+            ),
+            SizedBox(
+              height: 40,
+              child: Row(
+                children: [
+                  ...readalongControls,
+                  const Spacer(),
+                  spreadModeButton,
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     return Container(
       height: 60,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: EdgeInsets.symmetric(horizontal: isCompact ? 8 : 16),
       decoration: BoxDecoration(
         color: colors.surface.withValues(alpha: 0.95),
         border: Border(bottom: BorderSide(color: colors.subtleBorder)),
       ),
       child: Row(
         children: [
-          IconButton(
-            icon: Icon(Icons.arrow_back_rounded, color: colors.ink),
-            tooltip: 'Back to Library',
-            onPressed: () {
-              if (widget.onClose != null) {
-                widget.onClose!();
-              } else if (context.canPop()) {
-                context.pop();
-              } else {
-                context.go('/books/${widget.book.id}');
-              }
-            },
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.book.title,
-                  style: AppTypography.titleSerif(fontSize: 15, color: colors.ink),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (spread != null)
-                  Text(
-                    '${spread.label} of ${widget.book.spine.length}',
-                    style: AppTypography.mono(fontSize: 12, color: colors.secondaryInk),
-                  ),
-              ],
-            ),
-          ),
-
-          if (_hasReadalong) ...[
-            IconButton(
-              key: const Key('readalong-play-pause-button'),
-              icon: Icon(
-                isThisBookPlaying
-                    ? Icons.pause_circle_filled_rounded
-                    : Icons.play_circle_fill_rounded,
-                color: colors.accentPrimary,
-              ),
-              tooltip: isThisBookPlaying ? 'Pause Read-Along' : 'Play Read-Along',
-              onPressed: _toggleReadalongPlayback,
-            ),
-            IconButton(
-              key: const Key('readalong-autoturn-toggle'),
-              icon: Icon(
-                _autoTurnPages ? Icons.sync_rounded : Icons.sync_disabled_rounded,
-                color: _autoTurnPages ? colors.accentPrimary : colors.mutedInk,
-              ),
-              tooltip: _autoTurnPages ? 'Auto-Turn Pages: On' : 'Auto-Turn Pages: Off',
-              onPressed: () {
-                setState(() {
-                  _autoTurnPages = !_autoTurnPages;
-                });
-              },
-            ),
-            if (pipState.isSupported)
-              IconButton(
-                key: const Key('readalong-pip-button'),
-                icon: Icon(
-                  isPipOpen
-                      ? Icons.picture_in_picture_rounded
-                      : Icons.picture_in_picture_alt_rounded,
-                  color: isPipOpen ? colors.accentPrimary : colors.ink,
-                ),
-                tooltip: isPipOpen ? 'Close Pop-out Read-Along' : 'Pop out Read-Along',
-                onPressed: () {
-                  final manifest = _readalongManifest ??
-                      ReadalongManifest(bookId: widget.book.id, hasReadalong: true);
-                  final currentPage = spread?.leftPage ?? spread?.rightPage;
-                  ref.read(readalongPipProvider.notifier).togglePopout(
-                        book: widget.book,
-                        manifest: manifest,
-                        currentPage: currentPage,
-                        currentChapterIndex: currentPage?.chapterIndex,
-                        currentChapterTitle: spread?.label,
-                      );
-                },
-              ),
-            IconButton(
-              key: const Key('readalong-cast-button'),
-              icon: Icon(
-                ref.watch(audioPlayerProvider).isCasting
-                    ? Icons.cast_connected
-                    : Icons.cast,
-                color: ref.watch(audioPlayerProvider).isCasting
-                    ? colors.accentPrimary
-                    : colors.ink,
-              ),
-              tooltip: 'Cast audio',
-              onPressed: () => showCastDeviceSheet(
-                context,
-                book: widget.book,
-                hasReadalong: true,
-              ),
-            ),
-            IconButton(
-              key: const Key('switch_to_audiobook_button'),
-              icon: Icon(Icons.headphones_rounded, color: colors.ink),
-              tooltip: 'Switch to Audiobook Player',
-              onPressed: () => _switchToAudiobook(context),
-            ),
-          ],
-
-          // Spread Mode Toggle
-          IconButton(
-            icon: Icon(
-              _spreadMode == SpreadMode.auto
-                  ? Icons.auto_stories_rounded
-                  : _spreadMode == SpreadMode.twoPage
-                      ? Icons.menu_book_rounded
-                      : Icons.crop_portrait_rounded,
-              color: colors.ink,
-            ),
-            tooltip: _spreadMode == SpreadMode.auto
-                ? 'Spread Mode: Auto (Responsive)'
-                : _spreadMode == SpreadMode.twoPage
-                    ? 'Spread Mode: Two Pages (Facing)'
-                    : 'Spread Mode: Single Page',
-            onPressed: () {
-              setState(() {
-                if (_spreadMode == SpreadMode.auto) {
-                  _spreadMode = SpreadMode.twoPage;
-                } else if (_spreadMode == SpreadMode.twoPage) {
-                  _spreadMode = SpreadMode.singlePage;
-                } else {
-                  _spreadMode = SpreadMode.auto;
-                }
-              });
-            },
-          ),
-
-          // Bookmark Button
-          IconButton(
-            icon: Icon(Icons.bookmark_add_outlined, color: colors.ink),
-            tooltip: 'Bookmark Page',
-            onPressed: () {
-              if (spread == null) return;
-              final title = spread.label;
-              final progress = (spread.spreadIndex + 1) / totalSpreads;
-              ref.read(bookDetailProvider(widget.book.id).notifier).addBookmark(
-                    title: title,
-                    progress: progress,
-                    chapterId: spread.rightPage.id,
-                  );
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Bookmarked "$title"'),
-                  duration: const Duration(seconds: 2),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-          ),
-
-          // Table of Contents
-          Builder(
-            builder: (ctx) => IconButton(
-              icon: Icon(Icons.list_rounded, color: colors.ink),
-              tooltip: 'Table of Contents',
-              onPressed: () => Scaffold.of(ctx).openEndDrawer(),
-            ),
-          ),
+          backButton,
+          SizedBox(width: isCompact ? 6 : 8),
+          titleColumn,
+          ...readalongControls,
+          spreadModeButton,
+          bookmarkButton,
+          tocButton,
         ],
       ),
     );
@@ -977,10 +1076,46 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
           Text(
             spread != null ? spread.label : '',
             style: AppTypography.mono(fontSize: 12, color: colors.secondaryInk),
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
     );
+  }
+
+  (double, double) _effectivePageDimensions(SpineItem page) {
+    final pw = page.pageWidth;
+    final ph = page.pageHeight;
+    if (pw != null && pw > 0 && ph != null && ph > 0) {
+      return (pw, ph);
+    }
+    final detected = _detectedPageSizes[_pageViewKey(page)];
+    if (detected != null && detected.width > 0 && detected.height > 0) {
+      return (detected.width, detected.height);
+    }
+    return (1000.0, 1000.0);
+  }
+
+  void _recordDetectedPageDimensions(SpineItem page, double width, double height) {
+    if (!mounted || width <= 0 || height <= 0) return;
+    if (page.pageWidth != null &&
+        page.pageWidth! > 0 &&
+        page.pageHeight != null &&
+        page.pageHeight! > 0) {
+      return;
+    }
+    final key = _pageViewKey(page);
+    final prev = _detectedPageSizes[key];
+    if (prev != null &&
+        (prev.width - width).abs() <= 1.0 &&
+        (prev.height - height).abs() <= 1.0) {
+      return;
+    }
+    setState(() {
+      _detectedPageSizes[key] = Size(width, height);
+    });
   }
 
   Widget _buildSpreadStage(
@@ -1025,8 +1160,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
 
     if (spread.isSingle || spread.leftPage == null) {
       final page = spread.rightPage;
-      final pw = page.pageWidth ?? 1000.0;
-      final ph = page.pageHeight ?? 1000.0;
+      final (pw, ph) = _effectivePageDimensions(page);
 
       final scale = min(stageW / pw, stageH / ph).clamp(0.05, 2.0);
 
@@ -1059,6 +1193,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
             height: displayH,
             onReadalongClick: _handleReadalongClick,
             onToggleControls: _toggleControls,
+            onPageDimensions: (w, h) => _recordDetectedPageDimensions(page, w, h),
           ),
         ),
       );
@@ -1066,10 +1201,8 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
       final leftPage = spread.leftPage!;
       final rightPage = spread.rightPage;
 
-      final leftW = leftPage.pageWidth ?? 1000.0;
-      final leftH = leftPage.pageHeight ?? 1000.0;
-      final rightW = rightPage.pageWidth ?? 1000.0;
-      final rightH = rightPage.pageHeight ?? 1000.0;
+      final (leftW, leftH) = _effectivePageDimensions(leftPage);
+      final (rightW, rightH) = _effectivePageDimensions(rightPage);
 
       final combinedW = leftW + rightW;
       final combinedH = max(leftH, rightH);
@@ -1116,6 +1249,8 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   height: displayH,
                   onReadalongClick: _handleReadalongClick,
                   onToggleControls: _toggleControls,
+                  onPageDimensions: (w, h) =>
+                      _recordDetectedPageDimensions(leftPage, w, h),
                 ),
               ),
               Container(
@@ -1146,6 +1281,8 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   height: displayH,
                   onReadalongClick: _handleReadalongClick,
                   onToggleControls: _toggleControls,
+                  onPageDimensions: (w, h) =>
+                      _recordDetectedPageDimensions(rightPage, w, h),
                 ),
               ),
             ],
