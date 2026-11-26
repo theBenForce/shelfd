@@ -8,6 +8,7 @@ import '../../data/models/book_chat.dart';
 import '../../data/models/genre.dart';
 import '../../data/models/highlight.dart';
 import '../../data/models/queue_status.dart';
+import '../../data/models/recap.dart';
 import '../../data/models/search_result.dart';
 import '../../data/models/series.dart';
 import '../../data/models/topic.dart';
@@ -1514,4 +1515,110 @@ final bookChatProvider =
     NotifierProvider.family<BookChatNotifier, BookChatState, String>(
   BookChatNotifier.new,
 );
+
+// Book Recap ("Previously On") State
+class BookRecapState {
+  final BookRecap? recap;
+  final int chapterIndex;
+  final int paragraphOffset;
+  final bool isLoading;
+  final String? error;
+
+  const BookRecapState({
+    this.recap,
+    this.chapterIndex = 0,
+    this.paragraphOffset = 0,
+    this.isLoading = false,
+    this.error,
+  });
+
+  BookRecapState copyWith({
+    BookRecap? recap,
+    bool clearRecap = false,
+    int? chapterIndex,
+    int? paragraphOffset,
+    bool? isLoading,
+    String? error,
+  }) {
+    return BookRecapState(
+      recap: clearRecap ? null : (recap ?? this.recap),
+      chapterIndex: chapterIndex ?? this.chapterIndex,
+      paragraphOffset: paragraphOffset ?? this.paragraphOffset,
+      isLoading: isLoading ?? this.isLoading,
+      error: error,
+    );
+  }
+}
+
+class BookRecapNotifier extends Notifier<BookRecapState> {
+  final String bookId;
+  int _requestId = 0;
+
+  BookRecapNotifier(this.bookId);
+
+  @override
+  BookRecapState build() {
+    return const BookRecapState();
+  }
+
+  Future<void> loadRecap({
+    required int chapterIndex,
+    int paragraphOffset = 0,
+    bool forceRefresh = false,
+  }) async {
+    final requestId = ++_requestId;
+    final ceilingChanged =
+        state.chapterIndex != chapterIndex || state.paragraphOffset != paragraphOffset;
+
+    state = state.copyWith(
+      chapterIndex: chapterIndex,
+      paragraphOffset: paragraphOffset,
+      clearRecap: ceilingChanged,
+      isLoading: true,
+      error: null,
+    );
+
+    try {
+      final repo = ref.read(bookRepositoryProvider);
+      final result = await repo.getBookRecap(
+        bookId,
+        chapterIndex: chapterIndex,
+        paragraphOffset: paragraphOffset,
+        forceRefresh: forceRefresh,
+      );
+      if (requestId != _requestId) return;
+      state = state.copyWith(
+        recap: result,
+        chapterIndex: result.chapterIndex,
+        paragraphOffset: result.paragraphOffset,
+        isLoading: false,
+        error: null,
+      );
+    } catch (e) {
+      if (requestId != _requestId) return;
+      state = state.copyWith(
+        isLoading: false,
+        error: e.toString(),
+      );
+    }
+  }
+
+  Future<void> regenerate() => loadRecap(
+        chapterIndex: state.chapterIndex,
+        paragraphOffset: state.paragraphOffset,
+        forceRefresh: true,
+      );
+
+  Future<void> retry() => loadRecap(
+        chapterIndex: state.chapterIndex,
+        paragraphOffset: state.paragraphOffset,
+        forceRefresh: false,
+      );
+}
+
+final bookRecapProvider =
+    NotifierProvider.family<BookRecapNotifier, BookRecapState, String>(
+  BookRecapNotifier.new,
+);
+
 

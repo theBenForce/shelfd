@@ -66,6 +66,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	metadataHandler := NewMetadataHandler(cfg.Repo, cfg.DataDir, cfg.LibraryDir, cfg.Hub, logger)
 	pluginHandler := NewPluginHandler(cfg.PluginHost, logger)
 	castHandler := NewCastHandler(cfg.CastManager, logger)
+	recapHandler := NewRecapHandler(cfg.Repo, cfg.AIClient, logger)
 
 	auth := AuthMiddleware(cfg.Repo, cfg.JWTSecret)
 
@@ -140,6 +141,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("HEAD /api/v1/books/{id}/chapters/{index}/html", auth(http.HandlerFunc(bookHandler.GetChapterHTML)))
 	mux.Handle("POST /api/v1/books/{id}/reparse", auth(http.HandlerFunc(bookHandler.ReparseBook)))
 	mux.Handle("POST /api/v1/books/{id}/chat", auth(http.HandlerFunc(bookHandler.ChatBook)))
+	mux.Handle("POST /api/v1/books/{id}/recap", auth(http.HandlerFunc(recapHandler.GenerateRecap)))
 	mux.Handle("GET /api/v1/books/{id}/chapters/{index}", auth(http.HandlerFunc(bookHandler.GetChapter)))
 	mux.Handle("GET /api/v1/chapters/{id}", auth(http.HandlerFunc(bookHandler.GetChapterDirect)))
 

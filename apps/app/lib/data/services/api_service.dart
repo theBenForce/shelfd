@@ -13,6 +13,7 @@ import '../models/duplicate_group.dart';
 import '../models/genre.dart';
 import '../models/highlight.dart';
 import '../models/queue_status.dart';
+import '../models/recap.dart';
 import '../models/search_result.dart';
 import '../models/metadata_search_result.dart';
 import '../models/series.dart';
@@ -966,6 +967,26 @@ class ApiService {
     _checkResponse(response);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     return BookChatResponse.fromJson(data);
+  }
+
+  Future<BookRecap> getBookRecap(
+    String bookId, {
+    required int chapterIndex,
+    int paragraphOffset = 0,
+    bool forceRefresh = false,
+  }) async {
+    final response = await client.post(
+      _uri('/api/v1/books/$bookId/recap'),
+      headers: _headers(),
+      body: jsonEncode({
+        'chapter_index': chapterIndex,
+        'paragraph_offset': paragraphOffset,
+        'force_refresh': forceRefresh,
+      }),
+    );
+    _checkResponse(response);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return BookRecap.fromJson(data);
   }
 
   String getUploadJobCoverUrl(String jobId, {int? version}) {
