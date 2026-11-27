@@ -3,6 +3,7 @@ package api_test
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -259,3 +260,67 @@ func TestAPI_ReadalongStageUpload_MatchLinkDedupeAndTimeline(t *testing.T) {
 		t.Fatalf("expected 200 OK streaming linked read-along audio, got %d: %s", streamRec.Code, streamRec.Body.String())
 	}
 }
+
+func TestAPI_ReadalongEmbeddedMultiTrackAudioTracks(t *testing.T) {
+	f := setupAPITest(t)
+	defer f.db.Close()
+	defer f.repo.Close()
+
+	token := f.loginAndGetToken(t)
+
+	epubBytes := buildReadalongEPUB(t, "Multi-Track Read-Along", "Test Author")
+	var epubBody bytes.Buffer
+	epubMpw := multipart.NewWriter(&epubBody)
+	epubPart, _ := epubMpw.CreateFormFile("file", "multitrack.epub")
+	_, _ = epubPart.Write(epubBytes)
+	_ = epubMpw.Close()
+
+	uploadReq := httptest.NewRequest(http.MethodPost, "/api/v1/books/upload", &epubBody)
+	uploadReq.Header.Set("Authorization", "Bearer "+token)
+	uploadReq.Header.Set("Content-Type", epubMpw.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(uploadRec, uploadReq)
+	if uploadRec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted on EPUB upload, got %d: %s", uploadRec.Code, uploadRec.Body.String())
+	}
+	if _, err := f.uploadWorker.ProcessNext(context.Background()); err != nil {
+		t.Fatalf("ProcessNext upload failed: %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/books", nil)
+	listReq.Header.Set("Authorization", "Bearer "+token)
+	listRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(listRec, listReq)
+	var listResp struct {
+		Books []api.BookListItem `json:"books"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil || len(listResp.Books) != 1 {
+		t.Fatalf("expected 1 uploaded book, got %d (err=%v)", len(listResp.Books), err)
+	}
+	bookID := listResp.Books[0].ID
+
+	raReq := httptest.NewRequest(http.MethodGet, "/api/v1/books/"+bookID+"/readalong", nil)
+	raReq.Header.Set("Authorization", "Bearer "+token)
+	raRec := httptest.NewRecorder()
+	f.handler.ServeHTTP(raRec, raReq)
+	if raRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on GET /readalong, got %d: %s", raRec.Code, raRec.Body.String())
+	}
+
+	var raResp api.ReadalongResponse
+	if err := json.Unmarshal(raRec.Body.Bytes(), &raResp); err != nil {
+		t.Fatalf("unmarshal ReadalongResponse: %v", err)
+	}
+	if len(raResp.AudioTracks) != 2 {
+		t.Fatalf("expected 2 embedded audio_tracks, got %d: %+v", len(raResp.AudioTracks), raResp.AudioTracks)
+	}
+	wantTrack0 := "/api/v1/books/" + bookID + "/assets/OEBPS/audio/p1.mp3"
+	wantTrack1 := "/api/v1/books/" + bookID + "/assets/OEBPS/audio/p2.mp3"
+	if raResp.AudioTracks[0].StreamURL != wantTrack0 || raResp.AudioTracks[0].GlobalBegin != 0.0 || raResp.AudioTracks[0].GlobalEnd != 4.0 {
+		t.Errorf("unexpected track[0]: %+v", raResp.AudioTracks[0])
+	}
+	if raResp.AudioTracks[1].StreamURL != wantTrack1 || raResp.AudioTracks[1].GlobalBegin != 4.0 || raResp.AudioTracks[1].GlobalEnd != 9.0 {
+		t.Errorf("unexpected track[1]: %+v", raResp.AudioTracks[1])
+	}
+}
+

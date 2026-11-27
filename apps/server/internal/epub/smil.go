@@ -15,12 +15,22 @@ import (
 
 // SMILPar represents a single <par> synchronization element in a SMIL Media Overlay document.
 type SMILPar struct {
-	ID        string
-	EPUBType  string
-	TextSrc   string
-	AudioSrc  string
-	ClipBegin float64
-	ClipEnd   float64
+	ID         string
+	EPUBType   string
+	TextSrc    string
+	AudioSrc   string
+	ClipBegin  float64
+	ClipEnd    float64
+	HasClipEnd bool
+}
+
+// MediaOverlayTrack represents one ordered audio file in a Media Overlays timeline.
+type MediaOverlayTrack struct {
+	AudioSrc        string  `json:"audio_src"`
+	StreamURL       string  `json:"stream_url,omitempty"`
+	GlobalBegin     float64 `json:"global_begin"`
+	GlobalEnd       float64 `json:"global_end"`
+	DurationSeconds float64 `json:"duration_seconds"`
 }
 
 // MediaOverlaySegment represents a resolved synchronized text/audio segment for a book spine item.
@@ -45,6 +55,7 @@ type MediaOverlaysManifest struct {
 	PlaybackActiveClass string                `json:"playback_active_class"`
 	Narrator            string                `json:"narrator,omitempty"`
 	DurationSeconds     *float64              `json:"duration_seconds,omitempty"`
+	AudioTracks         []MediaOverlayTrack   `json:"audio_tracks,omitempty"`
 	Segments            []MediaOverlaySegment `json:"segments"`
 }
 
@@ -59,6 +70,7 @@ func ParseSMILClock(raw string) (float64, error) {
 		return 0, fmt.Errorf("empty clock value")
 	}
 
+	s = strings.ReplaceAll(s, ",", ".")
 	lower := strings.ToLower(s)
 	if strings.HasPrefix(lower, "npt=") {
 		s = strings.TrimSpace(s[4:])
@@ -100,6 +112,9 @@ func ParseSMILClock(raw string) (float64, error) {
 	// Check colon-separated clock values (hh:mm:ss.fff or mm:ss.fff)
 	if strings.Contains(s, ":") {
 		parts := strings.Split(s, ":")
+		last := strings.TrimSpace(parts[len(parts)-1])
+		last = strings.TrimSuffix(strings.TrimSuffix(last, "s"), "S")
+		parts[len(parts)-1] = last
 		if len(parts) == 3 {
 			hours, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
 			mins, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
@@ -190,6 +205,7 @@ func ParseSMIL(data []byte) ([]SMILPar, error) {
 					if clipEndRaw != "" {
 						if v, err := ParseSMILClock(clipEndRaw); err == nil {
 							currentPar.ClipEnd = v
+							currentPar.HasClipEnd = true
 						}
 					}
 				}
@@ -438,11 +454,11 @@ func (r *Reader) ExtractMediaOverlays() (*MediaOverlaysManifest, error) {
 	// 1. Collect SMIL overlays referenced directly by spine items in spine order
 	for i := range spineChapters {
 		ch := &spineChapters[i]
-		if ch.mediaOverlayID == "" {
+		if ch.mediaOverlayID == "" || visitedOverlays[ch.mediaOverlayID] {
 			continue
 		}
 		smilItem, ok := manifestMap[ch.mediaOverlayID]
-		if !ok {
+		if !ok || visitedOverlays[smilItem.ID] {
 			continue
 		}
 		smilFullPath := smilItem.Href
@@ -518,8 +534,26 @@ func (r *Reader) ExtractMediaOverlays() (*MediaOverlaysManifest, error) {
 	var currentTrackOffset float64
 	var currentTrackMaxEnd float64
 
+	finalizeTrack := func(audioSrc, overlayID string, offset, maxEnd float64) float64 {
+		trackDur := maxEnd
+		if overlayID != "" {
+			if opfDur, ok := overlayDurations[overlayID]; ok && opfDur >= maxEnd {
+				trackDur = opfDur
+			}
+		}
+		if audioSrc != "" {
+			manifest.AudioTracks = append(manifest.AudioTracks, MediaOverlayTrack{
+				AudioSrc:        audioSrc,
+				GlobalBegin:     offset,
+				GlobalEnd:       offset + trackDur,
+				DurationSeconds: trackDur,
+			})
+		}
+		return trackDur
+	}
+
 	for _, entry := range entries {
-		for _, par := range entry.pars {
+		for parIdx, par := range entry.pars {
 			docPath, fragID := splitHrefAndFragment(par.TextSrc, entry.smilPath)
 			var targetChap *spineChapterInfo
 			if docPath != "" {
@@ -544,22 +578,41 @@ func (r *Reader) ExtractMediaOverlays() (*MediaOverlaysManifest, error) {
 				resolvedAudio, _ = splitHrefAndFragment(par.AudioSrc, entry.smilPath)
 			}
 
-			// Determine if this clip starts a new audio track whose local timestamps reset to ~0
+			// Every distinct audio file in SMIL has its own 0-based local clock.
 			if resolvedAudio != "" && prevAudioPath != "" && !strings.EqualFold(resolvedAudio, prevAudioPath) {
-				if par.ClipBegin < currentTrackMaxEnd-0.05 {
-					trackDur := currentTrackMaxEnd
-					if prevOverlayID != "" && prevOverlayID != entry.overlayID {
-						if opfDur, ok := overlayDurations[prevOverlayID]; ok && opfDur >= currentTrackMaxEnd {
-							trackDur = opfDur
-						}
-					}
-					currentTrackOffset += trackDur
-					currentTrackMaxEnd = 0
+				overlayForPrev := ""
+				if prevOverlayID != "" && prevOverlayID != entry.overlayID {
+					overlayForPrev = prevOverlayID
 				}
+				trackDur := finalizeTrack(prevAudioPath, overlayForPrev, currentTrackOffset, currentTrackMaxEnd)
+				currentTrackOffset += trackDur
+				currentTrackMaxEnd = 0
 			}
 
 			clipBegin := par.ClipBegin
 			clipEnd := par.ClipEnd
+			if !par.HasClipEnd {
+				inferred := 0.0
+				if parIdx+1 < len(entry.pars) {
+					nextPar := entry.pars[parIdx+1]
+					nextAudio := ""
+					if nextPar.AudioSrc != "" {
+						nextAudio, _ = splitHrefAndFragment(nextPar.AudioSrc, entry.smilPath)
+					}
+					sameTrack := nextAudio == "" || resolvedAudio == "" || strings.EqualFold(nextAudio, resolvedAudio)
+					if sameTrack && nextPar.ClipBegin > clipBegin {
+						inferred = nextPar.ClipBegin
+					}
+				}
+				if inferred <= clipBegin {
+					if opfDur, ok := overlayDurations[entry.overlayID]; ok && opfDur > clipBegin {
+						inferred = opfDur
+					}
+				}
+				if inferred > clipBegin {
+					clipEnd = inferred
+				}
+			}
 			if clipEnd < clipBegin {
 				clipEnd = clipBegin
 			}
@@ -595,8 +648,15 @@ func (r *Reader) ExtractMediaOverlays() (*MediaOverlaysManifest, error) {
 		}
 	}
 
+	if prevAudioPath != "" {
+		finalizeTrack(prevAudioPath, prevOverlayID, currentTrackOffset, currentTrackMaxEnd)
+	}
+
 	if manifest.DurationSeconds == nil && len(manifest.Segments) > 0 {
 		maxEnd := manifest.Segments[len(manifest.Segments)-1].GlobalEnd
+		if len(manifest.AudioTracks) > 0 && manifest.AudioTracks[len(manifest.AudioTracks)-1].GlobalEnd > maxEnd {
+			maxEnd = manifest.AudioTracks[len(manifest.AudioTracks)-1].GlobalEnd
+		}
 		if maxEnd > 0 {
 			manifest.DurationSeconds = &maxEnd
 		}
