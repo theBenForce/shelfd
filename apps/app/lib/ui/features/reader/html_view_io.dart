@@ -451,11 +451,6 @@ class _NativeEpubWebViewFrameState extends State<_NativeEpubWebViewFrame> {
       NavigationDelegate(
         onPageFinished: (_) {
           created.applyViewportFit();
-          Future<void>.delayed(const Duration(milliseconds: 120), () {
-            if (_liveControllers[created.viewKey] == created) {
-              created.applyViewportFit();
-            }
-          });
           final hl = _lastHighlight;
           if (hl != null) {
             created.applyHighlight(hl);

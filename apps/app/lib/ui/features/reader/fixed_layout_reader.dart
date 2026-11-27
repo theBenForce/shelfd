@@ -1125,6 +1125,19 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
     });
   }
 
+  (double, double) _frameRenderDimensions(double pw, double ph) {
+    if (!requiresNativeMediaCookie) {
+      return (pw, ph);
+    }
+    const maxNativeEdge = 1280.0;
+    final longest = max(pw, ph);
+    if (longest <= maxNativeEdge) {
+      return (pw, ph);
+    }
+    final ratio = maxNativeEdge / longest;
+    return (pw * ratio, ph * ratio);
+  }
+
   Widget _buildSpreadStage(
     BuildContext context,
     FixedSpread spread,
@@ -1173,6 +1186,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
 
       final displayW = pw * scale;
       final displayH = ph * scale;
+      final (renderW, renderH) = _frameRenderDimensions(pw, ph);
       final viewKey = _pageViewKey(page);
       final url = _buildPageUrl(page);
 
@@ -1193,14 +1207,17 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
             borderRadius: BorderRadius.circular(4),
           ),
           clipBehavior: Clip.antiAlias,
-          child: buildHtmlFrame(
-            viewKey: viewKey,
-            url: url,
-            width: displayW,
-            height: displayH,
-            onReadalongClick: _handleReadalongClick,
-            onToggleControls: _toggleControls,
-            onPageDimensions: (w, h) => _recordDetectedPageDimensions(page, w, h),
+          child: FittedBox(
+            fit: BoxFit.contain,
+            child: buildHtmlFrame(
+              viewKey: viewKey,
+              url: url,
+              width: renderW,
+              height: renderH,
+              onReadalongClick: _handleReadalongClick,
+              onToggleControls: _toggleControls,
+              onPageDimensions: (w, h) => _recordDetectedPageDimensions(page, w, h),
+            ),
           ),
         ),
       );
@@ -1219,6 +1236,8 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
       final leftDisplayW = leftW * scale;
       final rightDisplayW = rightW * scale;
       final displayH = combinedH * scale;
+      final (leftRenderW, leftRenderH) = _frameRenderDimensions(leftW, leftH);
+      final (rightRenderW, rightRenderH) = _frameRenderDimensions(rightW, rightH);
 
       final leftViewKey = _pageViewKey(leftPage);
       final rightViewKey = _pageViewKey(rightPage);
@@ -1249,15 +1268,18 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   borderRadius: BorderRadius.horizontal(left: Radius.circular(4)),
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: buildHtmlFrame(
-                  viewKey: leftViewKey,
-                  url: leftUrl,
-                  width: leftDisplayW,
-                  height: displayH,
-                  onReadalongClick: _handleReadalongClick,
-                  onToggleControls: _toggleControls,
-                  onPageDimensions: (w, h) =>
-                      _recordDetectedPageDimensions(leftPage, w, h),
+                child: FittedBox(
+                  fit: BoxFit.contain,
+                  child: buildHtmlFrame(
+                    viewKey: leftViewKey,
+                    url: leftUrl,
+                    width: leftRenderW,
+                    height: leftRenderH,
+                    onReadalongClick: _handleReadalongClick,
+                    onToggleControls: _toggleControls,
+                    onPageDimensions: (w, h) =>
+                        _recordDetectedPageDimensions(leftPage, w, h),
+                  ),
                 ),
               ),
               Container(
@@ -1281,15 +1303,18 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: buildHtmlFrame(
-                  viewKey: rightViewKey,
-                  url: rightUrl,
-                  width: rightDisplayW,
-                  height: displayH,
-                  onReadalongClick: _handleReadalongClick,
-                  onToggleControls: _toggleControls,
-                  onPageDimensions: (w, h) =>
-                      _recordDetectedPageDimensions(rightPage, w, h),
+                child: FittedBox(
+                  fit: BoxFit.contain,
+                  child: buildHtmlFrame(
+                    viewKey: rightViewKey,
+                    url: rightUrl,
+                    width: rightRenderW,
+                    height: rightRenderH,
+                    onReadalongClick: _handleReadalongClick,
+                    onToggleControls: _toggleControls,
+                    onPageDimensions: (w, h) =>
+                        _recordDetectedPageDimensions(rightPage, w, h),
+                  ),
                 ),
               ),
             ],
