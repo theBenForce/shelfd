@@ -155,6 +155,7 @@ class _FakeAudioPlayerNotifier extends AudioPlayerNotifier {
     String? fileId,
     double? initialPosition,
     bool autoPlay = false,
+    List<ReadalongAudioTrack>? audioTracks,
   }) async {
     state = _initial.copyWith(book: book);
   }

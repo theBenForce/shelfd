@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../data/models/book.dart';
+import '../../../platform/wake_lock.dart';
 import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
@@ -100,18 +101,30 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   String? _lastHighlightedFragmentId;
   bool? _lastHighlightedPlaying;
   final Map<String, Size> _detectedPageSizes = <String, Size>{};
+  ScreenWakeLock? _wakeLock;
+  bool _wakeLockActive = false;
 
   bool get _hasReadalong =>
       widget.book.canReadAlong ||
       (_readalongManifest?.hasReadalong ?? false) ||
       (_readalongManifest?.segments.isNotEmpty ?? false);
 
+  void _syncWakeLock(AudioPlayerState audioState) {
+    final shouldKeepAwake =
+        audioState.book?.id == widget.book.id && audioState.isPlaying;
+    if (_wakeLockActive == shouldKeepAwake) return;
+    _wakeLockActive = shouldKeepAwake;
+    unawaited(_wakeLock?.setEnabled(shouldKeepAwake));
+  }
+
   @override
   void initState() {
     super.initState();
+    _wakeLock = ref.read(screenWakeLockProvider);
     _readalongManifest = widget.initialReadalongManifest;
     _cookieReady = !requiresNativeMediaCookie;
     _resolveInitialSpread();
+    _syncWakeLock(ref.read(audioPlayerProvider));
     if (!_cookieReady) {
       Future.microtask(_prepareNativeMediaCookie);
     }
@@ -310,6 +323,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   }
 
   void _onAudioStateChanged(AudioPlayerState audioState, {bool forceSyncSpread = false}) {
+    _syncWakeLock(audioState);
     if (audioState.book?.id != widget.book.id) {
       if (_activeSegment != null) {
         _activeSegment = null;
@@ -474,6 +488,10 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
 
   @override
   void dispose() {
+    if (_wakeLockActive) {
+      _wakeLockActive = false;
+      unawaited(_wakeLock?.setEnabled(false));
+    }
     _mediaTokenRefreshTimer?.cancel();
     _focusNode.dispose();
     super.dispose();

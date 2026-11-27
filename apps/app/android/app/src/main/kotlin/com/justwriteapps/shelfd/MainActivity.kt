@@ -3,6 +3,7 @@ package com.justwriteapps.shelfd
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import android.webkit.CookieManager
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.CommonStatusCodes
@@ -16,6 +17,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : AudioServiceActivity() {
     private var qrChannel: MethodChannel? = null
+    private var wakeLockChannel: MethodChannel? = null
     private var pendingPairUri: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,11 +33,20 @@ class MainActivity : AudioServiceActivity() {
         )
         qrChannel = channel
         channel.setMethodCallHandler(::handleMethodCall)
+
+        val wlChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            WAKELOCK_CHANNEL_NAME
+        )
+        wakeLockChannel = wlChannel
+        wlChannel.setMethodCallHandler(::handleWakeLockCall)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         qrChannel?.setMethodCallHandler(null)
         qrChannel = null
+        wakeLockChannel?.setMethodCallHandler(null)
+        wakeLockChannel = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
@@ -127,7 +138,24 @@ class MainActivity : AudioServiceActivity() {
             }
     }
 
+    private fun handleWakeLockCall(call: MethodCall, result: MethodChannel.Result) {
+        if (call.method == "setKeepScreenOn") {
+            val enabled = call.argument<Boolean>("enabled") ?: false
+            runOnUiThread {
+                if (enabled) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+                result.success(enabled)
+            }
+        } else {
+            result.notImplemented()
+        }
+    }
+
     companion object {
         private const val CHANNEL_NAME = "com.justwriteapps.shelfd/qr_scanner"
+        private const val WAKELOCK_CHANNEL_NAME = "com.justwriteapps.shelfd/wakelock"
     }
 }
