@@ -1,10 +1,8 @@
 ---
 name: principle-boundary-discipline
 description: "Apply when wiring validation, error handling, or framework adapters. Concentrate guards at system boundaries (CLI, config, network, external APIs); trust internal types and keep business logic in pure functions."
+user-invocable: false
 ---
-
-**Antigravity port.** Load the pstack-harness-adapter skill before following this skill. It replaces Cursor tool, model, history, scheduling, and authorization instructions below.
-
 
 # Boundary Discipline
 

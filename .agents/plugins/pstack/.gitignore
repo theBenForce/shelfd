@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Logs & temp test outputs
+*.log
+scratch/
+.system_generated/
