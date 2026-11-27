@@ -1,3 +1,10 @@
+## [1.37.1](https://github.com/theBenForce/shelfd/compare/v1.37.0...v1.37.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **reader:** fix multi-track read-along timeline, FittedBox page scaling, and screen wake lock ([#122](https://github.com/theBenForce/shelfd/issues/122)) ([056c34e](https://github.com/theBenForce/shelfd/commit/056c34e3a770250b7e7709503bf2fb39d685de4e))
+
 # [1.37.0](https://github.com/theBenForce/shelfd/compare/v1.36.0...v1.37.0) (2026-11-27)
 
 
