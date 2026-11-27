@@ -1,79 +1,186 @@
-# Install pstack for Antigravity
+# open-pstack
 
-From your pstack-ports checkout, use the Antigravity CLI:
+[![CI](https://github.com/ericlitman/open-pstack/actions/workflows/ci.yml/badge.svg)](https://github.com/ericlitman/open-pstack/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/ericlitman/open-pstack)](https://github.com/ericlitman/open-pstack/releases/latest)
+[![MIT license](https://img.shields.io/github/license/ericlitman/open-pstack)](LICENSE)
 
-```sh
-agy plugin install ./antigravity
-agy plugin list --json
+**Open Pstack brings [Lauren Tan (@poteto)](https://x.com/poteto)'s [pstack](https://github.com/cursor/plugins/tree/main/pstack) to Claude Code, Codex, and Google Antigravity.** Its job is to stay as close to her original work as possible while translating the parts that depend on Cursor.
+
+Lauren built pstack from the skills she uses to ship code at Cursor. In a [55-minute interview with Denis Labelle](https://x.com/DenisLabelle/status/2091337807939706928), she says that she shipped 1,000 pull requests in one month after steadily improving how her agents work and verify their results.
+
+> If you want to go fast, go deep first.
+
+Open Pstack is an unofficial community project that makes pstack work in Claude Code and Codex. If Cursor is your main coding environment, use [Lauren's original pstack](https://github.com/cursor/plugins/tree/main/pstack). If Claude Code, Codex, or Google Antigravity is your main coding environment, use this repository.
+
+## What pstack does
+
+pstack is a plugin for coding agents. It is not a new model or a hosted service. It gives your agent engineering rules, step-by-step workflows for different kinds of work, focused skills, and small local tools.
+
+The normal entry point is `poteto-mode`. You give it a task in plain language. It then:
+
+- reads the task and chooses a workflow that fits;
+- learns how the current system works before changing it;
+- compares designs when the choice matters;
+- favors small, simple changes over extra machinery;
+- asks several models to challenge important decisions when useful;
+- runs the code and checks real behavior instead of stopping at “the tests pass”; and
+- carries the work through review, continuous integration (CI), and a ready-to-merge pull request when asked.
+
+![How pstack routes a task through focused skills, real-app proof, and a review-ready pull request](assets/pstack-workflow.png)
+
+pstack does not ask you to trust an agent on day one. It helps the agent leave evidence you can inspect. Start with supervised work. Let it run more work in parallel only after its checks have earned that trust in your own repositories.
+
+## Install
+
+You need a current Claude Code, Codex, or Google Antigravity installation. For the full four-model review, install and sign in to the Claude Code, Codex, and Grok command-line tools. [Bun](https://bun.sh) runs the small local tool that starts models outside the app you are using. You can still use the core workflows with fewer models.
+
+### Claude Code
+
+Run these commands inside Claude Code:
+
+```text
+/plugin marketplace add ericlitman/open-pstack
+/plugin install pstack@open-pstack
+/reload-plugins
 ```
 
-Expect plugin `pstack` with 57 skills (56 pinned plus pstack-harness-adapter) and six agents. In the App or IDE, you can
-instead copy this entire directory into `<project>/.agents/plugins/pstack/`
-for one workspace, or `~/.gemini/config/plugins/pstack/` for all workspaces.
-Do not merge with an existing pstack directory without reviewing its changes.
-CLI-managed installation paths differ; let `agy plugin install` manage them.
+### Codex
 
-Start a new conversation and invoke `/poteto-mode`, or ask for the bundled
-poteto-mode skill. It does not auto-load. Check the discovered file path if
-another installation provides the same skill names.
+Run these commands in your shell:
 
-## Choose worker models
-
-The six native roles are poteto-agent, comment-sicko, pstack-researcher,
-pstack-reviewer, pstack-reviewer-alt, and pstack-synthesizer. The
-[adapter](ADAPTER.md) maps upstream workflow roles to these names.
-All roles default to `inherit`.
-
-From your pstack-ports checkout, run the setup command against the installed
-plugin directory. For a global App installation:
-
-```sh
-node antigravity/configure-models.mjs "$HOME/.gemini/config/plugins/pstack"
+```shell
+codex plugin marketplace add ericlitman/open-pstack --ref main
+codex plugin add pstack@open-pstack
 ```
 
-For a workspace installation, pass `<project>/.agents/plugins/pstack` instead.
-For a CLI installation, get the installed path from `agy plugin list --json`.
-The installed bundle also includes configure-models.mjs, so you can run that
-copy after moving or removing the source checkout.
+Turn on Codex subagents in `~/.codex/config.toml` so pstack can compare work in parallel:
 
-On first run, the command creates `~/.config/pstack-ports/antigravity-models.json`
-with all six roles set to `inherit`. If `XDG_CONFIG_HOME` is set, it uses that
-directory instead of `~/.config`. Settings stay outside the plugin bundle.
-Edit this file to choose `inherit`, `flash`, or `pro` per role, then rerun the
-same command. Omitted roles reset to `inherit`. Unknown roles, invalid tiers,
-malformed JSON, or missing agent model fields fail before agent files change.
-
-To keep separate settings for a project, pass an external settings file as the
-second argument. A missing file is initialized with all-inherit defaults:
-
-```sh
-node antigravity/configure-models.mjs /path/to/installed/pstack /path/to/project-models.json
+```toml
+[features]
+multi_agent = true
 ```
 
-The command changes only each agent's frontmatter `model:` field. It preserves
-other fields, prompts, and line endings. Reapplying unchanged settings writes
-no agent files. Reapply after plugin updates or reinstallation, then start a
-new Antigravity conversation. The command does not install a plugin or select
-a model through the App UI.
+Start a new Codex task after installation so it can discover the new skills and setting.
 
-Antigravity's documented agent configuration selects tiers, not arbitrary
-provider/model IDs. Different tiers do not establish different model families.
-The default review panel is not multi-model. Subagents are documented for the
-App and CLI; standalone IDE support must be checked against its available tools.
-Do not promise delegation when invoke_subagent is absent.
+### Google Antigravity
 
-## Check the port
+Copy or clone the plugin into your Antigravity plugins directory (e.g. `~/.gemini/config/plugins/pstack`). Antigravity automatically detects skills in installed plugin directories.
 
-From the source checkout, run `agy plugin validate ./antigravity --strict`.
-After installation, confirm the catalog with `agy plugin list --json`. Ask
-the agent to read the bundled bro skill and its adapter. In the App or CLI,
-give pstack-researcher a bounded report-only file lookup. Check its model,
-workspace, evidence, and absence of file changes. Then test poteto-agent on a
-disposable Git repository before using it for real work.
+## Get started
 
-Verified with agy 1.4.1: strict validation has no findings, native installation
-discovers all 57 skills and six agents, and installed definitions remain valid
-after applying flash and pro settings. Tests use an isolated home directory
-and leave the user's global plugins unchanged. Native CLI checks run when agy
-is available. No model is invoked, so App delegation and actual tier selection
-remain unverified.
+Lauren's original setup has two steps. Open Pstack keeps the same flow.
+
+### 1. Set up the models
+
+In Claude Code, run:
+
+```text
+/pstack:setup-pstack
+```
+
+In Codex, ask:
+
+```text
+Use pstack:setup-pstack to configure pstack.
+```
+
+In Google Antigravity, ask:
+
+```text
+Use pstack:setup-pstack to configure pstack.
+```
+
+Setup checks the models you can actually run, shows how each one will start, and asks before saving the choices. The current default group uses Fable, GPT-5.6 Sol, Grok 4.6, and Opus.
+
+An older model sheet starts using the rolling aliases in memory as soon as this release is installed. Run setup once after updating to persist that migration. It replaces versioned Fable and Opus entries while preserving every role assignment and effort selection.
+
+### 2. Use poteto-mode
+
+Start any task that needs careful engineering with `poteto-mode`.
+
+In Claude Code:
+
+```text
+/pstack:poteto-mode Add saved filters to search. Keep the design simple, verify it in the real app, and open a pull request.
+```
+
+In Codex:
+
+```text
+Use pstack:poteto-mode. Add saved filters to search. Keep the design simple, verify it in the real app, and open a pull request.
+```
+
+In Google Antigravity:
+
+```text
+Work on this in poteto-mode. Add saved filters to search. Keep the design simple, verify it in the real app, and open a pull request.
+```
+
+For that feature, poteto-mode should first understand how search works today. It should decide how the data should be represented before writing code, implement the smallest complete version, run the feature the way a user would, review the result, and prepare the pull request.
+
+That is the main workflow. The other skills are there when poteto-mode needs them or when you want to call one directly.
+
+## Useful skills
+
+| Skill | Use it when |
+| --- | --- |
+| `how` | You want a clear explanation of how part of the system works. |
+| `why` | You want evidence for why the system was built that way. |
+| `architect` | A change crosses a function or module boundary and the design needs to be settled first. |
+| `arena` | You want several complete attempts, followed by a comparison of their best parts. |
+| `interrogate` | You want different models to try to break a design or diff. |
+| `create-verification-skill` | Your project has no repeatable way for an agent to prove real behavior. |
+| `maintain-verification-skill` | The project's verification instructions no longer match the product. |
+| `babysit` | A pull request needs CI failures and review comments handled until it is ready. |
+| `reflect` | A hard task is finished and its lessons should improve the next run. |
+
+Plugin skills include `pstack:` in their name. In Claude Code, invoke a native skill such as `/pstack:architect`. In Codex, ask for the skill, such as `Use pstack:architect for this design.` See the [technical reference](docs/reference.md) for the full list.
+
+## Models and token use
+
+Some pstack workflows use one model. Skills such as `architect`, `arena`, and `interrogate` can run several models in parallel. Each model run uses the subscription and token allowance of its own command-line tool.
+
+`setup-pstack` lets you choose the models, one requested effort per model family, and how many run in parallel. A model from the app you are using runs inside that app. Other models run through their own command-line tools. Open Pstack does not quietly replace a failed model with a weaker one.
+
+## Claude Code and Codex
+
+Both apps read the same pstack skills. Only the way they start those skills and models is different.
+
+| | Claude Code | Codex |
+| --- | --- | --- |
+| Start poteto-mode | Claude loads a small startup instruction that can route non-trivial work into it. You can also run `/pstack:poteto-mode` yourself. | Ask for `pstack:poteto-mode` by name. Codex does not load the Claude startup instruction. |
+| Runs inside the app | Claude models stay inside Claude Code. | The Sol model stays inside Codex. |
+| Other models | Codex and Grok run through their signed-in command-line tools. | Claude and Grok run through their signed-in command-line tools. |
+| Skills and workflows | Shared with Codex. | Shared with Claude Code. |
+
+Grok can take part in a multi-model review. You cannot use Grok as the main app running pstack.
+
+## Learn from the original
+
+Lauren's [pstack guide](https://github.com/cursor/plugins/tree/main/pstack/docs/guide) walks through a real task, verification, and longer unattended runs. It uses Cursor's interface, but the ideas are the same. Use the translated skill invocations above in Claude Code or Codex.
+
+This repository also keeps:
+
+- [the original README](README-UPSTREAM.md), unchanged;
+- [the technical reference](docs/reference.md) for every skill, dependency, and Claude Code or Codex detail;
+- [the upstream sync record](UPSTREAM.md) and update process;
+- [the change record](CHANGES.md) for every adaptation; and
+- [the attribution record](NOTICE.md) for pstack and the imported Cursor Team Kit skills.
+
+## Staying close to Lauren's pstack
+
+Open Pstack 1.4.1 tracks pstack 0.15.1 at Cursor commit [`f8abeddd1862dc73704e3d719dd73df0d51b8c71`](https://github.com/cursor/plugins/commit/f8abeddd1862dc73704e3d719dd73df0d51b8c71).
+
+The two projects have separate version numbers. The pstack version identifies Lauren's upstream content. The Open Pstack version identifies the Claude Code and Codex package built from it.
+
+In this repository, “upstream” means Lauren's original pstack. Open Pstack does not promise instant updates. It records the exact version it follows, reviews new changes in order, and changes only what Claude Code and Codex require. New pstack behavior belongs in Lauren's project first whenever possible.
+
+## Contributing
+
+Fixes for Claude Code or Codex and help bringing over new pstack releases are welcome. Search [GitHub Issues](https://github.com/ericlitman/open-pstack/issues) before opening a new issue. For larger behavior changes, explain why the change belongs in Open Pstack instead of Lauren's original project.
+
+Read [UPSTREAM.md](UPSTREAM.md) before changing content brought over from Lauren's pstack. Pull requests must keep one shared skill tree for Claude Code and Codex and pass the repository's tests, type checks, plugin validation, and static checks.
+
+## License
+
+MIT. pstack was created by Lauren Tan. Open Pstack builds on Michael Denyer's [pstack-claude](https://github.com/michael-denyer/pstack-claude) port and includes attributed MIT-licensed work from Cursor Team Kit and Superpowers. See [NOTICE.md](NOTICE.md) and the preserved license files for details.
