@@ -674,6 +674,14 @@ func RewritePageHTML(rawHTML, bookID, chapterHref string, pageWidth, pageHeight 
 			dw,
 			dh,
 		)
+		extraCSS = fmt.Sprintf(`
+body {
+  width: %dpx !important;
+  height: %dpx !important;
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+}`, dw, dh)
 	} else {
 		extraCSS = `
 body {
@@ -706,6 +714,9 @@ html {
   overflow: hidden !important;
   background-color: #ffffff;
 }
+html[data-shelfd-fit-pending="true"] body {
+  opacity: 0 !important;
+}
 body {
   margin: 0 !important;
   padding: 0 !important;
@@ -718,8 +729,18 @@ body {
 <script>
 (function() {
   ` + fitConfig + `
+  if (document.documentElement) {
+    document.documentElement.setAttribute('data-shelfd-fit-pending', 'true');
+  }
   var reportedDims = false;
   var retryCount = 0;
+
+  function revealPage() {
+    if (document.documentElement) {
+      document.documentElement.removeAttribute('data-shelfd-fit-pending');
+      document.documentElement.setAttribute('data-shelfd-fitted', 'true');
+    }
+  }
 
   function parsePx(val) {
     if (!val) return 0;
@@ -777,6 +798,8 @@ body {
       if (retryCount < 60 && typeof requestAnimationFrame === 'function') {
         retryCount++;
         requestAnimationFrame(fit);
+      } else {
+        revealPage();
       }
       return;
     }
@@ -784,7 +807,10 @@ body {
     var dims = detectDimensions(ww, wh);
     var pageW = dims.w;
     var pageH = dims.h;
-    if (pageW <= 0 || pageH <= 0) return;
+    if (pageW <= 0 || pageH <= 0) {
+      revealPage();
+      return;
+    }
     staticW = pageW;
     staticH = pageH;
 
@@ -802,6 +828,7 @@ body {
     bs.setProperty('transform-origin', '0 0', 'important');
     bs.setProperty('transform', 'scale(' + scale + ')', 'important');
     bs.setProperty('overflow', 'hidden', 'important');
+    revealPage();
 
     if (!reportedDims) {
       reportedDims = true;
@@ -844,6 +871,7 @@ body {
   } else {
     fit();
   }
+  setTimeout(revealPage, 180);
 })();
 </script>`
 

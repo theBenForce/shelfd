@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../data/models/book.dart';
 import '../../../data/models/chapter.dart';
 import '../../../data/models/highlight.dart';
+import '../../../platform/wake_lock.dart';
 import '../../core/responsive.dart';
 import '../../core/shared_layout.dart';
 import '../../core/theme.dart';
@@ -44,6 +46,16 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
   ReadalongManifest? _readalongManifest;
   ReadalongSegment? _activeSegment;
   bool _autoTurnPages = true;
+  ScreenWakeLock? _wakeLock;
+  bool _wakeLockActive = false;
+
+  void _syncWakeLock(AudioPlayerState audioState) {
+    final shouldKeepAwake =
+        audioState.book?.id == widget.bookId && audioState.isPlaying;
+    if (_wakeLockActive == shouldKeepAwake) return;
+    _wakeLockActive = shouldKeepAwake;
+    unawaited(_wakeLock?.setEnabled(shouldKeepAwake));
+  }
 
   int _getSpineIndex(List<SpineItem> spine) {
     if (spine.isEmpty) return -1;
@@ -56,6 +68,7 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
   @override
   void initState() {
     super.initState();
+    _wakeLock = ref.read(screenWakeLockProvider);
     if (widget.initialChapter != null) {
       _currentChapter = widget.initialChapter;
       _activeIdentifier = widget.initialChapter!.id;
@@ -63,6 +76,15 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
       _activeIdentifier = widget.chapterIdentifier ?? widget.chapterIndex ?? 1;
     }
     Future.microtask(() => _initBookAndChapter());
+  }
+
+  @override
+  void dispose() {
+    if (_wakeLockActive) {
+      _wakeLockActive = false;
+      unawaited(_wakeLock?.setEnabled(false));
+    }
+    super.dispose();
   }
 
   Future<void> _initBookAndChapter() async {
@@ -142,6 +164,7 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
   }
 
   void _onAudioStateChanged(AudioPlayerState audioState, List<SpineItem> effectiveSpine) {
+    _syncWakeLock(audioState);
     if (audioState.book?.id != widget.bookId) return;
     final manifest = _readalongManifest;
     if (manifest == null || manifest.segments.isEmpty) return;
@@ -200,7 +223,12 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
           startPos = firstSeg.globalBegin;
         }
       }
-      await notifier.loadBook(targetBook, initialPosition: startPos, autoPlay: true);
+      await notifier.loadBook(
+        targetBook,
+        initialPosition: startPos,
+        autoPlay: true,
+        audioTracks: _readalongManifest?.audioTracks,
+      );
     } else {
       await notifier.togglePlayPause();
     }

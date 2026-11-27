@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shelf/data/models/author.dart';
 import 'package:shelf/data/models/book.dart';
 import 'package:shelf/data/services/api_service.dart';
+import 'package:shelf/platform/wake_lock.dart';
 import 'package:shelf/ui/core/theme.dart';
 import 'package:shelf/ui/features/audiobook/audiobook_player_view.dart';
 import 'package:shelf/ui/features/audiobook/widgets/mini_player_bar.dart';
@@ -13,6 +14,17 @@ import 'package:shelf/ui/features/reader/fixed_layout_reader.dart';
 import 'package:shelf/ui/features/reader/html_view.dart';
 import 'package:shelf/ui/features/reader/reader_view.dart';
 import 'package:shelf/ui/state/providers.dart';
+
+class _RecordingWakeLock implements ScreenWakeLock {
+  final List<bool> calls = <bool>[];
+  bool isEnabled = false;
+
+  @override
+  Future<void> setEnabled(bool enabled) async {
+    calls.add(enabled);
+    isEnabled = enabled;
+  }
+}
 
 class _StubBookDetailNotifier extends BookDetailNotifier {
   final Book mockBook;
@@ -583,6 +595,151 @@ void main() {
         // which is started by play() but never cancelled when toggling away from player view.
         await container.read(audioPlayerProvider.notifier).stop();
         await tester.pump();
+      },
+    );
+
+    testWidgets(
+      'queues multi-track read-along audio playlist and holds screen wake lock only while playing',
+      (tester) async {
+        SharedPreferences.setMockInitialValues({});
+        final prefs = await SharedPreferences.getInstance();
+
+        final manifest = ReadalongManifest.fromJson({
+          'book_id': 'b-long',
+          'has_readalong': true,
+          'has_media_overlays': true,
+          'duration_seconds': 15.0,
+          'audio_tracks': [
+            {
+              'audio_src': 'OEBPS/audio/track1.mp3',
+              'stream_url': '/api/v1/books/b-long/assets/OEBPS/audio/track1.mp3',
+              'global_begin': 0.0,
+              'global_end': 6.0,
+              'duration_seconds': 6.0,
+            },
+            {
+              'audio_src': 'OEBPS/audio/track2.mp3',
+              'stream_url': '/api/v1/books/b-long/assets/OEBPS/audio/track2.mp3',
+              'global_begin': 6.0,
+              'global_end': 15.0,
+              'duration_seconds': 9.0,
+            },
+          ],
+          'segments': [
+            {
+              'chapter_index': 1,
+              'chapter_href': 'OEBPS/xhtml/page01.xhtml',
+              'fragment_id': 'p1_w1',
+              'text': 'Track one word',
+              'audio_src': 'OEBPS/audio/track1.mp3',
+              'clip_begin': 0.0,
+              'clip_end': 6.0,
+              'global_begin': 0.0,
+              'global_end': 6.0,
+            },
+            {
+              'chapter_index': 2,
+              'chapter_href': 'OEBPS/xhtml/page02.xhtml',
+              'fragment_id': 'p2_w1',
+              'text': 'Track two word',
+              'audio_src': 'OEBPS/audio/track2.mp3',
+              'clip_begin': 0.0,
+              'clip_end': 9.0,
+              'global_begin': 6.0,
+              'global_end': 15.0,
+            },
+          ],
+        });
+
+        final book = Book(
+          id: 'b-long',
+          title: 'Long Multi-Track Storybook',
+          layout: 'pre-paginated',
+          bookType: 'ebook',
+          hasReadalong: true,
+          durationSeconds: 15.0,
+          spine: const [
+            SpineItem(
+              id: 'ch1',
+              bookId: 'b-long',
+              chapterIndex: 1,
+              title: 'Page 1',
+              href: 'OEBPS/xhtml/page01.xhtml',
+              pageWidth: 600,
+              pageHeight: 800,
+            ),
+            SpineItem(
+              id: 'ch2',
+              bookId: 'b-long',
+              chapterIndex: 2,
+              title: 'Page 2',
+              href: 'OEBPS/xhtml/page02.xhtml',
+              pageWidth: 600,
+              pageHeight: 800,
+            ),
+          ],
+        );
+
+        final engine = SimulatedAudioPlayerEngine(
+          initialDuration: const Duration(seconds: 15),
+        );
+        final api = _MockReadalongApiService(manifest);
+        final wakeLock = _RecordingWakeLock();
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              sharedPreferencesProvider.overrideWithValue(prefs),
+              apiServiceProvider.overrideWithValue(api),
+              audioPlayerEngineProvider.overrideWithValue(engine),
+              screenWakeLockProvider.overrideWithValue(wakeLock),
+            ],
+            child: MaterialApp(
+              home: FixedLayoutReader(
+                book: book,
+                initialReadalongManifest: manifest,
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        expect(wakeLock.isEnabled, isFalse);
+
+        // Start playback -> queues both tracks in engine.lastPlaylist and enables wake lock.
+        await tester.tap(find.byKey(const Key('readalong-play-pause-button')));
+        await tester.pump();
+        expect(engine.lastPlaylist.length, 2);
+        expect(
+          engine.lastPlaylist[0].url,
+          'http://localhost:8080/api/v1/books/b-long/assets/OEBPS/audio/track1.mp3',
+        );
+        expect(
+          engine.lastPlaylist[1].url,
+          'http://localhost:8080/api/v1/books/b-long/assets/OEBPS/audio/track2.mp3',
+        );
+        expect(wakeLock.isEnabled, isTrue);
+
+        // Advance into track 2 -> turns page and highlights p2_w1.
+        await engine.seek(const Duration(seconds: 8));
+        await tester.pump();
+        expect(find.text('Page 2 of 2'), findsOneWidget);
+        expect(activeFragmentForViewKey('fixed_b-long_2'), 'p2_w1');
+
+        // Pause -> releases wake lock.
+        await tester.tap(find.byKey(const Key('readalong-play-pause-button')));
+        await tester.pump();
+        expect(wakeLock.isEnabled, isFalse);
+
+        // Resume, then unmount reader -> releases wake lock on dispose.
+        await tester.tap(find.byKey(const Key('readalong-play-pause-button')));
+        await tester.pump();
+        expect(wakeLock.isEnabled, isTrue);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        expect(wakeLock.isEnabled, isFalse);
+
+        await engine.stop();
       },
     );
   });

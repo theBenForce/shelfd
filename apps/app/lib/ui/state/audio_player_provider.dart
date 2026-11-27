@@ -12,6 +12,18 @@ import 'providers.dart';
 
 export 'media_session_metadata.dart';
 
+class AudioTrackSource {
+  final String url;
+  final double globalBegin;
+  final double globalEnd;
+
+  const AudioTrackSource({
+    required this.url,
+    required this.globalBegin,
+    required this.globalEnd,
+  });
+}
+
 abstract class AudioPlayerEngine {
   Stream<Duration> get positionStream;
   Stream<Duration?> get durationStream;
@@ -19,6 +31,12 @@ abstract class AudioPlayerEngine {
 
   Future<void> setUrl(
     String url, {
+    Duration? initialPosition,
+    AudioMediaMetadata? metadata,
+    Map<String, String>? headers,
+  });
+  Future<void> setPlaylist(
+    List<AudioTrackSource> tracks, {
     Duration? initialPosition,
     AudioMediaMetadata? metadata,
     Map<String, String>? headers,
@@ -36,6 +54,7 @@ class JustAudioPlayerEngine implements AudioPlayerEngine {
   final AudioPlayer _player;
   final _statusController = StreamController<AudioPlaybackStatus>.broadcast();
   StreamSubscription? _playerStateSub;
+  List<AudioTrackSource> _playlistTracks = const [];
 
   JustAudioPlayerEngine({AudioPlayer? player}) : _player = player ?? AudioPlayer() {
     _playerStateSub = _player.playerStateStream.listen((playerState) {
@@ -55,11 +74,36 @@ class JustAudioPlayerEngine implements AudioPlayerEngine {
     });
   }
 
-  @override
-  Stream<Duration> get positionStream => _player.positionStream;
+  (int, Duration) _resolveTrackPosition(Duration globalPosition) {
+    if (_playlistTracks.isEmpty) return (0, globalPosition);
+    final sec = globalPosition.inMilliseconds / 1000.0;
+    for (int i = 0; i < _playlistTracks.length; i++) {
+      final tr = _playlistTracks[i];
+      if (sec < tr.globalEnd || i == _playlistTracks.length - 1) {
+        final localMs = ((sec - tr.globalBegin) * 1000).round();
+        return (i, Duration(milliseconds: localMs < 0 ? 0 : localMs));
+      }
+    }
+    return (0, Duration.zero);
+  }
 
   @override
-  Stream<Duration?> get durationStream => _player.durationStream;
+  Stream<Duration> get positionStream => _player.positionStream.map((localPos) {
+        if (_playlistTracks.isEmpty) return localPos;
+        final idx = (_player.currentIndex ?? 0).clamp(0, _playlistTracks.length - 1);
+        final offsetMs = (_playlistTracks[idx].globalBegin * 1000).round();
+        return Duration(milliseconds: offsetMs) + localPos;
+      });
+
+  @override
+  Stream<Duration?> get durationStream => _player.durationStream.map((trackDur) {
+        if (_playlistTracks.isEmpty) return trackDur;
+        final totalEnd = _playlistTracks.last.globalEnd;
+        if (totalEnd > 0) {
+          return Duration(milliseconds: (totalEnd * 1000).round());
+        }
+        return trackDur;
+      });
 
   @override
   Stream<AudioPlaybackStatus> get statusStream => _statusController.stream;
@@ -71,6 +115,7 @@ class JustAudioPlayerEngine implements AudioPlayerEngine {
     AudioMediaMetadata? metadata,
     Map<String, String>? headers,
   }) async {
+    _playlistTracks = const [];
     if (!kIsWeb && metadata != null) {
       try {
         await _player.setAudioSource(
@@ -105,6 +150,83 @@ class JustAudioPlayerEngine implements AudioPlayerEngine {
   }
 
   @override
+  Future<void> setPlaylist(
+    List<AudioTrackSource> tracks, {
+    Duration? initialPosition,
+    AudioMediaMetadata? metadata,
+    Map<String, String>? headers,
+  }) async {
+    if (tracks.isEmpty) return;
+    if (tracks.length == 1) {
+      await setUrl(
+        tracks.first.url,
+        initialPosition: initialPosition,
+        metadata: metadata,
+        headers: headers,
+      );
+      return;
+    }
+
+    _playlistTracks = List<AudioTrackSource>.unmodifiable(tracks);
+    final (initialIndex, localPos) =
+        _resolveTrackPosition(initialPosition ?? Duration.zero);
+
+    ConcatenatingAudioSource buildSource({required bool includeTag}) {
+      return ConcatenatingAudioSource(
+        children: List<AudioSource>.generate(tracks.length, (i) {
+          final tr = tracks[i];
+          final trackDurMs = ((tr.globalEnd - tr.globalBegin) * 1000).round();
+          return AudioSource.uri(
+            Uri.parse(tr.url),
+            headers: headers,
+            tag: includeTag && metadata != null
+                ? MediaItem(
+                    id: '${metadata.id}_$i',
+                    title: metadata.title,
+                    artist: metadata.artist,
+                    album: metadata.album,
+                    artUri: metadata.artworkUri,
+                    artHeaders: metadata.artworkHeaders,
+                    duration: trackDurMs > 0
+                        ? Duration(milliseconds: trackDurMs)
+                        : metadata.duration,
+                  )
+                : null,
+          );
+        }),
+      );
+    }
+
+    if (!kIsWeb && metadata != null) {
+      try {
+        await _player.setAudioSource(
+          buildSource(includeTag: true),
+          initialIndex: initialIndex,
+          initialPosition: localPos,
+        );
+      } on AssertionError {
+        await _player.setAudioSource(
+          buildSource(includeTag: false),
+          initialIndex: initialIndex,
+          initialPosition: localPos,
+        );
+      } on StateError {
+        await _player.setAudioSource(
+          buildSource(includeTag: false),
+          initialIndex: initialIndex,
+          initialPosition: localPos,
+        );
+      }
+    } else {
+      await _player.setAudioSource(
+        buildSource(includeTag: false),
+        initialIndex: initialIndex,
+        initialPosition: localPos,
+      );
+    }
+  }
+
+  @override
   Future<void> play() => _player.play();
 
   @override
@@ -114,7 +236,13 @@ class JustAudioPlayerEngine implements AudioPlayerEngine {
   Future<void> stop() => _player.stop();
 
   @override
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) {
+    if (_playlistTracks.isNotEmpty) {
+      final (idx, localOffset) = _resolveTrackPosition(position);
+      return _player.seek(localOffset, index: idx);
+    }
+    return _player.seek(position);
+  }
 
   @override
   Future<void> setSpeed(double speed) => _player.setSpeed(speed);
@@ -140,6 +268,7 @@ class SimulatedAudioPlayerEngine implements AudioPlayerEngine {
   double _currentSpeed = 1.0;
   double _currentVolume = 1.0;
   String? lastUrl;
+  List<AudioTrackSource> lastPlaylist = const [];
   Map<String, String>? lastHeaders;
   AudioMediaMetadata? lastMetadata;
   Timer? _ticker;
@@ -171,8 +300,31 @@ class SimulatedAudioPlayerEngine implements AudioPlayerEngine {
     Map<String, String>? headers,
   }) async {
     lastUrl = url;
+    lastPlaylist = const [];
     lastHeaders = headers;
     lastMetadata = metadata;
+    _currentPosition = initialPosition ?? Duration.zero;
+    _currentStatus = AudioPlaybackStatus.ready;
+    _statusController.add(_currentStatus);
+    _positionController.add(_currentPosition);
+    _durationController.add(_currentDuration);
+  }
+
+  @override
+  Future<void> setPlaylist(
+    List<AudioTrackSource> tracks, {
+    Duration? initialPosition,
+    AudioMediaMetadata? metadata,
+    Map<String, String>? headers,
+  }) async {
+    lastPlaylist = List<AudioTrackSource>.unmodifiable(tracks);
+    lastUrl = tracks.isNotEmpty ? tracks.first.url : null;
+    lastHeaders = headers;
+    lastMetadata = metadata;
+    if (tracks.isNotEmpty && tracks.last.globalEnd > 0) {
+      _currentDuration =
+          Duration(milliseconds: (tracks.last.globalEnd * 1000).round());
+    }
     _currentPosition = initialPosition ?? Duration.zero;
     _currentStatus = AudioPlaybackStatus.ready;
     _statusController.add(_currentStatus);
@@ -452,7 +604,13 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     return chapters.first;
   }
 
-  Future<void> loadBook(Book book, {String? fileId, double? initialPosition, bool autoPlay = false}) async {
+  Future<void> loadBook(
+    Book book, {
+    String? fileId,
+    double? initialPosition,
+    bool autoPlay = false,
+    List<ReadalongAudioTrack>? audioTracks,
+  }) async {
     final isSameLoadedBook = fileId == null &&
         state.book?.id == book.id &&
         state.status != AudioPlaybackStatus.idle &&
@@ -519,13 +677,18 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
 
       final progress = await _repository.getProgress(book.id);
       final double targetPosSec = initialPosition ?? progress.positionSeconds;
+      final trackEndSec = (audioTracks != null && audioTracks.isNotEmpty)
+          ? audioTracks.last.globalEnd
+          : 0.0;
       final Duration initialDuration = book.durationSeconds != null && book.durationSeconds! > 0
           ? Duration(milliseconds: (book.durationSeconds! * 1000).round())
-          : (chapters.isNotEmpty
-              ? Duration(
-                  milliseconds: ((chapters.last.startOffsetSec + chapters.last.durationSec) * 1000).round(),
-                )
-              : Duration.zero);
+          : (trackEndSec > 0
+              ? Duration(milliseconds: (trackEndSec * 1000).round())
+              : (chapters.isNotEmpty
+                  ? Duration(
+                      milliseconds: ((chapters.last.startOffsetSec + chapters.last.durationSec) * 1000).round(),
+                    )
+                  : Duration.zero));
 
       final streamUrl = fileId != null
           ? _repository.getFileStreamUrl(book.id, fileId)
@@ -543,12 +706,31 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
       );
       final streamHeaders = await _resolveStreamAuthHeaders(book.id, streamUrl);
 
-      await _engine.setUrl(
-        streamUrl,
-        initialPosition: startPos,
-        metadata: initialMetadata,
-        headers: streamHeaders,
-      );
+      if (fileId == null && audioTracks != null && audioTracks.length > 1) {
+        final apiService = ref.read(apiServiceProvider);
+        final resolvedTracks = audioTracks
+            .map(
+              (tr) => AudioTrackSource(
+                url: apiService.resolveMediaStreamUrl(tr.streamUrl),
+                globalBegin: tr.globalBegin,
+                globalEnd: tr.globalEnd,
+              ),
+            )
+            .toList(growable: false);
+        await _engine.setPlaylist(
+          resolvedTracks,
+          initialPosition: startPos,
+          metadata: initialMetadata,
+          headers: streamHeaders,
+        );
+      } else {
+        await _engine.setUrl(
+          streamUrl,
+          initialPosition: startPos,
+          metadata: initialMetadata,
+          headers: streamHeaders,
+        );
+      }
       if (progress.speed != 1.0) {
         await _engine.setSpeed(progress.speed);
       }
@@ -588,9 +770,10 @@ class AudioPlayerNotifier extends Notifier<AudioPlayerState> {
     try {
       state = state.copyWith(status: AudioPlaybackStatus.playing);
       _syncMediaSession(forcePosition: true);
-      await _engine.play();
       _startPeriodicSync();
+      await _engine.play();
     } catch (e) {
+      _syncTimer?.cancel();
       state = state.copyWith(
         status: AudioPlaybackStatus.error,
         errorMessage: 'Failed to start playback: $e',

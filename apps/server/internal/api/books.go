@@ -1852,6 +1852,7 @@ type ReadalongResponse struct {
 	Narrator            string                     `json:"narrator,omitempty"`
 	DurationSeconds     *float64                   `json:"duration_seconds,omitempty"`
 	AudioStreamURL      string                     `json:"audio_stream_url,omitempty"`
+	AudioTracks         []epub.MediaOverlayTrack   `json:"audio_tracks,omitempty"`
 	Segments            []epub.MediaOverlaySegment `json:"segments"`
 }
 
@@ -1888,6 +1889,13 @@ func (h *BookHandler) GetBookReadalong(w http.ResponseWriter, r *http.Request) {
 
 func (h *BookHandler) buildReadalongResponse(ctx context.Context, book *repository.Book) ReadalongResponse {
 	files, _ := h.repo.GetBookFilesByBookID(ctx, book.ID)
+	hasExternalAudio := false
+	for _, f := range files {
+		if f.FileType == "audiobook" || f.FileType == "audio" {
+			hasExternalAudio = true
+			break
+		}
+	}
 	hasReadalong, durationSeconds := resolveReadalongStatus(ctx, h.repo, book, files)
 
 	resp := ReadalongResponse{
@@ -1925,6 +1933,19 @@ func (h *BookHandler) buildReadalongResponse(ctx context.Context, book *reposito
 					resp.Segments = manifest.Segments
 					if resp.AudioStreamURL == "" {
 						resp.AudioStreamURL = fmt.Sprintf("/api/v1/audiobooks/%s/stream", book.ID)
+					}
+					if !hasExternalAudio && len(manifest.AudioTracks) > 0 {
+						tracks := make([]epub.MediaOverlayTrack, 0, len(manifest.AudioTracks))
+						for _, tr := range manifest.AudioTracks {
+							if tr.AudioSrc == "" {
+								continue
+							}
+							tr.StreamURL = fmt.Sprintf("/api/v1/books/%s/assets/%s", book.ID, strings.TrimPrefix(tr.AudioSrc, "/"))
+							tracks = append(tracks, tr)
+						}
+						if len(tracks) > 0 {
+							resp.AudioTracks = tracks
+						}
 					}
 				}
 			}

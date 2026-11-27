@@ -272,8 +272,16 @@ void main() {
 
     final frameFinder = find.byKey(const Key('html-frame-fixed_spidey-28_1'));
     expect(frameFinder, findsOneWidget);
-    final frameSize = tester.getSize(frameFinder);
-    expect(frameSize.width, closeTo(374.0, 0.5));
-    expect(frameSize.height, closeTo(374.0, 0.5));
+    final fittedBoxFinder = find.ancestor(
+      of: frameFinder,
+      matching: find.byType(FittedBox),
+    );
+    expect(fittedBoxFinder, findsOneWidget);
+    final frameNaturalSize = tester.getSize(frameFinder);
+    expect(frameNaturalSize.width, closeTo(1024.0, 0.5));
+    expect(frameNaturalSize.height, closeTo(1024.0, 0.5));
+    final renderedRect = tester.getRect(frameFinder);
+    expect(renderedRect.width, closeTo(374.0, 0.5));
+    expect(renderedRect.height, closeTo(374.0, 0.5));
   });
 }

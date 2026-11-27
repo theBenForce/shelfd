@@ -416,6 +416,36 @@ class ReadalongSegment {
   }
 }
 
+class ReadalongAudioTrack {
+  final String audioSrc;
+  final String streamUrl;
+  final double globalBegin;
+  final double globalEnd;
+  final double durationSeconds;
+
+  const ReadalongAudioTrack({
+    required this.audioSrc,
+    required this.streamUrl,
+    required this.globalBegin,
+    required this.globalEnd,
+    required this.durationSeconds,
+  });
+
+  factory ReadalongAudioTrack.fromJson(Map<String, dynamic> json) {
+    final begin = (json['global_begin'] as num?)?.toDouble() ?? 0.0;
+    final end = (json['global_end'] as num?)?.toDouble() ?? begin;
+    final dur = (json['duration_seconds'] as num?)?.toDouble() ??
+        (end > begin ? end - begin : 0.0);
+    return ReadalongAudioTrack(
+      audioSrc: json['audio_src'] as String? ?? '',
+      streamUrl: json['stream_url'] as String? ?? '',
+      globalBegin: begin,
+      globalEnd: end,
+      durationSeconds: dur,
+    );
+  }
+}
+
 class ReadalongManifest {
   final String bookId;
   final bool hasReadalong;
@@ -425,6 +455,7 @@ class ReadalongManifest {
   final String? narrator;
   final double? durationSeconds;
   final String audioStreamUrl;
+  final List<ReadalongAudioTrack> audioTracks;
   final List<ReadalongSegment> segments;
 
   const ReadalongManifest({
@@ -436,6 +467,7 @@ class ReadalongManifest {
     this.narrator,
     this.durationSeconds,
     this.audioStreamUrl = '',
+    this.audioTracks = const [],
     this.segments = const [],
   });
 
@@ -464,6 +496,7 @@ class ReadalongManifest {
 
   factory ReadalongManifest.fromJson(Map<String, dynamic> json) {
     final rawSegments = json['segments'] as List<dynamic>? ?? const [];
+    final rawTracks = json['audio_tracks'] as List<dynamic>? ?? const [];
     final activeCls = (json['active_class'] as String?)?.trim();
     final playbackCls = (json['playback_active_class'] as String?)?.trim();
     return ReadalongManifest(
@@ -479,6 +512,11 @@ class ReadalongManifest {
       narrator: json['narrator'] as String?,
       durationSeconds: (json['duration_seconds'] as num?)?.toDouble(),
       audioStreamUrl: json['audio_stream_url'] as String? ?? '',
+      audioTracks: rawTracks
+          .whereType<Map<String, dynamic>>()
+          .map(ReadalongAudioTrack.fromJson)
+          .where((t) => t.streamUrl.isNotEmpty)
+          .toList(),
       segments: rawSegments
           .whereType<Map<String, dynamic>>()
           .map(ReadalongSegment.fromJson)

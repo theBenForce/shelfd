@@ -225,3 +225,113 @@ func TestExtractMediaOverlays_EPUB3ReadAlong(t *testing.T) {
 		t.Errorf("expected RewritePageHTML bridge to scope highlights by chapterHref")
 	}
 }
+
+func TestParseSMILClock_ExtendedFormats(t *testing.T) {
+	tests := []struct {
+		input string
+		want  float64
+	}{
+		{"0:01:05.5s", 65.5},
+		{"1:05.25s", 65.25},
+		{"0:01:05,5", 65.5},
+		{"01:05,25", 65.25},
+	}
+	for _, tc := range tests {
+		got, err := epub.ParseSMILClock(tc.input)
+		if err != nil {
+			t.Errorf("ParseSMILClock(%q) unexpected error: %v", tc.input, err)
+			continue
+		}
+		if math.Abs(got-tc.want) > 1e-4 {
+			t.Errorf("ParseSMILClock(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestExtractMediaOverlays_MultiTrackLeadingSilenceSharedOverlayAndOmittedClipEnd(t *testing.T) {
+	files := map[string][]byte{
+		"META-INF/container.xml": []byte(`<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`),
+		"OEBPS/content.opf": []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="uid">urn:isbn:9780000000002</dc:identifier>
+    <dc:title>Longer Read-Along</dc:title>
+    <dc:creator>Test Author</dc:creator>
+    <meta property="rendition:layout">pre-paginated</meta>
+    <meta property="media:duration" refines="#ov1">0:00:02.000</meta>
+    <meta property="media:duration" refines="#ov2">0:00:08.000</meta>
+  </metadata>
+  <manifest>
+    <item id="p1" href="xhtml/page01.xhtml" media-type="application/xhtml+xml" media-overlay="ov1"/>
+    <item id="p2" href="xhtml/page02.xhtml" media-type="application/xhtml+xml" media-overlay="ov2"/>
+    <item id="p3" href="xhtml/page03.xhtml" media-type="application/xhtml+xml" media-overlay="ov2"/>
+    <item id="ov1" href="smil/page01.smil" media-type="application/smil+xml"/>
+    <item id="ov2" href="smil/page02.smil" media-type="application/smil+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="p1"/>
+    <itemref idref="p2"/>
+    <itemref idref="p3"/>
+  </spine>
+</package>`),
+		"OEBPS/xhtml/page01.xhtml": []byte(`<!DOCTYPE html><html><head><meta name="viewport" content="width=600, height=800"/></head><body><p><span id="w1">Title</span></p></body></html>`),
+		"OEBPS/xhtml/page02.xhtml": []byte(`<!DOCTYPE html><html><head><meta name="viewport" content="width=600, height=800"/></head><body><p><span id="w2">Chapter</span> <span id="w3">one</span></p></body></html>`),
+		"OEBPS/xhtml/page03.xhtml": []byte(`<!DOCTYPE html><html><head><meta name="viewport" content="width=600, height=800"/></head><body><p><span id="w4">End</span></p></body></html>`),
+		// Track 1 ends at 1.2s (refined duration 2.0s).
+		"OEBPS/smil/page01.smil": []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<smil xmlns="http://www.w3.org/ns/SMIL" version="3.0">
+  <body>
+    <par id="s1"><text src="../xhtml/page01.xhtml#w1"/><audio src="../audio/track1.mp3" clipBegin="0.0s" clipEnd="1.2s"/></par>
+  </body>
+</smil>`),
+		// Track 2 starts with 2.5s of intro music before the first word (clipBegin 2.5s > track 1 maxEnd 1.2s).
+		// Also omits clipEnd on s2 (should infer from s3's clipBegin = 4.0s) and s4 (should infer from ov2 duration = 8.0s).
+		"OEBPS/smil/page02.smil": []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<smil xmlns="http://www.w3.org/ns/SMIL" version="3.0">
+  <body>
+    <par id="s2"><text src="../xhtml/page02.xhtml#w2"/><audio src="../audio/track2.mp3" clipBegin="2.5s"/></par>
+    <par id="s3"><text src="../xhtml/page02.xhtml#w3"/><audio src="../audio/track2.mp3" clipBegin="4.0s" clipEnd="5.5s"/></par>
+    <par id="s4"><text src="../xhtml/page03.xhtml#w4"/><audio src="../audio/track2.mp3" clipBegin="5.5s"/></par>
+  </body>
+</smil>`),
+	}
+
+	epubBytes := createTestEPUB(files)
+	zr, err := zip.NewReader(bytes.NewReader(epubBytes), int64(len(epubBytes)))
+	if err != nil {
+		t.Fatalf("zip.NewReader: %v", err)
+	}
+	reader, err := epub.NewReader(zr)
+	if err != nil {
+		t.Fatalf("NewReader failed: %v", err)
+	}
+	defer reader.Close()
+
+	manifest, err := reader.ExtractMediaOverlays()
+	if err != nil {
+		t.Fatalf("ExtractMediaOverlays failed: %v", err)
+	}
+
+	// Shared overlay ov2 referenced by both p2 and p3 must NOT duplicate segments.
+	if len(manifest.Segments) != 4 {
+		t.Fatalf("expected 4 deduplicated segments, got %d", len(manifest.Segments))
+	}
+
+	// Track 2 offset must advance by track 1's 2.0s duration even though clipBegin (2.5s) > track 1 maxEnd (1.2s).
+	seg1 := manifest.Segments[1]
+	if math.Abs(seg1.GlobalBegin-4.5) > 1e-4 || math.Abs(seg1.GlobalEnd-6.0) > 1e-4 {
+		t.Errorf("expected seg[1] global [4.5, 6.0], got [%v, %v]", seg1.GlobalBegin, seg1.GlobalEnd)
+	}
+
+	// Omitted clipEnd on final par must infer from ov2's 8.0s refined duration (globalEnd = 2.0 + 8.0 = 10.0).
+	seg3 := manifest.Segments[3]
+	if math.Abs(seg3.GlobalBegin-7.5) > 1e-4 || math.Abs(seg3.GlobalEnd-10.0) > 1e-4 {
+		t.Errorf("expected seg[3] global [7.5, 10.0], got [%v, %v]", seg3.GlobalBegin, seg3.GlobalEnd)
+	}
+}
+

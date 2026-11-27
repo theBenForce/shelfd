@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../data/models/book.dart';
+import '../../../platform/wake_lock.dart';
 import '../../core/theme.dart';
 import '../../core/tokens.dart';
 import '../../core/typography.dart';
@@ -100,18 +101,30 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   String? _lastHighlightedFragmentId;
   bool? _lastHighlightedPlaying;
   final Map<String, Size> _detectedPageSizes = <String, Size>{};
+  ScreenWakeLock? _wakeLock;
+  bool _wakeLockActive = false;
 
   bool get _hasReadalong =>
       widget.book.canReadAlong ||
       (_readalongManifest?.hasReadalong ?? false) ||
       (_readalongManifest?.segments.isNotEmpty ?? false);
 
+  void _syncWakeLock(AudioPlayerState audioState) {
+    final shouldKeepAwake =
+        audioState.book?.id == widget.book.id && audioState.isPlaying;
+    if (_wakeLockActive == shouldKeepAwake) return;
+    _wakeLockActive = shouldKeepAwake;
+    unawaited(_wakeLock?.setEnabled(shouldKeepAwake));
+  }
+
   @override
   void initState() {
     super.initState();
+    _wakeLock = ref.read(screenWakeLockProvider);
     _readalongManifest = widget.initialReadalongManifest;
     _cookieReady = !requiresNativeMediaCookie;
     _resolveInitialSpread();
+    _syncWakeLock(ref.read(audioPlayerProvider));
     if (!_cookieReady) {
       Future.microtask(_prepareNativeMediaCookie);
     }
@@ -310,6 +323,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
   }
 
   void _onAudioStateChanged(AudioPlayerState audioState, {bool forceSyncSpread = false}) {
+    _syncWakeLock(audioState);
     if (audioState.book?.id != widget.book.id) {
       if (_activeSegment != null) {
         _activeSegment = null;
@@ -409,6 +423,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
         widget.book,
         initialPosition: matched.globalBegin,
         autoPlay: true,
+        audioTracks: _readalongManifest?.audioTracks,
       );
     } else {
       await notifier.seek(
@@ -454,7 +469,12 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
           initialPos = firstSeg.globalBegin;
         }
       }
-      await notifier.loadBook(widget.book, initialPosition: initialPos, autoPlay: true);
+      await notifier.loadBook(
+        widget.book,
+        initialPosition: initialPos,
+        autoPlay: true,
+        audioTracks: _readalongManifest?.audioTracks,
+      );
     } else {
       await notifier.togglePlayPause();
     }
@@ -468,6 +488,10 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
 
   @override
   void dispose() {
+    if (_wakeLockActive) {
+      _wakeLockActive = false;
+      unawaited(_wakeLock?.setEnabled(false));
+    }
     _mediaTokenRefreshTimer?.cancel();
     _focusNode.dispose();
     super.dispose();
@@ -1119,6 +1143,19 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
     });
   }
 
+  (double, double) _frameRenderDimensions(double pw, double ph) {
+    if (!requiresNativeMediaCookie) {
+      return (pw, ph);
+    }
+    const maxNativeEdge = 1280.0;
+    final longest = max(pw, ph);
+    if (longest <= maxNativeEdge) {
+      return (pw, ph);
+    }
+    final ratio = maxNativeEdge / longest;
+    return (pw * ratio, ph * ratio);
+  }
+
   Widget _buildSpreadStage(
     BuildContext context,
     FixedSpread spread,
@@ -1167,6 +1204,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
 
       final displayW = pw * scale;
       final displayH = ph * scale;
+      final (renderW, renderH) = _frameRenderDimensions(pw, ph);
       final viewKey = _pageViewKey(page);
       final url = _buildPageUrl(page);
 
@@ -1187,14 +1225,17 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
             borderRadius: BorderRadius.circular(4),
           ),
           clipBehavior: Clip.antiAlias,
-          child: buildHtmlFrame(
-            viewKey: viewKey,
-            url: url,
-            width: displayW,
-            height: displayH,
-            onReadalongClick: _handleReadalongClick,
-            onToggleControls: _toggleControls,
-            onPageDimensions: (w, h) => _recordDetectedPageDimensions(page, w, h),
+          child: FittedBox(
+            fit: BoxFit.contain,
+            child: buildHtmlFrame(
+              viewKey: viewKey,
+              url: url,
+              width: renderW,
+              height: renderH,
+              onReadalongClick: _handleReadalongClick,
+              onToggleControls: _toggleControls,
+              onPageDimensions: (w, h) => _recordDetectedPageDimensions(page, w, h),
+            ),
           ),
         ),
       );
@@ -1213,6 +1254,8 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
       final leftDisplayW = leftW * scale;
       final rightDisplayW = rightW * scale;
       final displayH = combinedH * scale;
+      final (leftRenderW, leftRenderH) = _frameRenderDimensions(leftW, leftH);
+      final (rightRenderW, rightRenderH) = _frameRenderDimensions(rightW, rightH);
 
       final leftViewKey = _pageViewKey(leftPage);
       final rightViewKey = _pageViewKey(rightPage);
@@ -1243,15 +1286,18 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   borderRadius: BorderRadius.horizontal(left: Radius.circular(4)),
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: buildHtmlFrame(
-                  viewKey: leftViewKey,
-                  url: leftUrl,
-                  width: leftDisplayW,
-                  height: displayH,
-                  onReadalongClick: _handleReadalongClick,
-                  onToggleControls: _toggleControls,
-                  onPageDimensions: (w, h) =>
-                      _recordDetectedPageDimensions(leftPage, w, h),
+                child: FittedBox(
+                  fit: BoxFit.contain,
+                  child: buildHtmlFrame(
+                    viewKey: leftViewKey,
+                    url: leftUrl,
+                    width: leftRenderW,
+                    height: leftRenderH,
+                    onReadalongClick: _handleReadalongClick,
+                    onToggleControls: _toggleControls,
+                    onPageDimensions: (w, h) =>
+                        _recordDetectedPageDimensions(leftPage, w, h),
+                  ),
                 ),
               ),
               Container(
@@ -1275,15 +1321,18 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
                   borderRadius: BorderRadius.horizontal(right: Radius.circular(4)),
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: buildHtmlFrame(
-                  viewKey: rightViewKey,
-                  url: rightUrl,
-                  width: rightDisplayW,
-                  height: displayH,
-                  onReadalongClick: _handleReadalongClick,
-                  onToggleControls: _toggleControls,
-                  onPageDimensions: (w, h) =>
-                      _recordDetectedPageDimensions(rightPage, w, h),
+                child: FittedBox(
+                  fit: BoxFit.contain,
+                  child: buildHtmlFrame(
+                    viewKey: rightViewKey,
+                    url: rightUrl,
+                    width: rightRenderW,
+                    height: rightRenderH,
+                    onReadalongClick: _handleReadalongClick,
+                    onToggleControls: _toggleControls,
+                    onPageDimensions: (w, h) =>
+                        _recordDetectedPageDimensions(rightPage, w, h),
+                  ),
                 ),
               ),
             ],
