@@ -570,6 +570,18 @@ class ApiService {
     return _uri('/api/v1/books/$bookId/files/$fileId/stream').toString();
   }
 
+  String resolveMediaStreamUrl(String pathOrUrl) {
+    final trimmed = pathOrUrl.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed;
+    }
+    final normalized = trimmed.startsWith('/') ? trimmed : '/$trimmed';
+    if (_isWeb && token != null && token!.isNotEmpty) {
+      return _uri(normalized, {'token': token!}).toString();
+    }
+    return _uri(normalized).toString();
+  }
+
   Future<List<AudioChapter>> getAudioChapters(String bookId) async {
     final response = await client.get(_uri('/api/v1/audiobooks/$bookId/chapters'), headers: _headers());
     _checkResponse(response);

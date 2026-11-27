@@ -200,7 +200,12 @@ class _ReaderViewState extends ConsumerState<ReaderView> {
           startPos = firstSeg.globalBegin;
         }
       }
-      await notifier.loadBook(targetBook, initialPosition: startPos, autoPlay: true);
+      await notifier.loadBook(
+        targetBook,
+        initialPosition: startPos,
+        autoPlay: true,
+        audioTracks: _readalongManifest?.audioTracks,
+      );
     } else {
       await notifier.togglePlayPause();
     }

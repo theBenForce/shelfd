@@ -126,6 +126,22 @@ class CastAudioPlayerEngine implements AudioPlayerEngine {
   }
 
   @override
+  Future<void> setPlaylist(
+    List<AudioTrackSource> tracks, {
+    Duration? initialPosition,
+    AudioMediaMetadata? metadata,
+    Map<String, String>? headers,
+  }) async {
+    if (tracks.isEmpty) return;
+    await setUrl(
+      tracks.first.url,
+      initialPosition: initialPosition,
+      metadata: metadata,
+      headers: headers,
+    );
+  }
+
+  @override
   Future<void> play() async {
     final snap = await _api.controlCastSession(action: 'play');
     if (snap != null) {

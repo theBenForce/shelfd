@@ -409,6 +409,7 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
         widget.book,
         initialPosition: matched.globalBegin,
         autoPlay: true,
+        audioTracks: _readalongManifest?.audioTracks,
       );
     } else {
       await notifier.seek(
@@ -454,7 +455,12 @@ class _FixedLayoutReaderState extends ConsumerState<FixedLayoutReader> {
           initialPos = firstSeg.globalBegin;
         }
       }
-      await notifier.loadBook(widget.book, initialPosition: initialPos, autoPlay: true);
+      await notifier.loadBook(
+        widget.book,
+        initialPosition: initialPos,
+        autoPlay: true,
+        audioTracks: _readalongManifest?.audioTracks,
+      );
     } else {
       await notifier.togglePlayPause();
     }
