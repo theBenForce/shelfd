@@ -17,6 +17,7 @@ import '../models/recap.dart';
 import '../models/search_result.dart';
 import '../models/metadata_search_result.dart';
 import '../models/series.dart';
+import '../models/synoptic.dart';
 import '../models/topic.dart';
 import '../models/paginated_books.dart';
 import '../models/plugin.dart';
@@ -771,6 +772,34 @@ class ApiService {
     _checkResponse(response);
     final data = jsonDecode(response.body) as List<dynamic>? ?? [];
     return data.map((h) => SemanticSearchHit.fromJson(h as Map<String, dynamic>)).toList();
+  }
+
+  Future<SynopticResult> runSynopticQuery({
+    required String query,
+    List<String> bookIds = const [],
+    List<String> authorIds = const [],
+    String? genreId,
+    int? maxPassagesPerBook,
+  }) async {
+    final trimmedGenre = genreId?.trim();
+    final payload = <String, dynamic>{
+      'query': query.trim(),
+      if (bookIds.isNotEmpty) 'book_ids': bookIds,
+      if (authorIds.isNotEmpty) 'author_ids': authorIds,
+      if (trimmedGenre != null && trimmedGenre.isNotEmpty)
+        'genre_id': trimmedGenre,
+      if (maxPassagesPerBook != null && maxPassagesPerBook > 0)
+        'max_passages_per_book': maxPassagesPerBook,
+    };
+
+    final response = await client.post(
+      _uri('/api/v1/synoptic/query'),
+      headers: _headers(),
+      body: jsonEncode(payload),
+    );
+    _checkResponse(response);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return SynopticResult.fromJson(data);
   }
 
   Future<BackgroundJob?> triggerLibraryScan() async {
