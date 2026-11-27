@@ -1,3 +1,10 @@
+# [1.37.0](https://github.com/theBenForce/shelfd/compare/v1.36.0...v1.37.0) (2026-11-27)
+
+
+### Features
+
+* **app:** add Synoptic Studio comparative search view ([#20](https://github.com/theBenForce/shelfd/issues/20)) ([#120](https://github.com/theBenForce/shelfd/issues/120)) ([1d6ec1c](https://github.com/theBenForce/shelfd/commit/1d6ec1cecbe7b6441c59858b27074cb73596a024))
+
 # [1.36.0](https://github.com/theBenForce/shelfd/compare/v1.35.0...v1.36.0) (2026-11-26)
 
 
