@@ -104,6 +104,12 @@ class BookRepository {
 
   Future<List<int>> downloadBookEpub(String bookId) => apiService.downloadBookEpub(bookId);
 
+  Future<List<int>> downloadBookFile(String bookId, String fileId) =>
+      apiService.downloadBookFile(bookId, fileId);
+
+  Future<void> deleteBookFile(String bookId, String fileId) =>
+      apiService.deleteBookFile(bookId, fileId);
+
   String getBookMarkdownUrl(String bookId) => apiService.getBookMarkdownUrl(bookId);
 
   Future<List<int>> downloadBookMarkdown(String bookId) =>

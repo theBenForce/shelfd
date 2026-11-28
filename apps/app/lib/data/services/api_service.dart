@@ -638,6 +638,27 @@ class ApiService {
     return response.bodyBytes;
   }
 
+  Future<List<int>> downloadBookFile(String bookId, String fileId) async {
+    final encodedBookId = Uri.encodeComponent(bookId);
+    final encodedFileId = Uri.encodeComponent(fileId);
+    final response = await client.get(
+      _uri('/api/v1/books/$encodedBookId/files/$encodedFileId/download'),
+      headers: _headers(),
+    );
+    _checkResponse(response);
+    return response.bodyBytes;
+  }
+
+  Future<void> deleteBookFile(String bookId, String fileId) async {
+    final encodedBookId = Uri.encodeComponent(bookId);
+    final encodedFileId = Uri.encodeComponent(fileId);
+    final response = await client.delete(
+      _uri('/api/v1/books/$encodedBookId/files/$encodedFileId'),
+      headers: _headers(),
+    );
+    _checkResponse(response);
+  }
+
   String getBookMarkdownUrl(String bookId) {
     if (_isWeb && token != null && token!.isNotEmpty) {
       return _uri('/api/v1/books/$bookId/markdown', {'token': token!}).toString();

@@ -33,6 +33,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
   int _selectedTabIndex = 0;
   String _annotationFilter = 'all'; // 'all', 'highlights', 'bookmarks'
   bool _isDownloading = false;
+  final Set<String> _busyFileIds = <String>{};
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _chatScrollController = ScrollController();
 
@@ -506,6 +507,177 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
     }
   }
 
+  String _extractFileName(String filePath) {
+    final normalized = filePath.replaceAll('\\', '/').trim();
+    if (normalized.isEmpty) return 'file';
+    final parts = normalized.split('/');
+    final base = parts.last.trim();
+    return base.isNotEmpty ? base : 'file';
+  }
+
+  String _inferFileMimeType(BookFile file) {
+    if (file.mimeType != null && file.mimeType!.trim().isNotEmpty) {
+      return file.mimeType!.trim();
+    }
+    final lower = file.filePath.toLowerCase();
+    if (lower.endsWith('.epub')) return 'application/epub+zip';
+    if (lower.endsWith('.m4b') || lower.endsWith('.m4a')) return 'audio/mp4';
+    if (lower.endsWith('.mp3')) return 'audio/mpeg';
+    if (lower.endsWith('.ogg') || lower.endsWith('.oga')) return 'audio/ogg';
+    if (lower.endsWith('.flac')) return 'audio/flac';
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    return 'application/octet-stream';
+  }
+
+  Future<void> _downloadBookFile(Book book, BookFile file) async {
+    if (_busyFileIds.contains(file.id)) return;
+    setState(() {
+      _busyFileIds.add(file.id);
+    });
+
+    final fileName = _extractFileName(file.filePath);
+    final mimeType = _inferFileMimeType(file);
+
+    try {
+      final repo = ref.read(bookRepositoryProvider);
+      final List<int> bytes;
+      if (book.files.isEmpty &&
+          (file.fileType == 'epub' ||
+              file.filePath.toLowerCase().endsWith('.epub'))) {
+        bytes = await repo.downloadBookEpub(book.id);
+      } else {
+        bytes = await repo.downloadBookFile(book.id, file.id);
+      }
+
+      final saved = await saveDownloadedFile(
+        bytes,
+        fileName,
+        mimeType: mimeType,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              saved ? 'Downloaded $fileName' : 'Download canceled',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to download $fileName: $e'),
+            backgroundColor: Colors.red.shade800,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busyFileIds.remove(file.id);
+        });
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteBookFile(
+    Book book,
+    BookFile file,
+  ) async {
+    if (_busyFileIds.contains(file.id)) return;
+    final fileName = _extractFileName(file.filePath);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) {
+        final colors = ShelfdColors.of(dialogCtx);
+        return AlertDialog(
+          backgroundColor: colors.surface,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+            side: BorderSide(color: colors.border),
+          ),
+          title: Text(
+            'Delete File',
+            style: AppTypography.titleSerif(fontSize: 18, color: colors.ink),
+          ),
+          content: Text(
+            'Are you sure you want to delete "$fileName"? This will permanently remove the file from this book and delete it from disk.',
+            style: AppTypography.bodySans(
+              fontSize: 13,
+              color: colors.secondaryInk,
+            ),
+          ),
+          actions: [
+            TextButton(
+              key: const Key('cancel_delete_file_button'),
+              onPressed: () => Navigator.of(dialogCtx).pop(false),
+              child: Text(
+                'Cancel',
+                style: AppTypography.bodySans(
+                  fontSize: 14,
+                  color: colors.secondaryInk,
+                ),
+              ),
+            ),
+            FilledButton(
+              key: const Key('confirm_delete_file_button'),
+              style: FilledButton.styleFrom(
+                backgroundColor: colors.errorText,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.of(dialogCtx).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _busyFileIds.add(file.id);
+    });
+
+    try {
+      await ref
+          .read(bookDetailProvider(widget.bookId).notifier)
+          .deleteBookFile(file.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Deleted $fileName'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete $fileName: $e'),
+            backgroundColor: Colors.red.shade800,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busyFileIds.remove(file.id);
+        });
+      }
+    }
+  }
+
   Color _highlightColor(String colorName, {bool isDark = false}) {
     final hlColor = KindleHighlightColor.fromName(colorName);
     return isDark ? hlColor.darkColor : hlColor.cardColor;
@@ -691,7 +863,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
           PopupMenuButton<String>(
             key: const Key('download_appbar_menu_button'),
             enabled: !_isDownloading,
-            tooltip: 'Download EPUB',
+            tooltip: 'Share',
             position: PopupMenuPosition.under,
             color: colors.surface,
             surfaceTintColor: Colors.transparent,
@@ -708,7 +880,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                       color: colors.ink,
                     ),
                   )
-                : Icon(Icons.download_rounded, color: colors.ink),
+                : Icon(Icons.share_rounded, color: colors.ink),
             onSelected: (action) => _handleExportMenuSelection(action, book),
             itemBuilder: (context) => _buildExportMenuItems(colors, book),
           ),
@@ -1022,7 +1194,7 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
             child: PopupMenuButton<String>(
               key: const Key('download_hero_menu_button'),
               enabled: !_isDownloading,
-              tooltip: '',
+              tooltip: 'Share',
               position: PopupMenuPosition.under,
               color: colors.surface,
               surfaceTintColor: Colors.transparent,
@@ -1053,13 +1225,13 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                       )
                     else
                       Icon(
-                        Icons.download_rounded,
+                        Icons.share_rounded,
                         size: 20,
                         color: colors.ink,
                       ),
                     const SizedBox(width: AppTokens.space8),
                     Text(
-                      _isDownloading ? 'Downloading...' : 'Download EPUB',
+                      _isDownloading ? 'Downloading...' : 'Share',
                       style: AppTypography.bodySans(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -1502,9 +1674,93 @@ class _BookDetailViewState extends ConsumerState<BookDetailView> {
                         visualDensity: VisualDensity.compact,
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                       ),
-                      onPressed: () => _downloadEpub(book),
+                      onPressed: _busyFileIds.contains(f.id)
+                          ? null
+                          : () => _downloadBookFile(book, f),
                       child: const Text('Export', style: TextStyle(fontSize: 11)),
                     ),
+                  const SizedBox(width: AppTokens.space4),
+                  PopupMenuButton<String>(
+                    key: Key('file_item_menu_button_$index'),
+                    tooltip: 'File options',
+                    enabled: !_busyFileIds.contains(f.id),
+                    position: PopupMenuPosition.under,
+                    color: colors.surface,
+                    surfaceTintColor: Colors.transparent,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 160),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppTokens.radiusMd),
+                      side: BorderSide(color: colors.border),
+                    ),
+                    icon: _busyFileIds.contains(f.id)
+                        ? SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: colors.secondaryInk,
+                            ),
+                          )
+                        : Icon(
+                            Icons.more_vert_rounded,
+                            size: 18,
+                            color: colors.secondaryInk,
+                          ),
+                    onSelected: (action) {
+                      if (action == 'download') {
+                        _downloadBookFile(book, f);
+                      } else if (action == 'delete') {
+                        _confirmDeleteBookFile(book, f);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      PopupMenuItem<String>(
+                        key: Key('file_menu_download_$index'),
+                        value: 'download',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.download_rounded,
+                              size: 18,
+                              color: colors.ink,
+                            ),
+                            const SizedBox(width: AppTokens.space12),
+                            Text(
+                              'Download',
+                              style: AppTypography.bodySans(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                color: colors.ink,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem<String>(
+                        key: Key('file_menu_delete_$index'),
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.delete_outline_rounded,
+                              size: 18,
+                              color: colors.errorText,
+                            ),
+                            const SizedBox(width: AppTokens.space12),
+                            Text(
+                              'Delete',
+                              style: AppTypography.bodySans(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                color: colors.errorText,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             );
