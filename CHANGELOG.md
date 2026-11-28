@@ -1,3 +1,10 @@
+## [1.37.2](https://github.com/theBenForce/shelfd/compare/v1.37.1...v1.37.2) (2026-11-28)
+
+
+### Bug Fixes
+
+* **upload:** fix mobile upload review modal scrolling and keyboard visibility ([#123](https://github.com/theBenForce/shelfd/issues/123)) ([ba0ed4a](https://github.com/theBenForce/shelfd/commit/ba0ed4a3770ad847bccf1bf1621a9fe68133c811))
+
 ## [1.37.1](https://github.com/theBenForce/shelfd/compare/v1.37.0...v1.37.1) (2026-11-27)
 
 
