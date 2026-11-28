@@ -1,3 +1,10 @@
+# [1.38.0](https://github.com/theBenForce/shelfd/compare/v1.37.2...v1.38.0) (2026-11-28)
+
+
+### Features
+
+* **book-detail:** add file item download/delete menu and rename export menu to Share ([#124](https://github.com/theBenForce/shelfd/issues/124)) ([83f5c4f](https://github.com/theBenForce/shelfd/commit/83f5c4ff7cbd4667c5447245660f10d627a9b515))
+
 ## [1.37.2](https://github.com/theBenForce/shelfd/compare/v1.37.1...v1.37.2) (2026-11-28)
 
 
