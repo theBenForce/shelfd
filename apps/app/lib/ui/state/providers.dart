@@ -1559,6 +1559,12 @@ class BookDetailNotifier extends Notifier<BookDetailState> {
     );
     await loadBook();
   }
+
+  Future<void> deleteBookFile(String fileId) async {
+    final repo = ref.read(bookRepositoryProvider);
+    await repo.deleteBookFile(bookId, fileId);
+    await loadBook();
+  }
 }
 
 final bookDetailProvider =

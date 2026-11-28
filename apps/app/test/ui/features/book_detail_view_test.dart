@@ -103,8 +103,8 @@ void main() {
     expect(find.text('65%'), findsOneWidget);
     expect(find.text('2 chapters'), findsOneWidget);
     expect(find.text('Resume Reading'), findsOneWidget);
-    expect(find.text('Download EPUB'), findsOneWidget);
-    expect(find.byTooltip('Download EPUB'), findsOneWidget);
+    expect(find.text('Share'), findsOneWidget);
+    expect(find.byTooltip('Share'), findsWidgets);
 
     // Verify Tabs
     expect(find.text('Overview'), findsOneWidget);
@@ -581,8 +581,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    // Open the AppBar dropdown menu via tooltip
-    await tester.tap(find.byTooltip('Download EPUB'));
+    // Open the AppBar Share dropdown menu
+    await tester.tap(find.byKey(const Key('download_appbar_menu_button')));
     await tester.pumpAndSettle();
 
     // Select "Download EPUB"
@@ -592,13 +592,105 @@ void main() {
     expect(mockRepo.downloadEpubCalledWith, 'book-42');
 
     // Open AppBar dropdown again and select "Download Markdown (.md)"
-    await tester.tap(find.byTooltip('Download EPUB'));
+    await tester.tap(find.byKey(const Key('download_appbar_menu_button')));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('menu_item_download_markdown')));
     await tester.pumpAndSettle();
 
     expect(mockRepo.downloadMarkdownCalledWith, 'book-42');
+  });
+
+  testWidgets('BookDetailView file item menu supports Download and Delete with confirmation', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final mockRepo = _MockBookRepository(prefs);
+
+    final bookWithFiles = testBook.copyWith(
+      bookType: 'dual',
+      durationSeconds: 3600.0,
+      files: const [
+        BookFile(
+          id: 'file-cover-1',
+          bookId: 'book-42',
+          fileType: 'cover',
+          filePath: 'Stephen Fry/Odyssey/cover.jpg',
+          fileSizeBytes: 47200,
+          mimeType: 'image/jpeg',
+        ),
+        BookFile(
+          id: 'file-audio-1',
+          bookId: 'book-42',
+          fileType: 'audiobook',
+          filePath: 'Stephen Fry/Odyssey/Odyssey.m4b',
+          durationSeconds: 3600.0,
+          bitrateKbps: 64,
+          mimeType: 'audio/mp4',
+        ),
+      ],
+    );
+
+    final notifier = _MockBookDetailNotifier(bookWithFiles, mockRepo: mockRepo);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          bookRepositoryProvider.overrideWithValue(mockRepo),
+          bookDetailProvider('book-42').overrideWith(() => notifier),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+          home: const BookDetailView(bookId: 'book-42'),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('Stephen Fry/Odyssey/cover.jpg'), findsOneWidget);
+    expect(find.text('Stephen Fry/Odyssey/Odyssey.m4b'), findsOneWidget);
+
+    // Open overflow menu for first file item (cover.jpg)
+    final coverMenuFinder = find.byKey(const Key('file_item_menu_button_0'));
+    await tester.ensureVisible(coverMenuFinder);
+    await tester.tap(coverMenuFinder);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('file_menu_download_0')), findsOneWidget);
+    expect(find.byKey(const Key('file_menu_delete_0')), findsOneWidget);
+    expect(find.text('Download'), findsOneWidget);
+    expect(find.text('Delete'), findsOneWidget);
+
+    // Select Download
+    await tester.tap(find.byKey(const Key('file_menu_download_0')));
+    await tester.pumpAndSettle();
+
+    expect(mockRepo.downloadBookFileCalledWith, ('book-42', 'file-cover-1'));
+
+    // Open overflow menu again and select Delete
+    await tester.tap(coverMenuFinder);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('file_menu_delete_0')));
+    await tester.pumpAndSettle();
+
+    // Verify confirmation dialog appears
+    expect(find.text('Delete File'), findsOneWidget);
+    expect(find.byKey(const Key('confirm_delete_file_button')), findsOneWidget);
+
+    // Confirm Delete
+    await tester.tap(find.byKey(const Key('confirm_delete_file_button')));
+    await tester.pumpAndSettle();
+
+    expect(mockRepo.deleteBookFileCalledWith, ('book-42', 'file-cover-1'));
+    expect(find.text('Stephen Fry/Odyssey/cover.jpg'), findsNothing);
+    expect(find.text('Stephen Fry/Odyssey/Odyssey.m4b'), findsOneWidget);
   });
 
   testWidgets('BookDetailView tapping Bookmark card navigates to reader view', (tester) async {
@@ -699,6 +791,8 @@ void main() {
 class _MockBookRepository extends BookRepository {
   String? downloadEpubCalledWith;
   String? downloadMarkdownCalledWith;
+  (String, String)? downloadBookFileCalledWith;
+  (String, String)? deleteBookFileCalledWith;
 
   _MockBookRepository(SharedPreferences prefs)
       : super(
@@ -710,6 +804,17 @@ class _MockBookRepository extends BookRepository {
   Future<List<int>> downloadBookEpub(String bookId) async {
     downloadEpubCalledWith = bookId;
     return [0x50, 0x4B, 0x03, 0x04];
+  }
+
+  @override
+  Future<List<int>> downloadBookFile(String bookId, String fileId) async {
+    downloadBookFileCalledWith = (bookId, fileId);
+    return [0xFF, 0xD8, 0xFF, 0xE0];
+  }
+
+  @override
+  Future<void> deleteBookFile(String bookId, String fileId) async {
+    deleteBookFileCalledWith = (bookId, fileId);
   }
 
   @override
@@ -769,11 +874,27 @@ class _MockPluginsNotifier extends PluginsNotifier {
 
 class _MockBookDetailNotifier extends BookDetailNotifier {
   final Book mockBook;
-  _MockBookDetailNotifier(this.mockBook) : super('book-42');
+  final _MockBookRepository? mockRepo;
+  _MockBookDetailNotifier(this.mockBook, {this.mockRepo}) : super('book-42');
 
   @override
   BookDetailState build() {
     return BookDetailState(book: mockBook, isLoading: false);
+  }
+
+  @override
+  Future<void> deleteBookFile(String fileId) async {
+    if (mockRepo != null) {
+      await mockRepo!.deleteBookFile(bookId, fileId);
+    }
+    final current = state.book;
+    if (current != null) {
+      state = state.copyWith(
+        book: current.copyWith(
+          files: current.files.where((f) => f.id != fileId).toList(),
+        ),
+      );
+    }
   }
 }
 

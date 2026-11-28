@@ -159,6 +159,8 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	mux.Handle("DELETE /api/v1/audiobooks/{id}/progress", auth(http.HandlerFunc(audioHandler.DeleteProgress)))
 	mux.Handle("GET /api/v1/books/{id}/files/{fileId}/stream", auth(http.HandlerFunc(audioHandler.StreamBookFile)))
 	mux.Handle("HEAD /api/v1/books/{id}/files/{fileId}/stream", auth(http.HandlerFunc(audioHandler.StreamBookFile)))
+	mux.Handle("GET /api/v1/books/{id}/files/{fileId}/download", auth(http.HandlerFunc(bookHandler.DownloadBookFile)))
+	mux.Handle("DELETE /api/v1/books/{id}/files/{fileId}", auth(http.HandlerFunc(bookHandler.DeleteBookFile)))
 
 	mux.Handle("GET /api/v1/books/{id}/bookmarks", auth(http.HandlerFunc(bookHandler.ListBookmarks)))
 	mux.Handle("POST /api/v1/books/{id}/bookmarks", auth(http.HandlerFunc(bookHandler.CreateBookmark)))

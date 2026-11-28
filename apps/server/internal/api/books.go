@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -687,6 +688,272 @@ func (h *BookHandler) DownloadBook(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, no-transform")
 
 	http.ServeFile(w, r, filePath)
+}
+
+func sanitizeBookFileDownloadName(rawPath string) string {
+	base := filepath.Base(strings.TrimSpace(rawPath))
+	if base == "" || base == "." || base == "/" {
+		return "file"
+	}
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	cleanStem := sanitizeDownloadFilename(stem)
+	if cleanStem == "" {
+		cleanStem = "file"
+	}
+	cleanExt := ""
+	if ext != "" {
+		extBody := sanitizeDownloadFilename(strings.TrimPrefix(ext, "."))
+		if extBody != "" {
+			cleanExt = "." + extBody
+		}
+	}
+	return cleanStem + cleanExt
+}
+
+func inferBookFileMimeType(bf *repository.BookFile, filePath string) string {
+	if bf != nil && bf.MimeType != nil && strings.TrimSpace(*bf.MimeType) != "" {
+		return strings.TrimSpace(*bf.MimeType)
+	}
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".epub":
+		return "application/epub+zip"
+	case ".m4b", ".m4a":
+		return "audio/mp4"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".ogg", ".oga":
+		return "audio/ogg"
+	case ".flac":
+		return "audio/flac"
+	case ".pdf":
+		return "application/pdf"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".webp":
+		return "image/webp"
+	}
+	if guessed := mime.TypeByExtension(ext); guessed != "" {
+		return guessed
+	}
+	return "application/octet-stream"
+}
+
+func isAudioBookFile(bf *repository.BookFile) bool {
+	if bf == nil {
+		return false
+	}
+	if bf.FileType == "audiobook" {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(bf.FilePath))
+	return ext == ".m4b" || ext == ".m4a" || ext == ".mp3" || ext == ".ogg" || ext == ".flac"
+}
+
+func isEpubBookFile(bf *repository.BookFile) bool {
+	if bf == nil {
+		return false
+	}
+	return bf.FileType == "epub" || strings.HasSuffix(strings.ToLower(bf.FilePath), ".epub")
+}
+
+// DownloadBookFile handles downloading any associated file for a book as an attachment.
+func (h *BookHandler) DownloadBookFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	fileID := r.PathValue("fileId")
+	if bookID == "" || fileID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Missing book ID or file ID")
+		return
+	}
+
+	bf, err := h.repo.GetBookFileByID(r.Context(), fileID)
+	if errors.Is(err, repository.ErrNotFound) || bf == nil {
+		writeJSONError(w, http.StatusNotFound, "Book file not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book file: %v", err))
+		return
+	}
+	if bf.BookID != bookID {
+		writeJSONError(w, http.StatusNotFound, "Book file does not belong to specified book")
+		return
+	}
+
+	resolvedPath := resolveStoredPath(h.libraryDir, h.dataDir, bf.FilePath)
+	if resolvedPath == "" {
+		writeJSONError(w, http.StatusNotFound, "File not found on disk")
+		return
+	}
+
+	filename := sanitizeBookFileDownloadName(bf.FilePath)
+	mimeType := inferBookFileMimeType(bf, resolvedPath)
+
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("Cache-Control", "private, no-transform")
+
+	http.ServeFile(w, r, resolvedPath)
+}
+
+// DeleteBookFile removes an associated file from disk and database for a book.
+func (h *BookHandler) DeleteBookFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	bookID := r.PathValue("id")
+	fileID := r.PathValue("fileId")
+	if bookID == "" || fileID == "" {
+		writeJSONError(w, http.StatusBadRequest, "Missing book ID or file ID")
+		return
+	}
+
+	ctx := r.Context()
+	book, err := h.repo.GetBookByID(ctx, bookID)
+	if errors.Is(err, repository.ErrNotFound) || book == nil {
+		writeJSONError(w, http.StatusNotFound, "Book not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book: %v", err))
+		return
+	}
+
+	bf, err := h.repo.GetBookFileByID(ctx, fileID)
+	if errors.Is(err, repository.ErrNotFound) || bf == nil {
+		writeJSONError(w, http.StatusNotFound, "Book file not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get book file: %v", err))
+		return
+	}
+	if bf.BookID != bookID {
+		writeJSONError(w, http.StatusNotFound, "Book file does not belong to specified book")
+		return
+	}
+
+	resolved := resolveStoredPath(h.libraryDir, h.dataDir, bf.FilePath)
+	if resolved != "" && (isUnderDir(resolved, h.libraryDir) || isUnderDir(resolved, h.dataDir)) {
+		if err := os.Remove(resolved); err != nil && !os.IsNotExist(err) {
+			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to remove file from disk: %v", err))
+			return
+		}
+	}
+
+	if err := h.repo.DeleteBookFile(ctx, bf.ID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			writeJSONError(w, http.StatusNotFound, "Book file not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to delete book file: %v", err))
+		return
+	}
+
+	remaining, _ := h.repo.GetBookFilesByBookID(ctx, book.ID)
+	bookUpdated := false
+
+	// Reconcile cover reference
+	if (book.CoverPath != nil && *book.CoverPath == bf.FilePath) || bf.FileType == "cover" {
+		var replacementCover *string
+		for _, rf := range remaining {
+			if rf.FileType == "cover" {
+				p := rf.FilePath
+				replacementCover = &p
+				break
+			}
+		}
+		book.CoverPath = replacementCover
+		bookUpdated = true
+	}
+
+	// Reconcile primary file path reference
+	if book.FilePath == bf.FilePath {
+		var nextPrimary *repository.BookFile
+		for _, rf := range remaining {
+			if isEpubBookFile(rf) {
+				nextPrimary = rf
+				break
+			}
+		}
+		if nextPrimary == nil {
+			for _, rf := range remaining {
+				if isAudioBookFile(rf) {
+					nextPrimary = rf
+					break
+				}
+			}
+		}
+		if nextPrimary == nil {
+			for _, rf := range remaining {
+				if rf.FileType != "cover" {
+					nextPrimary = rf
+					break
+				}
+			}
+		}
+		if nextPrimary != nil {
+			book.FilePath = nextPrimary.FilePath
+			book.FileSizeBytes = nextPrimary.FileSizeBytes
+		} else {
+			book.FilePath = ""
+			book.FileSizeBytes = nil
+		}
+		bookUpdated = true
+	}
+
+	// Reconcile audio / ebook type metadata
+	hasRemainingAudio := false
+	hasRemainingEpub := false
+	for _, rf := range remaining {
+		if isAudioBookFile(rf) {
+			hasRemainingAudio = true
+		}
+		if isEpubBookFile(rf) {
+			hasRemainingEpub = true
+		}
+	}
+	if isAudioBookFile(bf) && !hasRemainingAudio {
+		_ = h.repo.DeleteAudioChaptersByBookID(ctx, book.ID)
+		book.DurationSeconds = nil
+		if hasRemainingEpub && book.BookType != "ebook" {
+			book.BookType = "ebook"
+		}
+		bookUpdated = true
+	} else if !hasRemainingEpub && hasRemainingAudio && book.BookType != "audiobook" {
+		book.BookType = "audiobook"
+		bookUpdated = true
+	}
+
+	if bookUpdated {
+		if err := h.repo.UpdateBook(ctx, book); err != nil {
+			h.logger.Warn("Failed to update book after file deletion", "book_id", book.ID, "file_id", bf.ID, "err", err)
+		}
+	}
+
+	if h.hub != nil {
+		h.hub.Broadcast(events.Event{
+			Type: events.EventBookUpdated,
+			Data: BuildBookListItem(ctx, h.repo, book),
+		})
+	}
+
+	h.logger.Info("Deleted book file", "book_id", book.ID, "file_id", bf.ID, "file_path", bf.FilePath)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "deleted",
+		"book_id": book.ID,
+		"file_id": bf.ID,
+	})
 }
 
 func bookMarkdownFilename(book *repository.Book) string {

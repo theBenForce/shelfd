@@ -2641,6 +2641,18 @@ func (r *SQLiteStorageEngine) GetBookFileByFilePath(ctx context.Context, filePat
 	return f, nil
 }
 
+func (r *SQLiteStorageEngine) DeleteBookFile(ctx context.Context, id string) error {
+	res, err := r.db.ExecContext(ctx, "DELETE FROM book_files WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("deleting book file: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *SQLiteStorageEngine) DeleteBookFilesByBookID(ctx context.Context, bookID string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM book_files WHERE book_id = ?", bookID)
 	if err != nil {
