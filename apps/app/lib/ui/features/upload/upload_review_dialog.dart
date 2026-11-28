@@ -24,14 +24,22 @@ Future<Book?> showUploadReviewModal(
     return showModalBottomSheet<Book>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: colors.background,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppTokens.radiusLg)),
       ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-        child: UploadReviewContent(job: job, isBottomSheet: true),
-      ),
+      builder: (ctx) {
+        final mediaQuery = MediaQuery.of(ctx);
+        final maxHeight = mediaQuery.size.height * 0.92;
+        return Padding(
+          padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: UploadReviewContent(job: job, isBottomSheet: true),
+          ),
+        );
+      },
     );
   }
 
@@ -67,8 +75,10 @@ class UploadReviewContent extends ConsumerStatefulWidget {
   ConsumerState<UploadReviewContent> createState() => _UploadReviewContentState();
 }
 
-class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
+class _UploadReviewContentState extends ConsumerState<UploadReviewContent>
+    with WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
+  final _scrollController = ScrollController();
 
   late final TextEditingController _titleController;
   late final TextEditingController _authorController;
@@ -85,10 +95,13 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
   bool _isUploadingCover = false;
   bool _hasCover = false;
   String? _errorMessage;
+  double _lastViewInsetsBottom = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    FocusManager.instance.addListener(_onFocusChanged);
     _hasCover = widget.job.hasCover;
     final m = widget.job.metadata;
     _titleController = TextEditingController(text: m.title);
@@ -114,6 +127,53 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
     _publisherController.addListener(_onTextChanged);
     _languageController.addListener(_onTextChanged);
     _descriptionController.addListener(_onTextChanged);
+  }
+
+  void _onFocusChanged() {
+    if (!mounted) return;
+    if (widget.isBottomSheet || Responsive.isMobile(context)) {
+      _ensureFocusedFieldVisible();
+    }
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    if (!mounted) return;
+    final view = View.maybeOf(context);
+    if (view == null) return;
+    final insetsBottom = view.viewInsets.bottom / view.devicePixelRatio;
+    if (insetsBottom > _lastViewInsetsBottom &&
+        (widget.isBottomSheet || Responsive.isMobile(context))) {
+      _ensureFocusedFieldVisible();
+    }
+    _lastViewInsetsBottom = insetsBottom;
+  }
+
+  void _ensureFocusedFieldVisible() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final focusContext = FocusManager.instance.primaryFocus?.context;
+      final formContext = _formKey.currentContext;
+      if (focusContext == null || formContext == null) return;
+
+      var isDescendant = false;
+      focusContext.visitAncestorElements((element) {
+        if (element == formContext) {
+          isDescendant = true;
+          return false;
+        }
+        return true;
+      });
+      if (!isDescendant) return;
+
+      Scrollable.ensureVisible(
+        focusContext,
+        alignment: 0.25,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   void _onTextChanged() {
@@ -149,6 +209,9 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    FocusManager.instance.removeListener(_onFocusChanged);
+    _scrollController.dispose();
     _titleController.removeListener(_onTextChanged);
     _authorController.removeListener(_onTextChanged);
     _narratorController.removeListener(_onTextChanged);
@@ -459,25 +522,34 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
     final coverUrl = hasCover ? bookRepo.getUploadJobCoverUrl(widget.job.jobId, version: coverVersion) : null;
 
     final header = Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppTokens.space24,
-        AppTokens.space20,
-        AppTokens.space24,
-        AppTokens.space12,
-      ),
+      padding: isMobile
+          ? const EdgeInsets.fromLTRB(
+              AppTokens.space16,
+              AppTokens.space8,
+              AppTokens.space8,
+              AppTokens.space12,
+            )
+          : const EdgeInsets.fromLTRB(
+              AppTokens.space24,
+              AppTokens.space20,
+              AppTokens.space24,
+              AppTokens.space12,
+            ),
       child: Row(
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: colors.containerLow,
-              borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              border: Border.all(color: colors.border),
+          if (!isMobile) ...[
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: colors.containerLow,
+                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+                border: Border.all(color: colors.border),
+              ),
+              child: Icon(Icons.edit_note_rounded, color: colors.accentPrimary, size: 20),
             ),
-            child: Icon(Icons.edit_note_rounded, color: colors.accentPrimary, size: 20),
-          ),
-          const SizedBox(width: AppTokens.space12),
+            const SizedBox(width: AppTokens.space12),
+          ],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -487,30 +559,37 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                   widget.job.metadata.bookType == 'audiobook'
                       ? 'Review Staged Audiobook'
                       : 'Review Staged EPUB',
+                  maxLines: isMobile ? 1 : null,
+                  overflow: isMobile ? TextOverflow.ellipsis : null,
                   style: AppTypography.titleSerif(
-                    fontSize: 18,
+                    fontSize: isMobile ? 16 : 18,
                     fontWeight: FontWeight.w600,
                     color: colors.ink,
                   ),
                 ),
-                Text(
-                  'Verify and adjust metadata before adding to /library',
-                  style: AppTypography.bodySans(fontSize: 12, color: colors.mutedInk),
-                ),
+                if (!isMobile)
+                  Text(
+                    'Verify and adjust metadata before adding to /library',
+                    style: AppTypography.bodySans(fontSize: 12, color: colors.mutedInk),
+                  ),
               ],
             ),
           ),
+          const SizedBox(width: AppTokens.space8),
           OutlinedButton.icon(
             icon: const Icon(Icons.auto_fix_high, size: 16),
             label: const Text('Auto-Fill'),
             style: OutlinedButton.styleFrom(
               foregroundColor: colors.ink,
               side: BorderSide(color: colors.border),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: EdgeInsets.symmetric(
+                horizontal: isMobile ? 10 : 12,
+                vertical: isMobile ? 6 : 8,
+              ),
             ),
             onPressed: _isSaving || _isDiscarding ? null : _searchAndAutoPopulate,
           ),
-          const SizedBox(width: AppTokens.space8),
+          const SizedBox(width: AppTokens.space4),
           IconButton(
             icon: Icon(Icons.close_rounded, size: 20, color: colors.mutedInk),
             onPressed: _isSaving || _isDiscarding ? null : () => Navigator.of(context).pop(null),
@@ -812,6 +891,8 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
       ],
     );
 
+    const fieldScrollPadding = EdgeInsets.fromLTRB(20, 20, 20, 120);
+
     final formFields = Form(
       key: _formKey,
       child: Column(
@@ -820,6 +901,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
           // Title
           TextFormField(
             controller: _titleController,
+            scrollPadding: fieldScrollPadding,
             decoration: const InputDecoration(
               labelText: 'Title *',
               hintText: 'Enter book title',
@@ -833,6 +915,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
           // Author
           TextFormField(
             controller: _authorController,
+            scrollPadding: fieldScrollPadding,
             decoration: const InputDecoration(
               labelText: 'Author(s) *',
               hintText: 'e.g. Ursula K. Le Guin',
@@ -847,6 +930,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
           if (widget.job.metadata.bookType == 'audiobook') ...[
             TextFormField(
               controller: _narratorController,
+              scrollPadding: fieldScrollPadding,
               decoration: const InputDecoration(
                 labelText: 'Narrator',
                 hintText: 'e.g. Frank Muller, Ray Porter',
@@ -865,6 +949,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                 flex: 3,
                 child: TextFormField(
                   controller: _seriesController,
+                  scrollPadding: fieldScrollPadding,
                   decoration: const InputDecoration(
                     labelText: 'Series',
                     hintText: 'e.g. Earthsea Cycle',
@@ -878,6 +963,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
                 flex: 2,
                 child: TextFormField(
                   controller: _sequenceController,
+                  scrollPadding: fieldScrollPadding,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(
                     labelText: 'Volume #',
@@ -894,6 +980,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
           // Genres & Tags
           TextFormField(
             controller: _genresController,
+            scrollPadding: fieldScrollPadding,
             decoration: const InputDecoration(
               labelText: 'Genres / Tags',
               hintText: 'e.g. Fantasy, Classic, Magic',
@@ -910,6 +997,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
               Expanded(
                 child: TextFormField(
                   controller: _publisherController,
+                  scrollPadding: fieldScrollPadding,
                   decoration: const InputDecoration(
                     labelText: 'Publisher',
                     hintText: 'e.g. Parnassus Press',
@@ -922,6 +1010,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
               Expanded(
                 child: TextFormField(
                   controller: _languageController,
+                  scrollPadding: fieldScrollPadding,
                   decoration: const InputDecoration(
                     labelText: 'Language',
                     hintText: 'e.g. en',
@@ -937,6 +1026,7 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
           // Description
           TextFormField(
             controller: _descriptionController,
+            scrollPadding: fieldScrollPadding,
             maxLines: 4,
             minLines: 2,
             decoration: const InputDecoration(
@@ -950,10 +1040,45 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
       ),
     );
 
+    final mediaQuery = MediaQuery.of(context);
+    final bottomSafePadding = widget.isBottomSheet && mediaQuery.viewInsets.bottom == 0
+        ? mediaQuery.padding.bottom
+        : 0.0;
+
+    final discardButton = OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: colors.errorText,
+        side: BorderSide(color: colors.errorBorder),
+        minimumSize: Size(isMobile ? 0 : 100, AppTokens.minTouchTarget),
+        padding: EdgeInsets.symmetric(horizontal: isMobile ? AppTokens.space12 : AppTokens.space16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTokens.radiusSm),
+        ),
+      ),
+      onPressed: _isSaving || _isDiscarding ? null : _discard,
+      icon: _isDiscarding
+          ? SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: colors.errorText),
+            )
+          : const Icon(Icons.delete_outline_rounded, size: 18),
+      label: const Text('Discard'),
+    );
+
+    final saveButton = PrimaryButton(
+      label: 'Save & Add to Library',
+      icon: Icons.check_circle_outline_rounded,
+      isLoading: _isSaving,
+      onPressed: _isDiscarding ? null : _commit,
+    );
+
     final actions = Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppTokens.space24,
-        vertical: AppTokens.space16,
+      padding: EdgeInsets.fromLTRB(
+        isMobile ? AppTokens.space16 : AppTokens.space24,
+        isMobile ? AppTokens.space12 : AppTokens.space16,
+        isMobile ? AppTokens.space16 : AppTokens.space24,
+        (isMobile ? AppTokens.space12 : AppTokens.space16) + bottomSafePadding,
       ),
       decoration: BoxDecoration(
         color: colors.surface,
@@ -961,41 +1086,20 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
       ),
       child: Row(
         children: [
-          // Discard Button
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: colors.errorText,
-              side: BorderSide(color: colors.errorBorder),
-              minimumSize: const Size(100, AppTokens.minTouchTarget),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppTokens.radiusSm),
-              ),
-            ),
-            onPressed: _isSaving || _isDiscarding ? null : _discard,
-            icon: _isDiscarding
-                ? SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: colors.errorText),
-                  )
-                : const Icon(Icons.delete_outline_rounded, size: 18),
-            label: const Text('Discard'),
-          ),
-          const Spacer(),
-
-          // Save & Add Button
-          PrimaryButton(
-            label: 'Save & Add to Library',
-            icon: Icons.check_circle_outline_rounded,
-            isLoading: _isSaving,
-            onPressed: _isDiscarding ? null : _commit,
-          ),
+          discardButton,
+          if (isMobile) ...[
+            const SizedBox(width: AppTokens.space12),
+            Expanded(child: saveButton),
+          ] else ...[
+            const Spacer(),
+            saveButton,
+          ],
         ],
       ),
     );
 
     return Column(
-      mainAxisSize: isMobile ? MainAxisSize.min : MainAxisSize.max,
+      mainAxisSize: MainAxisSize.max,
       children: [
         if (widget.isBottomSheet)
           Center(
@@ -1034,9 +1138,10 @@ class _UploadReviewContentState extends ConsumerState<UploadReviewContent> {
             ),
           ),
         Expanded(
-          flex: isMobile ? 0 : 1,
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppTokens.space24),
+            controller: _scrollController,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: EdgeInsets.all(isMobile ? AppTokens.space16 : AppTokens.space24),
             child: isMobile
                 ? Column(
                     children: [
