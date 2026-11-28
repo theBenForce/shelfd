@@ -525,6 +525,175 @@ void main() {
       expect(committedNarrator, 'Ray Porter');
       expect(committedBookType, 'audiobook');
     });
+
+    testWidgets('mobile bottom sheet scrolls cleanly and keeps Save & Add to Library tappable', (tester) async {
+      tester.view.physicalSize = const Size(375, 812);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      bool commitCalled = false;
+      final mockClient = MockClient((request) async {
+        if (request.method == 'POST' && request.url.path == '/api/v1/books/upload/jobs/job-mobile-1/commit') {
+          commitCalled = true;
+          return http.Response(
+            jsonEncode({
+              'id': 'book-mobile-1',
+              'title': 'Mobile Upload Book',
+              'authors': [{'id': 'a1', 'name': 'Ada Lovelace'}],
+            }),
+            201,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response('{}', 200);
+      });
+
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+      final stagedJob = StagedUploadJob(
+        jobId: 'job-mobile-1',
+        status: 'staged',
+        filename: 'mobile_upload.epub',
+        metadata: const StagedMetadata(
+          title: 'Mobile Upload Book',
+          authors: ['Ada Lovelace'],
+        ),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            bookRepositoryProvider.overrideWithValue(bookRepo),
+            storageServiceProvider.overrideWithValue(storageService),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () => showUploadReviewModal(context, stagedJob),
+                  child: const Text('Open Modal'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Modal'));
+      await tester.pumpAndSettle();
+
+      // Verify SingleChildScrollView is actually scrollable on mobile
+      final scrollableState = tester.state<ScrollableState>(
+        find.descendant(
+          of: find.byType(UploadReviewContent),
+          matching: find.byType(Scrollable),
+        ).first,
+      );
+      expect(scrollableState.position.maxScrollExtent, greaterThan(0));
+
+      // Verify action bar is visible within the 812px viewport
+      final saveFinder = find.text('Save & Add to Library');
+      expect(saveFinder, findsOneWidget);
+      final saveRect = tester.getRect(saveFinder);
+      expect(saveRect.bottom, lessThanOrEqualTo(812));
+
+      // Scroll down to Description field
+      final descField = find.widgetWithText(TextFormField, 'Description / Synopsis');
+      await tester.scrollUntilVisible(
+        descField,
+        200,
+        scrollable: find.descendant(
+          of: find.byType(UploadReviewContent),
+          matching: find.byType(Scrollable),
+        ).first,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getRect(descField).bottom, lessThanOrEqualTo(saveRect.top));
+
+      // Tap Save & Add to Library
+      await tester.tap(saveFinder);
+      await tester.pumpAndSettle();
+      expect(commitCalled, isTrue);
+      expect(find.text('Review Staged EPUB'), findsNothing);
+    });
+
+    testWidgets('mobile keyboard keeps Author field visible above keyboard and action bar', (tester) async {
+      tester.view.physicalSize = const Size(360, 740);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final mockClient = MockClient((request) async => http.Response('{}', 200));
+      final apiService = ApiService(baseUrl: 'http://localhost:8080', client: mockClient);
+      final bookRepo = BookRepository(apiService: apiService, storageService: storageService);
+
+      final stagedJob = StagedUploadJob(
+        jobId: 'job-mobile-kb',
+        status: 'staged',
+        filename: 'keyboard_test.epub',
+        metadata: const StagedMetadata(
+          title: 'Keyboard Test Book',
+          authors: ['Unknown'],
+        ),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            bookRepositoryProvider.overrideWithValue(bookRepo),
+            storageServiceProvider.overrideWithValue(storageService),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.buildTheme(ReadingThemeMode.bone),
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  onPressed: () => showUploadReviewModal(context, stagedJob),
+                  child: const Text('Open Modal'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Modal'));
+      await tester.pumpAndSettle();
+
+      // Scroll to Author field and tap it to focus
+      final authorField = find.widgetWithText(TextFormField, 'Author(s) *');
+      await tester.scrollUntilVisible(
+        authorField,
+        150,
+        scrollable: find.descendant(
+          of: find.byType(UploadReviewContent),
+          matching: find.byType(Scrollable),
+        ).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(authorField);
+      await tester.pumpAndSettle();
+
+      // Simulate on-screen mobile keyboard opening (300px tall)
+      const keyboardHeight = 300.0;
+      tester.view.viewInsets = const FakeViewPadding(bottom: keyboardHeight);
+      await tester.pumpAndSettle();
+
+      final keyboardTop = 740.0 - keyboardHeight;
+      final authorRect = tester.getRect(authorField);
+      final saveRect = tester.getRect(find.text('Save & Add to Library'));
+
+      // Author field must be visible above both the keyboard and the action bar
+      expect(authorRect.top, greaterThanOrEqualTo(0));
+      expect(authorRect.bottom, lessThanOrEqualTo(keyboardTop));
+      expect(authorRect.bottom, lessThanOrEqualTo(saveRect.top));
+
+      // Verify editing the Author field works while keyboard is open
+      await tester.enterText(authorField, 'Octavia E. Butler');
+      await tester.pumpAndSettle();
+      expect(find.text('Missing Author'), findsNothing);
+    });
   });
 
   group('ShelfdDropTarget Tests', () {
